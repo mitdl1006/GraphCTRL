@@ -48,8 +48,10 @@ impl ViewTarget {
                 | wgpu::TextureUsages::TEXTURE_BINDING
                 | wgpu::TextureUsages::COPY_SRC,
         );
-        let msaa = texture("gc_render.msaa", COLOR_FORMAT, MSAA_SAMPLES, wgpu::TextureUsages::RENDER_ATTACHMENT);
-        let depth = texture("gc_render.depth", DEPTH_FORMAT, MSAA_SAMPLES, wgpu::TextureUsages::RENDER_ATTACHMENT);
+        let msaa =
+            texture("gc_render.msaa", COLOR_FORMAT, MSAA_SAMPLES, wgpu::TextureUsages::RENDER_ATTACHMENT);
+        let depth =
+            texture("gc_render.depth", DEPTH_FORMAT, MSAA_SAMPLES, wgpu::TextureUsages::RENDER_ATTACHMENT);
         let view = |t: &wgpu::Texture| t.create_view(&wgpu::TextureViewDescriptor::default());
         Self {
             width,
@@ -72,7 +74,11 @@ impl ViewTarget {
     }
 
     /// Begins the main pass: clears colour and depth and resolves into [`ViewTarget::resolve_view`].
-    pub fn begin_pass<'e>(&self, encoder: &'e mut wgpu::CommandEncoder, clear: wgpu::Color) -> wgpu::RenderPass<'e> {
+    pub fn begin_pass<'e>(
+        &self,
+        encoder: &'e mut wgpu::CommandEncoder,
+        clear: wgpu::Color,
+    ) -> wgpu::RenderPass<'e> {
         encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("gc_render.main"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -83,7 +89,10 @@ impl ViewTarget {
             })],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                 view: &self.depth_view,
-                depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0.0), store: wgpu::StoreOp::Discard }),
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(0.0),
+                    store: wgpu::StoreOp::Discard,
+                }),
                 stencil_ops: None,
             }),
             timestamp_writes: None,
@@ -95,14 +104,20 @@ impl ViewTarget {
 
 /// Clears the target to one colour (linear RGBA in 0..=1) and submits the work.
 pub fn clear(device: &wgpu::Device, queue: &wgpu::Queue, target: &ViewTarget, color: [f64; 4]) {
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("gc_render.clear") });
-    let pass = target.begin_pass(&mut encoder, wgpu::Color { r: color[0], g: color[1], b: color[2], a: color[3] });
+    let mut encoder =
+        device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("gc_render.clear") });
+    let pass =
+        target.begin_pass(&mut encoder, wgpu::Color { r: color[0], g: color[1], b: color[2], a: color[3] });
     drop(pass);
     queue.submit([encoder.finish()]);
 }
 
 /// Reads the resolved colour texture back as tightly packed RGBA8 rows (top row first).
-pub fn read_rgba(device: &wgpu::Device, queue: &wgpu::Queue, target: &ViewTarget) -> Result<Vec<u8>, RenderError> {
+pub fn read_rgba(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    target: &ViewTarget,
+) -> Result<Vec<u8>, RenderError> {
     let (width, height) = target.size();
     let unpadded = 4 * width;
     let padded = unpadded.next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
@@ -118,7 +133,11 @@ pub fn read_rgba(device: &wgpu::Device, queue: &wgpu::Queue, target: &ViewTarget
         target.resolve.as_image_copy(),
         wgpu::TexelCopyBufferInfo {
             buffer: &buffer,
-            layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(padded), rows_per_image: None },
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(padded),
+                rows_per_image: None,
+            },
         },
         wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
     );

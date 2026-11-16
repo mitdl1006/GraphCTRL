@@ -47,7 +47,11 @@ impl ViewportStub {
                     );
                     id
                 }
-                None => renderer.register_native_texture(&rs.device, target.resolve_view(), wgpu::FilterMode::Nearest),
+                None => renderer.register_native_texture(
+                    &rs.device,
+                    target.resolve_view(),
+                    wgpu::FilterMode::Nearest,
+                ),
             };
             drop(renderer);
             gc_render::clear(&rs.device, &rs.queue, &target, [0.90, 0.92, 0.93, 1.0]);

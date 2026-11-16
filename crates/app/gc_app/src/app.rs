@@ -60,7 +60,7 @@ impl GraphCtrlApp {
 
     /// Records single-letter tool shortcuts by physical key so they work while a Hangul layout is active.
     fn poll_shortcuts(&mut self, ctx: &egui::Context) {
-        if ctx.wants_keyboard_input() {
+        if ctx.egui_wants_keyboard_input() {
             return;
         }
         let pressed = ctx.input(|i| {
@@ -89,7 +89,9 @@ impl GraphCtrlApp {
             let (width, height) = target.size();
             match gc_render::read_rgba(&rs.device, &rs.queue, target) {
                 Ok(pixels) => {
-                    if let Err(err) = image::save_buffer(path, &pixels, width, height, image::ColorType::Rgba8) {
+                    if let Err(err) =
+                        image::save_buffer(path, &pixels, width, height, image::ColorType::Rgba8)
+                    {
                         log::error!("screenshot could not be written: {err}");
                     }
                 }
