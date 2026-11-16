@@ -1,0 +1,27 @@
+# Licence policy, checked by `cargo xtask check-licences`.
+# The repository is MIT, so copyleft licences (GPL, LGPL, AGPL, MPL, EUPL) are not acceptable.
+
+# SPDX identifiers a dependency may carry. `A OR B` needs one of them here, `A AND B` needs both.
+allowed = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "BSL-1.0",
+    "CC0-1.0",
+    "Unicode-3.0",
+    "OFL-1.1",
+    "Ubuntu-font-1.0",
+]
+allowed_exceptions = ["LLVM-exception"]
+
+# Never acceptable, whatever the licence field says (see docs/PLAN.md, appendix A).
+banned_crates = ["evalexpr", "slvs", "brepkit-sketch", "directories"]
+
+# Dependency graphs that are checked: the operating systems the application targets.
+targets = ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
+
+# Crates without a machine-readable licence that were reviewed by hand: name = "what was found".
+[reviewed]

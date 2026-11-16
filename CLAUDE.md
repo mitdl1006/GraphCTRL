@@ -26,3 +26,4 @@ VK_ICD_FILENAMES=$(ls /opt/pw-browsers/chromium-*/chrome-linux*/vk_swiftshader_i
 - 레이어 순서 `foundation < api < domain < render < ui < app`를 지킨다(`layers.toml`).
 - 비테스트 코드에서 `unwrap`/`expect`/`panic!`/`todo!` 금지(clippy가 거부).
 - 선택 기준의 우선순위: 큰 장면 3D 성능 → 유지보수 지속성 → 주류 크레이트.
+- 커밋 전 전체 검사는 `cargo xtask gate` 한 번으로 돌릴 수 있다(위 네 단계 + Windows 교차 clippy + GPU 테스트 + 레이어·라이선스 검사).

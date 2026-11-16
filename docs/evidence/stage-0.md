@@ -38,3 +38,12 @@
 
 - Jetendard 폰트는 파일당 약 4.6 MB(예상 2 MB). Regular + Bold 합계 9.3 MB가 실행 파일에 포함된다.
 - `#[ignore]` 처리한 테스트: 없음.
+
+## Windows 빌드 메모리 부족 (사용자 PC, 2026-11-16)
+
+- 증상: `cargo run -p graphctrl`이 `rustc-LLVM ERROR: out of memory`로 실패. `-j`로 동시 작업 수를 줄이면 빌드·실행됨(사용자 확인).
+- 측정(샌드박스, Windows 대상 라이브러리 빌드, rustc 프로세스당 최대 메모리): 의존성 `opt-level` 2 / 1 / 0에서
+  `windows` 1611 / 1584 / 1568 MB, `naga` 903 / 889 / 740 MB, `wgpu_core` 845 / 827 / 682 MB.
+  동시 16개 빌드 전체의 최대 사용량은 수준 2에서 3.2 GB, 수준 1에서도 3.2 GB.
+- 결론: 최적화 수준은 원인이 아니므로 프로필은 그대로 둔다. 대응은 동시 작업 수 제한(`-j N` 또는 `CARGO_BUILD_JOBS`)이며
+  PC마다 다르므로 저장소 설정에 고정하지 않고 README에 안내한다.
