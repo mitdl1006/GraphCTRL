@@ -14,4 +14,8 @@ workspace = true
 gc_core.workspace = true
 gc_plugin_api.workspace = true
 serde.workspace = true
+libm.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+libm.workspace = true
