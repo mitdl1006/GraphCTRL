@@ -1,0 +1,22 @@
+[package]
+name = "gc_viewport"
+description = "Viewport widget: navigation and tool input, offscreen render, overlays."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+gc_ui.workspace = true
+gc_render.workspace = true
+gc_draw.workspace = true
+gc_scene.workspace = true
+gc_session.workspace = true
+gc_tools.workspace = true
+egui.workspace = true
+egui-wgpu.workspace = true
+wgpu.workspace = true

@@ -1,0 +1,21 @@
+[package]
+name = "gc_robot"
+description = "URDF reader and validation, robot model, FK, Jacobian and inverse kinematics."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+gc_core.workspace = true
+gc_math.workspace = true
+gc_linalg.workspace = true
+gc_mesh.workspace = true
+gc_robotics_api.workspace = true
+roxmltree.workspace = true
+serde.workspace = true
+thiserror.workspace = true

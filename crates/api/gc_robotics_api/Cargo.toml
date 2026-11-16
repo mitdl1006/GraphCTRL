@@ -1,0 +1,17 @@
+[package]
+name = "gc_robotics_api"
+description = "Robotics plugin contract (unstable): kinematics, planners, retimers, robot providers."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+gc_core.workspace = true
+gc_plugin_api.workspace = true
+serde.workspace = true
+thiserror.workspace = true

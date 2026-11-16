@@ -293,7 +293,7 @@ pub trait RobotModelProvider: Send + Sync { fn catalog(&self) -> Vec<RobotModelI
 | **2b** | `gc_sketch` ∥ `gc_collide` ∥ `gc_render` ∥ `gc_plugin_mesh` ∥ `gc_plugin_ur` | 스냅·배치·측정 테스트, 충돌 vs 무차별 대입 비교, 렌더 리드백, UR 4종 "생성 == 커밋 / FK == DH / IK 왕복"(부록 D 값) |
 | **3a** | `gc_doc`(구체 모델·Command·연쇄, **스키마 동결**) ∥ `gc_motion` ∥ `gc_plugin_planners` | undo∘redo = id, I1 속성 테스트, **범용 URDF 게이트**(픽스처 3종이 임포트 → 자동 프로파일·ACM → 계획 → 후처리 → 타이밍 → `Validated`; 로봇 이름으로 분기하는 코드 금지), UR5e 장면 S1–S4 |
 | **3b** | `gc_persist` ∥ `gc_tools` ∥ `gc_session` ∥ `gc_scene`, UR ACM 골든 생성 | **헤드리스 시나리오 테스트**: 3.1의 3–8을 ToolEvent/Command와 `InlineExecutor`로 실행, 문서 상태·계획 지표 단언(GPU 불필요). save∘load = id |
-| **4** | `gc_ui`, `gc_viewport` | kittest 입력 시뮬레이션, 스냅샷 |
+| **4** | `gc_ui`, `gc_viewport` | kittest 입력 시뮬레이션, 스냅샷. **UI 확인 지점**: 리본 + 브라우저 + 속성 그리드 + 상태바의 실제 화면 스크린샷을 사용자에게 보여 주고, 승인 후 Stage 5로 진행(불만족 시 UI 계층만 교체하는 대안을 그 시점에 결정 — 코어·렌더러는 유지) |
 | **5a → 5f** | 5a 셸·명령·내비게이션(3.1 #1–2) → 5b 2D 스케치 UI(#3) → **5c 로봇·장면·웨이포인트·계획·재생(#5–7)** → 5d 3D 스케치 UI(#4) → 5e 저장·설정·배관(#8, 5.11) → 5f 알고리즘 비교와 남은 P1 | 하위 단계마다 kittest 시나리오 + 스냅샷 체크리스트, 따로 커밋 |
 | **6. 하드닝** | 코드 전반 반박 리뷰, 수정, README(한국어), 고지, P2·보류 목록 | 전체 게이트 + Tier B 보고서 |
 

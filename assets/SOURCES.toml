@@ -1,0 +1,310 @@
+# Third-party assets committed to this repository. Verified by tests against sha256.
+# UR files: Universal_Robots_ROS2_Description at commit 0eb1a861f7772fceb38510d90fa2f98ec668070c (tag 4.4.1).
+
+[[file]]
+path = "fonts/Jetendard-Bold.ttf"
+url = "https://github.com/kuskhan/jetendard/releases/download/v0.1.0/Jetendard-TTF.zip#ttf/Jetendard-Bold.ttf"
+bytes = 4630276
+sha256 = "330f8c4b6d80b13fa4c8eeded163b9169aa0a4a3d07edc52b2219d081932f6d7"
+licence = "OFL-1.1"
+
+[[file]]
+path = "fonts/Jetendard-Regular.ttf"
+url = "https://github.com/kuskhan/jetendard/releases/download/v0.1.0/Jetendard-TTF.zip#ttf/Jetendard-Regular.ttf"
+bytes = 4684648
+sha256 = "2a9eb39d9013fbaf7b6474ae5e37af2de0b4c2a92827cb730ea3c9151dde69c9"
+licence = "OFL-1.1"
+
+[[file]]
+path = "fonts/LICENSE-Jetendard.txt"
+url = "https://raw.githubusercontent.com/kuskhan/jetendard/v0.1.0/LICENSE"
+bytes = 4640
+sha256 = "c6bd5bf88860a4baab08368d5a42cc82863e394400810719352a990d7fda78cb"
+licence = "OFL-1.1"
+
+[[file]]
+path = "ur/config/ur10e/default_kinematics.yaml"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/config/ur10e/default_kinematics.yaml"
+bytes = 640
+sha256 = "4bf9a0dfdeb73d7a8b43171fd8a2cedffa9eaf6e342857df44229380e4ad2e49"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/config/ur10e/joint_limits.yaml"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/config/ur10e/joint_limits.yaml"
+bytes = 2871
+sha256 = "de6b27680ef8ca8930d1902fc6869f49b9295dabbb40048eaa538f9d4796bc4b"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/config/ur10e/physical_parameters.yaml"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/config/ur10e/physical_parameters.yaml"
+bytes = 2294
+sha256 = "677931caf9cbaec19eedf7671b8070f345ca409de9ab4a99a4c11b75f918655a"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/config/ur10e/visual_parameters.yaml"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/config/ur10e/visual_parameters.yaml"
+bytes = 2407
+sha256 = "0e58b93fdce20ef92bf7321d6eb5eaf17aacdf8c146a7b0bf96deb37e0f68cdc"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/config/ur16e/default_kinematics.yaml"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/config/ur16e/default_kinematics.yaml"
+bytes = 637
+sha256 = "20fb7f133426c7182d0eee6442d4cbad4cc733fa9ce2ef1924620961c44c1d81"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/config/ur16e/joint_limits.yaml"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/config/ur16e/joint_limits.yaml"
+bytes = 2871
+sha256 = "05d9279f87942504c1d7af4be1c9d30ac447c18f98be2f57307565c519182e3d"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/config/ur16e/physical_parameters.yaml"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/config/ur16e/physical_parameters.yaml"
+bytes = 2438
+sha256 = "81fcdec084c4ee0ecb6bd10664e762e20888d6fc7fdb50ec21f0162092b719eb"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/config/ur16e/visual_parameters.yaml"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/config/ur16e/visual_parameters.yaml"
+bytes = 2489
+sha256 = "2d3a9bfff28749b5a2a5517eeaa8f86557981166414be0d34d521061187e587e"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/config/ur3e/default_kinematics.yaml"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/config/ur3e/default_kinematics.yaml"
+bytes = 639
+sha256 = "c0bfd5cb5bafd9df090a71a914bbeb8812a1a3b07f03fb930d6f8fa38fff9de7"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/config/ur3e/joint_limits.yaml"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/config/ur3e/joint_limits.yaml"
+bytes = 2796
+sha256 = "51f2e1d00f69154a49aca95c1f17497622861b1d14c2de5ace0a9687dc5424ca"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/config/ur3e/physical_parameters.yaml"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/config/ur3e/physical_parameters.yaml"
+bytes = 2392
+sha256 = "ee8e6db5d031bd7b4bc02d70edcbba4846036187d0ecaeb7b0bbc4d810f1e3ac"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/config/ur3e/visual_parameters.yaml"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/config/ur3e/visual_parameters.yaml"
+bytes = 2390
+sha256 = "cc0abaa343555c577a374ccdae6aacfbf17cb9cdb526d57b50c8cc18475b4a86"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/config/ur5e/default_kinematics.yaml"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/config/ur5e/default_kinematics.yaml"
+bytes = 649
+sha256 = "4ffc6086bb0118a5a8e4a3576ef41de878de946710799ea4835789063fa9c0bc"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/config/ur5e/joint_limits.yaml"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/config/ur5e/joint_limits.yaml"
+bytes = 2869
+sha256 = "1e908454a0fb073761a0c675f708eb003ca7d5333a9e0863ef87fe40d9abb3c7"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/config/ur5e/physical_parameters.yaml"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/config/ur5e/physical_parameters.yaml"
+bytes = 2428
+sha256 = "0e58b89069d8d87b24cce0c2c02832d88de0f3229baf42916953ce1c71f0fa2d"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/config/ur5e/visual_parameters.yaml"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/config/ur5e/visual_parameters.yaml"
+bytes = 2393
+sha256 = "87e8adba0d4e40cc9a994e7ca2264671cc6b6c732649b675b553639cb275a16d"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/meshes/ur10e/collision/base.stl"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/meshes/ur10e/collision/base.stl"
+bytes = 22984
+sha256 = "8a214f3f650e703fa081bd4bd8b1caeb0667598bec22d8b0e572efb97d06e957"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/meshes/ur10e/collision/forearm.stl"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/meshes/ur10e/collision/forearm.stl"
+bytes = 67284
+sha256 = "7005ed835336ec03ce6a299a356c774bfe2ba989051e37b2a66406173dcb3c96"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/meshes/ur10e/collision/shoulder.stl"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/meshes/ur10e/collision/shoulder.stl"
+bytes = 85284
+sha256 = "3f7c5f7ee742cf2d57130829be9f20b25625b3513d676ac5e20ca46ae84fd528"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/meshes/ur10e/collision/upperarm.stl"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/meshes/ur10e/collision/upperarm.stl"
+bytes = 93784
+sha256 = "663a935951c802b1c16ad7478e7ce754b2d48efb828bbe5d3915fb6bb51cd7db"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/meshes/ur10e/collision/wrist1.stl"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/meshes/ur10e/collision/wrist1.stl"
+bytes = 66984
+sha256 = "1408c3a0a29385fefe30ed44fceca56d2254f51ea93c75c404976816992324cc"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/meshes/ur10e/collision/wrist2.stl"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/meshes/ur10e/collision/wrist2.stl"
+bytes = 89184
+sha256 = "4b9e74eab991af3dc9d38c3dfaad2c5bc69591fadc855f7966627ba4d0956579"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/meshes/ur10e/collision/wrist3.stl"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/meshes/ur10e/collision/wrist3.stl"
+bytes = 6984
+sha256 = "7038904dd03dfea56212191ac61d26746b379dbddfd517b905e13c01e1c12e6a"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/meshes/ur16e/collision/forearm.stl"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/meshes/ur16e/collision/forearm.stl"
+bytes = 99584
+sha256 = "fc1c07390183b3874d66e3005795063980bc4f4a786504999f2e86250dcbfe0f"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/meshes/ur16e/collision/upperarm.stl"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/meshes/ur16e/collision/upperarm.stl"
+bytes = 136984
+sha256 = "5c1eacd146739265039ccb0b75649b83719f67cb36cca42d1d11a8e4cd929175"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/meshes/ur3e/collision/base.stl"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/meshes/ur3e/collision/base.stl"
+bytes = 21784
+sha256 = "2838ae72d4b6f1421083209ebdd9ea5cecd3a19a9b3ca60f4e0ad3300beeb648"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/meshes/ur3e/collision/forearm.stl"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/meshes/ur3e/collision/forearm.stl"
+bytes = 51384
+sha256 = "cbb4b2d2f024d05af7dad9cbaf018a11a360693ca5b96d3de89ea7ff2480bfca"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/meshes/ur3e/collision/shoulder.stl"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/meshes/ur3e/collision/shoulder.stl"
+bytes = 90684
+sha256 = "2edd8898d06fd4dd289e27dae047598ec7fa61e1860682452b57ed70c0e836d6"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/meshes/ur3e/collision/upperarm.stl"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/meshes/ur3e/collision/upperarm.stl"
+bytes = 101084
+sha256 = "009baa2a00697891cdc191a3cd9d4eae9106ba09c6e78db8d509b1c84fbaa41f"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/meshes/ur3e/collision/wrist1.stl"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/meshes/ur3e/collision/wrist1.stl"
+bytes = 63584
+sha256 = "458cbd3b36b0419e9fafd13bfd1f1cd9fd47e4c31191d6c078b239f220dcfd28"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/meshes/ur3e/collision/wrist2.stl"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/meshes/ur3e/collision/wrist2.stl"
+bytes = 72784
+sha256 = "d2b00401f97d1a1d951a1a99c7dc74589009f80b6817d1c633cc793dcec083ad"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/meshes/ur3e/collision/wrist3.stl"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/meshes/ur3e/collision/wrist3.stl"
+bytes = 8084
+sha256 = "0795382b1ff170be3ce66ab44da8f4f41fd08096661471801fc627712d9c592f"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/meshes/ur5e/collision/base.stl"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/meshes/ur5e/collision/base.stl"
+bytes = 21084
+sha256 = "9a145e0d46f2130afdf2a2e8825a00a929870c4c3d6d8e4d1adc5f04db3aac1b"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/meshes/ur5e/collision/forearm.stl"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/meshes/ur5e/collision/forearm.stl"
+bytes = 53284
+sha256 = "2e7423cab807c34160ec4f770daee5e747d70e777eb01b7beeace2b8c5751816"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/meshes/ur5e/collision/shoulder.stl"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/meshes/ur5e/collision/shoulder.stl"
+bytes = 70084
+sha256 = "ceb92532177daa77682f5fbd628e01c2137d168f949a7a706ce1dabe9f002387"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/meshes/ur5e/collision/upperarm.stl"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/meshes/ur5e/collision/upperarm.stl"
+bytes = 99684
+sha256 = "ee893044caf00075cb55b4cf666d1f1311c7979786212a501009f33bee945209"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/meshes/ur5e/collision/wrist1.stl"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/meshes/ur5e/collision/wrist1.stl"
+bytes = 59584
+sha256 = "f8c9f9337b6fd98c75f052e96de10e14a107ddb6874ba6b904e546f8a4e4f43a"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/meshes/ur5e/collision/wrist2.stl"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/meshes/ur5e/collision/wrist2.stl"
+bytes = 67584
+sha256 = "2964a63f60ce3e3cf3ad55bcf190d7876d50e373cb64b70a57cea5885eaf3c86"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/meshes/ur5e/collision/wrist3.stl"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/meshes/ur5e/collision/wrist3.stl"
+bytes = 7184
+sha256 = "83b3666b4ae2badd54af0d2c25a921682ecbc29e849eec646c3ed55fb74c78a3"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/upstream/LICENSE"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/LICENSE"
+bytes = 1459
+sha256 = "143077f9f6a8de5a99f78c2c2472801fb53cf240277ef661642f079b9acdfff8"
+licence = "BSD-3-Clause"
+
+[[file]]
+path = "ur/upstream/README.md"
+url = "https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/0eb1a861f7772fceb38510d90fa2f98ec668070c/README.md"
+bytes = 4306
+sha256 = "7bf26581913a851476323daab7226fb5fb8aa19b0acbda3969abe58be2689a18"
+licence = "BSD-3-Clause"

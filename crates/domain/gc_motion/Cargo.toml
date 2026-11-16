@@ -1,0 +1,22 @@
+[package]
+name = "gc_motion"
+description = "Robot motion pipeline: goals, sequence resolution, planning, timing, validation."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+gc_core.workspace = true
+gc_math.workspace = true
+gc_jobs.workspace = true
+gc_robot.workspace = true
+gc_collide.workspace = true
+gc_plan.workspace = true
+gc_traj.workspace = true
+gc_robotics_api.workspace = true
+thiserror.workspace = true

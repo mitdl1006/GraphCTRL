@@ -1,0 +1,27 @@
+[package]
+name = "gc_session"
+description = "Headless application core: session, intents, caches, jobs and API adapters."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+gc_core.workspace = true
+gc_math.workspace = true
+gc_doc.workspace = true
+gc_persist.workspace = true
+gc_motion.workspace = true
+gc_collide.workspace = true
+gc_robot.workspace = true
+gc_jobs.workspace = true
+gc_mesh.workspace = true
+gc_tools.workspace = true
+gc_plugin_api.workspace = true
+gc_robotics_api.workspace = true
+log.workspace = true
+thiserror.workspace = true

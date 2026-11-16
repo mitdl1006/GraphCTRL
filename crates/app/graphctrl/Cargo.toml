@@ -1,0 +1,18 @@
+[package]
+name = "graphctrl"
+description = "GraphCTRL desktop application."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+gc_app.workspace = true
+gc_plugin_ur.workspace = true
+gc_plugin_mesh.workspace = true
+gc_plugin_planners.workspace = true
+anyhow.workspace = true

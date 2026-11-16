@@ -1,0 +1,15 @@
+[package]
+name = "gc_plan"
+description = "Robot-agnostic motion planners, nearest-neighbour search and path processors."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+smallvec.workspace = true
+thiserror.workspace = true

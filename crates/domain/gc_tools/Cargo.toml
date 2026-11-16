@@ -1,0 +1,17 @@
+[package]
+name = "gc_tools"
+description = "UI-independent interactive tool state machines."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+gc_core.workspace = true
+gc_math.workspace = true
+gc_sketch.workspace = true
+gc_doc.workspace = true

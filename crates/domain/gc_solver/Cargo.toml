@@ -1,0 +1,16 @@
+[package]
+name = "gc_solver"
+description = "Geometric constraint solver (2D and 3D) with diagnosis and drag sessions."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+gc_linalg.workspace = true
+libm.workspace = true
+thiserror.workspace = true

@@ -1,0 +1,21 @@
+[package]
+name = "gc_persist"
+description = "Versioned project files, atomic save, autosave and platform paths."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+gc_core.workspace = true
+gc_doc.workspace = true
+gc_sketch.workspace = true
+gc_mesh.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true

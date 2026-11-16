@@ -1,0 +1,6 @@
+# Layer order: a crate may depend on crates in lower layers, and on same-layer crates only when acyclic.
+order = ["foundation", "api", "domain", "render", "ui", "app"]
+# plugins may depend on foundation + api, plus the listed exceptions.
+[plugins]
+allowed_layers = ["foundation", "api"]
+exceptions = { gc_plugin_planners = ["gc_plan", "gc_traj"] }

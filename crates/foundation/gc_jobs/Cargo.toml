@@ -1,0 +1,13 @@
+[package]
+name = "gc_jobs"
+description = "Background jobs with cancellation, progress and injectable executors."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]

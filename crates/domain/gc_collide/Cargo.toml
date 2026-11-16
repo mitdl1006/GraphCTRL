@@ -1,0 +1,18 @@
+[package]
+name = "gc_collide"
+description = "Robot-agnostic collision world; isolates parry3d-f64."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+gc_core.workspace = true
+gc_math.workspace = true
+gc_mesh.workspace = true
+parry3d-f64.workspace = true
+thiserror.workspace = true
