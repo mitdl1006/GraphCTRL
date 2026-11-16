@@ -12,4 +12,5 @@ workspace = true
 
 [dependencies]
 gc_core.workspace = true
+libm.workspace = true
 thiserror.workspace = true

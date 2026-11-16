@@ -1391,6 +1391,7 @@ name = "gc_expr"
 version = "0.1.0"
 dependencies = [
  "gc_core",
+ "libm",
  "thiserror 2.0.21",
 ]
 
