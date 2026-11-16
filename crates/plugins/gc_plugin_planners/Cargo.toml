@@ -1,0 +1,17 @@
+[package]
+name = "gc_plugin_planners"
+description = "Registers the built-in planners and retimers through the robotics API."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+gc_robotics_api.workspace = true
+gc_plugin_api.workspace = true
+gc_plan.workspace = true
+gc_traj.workspace = true

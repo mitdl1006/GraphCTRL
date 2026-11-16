@@ -1,0 +1,15 @@
+[package]
+name = "gc_traj"
+description = "Geometric paths, time parameterisation and validated trajectories."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+gc_linalg.workspace = true
+thiserror.workspace = true

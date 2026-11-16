@@ -1,0 +1,33 @@
+[package]
+name = "gc_app"
+description = "eframe wiring, settings, file dialogs and crash handling."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+gc_core.workspace = true
+gc_i18n.workspace = true
+gc_jobs.workspace = true
+gc_session.workspace = true
+gc_plugin_api.workspace = true
+gc_robotics_api.workspace = true
+gc_ui.workspace = true
+gc_viewport.workspace = true
+gc_panels.workspace = true
+gc_render.workspace = true
+eframe.workspace = true
+egui.workspace = true
+rfd.workspace = true
+anyhow.workspace = true
+log.workspace = true
+image.workspace = true
+
+[dev-dependencies]
+egui_kittest.workspace = true
+gc_test_support.workspace = true

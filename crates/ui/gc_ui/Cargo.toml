@@ -1,0 +1,18 @@
+[package]
+name = "gc_ui"
+description = "UI kit: theme, ribbon, property grid, tree wrapper, icons, text fields."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+gc_i18n.workspace = true
+egui.workspace = true
+egui_tiles.workspace = true
+egui_ltreeview.workspace = true
+egui-notify.workspace = true

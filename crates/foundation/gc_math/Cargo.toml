@@ -1,0 +1,17 @@
+[package]
+name = "gc_math"
+description = "Geometry maths: the only crate that names glamx; deterministic trig in fm."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+gc_core.workspace = true
+glamx.workspace = true
+libm.workspace = true
+serde.workspace = true

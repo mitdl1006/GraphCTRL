@@ -1,0 +1,16 @@
+[package]
+name = "gc_test_support"
+description = "Test helpers: GPU probing and snapshot utilities."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+wgpu.workspace = true
+pollster.workspace = true
+image.workspace = true

@@ -1,0 +1,19 @@
+[package]
+name = "gc_sketch"
+description = "Sketch model, solver binding, snapping/inference, 3D placement and measurement."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+gc_core.workspace = true
+gc_math.workspace = true
+gc_expr.workspace = true
+gc_solver.workspace = true
+serde.workspace = true
+thiserror.workspace = true

@@ -1,0 +1,134 @@
+[workspace]
+resolver = "3"
+members = ["crates/*/*", "xtask"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.97"
+license = "MIT"
+publish = false
+version = "0.1.0"
+
+[workspace.dependencies]
+gc_core = { path = "crates/foundation/gc_core" }
+gc_linalg = { path = "crates/foundation/gc_linalg" }
+gc_math = { path = "crates/foundation/gc_math" }
+gc_mesh = { path = "crates/foundation/gc_mesh" }
+gc_expr = { path = "crates/foundation/gc_expr" }
+gc_i18n = { path = "crates/foundation/gc_i18n" }
+gc_jobs = { path = "crates/foundation/gc_jobs" }
+gc_plugin_api = { path = "crates/api/gc_plugin_api" }
+gc_robotics_api = { path = "crates/api/gc_robotics_api" }
+gc_solver = { path = "crates/domain/gc_solver" }
+gc_sketch = { path = "crates/domain/gc_sketch" }
+gc_robot = { path = "crates/domain/gc_robot" }
+gc_collide = { path = "crates/domain/gc_collide" }
+gc_plan = { path = "crates/domain/gc_plan" }
+gc_traj = { path = "crates/domain/gc_traj" }
+gc_motion = { path = "crates/domain/gc_motion" }
+gc_doc = { path = "crates/domain/gc_doc" }
+gc_tools = { path = "crates/domain/gc_tools" }
+gc_persist = { path = "crates/domain/gc_persist" }
+gc_session = { path = "crates/domain/gc_session" }
+gc_draw = { path = "crates/render/gc_draw" }
+gc_render = { path = "crates/render/gc_render" }
+gc_scene = { path = "crates/render/gc_scene" }
+gc_ui = { path = "crates/ui/gc_ui" }
+gc_viewport = { path = "crates/ui/gc_viewport" }
+gc_panels = { path = "crates/ui/gc_panels" }
+gc_app = { path = "crates/app/gc_app" }
+gc_test_support = { path = "crates/app/gc_test_support" }
+gc_plugin_ur = { path = "crates/plugins/gc_plugin_ur" }
+gc_plugin_mesh = { path = "crates/plugins/gc_plugin_mesh" }
+gc_plugin_planners = { path = "crates/plugins/gc_plugin_planners" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+thiserror = "2"
+anyhow = "1"
+log = "0.4"
+libm = "0.2"
+smallvec = "1"
+bytemuck = { version = "1", features = ["derive"] }
+pollster = "1"
+tempfile = "3"
+roxmltree = "0.21"
+image = { version = "0.25", default-features = false, features = ["png"] }
+glamx = { version = "=0.3.1", default-features = false, features = ["std", "f64", "libm", "scalar-math"] }
+parry3d-f64 = { version = "=0.31.1", features = ["enhanced-determinism"] }
+mesh-loader = { version = "0.1.13", default-features = false, features = ["stl", "obj"] }
+egui = "=0.37.0"
+eframe = "=0.37.0"
+egui-wgpu = "=0.37.0"
+# The `snapshot` feature is left off: it pulls `dify` -> `colored` (MPL-2.0). Image comparison lives in gc_test_support.
+egui_kittest = { version = "=0.37.0", features = ["wgpu", "eframe"] }
+wgpu = "=30.0.2"
+egui_tiles = "=0.18.0"
+egui_ltreeview = "=0.10.0"
+egui-notify = "0.24"
+rfd = "0.18"
+proptest = "1"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+exit = "deny"
+mem_forget = "deny"
+undocumented_unsafe_blocks = "deny"
+iter_over_hash_type = "warn"
+float_cmp = "warn"
+map_err_ignore = "warn"
+let_underscore_must_use = "warn"
+print_stdout = "warn"
+print_stderr = "warn"
+needless_range_loop = "allow"
+many_single_char_names = "allow"
+too_many_arguments = "allow"
+too_many_lines = "allow"
+
+[profile.dev]
+opt-level = 1
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+opt-level = 2
+debug = false
+
+[profile.dev.package.gc_linalg]
+opt-level = 3
+
+[profile.dev.package.gc_solver]
+opt-level = 3
+
+[profile.dev.package.gc_robot]
+opt-level = 3
+
+[profile.dev.package.gc_collide]
+opt-level = 3
+
+[profile.dev.package.gc_plan]
+opt-level = 3
+
+[profile.dev.package.gc_traj]
+opt-level = 3
+
+[profile.dev.package.gc_motion]
+opt-level = 3
+
+[profile.dev.package.gc_plugin_planners]
+opt-level = 3
+
+[profile.dev.package.gc_plugin_ur]
+opt-level = 3
+
+[profile.release]
+panic = "unwind"
+lto = "thin"
+debug = "line-tables-only"
