@@ -14,3 +14,6 @@ workspace = true
 gc_linalg.workspace = true
 libm.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+libm.workspace = true

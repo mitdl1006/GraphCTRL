@@ -6,7 +6,7 @@
 |---|---|---|
 | 0. 골격·환경 | 완료(한글 입력 시험만 사용자 확인 대기) | 증거: [evidence/stage-0.md](evidence/stage-0.md). Windows에서 빌드·실행 확인됨(`-j`로 동시 작업 수 제한). `gen-ur`는 Stage 2b, `bench-quality`는 Stage 3a에서 추가 |
 | 1. 기반 + 계약 동결 | 완료 | foundation 7개 + api 2개. CI: Windows 빌드·테스트 통과 확인 |
-| 2a / 2b 헤드리스 도메인 | 대기 | |
+| 2a / 2b 헤드리스 도메인 | 진행 중 | `gc_solver` 완료(수용 픽스처 F1–F20 통과). 다음: `gc_sketch` |
 | 3a / 3b 통합 도메인 | 대기 | |
 | 4. UI 키트·뷰포트 | 대기 | |
 | 5a–5f 앱 조립 | 대기 | |
@@ -31,4 +31,5 @@
 | gc_mesh | 완료 | 14 |
 | gc_plugin_api | 완료 | 8 |
 | gc_robotics_api | 완료 | 10 (API만으로 작성한 모의 플러그인 포함) |
+| gc_solver | 완료(드래그 속도는 KNOWN_ISSUES 참고) | 35 (F1–F20, 드래그, 3D 포함) |
 | 그 외 | 스텁 | |
