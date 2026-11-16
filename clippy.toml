@@ -3,3 +3,20 @@ allow-expect-in-tests = true
 allow-panic-in-tests = true
 allow-dbg-in-tests = true
 allow-print-in-tests = true
+
+# Transcendental functions of the standard library may differ between platforms and toolchains.
+# `gc_math::fm` (libm) gives the same bits everywhere, which planner and solver reproducibility relies on.
+disallowed-methods = [
+    { path = "f64::sin", reason = "use gc_math::fm::sin (libm) for reproducible results" },
+    { path = "f64::cos", reason = "use gc_math::fm::cos (libm) for reproducible results" },
+    { path = "f64::sin_cos", reason = "use gc_math::fm::sin_cos (libm) for reproducible results" },
+    { path = "f64::tan", reason = "use gc_math::fm::tan (libm) for reproducible results" },
+    { path = "f64::asin", reason = "use gc_math::fm::asin (libm) for reproducible results" },
+    { path = "f64::acos", reason = "use gc_math::fm::acos (libm) for reproducible results" },
+    { path = "f64::atan", reason = "use gc_math::fm::atan (libm) for reproducible results" },
+    { path = "f64::atan2", reason = "use gc_math::fm::atan2 (libm) for reproducible results" },
+    { path = "f64::exp", reason = "use gc_math::fm::exp (libm) for reproducible results" },
+    { path = "f64::ln", reason = "use gc_math::fm::ln (libm) for reproducible results" },
+    { path = "f64::powf", reason = "use gc_math::fm::powf (libm) for reproducible results" },
+    { path = "f64::hypot", reason = "use gc_math::fm::hypot (libm) for reproducible results" },
+]

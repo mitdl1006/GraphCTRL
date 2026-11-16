@@ -14,4 +14,3 @@ workspace = true
 gc_core.workspace = true
 glamx.workspace = true
 libm.workspace = true
-serde.workspace = true
