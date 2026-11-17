@@ -319,11 +319,13 @@ fn a_rotational_joint_leaves_the_turn_about_its_axis_free() {
         "the turn is kept: {}",
         gc_math::fm::atan2(x.y, x.x)
     );
-    // Automatic picks Rotational for a circular origin, Rigid otherwise.
+    // Automatic picks Rotational when both origins are circular, Rigid otherwise.
     let circle = on(base, Geometry::Circle { centre: [0.0; 3], normal: [0.0, 0.0, 1.0] });
+    let hole = on(table, Geometry::Circle { centre: [0.5, 0.0, 0.5], normal: [0.0, 0.0, 1.0] });
+    assert_eq!(Document::automatic_joint(&circle, &hole), RelationKind::Rotational { flip: false });
     assert_eq!(
         Document::automatic_joint(&circle, &on(table, table_frame())),
-        RelationKind::Rotational { flip: false }
+        RelationKind::Rigid { flip: false }
     );
     assert_eq!(
         Document::automatic_joint(&on(base, Geometry::origin_frame()), &on(table, table_frame())),

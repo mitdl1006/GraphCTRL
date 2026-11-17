@@ -28,8 +28,10 @@
   옮기면 로봇이 따라감(테스트는 바디로; 로봇도 같은 owner 경로).
 - **툴→플랜지**: 툴은 아직 별도 컴포넌트가 아니라(`Robot.tool`) `session.mount_tool(robot, origin: Geometry, flip) -> Result<(), EditError>`가
   같은 Rigid 규칙으로 툴 배치를 계산한다(`Geometry::rigid_mount(flip) -> DPose3`). 툴 원점 = 툴 장착면 중심, Z는 면 밖(플랜지 쪽).
-- **확인 필요**: 조인트 원문 A30(`GUID-21DC3336-5C51-42C1-90FB-4299CD66E0…`)의 GUID가 잘려 원문을 못 읽었다. 기본 Z 방향(반대 vs 같은 방향)과
-  Flip component·Align·Invert의 정확한 의미는 명세 요약 기준으로 추정했다 — 전체 GUID를 받으면 확인 후 맞춘다.
+- 원문 확인(2026-11-18): To Define and Manage Joint Relationships `GUID-21DC3336-5C51-42C1-90FB-4299CD66E0C6.htm`, Create Joints Reference
+  `GUID-6AA68E8F-7C97-4806-8483-3941DE915E70.htm`. 맞음: 첫 원점 = 움직이는 컴포넌트(두 번째로 이동), Rigid는 한계 없음, Flip component =
+  방향 반전. **고침**: Automatic은 두 원점이 **모두** 원형일 때만 Rotational(전에는 한쪽만이어도). 원문에 기본 Z 방향 규정은 없다 —
+  우리 기본(Z 반대, 면 대 면)은 유지. 아직 없는 것: Gap 값, Align 1/2·Invert alignment, Lock/Protect, Cylindrical·Ball·Slider·Planar, 한계.
 - 아직: 각도 한계(Angular Start/End)·Drive, Slider·Cylindrical·Ball, 링크 프레임(플랜지·TCP) 선택, 툴의 독립 컴포넌트화.
 - 테스트: `gc_doc/tests/relate.rs`(마운트 추종·Rigid 복귀·flip, Rotational 회전 유지, Automatic, 툴 마운트).
 
