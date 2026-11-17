@@ -278,7 +278,14 @@ impl Sketch {
         let id: Id<Dimension> = alloc.alloc();
         let outcome = binding.sys.try_add(solver_id(id), lowered);
         self.add_outcome(&binding, id, outcome, |sketch| {
-            let dimension = Dimension { kind, source: source.to_owned(), value, driving: true, text_pos };
+            let dimension = Dimension {
+                kind,
+                source: source.to_owned(),
+                value,
+                driving: true,
+                text_pos,
+                name: String::new(),
+            };
             sketch.dimensions.insert(id, dimension);
         })
     }
@@ -291,7 +298,14 @@ impl Sketch {
         text_pos: [f64; 2],
     ) -> Id<Dimension> {
         let id = alloc.alloc();
-        let dimension = Dimension { kind, source: String::new(), value: 0.0, driving: false, text_pos };
+        let dimension = Dimension {
+            kind,
+            source: String::new(),
+            value: 0.0,
+            driving: false,
+            text_pos,
+            name: String::new(),
+        };
         self.dimensions.insert(id, dimension);
         id
     }

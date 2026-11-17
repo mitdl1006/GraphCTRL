@@ -45,6 +45,22 @@ pub enum Geometry {
         /// Normal of the circle's plane.
         normal: [f64; 3],
     },
+    /// A cylindrical face: a point on its axis, the axis direction, the radius.
+    Cylinder {
+        /// A point on the axis.
+        point: [f64; 3],
+        /// The axis direction.
+        direction: [f64; 3],
+        /// Radius, metres.
+        radius: f64,
+    },
+    /// A spherical face: centre and radius.
+    Sphere {
+        /// Centre.
+        centre: [f64; 3],
+        /// Radius, metres.
+        radius: f64,
+    },
     /// A joint origin: a point with a Z axis (out of the face it sits on) and an X axis.
     Frame {
         /// The point.
@@ -104,7 +120,10 @@ impl Geometry {
             Geometry::Plane { point, normal } => (v(point), v(normal), None),
             Geometry::Circle { centre, normal } => (v(centre), v(normal), None),
             Geometry::Axis { point, direction } => (v(point), v(direction), None),
-            Geometry::Point(point) => (v(point), DVec3::Z, Some(DVec3::X)),
+            Geometry::Point(point) | Geometry::Sphere { centre: point, .. } => {
+                (v(point), DVec3::Z, Some(DVec3::X))
+            }
+            Geometry::Cylinder { point, direction, .. } => (v(point), v(direction), None),
         };
         let z = z.normalize_or_zero();
         let helper = x.unwrap_or(if z.x.abs() < 0.9 { DVec3::X } else { DVec3::Y });
@@ -118,6 +137,18 @@ impl Geometry {
             Geometry::Axis { point, direction } => (point, direction),
             Geometry::Point(p) => (p, [1.0, 0.0, 0.0]),
             Geometry::Circle { centre, normal } => (centre, normal),
+            Geometry::Cylinder { point, direction, radius } => {
+                if !(radius.is_finite() && radius > 0.0) {
+                    return false;
+                }
+                (point, direction)
+            }
+            Geometry::Sphere { centre, radius } => {
+                if !(radius.is_finite() && radius > 0.0) {
+                    return false;
+                }
+                (centre, [1.0, 0.0, 0.0])
+            }
             Geometry::Frame { origin, z, x } => {
                 let cross = DVec3::from_array(z).cross(DVec3::from_array(x));
                 if !x.iter().all(|v| v.is_finite()) || cross.length() < 1e-9 {
@@ -178,6 +209,38 @@ pub enum RelationKind {
         /// Flip component: Z axes the same way.
         flip: bool,
     },
+    /// A slider joint: Z axes on one line (opposed unless `flip`), X axes alike; sliding along Z stays free.
+    Slider {
+        /// Flip component.
+        flip: bool,
+    },
+    /// A cylindrical joint: Z axes on one line (opposed unless `flip`); sliding along and turning about Z
+    /// stay free.
+    Cylindrical {
+        /// Flip component.
+        flip: bool,
+    },
+    /// A ball joint: the origins coincide; all turning stays free.
+    Ball,
+    /// An angle between two planes' normals or two edges' directions, radians.
+    Angle {
+        /// The angle.
+        angle: f64,
+        /// How its sense is read.
+        solution: AngleSolution,
+    },
+    /// Faces touching: a plane, cylinder or sphere against another, `offset` apart, inside or outside.
+    Tangent {
+        /// Gap, metres.
+        offset: f64,
+        /// The first inside the second (for a plane: on the side its normal points away from).
+        inside: bool,
+    },
+    /// The two selections mirror each other across a plane.
+    Symmetry {
+        /// The symmetry plane (a plane on any component).
+        plane: Selection,
+    },
     /// A circular edge into another: axes coincident and the circles' planes mated at `offset`. Rotation
     /// about the axis stays free.
     Insert {
@@ -186,6 +249,18 @@ pub enum RelationKind {
         /// False (Opposed, the default): normals opposite, like a bolt head on the face around a hole.
         aligned: bool,
     },
+}
+
+/// How an angle constraint reads its sense (Inventor 2026 help, To Place Angle Constraints in Assemblies,
+/// GUID-AD4679FD-EE9B-47C0-9E32-04B990BDD29E).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum AngleSolution {
+    /// The right-hand rule always applies, about the axis inferred from how the selections lie.
+    Directed,
+    /// Either sense: only the size of the angle counts.
+    Undirected,
+    /// The axis of the right-hand rule is given by a third selection (a face, edge, work plane or axis).
+    Explicit(Selection),
 }
 
 /// An assembly constraint between two components. The first selection is on the component that moves by
@@ -207,10 +282,22 @@ impl Entity for Relationship {
     fn refs(&self, out: &mut Vec<AnyId>) {
         out.push(self.first.occurrence.owner());
         out.push(self.second.occurrence.owner());
+        if let Some(third) = self.third() {
+            out.push(third.occurrence.owner());
+        }
     }
 }
 
 impl Relationship {
+    /// A third selection some kinds carry: the symmetry plane, an angle's explicit reference.
+    pub fn third(&self) -> Option<&Selection> {
+        match &self.kind {
+            RelationKind::Symmetry { plane } => Some(plane),
+            RelationKind::Angle { solution: AngleSolution::Explicit(reference), .. } => Some(reference),
+            _ => None,
+        }
+    }
+
     /// True when the kind fits the selected geometry and the values are finite.
     pub fn is_valid(&self) -> bool {
         let (g1, g2) = (self.first.geometry, self.second.geometry);
@@ -222,9 +309,22 @@ impl Relationship {
             RelationKind::Insert { offset, .. } => {
                 offset.is_finite() && matches!((g1, g2), (Geometry::Circle { .. }, Geometry::Circle { .. }))
             }
-            RelationKind::Rigid { .. } | RelationKind::Rotational { .. } => true,
+            RelationKind::Rigid { .. }
+            | RelationKind::Rotational { .. }
+            | RelationKind::Slider { .. }
+            | RelationKind::Cylindrical { .. }
+            | RelationKind::Ball => true,
+            RelationKind::Angle { angle, .. } => {
+                angle.is_finite() && direction_of(&g1).is_some() && direction_of(&g2).is_some()
+            }
+            RelationKind::Tangent { offset, .. } => {
+                offset.is_finite() && round_or_flat(&g1) && round_or_flat(&g2)
+            }
+            RelationKind::Symmetry { plane } => {
+                matches!(plane.geometry, Geometry::Plane { .. }) && plane.geometry.is_finite()
+            }
         };
-        let joint = matches!(self.kind, RelationKind::Rigid { .. } | RelationKind::Rotational { .. });
+        let joint = is_joint(&self.kind);
         let frames = matches!(g1, Geometry::Frame { .. }) || matches!(g2, Geometry::Frame { .. });
         fits && (joint || !frames)
             && g1.is_finite()
@@ -252,7 +352,37 @@ fn world(pose: &DPose3, geometry: &Geometry) -> (World, Option<(DVec3, DVec3)>) 
             (World::Axis(p(centre), d(normal)), Some((p(centre), d(normal))))
         }
         Geometry::Frame { origin, z, .. } => (World::Axis(p(origin), d(z)), None),
+        // A cylinder mates by its axis, a sphere by its centre.
+        Geometry::Cylinder { point, direction, .. } => (World::Axis(p(point), d(direction)), None),
+        Geometry::Sphere { centre, .. } => (World::Point(p(centre)), None),
     }
+}
+
+/// True for the joint kinds (solved from joint origins).
+fn is_joint(kind: &RelationKind) -> bool {
+    matches!(
+        kind,
+        RelationKind::Rigid { .. }
+            | RelationKind::Rotational { .. }
+            | RelationKind::Slider { .. }
+            | RelationKind::Cylindrical { .. }
+            | RelationKind::Ball
+    )
+}
+
+/// The direction an angle is measured on: a plane's normal, an edge's or axis's direction.
+fn direction_of(geometry: &Geometry) -> Option<[f64; 3]> {
+    match *geometry {
+        Geometry::Plane { normal, .. } | Geometry::Circle { normal, .. } => Some(normal),
+        Geometry::Axis { direction, .. } | Geometry::Cylinder { direction, .. } => Some(direction),
+        Geometry::Frame { z, .. } => Some(z),
+        Geometry::Point(_) | Geometry::Sphere { .. } => None,
+    }
+}
+
+/// Geometry a tangent constraint takes: planes, cylinders, spheres.
+fn round_or_flat(geometry: &Geometry) -> bool {
+    matches!(geometry, Geometry::Plane { .. } | Geometry::Cylinder { .. } | Geometry::Sphere { .. })
 }
 
 /// The part of `v` across direction `d`.
@@ -264,7 +394,10 @@ fn across(v: DVec3, d: DVec3) -> DVec3 {
 /// the same), with Undirected settled from `now` (the dot product of the directions as they lie).
 fn sense_sign(kind: &RelationKind, now: f64) -> f64 {
     match *kind {
-        RelationKind::Rigid { flip } | RelationKind::Rotational { flip } => {
+        RelationKind::Rigid { flip }
+        | RelationKind::Rotational { flip }
+        | RelationKind::Slider { flip }
+        | RelationKind::Cylindrical { flip } => {
             if flip {
                 1.0
             } else {
@@ -279,7 +412,10 @@ fn sense_sign(kind: &RelationKind, now: f64) -> f64 {
                 -1.0
             }
         }
-        RelationKind::Mate { sense: AxisSense::Undirected, .. } => {
+        RelationKind::Ball | RelationKind::Angle { .. } => 1.0,
+        RelationKind::Mate { sense: AxisSense::Undirected, .. }
+        | RelationKind::Tangent { .. }
+        | RelationKind::Symmetry { .. } => {
             if now >= 0.0 {
                 1.0
             } else {
@@ -303,7 +439,8 @@ fn residuals(
         RelationKind::Mate { offset, .. }
         | RelationKind::Flush { offset }
         | RelationKind::Insert { offset, .. } => offset,
-        RelationKind::Rigid { .. } | RelationKind::Rotational { .. } => 0.0,
+        RelationKind::Tangent { offset, .. } => offset,
+        _ => 0.0,
     };
     let push3 = |out: &mut Vec<f64>, v: DVec3| out.extend([v.x, v.y, v.z]);
     if let (RelationKind::Insert { .. }, Some((c1, n1)), Some((c2, n2))) = (kind, first.1, second.1) {
@@ -365,6 +502,10 @@ struct Term {
     owners: [usize; 2],
     geometry: [Geometry; 2],
     sign: f64,
+    /// The third selection (symmetry plane, explicit angle reference): owner index and geometry.
+    third: Option<(usize, Geometry)>,
+    /// A directed angle's axis, read from how the selections lay when solving started.
+    axis: DVec3,
 }
 
 impl Document {
@@ -391,6 +532,10 @@ impl Document {
             Geometry::Point(point) => Geometry::Point(p(point)),
             Geometry::Circle { centre, normal } => Geometry::Circle { centre: p(centre), normal: d(normal) },
             Geometry::Frame { origin, z, x } => Geometry::Frame { origin: p(origin), z: d(z), x: d(x) },
+            Geometry::Cylinder { point, direction, radius } => {
+                Geometry::Cylinder { point: p(point), direction: d(direction), radius }
+            }
+            Geometry::Sphere { centre, radius } => Geometry::Sphere { centre: p(centre), radius },
         })
     }
 
@@ -486,14 +631,51 @@ impl Document {
             ) else {
                 return Err(Unsolved { sick: vec![id] });
             };
+            let third = match relationship.third() {
+                Some(selection) => {
+                    let (Some(c), Some(g3)) =
+                        (index_of(self, &mut owners, selection.occurrence.owner()), self.in_owner(selection))
+                    else {
+                        return Err(Unsolved { sick: vec![id] });
+                    };
+                    Some((c, g3))
+                }
+                None => None,
+            };
             let (w1, w2) = (world(&owners[a].pose, &g1), world(&owners[b].pose, &g2));
-            let now = directions(&w1.0, &w2.0).map_or(1.0, |(x, y)| x.dot(y));
+            let mut now = directions(&w1.0, &w2.0).map_or(1.0, |(x, y)| x.dot(y));
+            if let (RelationKind::Symmetry { .. }, Some((c, g3))) = (relationship.kind, third) {
+                // The mirror image of the first against the second.
+                let (_, m) = plane_world(&owners[c].pose, &g3);
+                if let (World::Axis(_, d1), World::Axis(_, d2)) = (w1.0, w2.0) {
+                    now = mirror_direction(d1, m).dot(d2);
+                }
+            }
+            if let (RelationKind::Tangent { .. }, Geometry::Cylinder { .. }, Geometry::Cylinder { .. }) =
+                (relationship.kind, g1, g2)
+                && let (World::Axis(_, d1), World::Axis(_, d2)) = (w1.0, w2.0)
+            {
+                now = d1.dot(d2);
+            }
+            let axis = match (direction_of(&g1), direction_of(&g2)) {
+                (Some(x), Some(y)) => {
+                    let (x, y) = (
+                        owners[a].pose.rotation * DVec3::from_array(x),
+                        owners[b].pose.rotation * DVec3::from_array(y),
+                    );
+                    let z = x.cross(y);
+                    if z.length() > 1e-9 { z.normalize() } else { perpendicular(x) }
+                }
+                _ => DVec3::Z,
+            };
             terms.push(Term {
                 id,
                 kind: relationship.kind,
                 owners: [a, b],
                 geometry: [g1, g2],
                 sign: sense_sign(&relationship.kind, now),
+                third,
+                axis,
             });
         }
         Ok((owners, terms))
@@ -508,16 +690,77 @@ fn joint_world(pose: &DPose3, geometry: &Geometry) -> (DVec3, DVec3, DVec3) {
 
 fn term_residuals(term: &Term, poses: &[DPose3]) -> Vec<f64> {
     let mut out = Vec::with_capacity(9);
-    if let RelationKind::Rigid { .. } | RelationKind::Rotational { .. } = term.kind {
-        let (p1, z1, x1) = joint_world(&poses[term.owners[0]], &term.geometry[0]);
-        let (p2, z2, x2) = joint_world(&poses[term.owners[1]], &term.geometry[1]);
-        let push3 = |out: &mut Vec<f64>, v: DVec3| out.extend([v.x, v.y, v.z]);
-        push3(&mut out, p1 - p2);
-        push3(&mut out, z1 - z2 * term.sign);
-        if let RelationKind::Rigid { .. } = term.kind {
+    let push3 = |out: &mut Vec<f64>, v: DVec3| out.extend([v.x, v.y, v.z]);
+    let (pose1, pose2) = (&poses[term.owners[0]], &poses[term.owners[1]]);
+    if is_joint(&term.kind) {
+        let (p1, z1, x1) = joint_world(pose1, &term.geometry[0]);
+        let (p2, z2, x2) = joint_world(pose2, &term.geometry[1]);
+        match term.kind {
+            RelationKind::Slider { .. } | RelationKind::Cylindrical { .. } => {
+                push3(&mut out, across(p1 - p2, z2))
+            }
+            _ => push3(&mut out, p1 - p2),
+        }
+        if !matches!(term.kind, RelationKind::Ball) {
+            push3(&mut out, z1 - z2 * term.sign);
+        }
+        if let RelationKind::Rigid { .. } | RelationKind::Slider { .. } = term.kind {
             push3(&mut out, x1 - x2);
         }
         return out;
+    }
+    match term.kind {
+        RelationKind::Angle { angle, solution } => {
+            let d = |pose: &DPose3, g: &Geometry| {
+                (pose.rotation * DVec3::from_array(direction_of(g).unwrap_or([0.0, 0.0, 1.0])))
+                    .normalize_or_zero()
+            };
+            let (a1, a2) = (d(pose1, &term.geometry[0]), d(pose2, &term.geometry[1]));
+            let (sin, cos) = gc_math::fm::sin_cos(angle);
+            out.push(a1.dot(a2) - cos);
+            let z = match (solution, term.third) {
+                (AngleSolution::Undirected, _) => return out,
+                (AngleSolution::Explicit(_), Some((c, g3))) => d(&poses[c], &g3),
+                _ => term.axis,
+            };
+            out.push(a1.cross(a2).dot(z) - sin);
+            return out;
+        }
+        RelationKind::Tangent { offset, inside } => {
+            tangent_residuals(
+                pose1,
+                &term.geometry[0],
+                pose2,
+                &term.geometry[1],
+                offset,
+                inside,
+                term.sign,
+                &mut out,
+            );
+            return out;
+        }
+        RelationKind::Symmetry { .. } => {
+            if let Some((c, g3)) = term.third {
+                let (q, m) = plane_world(&poses[c], &g3);
+                let mirror_point = |p: DVec3| p - m * (2.0 * (p - q).dot(m));
+                let (w1, w2) = (world(pose1, &term.geometry[0]).0, world(pose2, &term.geometry[1]).0);
+                match (w1, w2) {
+                    (World::Plane(p1, n1), World::Plane(p2, n2)) => {
+                        push3(&mut out, mirror_direction(n1, m) - n2);
+                        out.push((mirror_point(p1) - p2).dot(n2));
+                    }
+                    (World::Axis(p1, d1), World::Axis(p2, d2)) => {
+                        push3(&mut out, mirror_direction(d1, m) - d2 * term.sign);
+                        push3(&mut out, across(mirror_point(p1) - p2, d2));
+                    }
+                    (World::Point(p1), World::Point(p2)) => push3(&mut out, mirror_point(p1) - p2),
+                    // Mixed kinds of geometry cannot mirror each other: always sick.
+                    _ => out.push(1.0),
+                }
+            }
+            return out;
+        }
+        _ => {}
     }
     let w1 = world(&poses[term.owners[0]], &term.geometry[0]);
     let w2 = world(&poses[term.owners[1]], &term.geometry[1]);
@@ -533,8 +776,16 @@ fn all_residuals(terms: &[Term], poses: &[DPose3]) -> Vec<f64> {
 /// squares do not start at the saddle where opposite directions have no gradient.
 fn rough_turns(owners: &[Owner], terms: &[Term], poses: &mut [DPose3]) {
     for term in terms {
-        if let RelationKind::Rigid { .. } | RelationKind::Rotational { .. } = term.kind {
-            joint_turns(owners, term, poses);
+        if is_joint(&term.kind) {
+            if !matches!(term.kind, RelationKind::Ball) {
+                joint_turns(owners, term, poses);
+            }
+            continue;
+        }
+        if matches!(
+            term.kind,
+            RelationKind::Angle { .. } | RelationKind::Tangent { .. } | RelationKind::Symmetry { .. }
+        ) {
             continue;
         }
         let w1 = world(&poses[term.owners[0]], &term.geometry[0]);
@@ -694,7 +945,7 @@ fn joint_turns(owners: &[Owner], term: &Term, poses: &mut [DPose3]) {
         let turn = DQuat::from_axis_angle(z.cross(helper).normalize(), std::f64::consts::PI);
         poses[index].rotation = (turn * poses[index].rotation).normalize();
     }
-    if let RelationKind::Rigid { .. } = term.kind {
+    if let RelationKind::Rigid { .. } | RelationKind::Slider { .. } = term.kind {
         let (_, z1, x1) = joint_world(&poses[term.owners[0]], &term.geometry[0]);
         let (_, z2, x2) = joint_world(&poses[term.owners[1]], &term.geometry[1]);
         if x1.dot(x2) < -0.5 {
@@ -914,7 +1165,21 @@ impl Document {
                 };
                 crate::apply(&mut preview, &Command::Cell(op))?;
             }
-            RelationKind::Rigid { .. } => return Err(EditError::BadValue),
+            RelationKind::Angle { solution, .. } => {
+                let relationship =
+                    Relationship { kind: RelationKind::Angle { angle: value, solution }, ..relationship };
+                crate::apply(&mut preview, &Command::Cell(CellOp::SetRelationship { id, relationship }))?;
+            }
+            RelationKind::Tangent { inside, .. } => {
+                let relationship =
+                    Relationship { kind: RelationKind::Tangent { offset: value, inside }, ..relationship };
+                crate::apply(&mut preview, &Command::Cell(CellOp::SetRelationship { id, relationship }))?;
+            }
+            RelationKind::Rigid { .. }
+            | RelationKind::Slider { .. }
+            | RelationKind::Cylindrical { .. }
+            | RelationKind::Ball
+            | RelationKind::Symmetry { .. } => return Err(EditError::BadValue),
         }
         let items: Vec<AnyId> = self
             .bodies()
@@ -930,5 +1195,88 @@ impl Document {
                 (self.owner_pose(item)? != now).then_some((item, now))
             })
             .collect())
+    }
+}
+
+/// A plane selection in the world: a point on it and its unit normal.
+fn plane_world(pose: &DPose3, geometry: &Geometry) -> (DVec3, DVec3) {
+    match world(pose, geometry).0 {
+        World::Plane(q, m) => (q, m),
+        World::Axis(q, d) => (q, d),
+        World::Point(q) => (q, DVec3::Z),
+    }
+}
+
+/// A direction mirrored across a plane with unit normal `m`.
+fn mirror_direction(d: DVec3, m: DVec3) -> DVec3 {
+    d - m * (2.0 * d.dot(m))
+}
+
+/// Some unit vector perpendicular to `v`.
+fn perpendicular(v: DVec3) -> DVec3 {
+    let helper = if v.x.abs() < 0.9 { DVec3::X } else { DVec3::Y };
+    v.cross(helper).normalize_or_zero()
+}
+
+/// Tangency residuals between planes, cylinders and spheres (Inventor 2026 help, Place Tangent
+/// constraints in assemblies, GUID-FF270566-CA9E-420A-A00A-F52DD0FDFD8E). `sign` is the settled sense of
+/// two cylinders' axes.
+#[allow(clippy::too_many_arguments, reason = "two posed selections and the constraint's values")]
+fn tangent_residuals(
+    pose1: &DPose3,
+    g1: &Geometry,
+    pose2: &DPose3,
+    g2: &Geometry,
+    offset: f64,
+    inside: bool,
+    sign: f64,
+    out: &mut Vec<f64>,
+) {
+    let p = |pose: &DPose3, v: [f64; 3]| pose.translation + pose.rotation * DVec3::from_array(v);
+    let d = |pose: &DPose3, v: [f64; 3]| (pose.rotation * DVec3::from_array(v)).normalize_or_zero();
+    enum Shape {
+        Plane(DVec3, DVec3),
+        Cylinder(DVec3, DVec3, f64),
+        Sphere(DVec3, f64),
+    }
+    let shape = |pose: &DPose3, g: &Geometry| match *g {
+        Geometry::Plane { point, normal } => Some(Shape::Plane(p(pose, point), d(pose, normal))),
+        Geometry::Cylinder { point, direction, radius } => {
+            Some(Shape::Cylinder(p(pose, point), d(pose, direction), radius))
+        }
+        Geometry::Sphere { centre, radius } => Some(Shape::Sphere(p(pose, centre), radius)),
+        _ => None,
+    };
+    let (Some(s1), Some(s2)) = (shape(pose1, g1), shape(pose2, g2)) else {
+        out.push(1.0);
+        return;
+    };
+    // Distance between centres (or from the plane) that touching asks for.
+    let touching = |r1: f64, r2: f64| if inside { (r2 - r1).abs() - offset } else { r1 + r2 + offset };
+    let side = if inside { -1.0 } else { 1.0 };
+    match (s1, s2) {
+        (Shape::Plane(p1, n1), Shape::Plane(q, n2)) => {
+            // Two planes touching: face to face (like a mate), `offset` apart.
+            let v = n1 + n2;
+            out.extend([v.x, v.y, v.z]);
+            out.push((p1 - q).dot(n2) - offset);
+        }
+        (Shape::Sphere(c, r), Shape::Plane(q, n)) | (Shape::Plane(q, n), Shape::Sphere(c, r)) => {
+            out.push((c - q).dot(n) - side * (r + offset));
+        }
+        (Shape::Cylinder(a, u, r), Shape::Plane(q, n)) | (Shape::Plane(q, n), Shape::Cylinder(a, u, r)) => {
+            out.push(u.dot(n));
+            out.push((a - q).dot(n) - side * (r + offset));
+        }
+        (Shape::Sphere(c1, r1), Shape::Sphere(c2, r2)) => out.push((c1 - c2).length() - touching(r1, r2)),
+        (Shape::Sphere(c, rs), Shape::Cylinder(a, u, rc))
+        | (Shape::Cylinder(a, u, rc), Shape::Sphere(c, rs)) => {
+            out.push(across(c - a, u).length() - touching(rs, rc));
+        }
+        (Shape::Cylinder(a1, u1, r1), Shape::Cylinder(a2, u2, r2)) => {
+            let v = u1 - u2 * sign;
+            out.extend([v.x, v.y, v.z]);
+            out.push(across(a1 - a2, u2).length() - touching(r1, r2));
+        }
     }
 }

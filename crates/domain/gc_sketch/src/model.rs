@@ -264,6 +264,10 @@ pub struct Dimension {
     pub driving: bool,
     /// Where the dimension text is placed, in sketch coordinates.
     pub text_pos: [f64; 2],
+    /// Its model parameter name (`d0`, `d1`, … or one the user gave), unique in the document, by which
+    /// expressions refer to it; empty until the document names it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name: String,
 }
 
 impl Entity for Dimension {

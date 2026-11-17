@@ -159,6 +159,14 @@ pub enum SketchOp {
     },
     /// Deletes items and everything that depends on them.
     Delete(Vec<Item>),
+    /// Renames a dimension's model parameter (`d0` → `HGHT`) and the references to it in parameters and
+    /// dimensions. Refused when the name is malformed or a parameter or dimension has it.
+    RenameDimension {
+        /// The dimension.
+        id: Id<Dimension>,
+        /// The new name.
+        name: String,
+    },
     /// Projects geometry of a component or work feature onto the sketch as reference geometry that follows
     /// it (Project Geometry): a point, or a reference line between two.
     Project {
@@ -482,7 +490,8 @@ fn evaluate(source: &str, scope: &dyn Scope, unit: Unit) -> Result<f64, EditErro
 
 /// Parameter values by name.
 fn scope_of(doc: &Document) -> BTreeMap<String, Quantity> {
-    doc.params()
+    let mut scope: BTreeMap<String, Quantity> = doc
+        .params()
         .iter()
         .map(|(_, p)| {
             let quantity = if p.unit.dim() == Unit::Deg.dim() {
@@ -492,7 +501,72 @@ fn scope_of(doc: &Document) -> BTreeMap<String, Quantity> {
             };
             (p.name.clone(), quantity)
         })
-        .collect()
+        .collect();
+    // Model parameters: every named dimension, driving ones by their value, reference ones by what they
+    // measure now.
+    for (_, sketch) in doc.sketches().iter() {
+        for dimension in sketch.dimensions.values().filter(|d| !d.name.is_empty()) {
+            let value =
+                if dimension.driving { Some(dimension.value) } else { sketch.measure(&dimension.kind) };
+            let Some(value) = value else { continue };
+            let quantity = if field_unit(&dimension.kind) == Unit::Deg {
+                Quantity::angle(value)
+            } else {
+                Quantity::length(value)
+            };
+            scope.entry(dimension.name.clone()).or_insert(quantity);
+        }
+    }
+    scope
+}
+
+/// Splits `NAME = expression` (Inventor: typing `HGHT = 5mm` in a dimension names its parameter HGHT):
+/// the name and the expression; `None` when the text is a plain expression.
+fn named_source(source: &str) -> Option<(String, String)> {
+    let (name, rest) = source.split_once('=')?;
+    let name = name.trim();
+    gc_expr::is_valid_param_name(name).then(|| (name.to_owned(), rest.trim().to_owned()))
+}
+
+/// True when `name` is free for a parameter or dimension (other than `except`).
+fn name_free(doc: &Document, name: &str, except: Option<(Id<Sketch>, Id<Dimension>)>) -> bool {
+    let param = doc.params().iter().any(|(_, p)| p.name == name);
+    let dimension = doc
+        .sketches()
+        .iter()
+        .any(|(sid, s)| s.dimensions.iter().any(|(did, d)| d.name == name && Some((sid, *did)) != except));
+    !param && !dimension
+}
+
+/// Gives every unnamed dimension the next free model parameter name `dN` (above the highest in use).
+fn name_dimensions(txn: &mut Txn<'_>) -> Result<(), EditError> {
+    let doc = txn.doc();
+    let unnamed: Vec<(Id<Sketch>, Id<Dimension>)> = doc
+        .sketches()
+        .iter()
+        .flat_map(|(sid, s)| {
+            s.dimensions.iter().filter(|(_, d)| d.name.is_empty()).map(move |(did, _)| (sid, *did))
+        })
+        .collect();
+    if unnamed.is_empty() {
+        return Ok(());
+    }
+    let highest = doc
+        .sketches()
+        .iter()
+        .flat_map(|(_, s)| s.dimensions.values().map(|d| d.name.clone()).collect::<Vec<_>>())
+        .chain(doc.params().iter().map(|(_, p)| p.name.clone()))
+        .filter_map(|n| n.strip_prefix('d').and_then(|k| k.parse::<u64>().ok()))
+        .max();
+    for (next, (sketch, dimension)) in (highest.map_or(0, |h| h + 1)..).zip(unnamed) {
+        let name = format!("d{next}");
+        txn.modify(sketch, |s: &mut Sketch, _| {
+            if let Some(d) = s.dimensions.get_mut(&dimension) {
+                d.name = name;
+            }
+        })?;
+    }
+    Ok(())
 }
 
 /// The names an expression refers to (empty when it does not parse).
@@ -532,38 +606,56 @@ fn names_in(source: &str) -> BTreeSet<String> {
 /// Re-evaluates every parameter in dependency order, then every driving dimension, and lets the sketches
 /// follow. Any failure fails the whole command.
 fn propagate(txn: &mut Txn<'_>) -> Result<(), EditError> {
-    let ids_by_name: BTreeMap<String, Id<Param>> =
-        txn.doc().params().iter().map(|(id, p)| (p.name.clone(), id)).collect();
-    let deps: BTreeMap<Id<Param>, BTreeSet<Id<Param>>> = txn
-        .doc()
-        .params()
+    /// Something whose value comes from an expression.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+    enum Node {
+        Param(Id<Param>),
+        Dimension(Id<Sketch>, Id<Dimension>),
+    }
+    let doc = txn.doc();
+    let mut by_name: BTreeMap<String, Node> = BTreeMap::new();
+    let mut sources: Vec<(Node, String)> = Vec::new();
+    for (id, p) in doc.params().iter() {
+        by_name.insert(p.name.clone(), Node::Param(id));
+        sources.push((Node::Param(id), p.source.clone()));
+    }
+    for (sid, s) in doc.sketches().iter() {
+        for (did, d) in s.dimensions.iter().filter(|(_, d)| d.driving) {
+            if !d.name.is_empty() {
+                by_name.entry(d.name.clone()).or_insert(Node::Dimension(sid, *did));
+            }
+            sources.push((Node::Dimension(sid, *did), d.source.clone()));
+        }
+    }
+    let deps: BTreeMap<Node, BTreeSet<Node>> = sources
         .iter()
-        .map(|(id, p)| (id, names_in(&p.source).iter().filter_map(|n| ids_by_name.get(n).copied()).collect()))
+        .map(|(node, source)| {
+            (*node, names_in(source).iter().filter_map(|n| by_name.get(n).copied()).collect())
+        })
         .collect();
     let (order, blocked) = gc_expr::eval_order(&deps);
     if !blocked.is_empty() {
         return Err(EditError::Cycle);
     }
-    for id in order {
-        let Some(param) = txn.doc().get(id) else { continue };
-        let value = evaluate(&param.source, &scope_of(txn.doc()), param.unit)?;
-        if value.to_bits() != param.value.to_bits() {
-            txn.modify(id, |p: &mut Param, _| p.value = value)?;
-        }
-    }
-    let scope = scope_of(txn.doc());
-    let sketches: Vec<Id<Sketch>> = txn.doc().sketches().iter().map(|(id, _)| id).collect();
-    for sketch_id in sketches {
-        let Some(sketch) = txn.doc().get(sketch_id) else { continue };
-        let mut updates = Vec::new();
-        for (id, dimension) in sketch.dimensions.iter().filter(|(_, d)| d.driving) {
-            let value = evaluate(&dimension.source, &scope, field_unit(&dimension.kind))?;
-            if value.to_bits() != dimension.value.to_bits() {
-                updates.push((*id, dimension.source.clone(), value));
+    for node in order {
+        match node {
+            Node::Param(id) => {
+                let Some(param) = txn.doc().get(id) else { continue };
+                let value = evaluate(&param.source, &scope_of(txn.doc()), param.unit)?;
+                if value.to_bits() != param.value.to_bits() {
+                    txn.modify(id, |p: &mut Param, _| p.value = value)?;
+                }
             }
-        }
-        for (id, source, value) in updates {
-            txn.modify(sketch_id, |s: &mut Sketch, _| s.set_dimension(id, &source, value))??;
+            Node::Dimension(sketch_id, id) => {
+                let Some(dimension) = txn.doc().get(sketch_id).and_then(|s| s.dimensions.get(&id)) else {
+                    continue;
+                };
+                let source = dimension.source.clone();
+                let value = evaluate(&source, &scope_of(txn.doc()), field_unit(&dimension.kind))?;
+                if value.to_bits() != dimension.value.to_bits() {
+                    txn.modify(sketch_id, |s: &mut Sketch, _| s.set_dimension(id, &source, value))??;
+                }
+            }
         }
     }
     Ok(())
@@ -1053,6 +1145,7 @@ fn sketch_op(
             "Delete"
         }
         // Resolved against the document in `run`; inside a wrapper it is not supported.
+        SketchOp::RenameDimension { .. } => return Err(SketchError::InvalidValue.into()),
         SketchOp::Project { .. } => return Err(SketchError::InvalidValue.into()),
         SketchOp::Trim { curve, at } => {
             push_cut(&mut created, &sketch.trim(ids, *curve, *at)?);
@@ -1088,7 +1181,7 @@ fn sketch_op(
 fn run(txn: &mut Txn<'_>, command: &Command) -> Result<(Vec<Created>, &'static str), EditError> {
     match command {
         Command::AddParam { name, source, angle } => {
-            let taken = txn.doc().params().iter().any(|(_, p)| &p.name == name);
+            let taken = !name_free(txn.doc(), name, None);
             if taken || !gc_expr::is_valid_param_name(name) {
                 return Err(EditError::BadName(name.clone()));
             }
@@ -1115,7 +1208,10 @@ fn run(txn: &mut Txn<'_>, command: &Command) -> Result<(Vec<Created>, &'static s
             if name == old {
                 return Ok((Vec::new(), "Rename parameter"));
             }
-            let taken = txn.doc().params().iter().any(|(other, p)| other != *id && p.name == name);
+            let dimension_has_it =
+                txn.doc().sketches().iter().any(|(_, s)| s.dimensions.values().any(|d| d.name == name));
+            let taken = dimension_has_it
+                || txn.doc().params().iter().any(|(other, p)| other != *id && p.name == name);
             if taken || !gc_expr::is_valid_param_name(&name) {
                 return Err(EditError::BadName(name));
             }
@@ -1209,9 +1305,55 @@ fn run(txn: &mut Txn<'_>, command: &Command) -> Result<(Vec<Created>, &'static s
         Command::Sketch { sketch, op: SketchOp::Project { source, construction } } => {
             crate::project::project(txn, *sketch, source, *construction)
         }
+        Command::Sketch { sketch, op: SketchOp::AddDimension { kind, source, text_pos } }
+            if named_source(source).is_some() =>
+        {
+            let (name, expression) = named_source(source).ok_or(EditError::BadValue)?;
+            if !name_free(txn.doc(), &name, None) {
+                return Err(EditError::BadName(name));
+            }
+            let op = SketchOp::AddDimension { kind: *kind, source: expression, text_pos: *text_pos };
+            let scope = scope_of(txn.doc());
+            let (created, label) =
+                txn.modify(*sketch, |s: &mut Sketch, ids| sketch_op(s, ids, &op, &scope))??;
+            if let Some(Created::Dimension(id)) = created.first() {
+                let id = *id;
+                txn.modify(*sketch, |s: &mut Sketch, _| {
+                    if let Some(d) = s.dimensions.get_mut(&id) {
+                        d.name = name;
+                    }
+                })?;
+            }
+            propagate(txn)?;
+            Ok((created, label))
+        }
+        Command::Sketch { sketch, op: SketchOp::SetDimension { id, source } }
+            if named_source(source).is_some() =>
+        {
+            let (name, expression) = named_source(source).ok_or(EditError::BadValue)?;
+            rename_dimension(txn, *sketch, *id, &name)?;
+            let op = SketchOp::SetDimension { id: *id, source: expression };
+            let scope = scope_of(txn.doc());
+            let result = txn.modify(*sketch, |s: &mut Sketch, ids| sketch_op(s, ids, &op, &scope))??;
+            propagate(txn)?;
+            Ok(result)
+        }
+        Command::Sketch { sketch, op: SketchOp::RenameDimension { id, name } } => {
+            rename_dimension(txn, *sketch, *id, name.trim())?;
+            propagate(txn)?;
+            Ok((Vec::new(), "Rename parameter"))
+        }
         Command::Sketch { sketch, op } => {
             let scope = scope_of(txn.doc());
-            txn.modify(*sketch, |s: &mut Sketch, ids| sketch_op(s, ids, op, &scope))?
+            let result = txn.modify(*sketch, |s: &mut Sketch, ids| sketch_op(s, ids, op, &scope))??;
+            // Dimensions and parameters that use this sketch's dimensions follow (and loops are refused).
+            if matches!(
+                op,
+                SketchOp::SetDimension { .. } | SketchOp::SetDriving { .. } | SketchOp::AddDimension { .. }
+            ) {
+                propagate(txn)?;
+            }
+            Ok(result)
         }
         Command::Cell(op) => crate::cell::run(txn, op),
         Command::Rename { item, name } => crate::tree::rename(txn, *item, name),
@@ -1231,6 +1373,68 @@ pub fn apply(doc: &mut Document, command: &Command) -> Result<Applied, EditError
     let mut txn = Txn::new(doc);
     let (created, label) = run(&mut txn, command)?; // an early return drops `txn`, which rolls back
     crate::project::refresh(&mut txn)?;
+    name_dimensions(&mut txn)?;
     let (delta, changed) = txn.commit()?;
     Ok(Applied { delta, changed, created, label })
+}
+
+/// Renames a dimension's model parameter and every reference to it.
+fn rename_dimension(
+    txn: &mut Txn<'_>,
+    sketch: Id<Sketch>,
+    id: Id<Dimension>,
+    name: &str,
+) -> Result<(), EditError> {
+    let old = txn
+        .doc()
+        .get(sketch)
+        .and_then(|s| s.dimensions.get(&id))
+        .ok_or(EditError::Sketch(SketchError::MissingItem))?
+        .name
+        .clone();
+    if name == old {
+        return Ok(());
+    }
+    if !gc_expr::is_valid_param_name(name) || !name_free(txn.doc(), name, Some((sketch, id))) {
+        return Err(EditError::BadName(name.to_owned()));
+    }
+    if !old.is_empty() {
+        rewrite_references(txn, &old, name)?;
+    }
+    txn.modify(sketch, |s: &mut Sketch, _| {
+        if let Some(d) = s.dimensions.get_mut(&id) {
+            name.clone_into(&mut d.name);
+        }
+    })?;
+    Ok(())
+}
+
+/// Renames references to `old` in every parameter's and dimension's expression.
+fn rewrite_references(txn: &mut Txn<'_>, old: &str, new: &str) -> Result<(), EditError> {
+    let params: Vec<(Id<Param>, String)> = txn
+        .doc()
+        .params()
+        .iter()
+        .filter_map(|(other, p)| rename_in(&p.source, old, new).map(|source| (other, source)))
+        .collect();
+    for (other, source) in params {
+        txn.modify(other, |p: &mut Param, _| p.source = source)?;
+    }
+    let sketches: Vec<Id<Sketch>> = txn
+        .doc()
+        .sketches()
+        .iter()
+        .filter(|(_, s)| s.dimensions.values().any(|d| rename_in(&d.source, old, new).is_some()))
+        .map(|(id, _)| id)
+        .collect();
+    for sketch in sketches {
+        txn.modify(sketch, |s: &mut Sketch, _| {
+            for d in s.dimensions.values_mut() {
+                if let Some(source) = rename_in(&d.source, old, new) {
+                    d.source = source;
+                }
+            }
+        })?;
+    }
+    Ok(())
 }

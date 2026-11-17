@@ -307,3 +307,67 @@ fn renaming_a_parameter_renames_its_references_in_one_undo_step() {
     assert_eq!(doc.get(h).unwrap().source, "w + 1 mm + w / 2");
     assert_eq!(doc.get(sketch).unwrap().dimensions[&dimension].source, "w * 2");
 }
+
+#[test]
+fn dimensions_are_model_parameters_d0_d1_usable_in_expressions_and_named_by_name_equals_value() {
+    let (mut doc, _history, sketch, w, width, lines) = rectangle_driven_by_parameter();
+    let dims = |doc: &Document| doc.get(sketch).unwrap().dimensions.clone();
+    assert_eq!(dims(&doc)[&width].name, "d0", "the first dimension is d0");
+    // The height is half the width, by the width dimension's name.
+    let (a, b) = doc.get(sketch).unwrap().line(lines[1]).unwrap();
+    let created = apply(
+        &mut doc,
+        &Command::Sketch {
+            sketch,
+            op: SketchOp::AddDimension {
+                kind: DimKind::Distance { p: a, q: b },
+                source: "d0 / 2".into(),
+                text_pos: [0.0; 2],
+            },
+        },
+    )
+    .unwrap()
+    .created;
+    let Created::Dimension(height) = created[0] else { panic!() };
+    assert_eq!(dims(&doc)[&height].name, "d1");
+    assert!((dims(&doc)[&height].value - 0.020).abs() < 1e-12, "half of 40 mm");
+    // The parameter changes: both dimensions follow.
+    apply(&mut doc, &Command::SetParam { id: w, source: "30 mm".into() }).unwrap();
+    assert!((dims(&doc)[&width].value - 0.060).abs() < 1e-12);
+    assert!((dims(&doc)[&height].value - 0.030).abs() < 1e-12);
+    // `NAME = value` names the dimension and renames its uses.
+    apply(
+        &mut doc,
+        &Command::Sketch { sketch, op: SketchOp::SetDimension { id: width, source: "WIDTH = 50 mm".into() } },
+    )
+    .unwrap();
+    assert_eq!(dims(&doc)[&width].name, "WIDTH");
+    assert_eq!(dims(&doc)[&width].source, "50 mm");
+    assert_eq!(dims(&doc)[&height].source, "WIDTH / 2");
+    assert!((dims(&doc)[&height].value - 0.025).abs() < 1e-12);
+    // A loop is refused; so is a parameter with a dimension's name.
+    assert!(matches!(
+        apply(
+            &mut doc,
+            &Command::Sketch { sketch, op: SketchOp::SetDimension { id: width, source: "d1 * 2".into() } }
+        ),
+        Err(EditError::Cycle)
+    ));
+    assert!(matches!(
+        apply(&mut doc, &Command::AddParam { name: "d1".into(), source: "1 mm".into(), angle: false }),
+        Err(EditError::BadName(_))
+    ));
+    assert!(
+        apply(
+            &mut doc,
+            &Command::Sketch { sketch, op: SketchOp::RenameDimension { id: height, name: "w".into() } }
+        )
+        .is_err()
+    );
+    apply(
+        &mut doc,
+        &Command::Sketch { sketch, op: SketchOp::RenameDimension { id: height, name: "HEIGHT".into() } },
+    )
+    .unwrap();
+    assert_eq!(dims(&doc)[&height].name, "HEIGHT");
+}

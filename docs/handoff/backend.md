@@ -1,5 +1,52 @@
 # 백엔드 인계 (2026-11-17)
 
+## 에이전트 도구 후보(리드 요청, PLAN 9.8 2단계) — 백엔드 세션 API 정리
+
+모두 `gc_session::Session` 메서드, 문서를 바꾸는 것은 한 undo 단계. 인자 타입은 `gc_doc`의 평범한 자료(serde 가능).
+
+| 묶음 | 메서드 |
+|---|---|
+| 컴포넌트 트리 | `components() -> Vec<ComponentNode>`, `robot_links(robot) -> Vec<ComponentNode>`, `set_component(occ, ComponentFlag, bool)` |
+| 원점 폴더 | `component_origin(occ) -> Option<ComponentOrigin>`, `set_origin_visible(occ, &[OriginElement], bool)`, `origin_visible(occ, el)` |
+| 배치 | `ground_at_origin(&[AnyId])`, `place_at_component_origin(item, target: Occurrence)`, `mount_tool(robot, Geometry, flip)` |
+| 구속·조인트 | `add_relationship(Relationship) -> Id`, `set_relationship(id, Relationship)`, `delete_relationship(id)`, `relationships()`, `predict_relationship(&Selection, &Selection)`, `automatic_joint(&a, &b)` |
+| 상태 | `component_dof(item) -> Option<Dof>`, `component_status(item) -> Option<ComponentStatus>`, `relationship_status(id)` |
+| 구동 | `drive_relationship(id, value)`, `end_drive_relationship()`, `driven_placement(item)` |
+| 스케치 평면 | `create_sketch_on_component(occ, OriginPlane)`, `create_sketch_on_work_plane(id)`, `create_sketch_on_face(..)` |
+| 투영 | `project_geometry(ProjectSource, shift) -> Vec<Created>` |
+| 매개변수 | `execute(Command::{AddParam, SetParam, RenameParam, DeleteParam})`, 스케치: `SketchOp::{AddDimension, SetDimension("NAME = 값" 가능), RenameDimension, SetDriving}` |
+| 스케치 도구 | `tool_event(ToolEvent)`, `tool_hud()`, `set_tool_construction(bool)`; Trim/Extend/Fillet은 `SketchOp::{Trim, Extend, Fillet}`로 직접도 가능 |
+
+에이전트가 쓰기 좋은 순서: `components()`로 대상 찾기 → `component_origin`으로 좌표 확인 → `add_relationship`/`ground_at_origin`으로 배치 →
+`component_status`로 확인. 실패는 `EditError`(Display가 사람이 읽는 문장, `Unsolvable`은 관계 이름 포함).
+
+## 2026-11-18 — 모델 매개변수(d0, d1 …) — 리드 요청
+
+근거(원문): To Work with Sketch Dimensions `GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185.htm` — Edit Dimension에서 식 입력 가능,
+"enter HGHT = 5mm … creates the parameter HGHT and assigns the value of 5 mm".
+- `Dimension.name`(gc_sketch, 저장됨): 모든 치수가 문서 전역 이름 `dN`(쓰는 중 가장 큰 번호 + 1)을 받는다 — 모든 명령 뒤 자동 부여.
+- 수식에서 매개변수와 똑같이 참조: 구동 치수는 값, 참조(driven) 치수는 지금 측정값. 매개변수·구동 치수를 한 의존 그래프로 순서대로 계산,
+  순환은 `EditError::Cycle`. 치수를 바꾸면 그것을 쓰는 치수·매개변수가 따라간다.
+- `NAME = 식`: AddDimension/SetDimension의 source가 이 꼴이면 치수 이름을 NAME으로(기존 참조도 바꿈), 식만 값으로.
+  `SketchOp::RenameDimension{id, name}`(참조 갱신). 이름은 매개변수·치수 통틀어 유일(AddParam/RenameParam도 치수 이름과 충돌 거부).
+- 테스트 `gc_doc/tests/document.rs::dimensions_are_model_parameters_…`.
+- 아직: 매개변수 대화상자에 모델 매개변수 행 표시(리드 parameters.rs) — `doc.sketches()`의 `dimensions[*].name/source/value`로 읽으면 된다.
+
+## 2026-11-18 — P2-17 구속 완성(Angle·Tangent·Symmetry) · P2-18 조인트 완성(Slider·Cylindrical·Ball)
+
+근거(원문): To Place Angle Constraints `GUID-AD4679FD-EE9B-47C0-9E32-04B990BDD29E.htm`(Directed = 항상 오른손 법칙, 축은 선택에서 추론;
+Undirected = 어느 쪽이든; Explicit Reference Vector = 세 번째 선택이 외적(Z) 방향), Place Tangent constraints
+`GUID-FF270566-CA9E-420A-A00A-F52DD0FDFD8E.htm`(면·평면·원통·구, Inside/Outside, 오프셋), Place Symmetry constraints
+`GUID-237E701E-A16B-49D5-95C2-FB6528E41217.htm`(두 대상이 평면 기준 대칭), Create Joints Reference `GUID-6AA68E8F-…`(Slider = 병진 1,
+Cylindrical = 병진 1 + 회전 1, Ball = 회전 3).
+- `RelationKind::{Angle{angle, solution: AngleSolution::{Directed, Undirected, Explicit(Selection)}}, Tangent{offset, inside},
+  Symmetry{plane: Selection}, Slider{flip}, Cylindrical{flip}, Ball}`; `Geometry::{Cylinder{point, direction, radius}, Sphere{centre, radius}}`
+  (Mate에서는 원통 = 축, 구 = 중심). `Relationship::third()` = 대칭 평면·명시 기준. 세 번째 선택의 컴포넌트도 삭제 보호(refs).
+- 각도는 평면 법선·모서리/축 방향 사이(rad). Directed의 축은 풀이 시작 때 두 방향의 외적으로 읽는다.
+- `drive_relationship`: Angle(각도)·Tangent(오프셋)도 구동.
+- 아직: 한계(Maximum/Minimum/Resting) — 관계 구조체에 필드를 늘리면 app의 리터럴이 깨지므로 리드와 표현 합의 후.
+- 테스트 `gc_doc/tests/relate.rs`(각도 3방식·자유도, 공·롤러 접선·inside, 대칭, 세 조인트 자유도).
+
 ## 2026-11-18 — P2-16 Ground and Root(원점에 고정) · Place at Component Origin
 
 근거(원문): Ground and Root `GUID-98FA88B2-AA32-4A27-946A-DCECB36A6696.htm`, Place at Component Origin
