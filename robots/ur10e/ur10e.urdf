@@ -1,49 +1,77 @@
 <?xml version="1.0"?>
-<!-- UR16e: joint origins, limits and collision meshes as published in Universal_Robots_ROS2_Description 4.4.1
-     (BSD-3-Clause, see assets/ur/upstream/LICENSE). Generated from its YAML files; no visual meshes are bundled, so the collision meshes are drawn and checked. -->
-<robot name="ur16e">
+<!-- UR10e: joint origins, limits and collision meshes as published in Universal_Robots_ROS2_Description 4.4.1
+     (BSD-3-Clause, see assets/ur/upstream/LICENSE). Generated from its YAML files. Visual meshes are drawn; the simpler collision meshes are checked. -->
+<robot name="ur10e">
   <link name="base_link"/>
   <link name="base_link_inertia">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 3.141592653589793"/>
+      <geometry><mesh filename="package://ur10e/meshes/visual/base.dae"/></geometry>
+    </visual>
     <collision>
       <origin xyz="0 0 0" rpy="0 0 3.141592653589793"/>
-      <geometry><mesh filename="package://ur_description/meshes/ur10e/collision/base.stl"/></geometry>
+      <geometry><mesh filename="package://ur10e/meshes/collision/base.stl"/></geometry>
     </collision>
   </link>
   <link name="base"/>
   <link name="shoulder_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 3.141592653589793"/>
+      <geometry><mesh filename="package://ur10e/meshes/visual/shoulder.dae"/></geometry>
+    </visual>
     <collision>
       <origin xyz="0 0 0" rpy="0 0 3.141592653589793"/>
-      <geometry><mesh filename="package://ur_description/meshes/ur10e/collision/shoulder.stl"/></geometry>
+      <geometry><mesh filename="package://ur10e/meshes/collision/shoulder.stl"/></geometry>
     </collision>
   </link>
   <link name="upper_arm_link">
+    <visual>
+      <origin xyz="0 0 0.1762" rpy="1.5707963267948966 0 -1.5707963267948966"/>
+      <geometry><mesh filename="package://ur10e/meshes/visual/upperarm.dae"/></geometry>
+    </visual>
     <collision>
       <origin xyz="0 0 0.1762" rpy="1.5707963267948966 0 -1.5707963267948966"/>
-      <geometry><mesh filename="package://ur_description/meshes/ur16e/collision/upperarm.stl"/></geometry>
+      <geometry><mesh filename="package://ur10e/meshes/collision/upperarm.stl"/></geometry>
     </collision>
   </link>
   <link name="forearm_link">
+    <visual>
+      <origin xyz="0 0 0.0393" rpy="1.5707963267948966 0 -1.5707963267948966"/>
+      <geometry><mesh filename="package://ur10e/meshes/visual/forearm.dae"/></geometry>
+    </visual>
     <collision>
       <origin xyz="0 0 0.0393" rpy="1.5707963267948966 0 -1.5707963267948966"/>
-      <geometry><mesh filename="package://ur_description/meshes/ur16e/collision/forearm.stl"/></geometry>
+      <geometry><mesh filename="package://ur10e/meshes/collision/forearm.stl"/></geometry>
     </collision>
   </link>
   <link name="wrist_1_link">
+    <visual>
+      <origin xyz="0 0 -0.135" rpy="1.5707963267948966 0 0"/>
+      <geometry><mesh filename="package://ur10e/meshes/visual/wrist1.dae"/></geometry>
+    </visual>
     <collision>
       <origin xyz="0 0 -0.135" rpy="1.5707963267948966 0 0"/>
-      <geometry><mesh filename="package://ur_description/meshes/ur10e/collision/wrist1.stl"/></geometry>
+      <geometry><mesh filename="package://ur10e/meshes/collision/wrist1.stl"/></geometry>
     </collision>
   </link>
   <link name="wrist_2_link">
+    <visual>
+      <origin xyz="0 0 -0.12" rpy="0 0 0"/>
+      <geometry><mesh filename="package://ur10e/meshes/visual/wrist2.dae"/></geometry>
+    </visual>
     <collision>
       <origin xyz="0 0 -0.12" rpy="0 0 0"/>
-      <geometry><mesh filename="package://ur_description/meshes/ur10e/collision/wrist2.stl"/></geometry>
+      <geometry><mesh filename="package://ur10e/meshes/collision/wrist2.stl"/></geometry>
     </collision>
   </link>
   <link name="wrist_3_link">
+    <visual>
+      <origin xyz="0 -0.0005 -0.1168" rpy="1.5707963267948966 0 0"/>
+      <geometry><mesh filename="package://ur10e/meshes/visual/wrist3.dae"/></geometry>
+    </visual>
     <collision>
       <origin xyz="0 -0.0005 -0.1168" rpy="1.5707963267948966 0 0"/>
-      <geometry><mesh filename="package://ur_description/meshes/ur10e/collision/wrist3.stl"/></geometry>
+      <geometry><mesh filename="package://ur10e/meshes/collision/wrist3.stl"/></geometry>
     </collision>
   </link>
   <link name="flange"/>
@@ -75,14 +103,14 @@
   <joint name="elbow_joint" type="revolute">
     <parent link="upper_arm_link"/>
     <child link="forearm_link"/>
-    <origin xyz="-0.4784 0 0" rpy="0 0 0"/>
+    <origin xyz="-0.6127 0 0" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
     <limit lower="-3.141592653589793" upper="3.141592653589793" velocity="3.141592653589793" effort="150"/>
   </joint>
   <joint name="wrist_1_joint" type="revolute">
     <parent link="forearm_link"/>
     <child link="wrist_1_link"/>
-    <origin xyz="-0.36 0 0.17415" rpy="0 0 0"/>
+    <origin xyz="-0.57155 0 0.17415" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
     <limit lower="-6.283185307179586" upper="6.283185307179586" velocity="3.141592653589793" effort="54"/>
   </joint>

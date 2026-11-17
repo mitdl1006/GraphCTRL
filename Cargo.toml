@@ -56,6 +56,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 glamx = { version = "=0.3.1", default-features = false, features = ["std", "f64", "libm", "scalar-math"] }
 parry3d-f64 = { version = "=0.31.1", features = ["enhanced-determinism"] }
 mesh-loader = { version = "0.1.13", default-features = false, features = ["stl", "obj"] }
+gltf = { version = "1.4", default-features = false, features = ["import", "names", "utils", "KHR_materials_pbrSpecularGlossiness"] }
 egui = "=0.37.0"
 eframe = "=0.37.0"
 egui-wgpu = "=0.37.0"

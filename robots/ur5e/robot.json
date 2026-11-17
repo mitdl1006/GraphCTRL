@@ -1,0 +1,10 @@
+{
+  "name": "UR5e",
+  "vendor": "Universal Robots",
+  "description": "ur5e.urdf",
+  "reach_m": 0.85,
+  "payload_kg": 5.0,
+  "license": "LICENSE",
+  "license_name": "BSD-3-Clause",
+  "attribution": "Universal Robots A/S and contributors, Universal_Robots_ROS2_Description 4.4.1"
+}

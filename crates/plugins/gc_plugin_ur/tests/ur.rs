@@ -1,4 +1,5 @@
-//! The packaged UR5e: its description reads cleanly, its meshes are all there and fit the kinematics.
+//! The UR packages of the robot library (`robots/`): descriptions read cleanly, their meshes are all there
+//! and fit the kinematics, and the plugin's closed-form inverse kinematics solves them.
 
 #![allow(
     clippy::float_cmp,
@@ -14,19 +15,33 @@ use gc_math::DVec3;
 use gc_plugin_api::Registry;
 use gc_plugin_ur::UrPlugin;
 use gc_robot::{Shape, import};
-use gc_robotics_api::ROBOT_MODEL_PROVIDERS;
+
+/// The robot library of the repository, read the way the application reads it.
+struct Library;
+
+impl Library {
+    fn dir(model: &str) -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../robots").join(model)
+    }
+
+    fn urdf(&self, model: &str) -> Result<String, String> {
+        std::fs::read_to_string(Self::dir(model).join(format!("{model}.urdf")))
+            .map_err(|e| format!("{model}: {e}"))
+    }
+
+    fn resource(&self, model: &str, uri: &str) -> Result<Vec<u8>, String> {
+        let inside = uri
+            .strip_prefix("package://")
+            .and_then(|rest| rest.strip_prefix(model))
+            .and_then(|rest| rest.strip_prefix('/'))
+            .ok_or_else(|| format!("{uri} is not in the {model} package"))?;
+        std::fs::read(Self::dir(model).join(inside)).map_err(|e| format!("{uri}: {e}"))
+    }
+}
 
 #[test]
 fn the_ur5e_reads_cleanly_and_its_meshes_follow_the_arm() {
-    let mut registry = Registry::default();
-    registry.load(&UrPlugin).unwrap();
-    let providers = registry.get(ROBOT_MODEL_PROVIDERS);
-    assert_eq!(providers.len(), 1);
-    let provider = &providers[0];
-    assert_eq!(
-        provider.catalog().iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
-        ["ur3e", "ur5e", "ur10e", "ur16e"]
-    );
+    let provider = Library;
     assert!(provider.urdf("ur99").is_err());
     assert!(provider.resource("ur5e", "package://nothing.stl").is_err());
 
@@ -112,9 +127,7 @@ fn every_model_matches_its_dh_parameters() {
         ("ur10e", [0.1807, -0.6127, -0.57155, 0.17415, 0.11985, 0.11655]),
         ("ur16e", [0.1807, -0.4784, -0.36, 0.17415, 0.11985, 0.11655]),
     ];
-    let mut registry = Registry::default();
-    registry.load(&UrPlugin).unwrap();
-    let provider = &registry.get(ROBOT_MODEL_PROVIDERS)[0];
+    let provider = Library;
     for (model, [d1, a2, a3, d4, d5, d6]) in tables {
         let (robot, findings) = import(&provider.urdf(model).unwrap()).unwrap();
         assert!(findings.is_empty(), "{model}: {findings:?}");
@@ -126,6 +139,13 @@ fn every_model_matches_its_dh_parameters() {
             }
         }
         let chain = robot.default_chain().unwrap();
+        // The plugin finds the same lengths by fitting the chain, without being told the model.
+        let (fitted, _) = gc_plugin_ur::ik::recognise(&chain.to_spec().unwrap()).unwrap();
+        let table = [d1, a2, a3, d4, d5, d6];
+        assert!(
+            fitted.turned && fitted.lengths.iter().zip(&table).all(|(a, b)| (a - b).abs() < 1e-9),
+            "{model}: {fitted:?}"
+        );
         let (a, d) = ([0.0, a2, a3, 0.0, 0.0, 0.0], [d1, 0.0, 0.0, d4, d5, d6]);
         let alpha = [
             std::f64::consts::FRAC_PI_2,
@@ -161,7 +181,7 @@ fn the_closed_form_solver_finds_every_arm_configuration() {
     use gc_robotics_api::{Fit, KINEMATICS_FACTORIES};
     let mut registry = Registry::default();
     registry.load(&UrPlugin).unwrap();
-    let provider = &registry.get(ROBOT_MODEL_PROVIDERS)[0];
+    let provider = Library;
     let factory = &registry.get(KINEMATICS_FACTORIES)[0];
     assert_eq!(factory.id(), "ur6r");
     for model in ["ur3e", "ur5e", "ur10e", "ur16e"] {
