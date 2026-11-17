@@ -387,3 +387,33 @@ fn remaining_freedom_and_status_points_follow_the_relationships() {
     bench.history.undo(&mut bench.doc).unwrap();
     assert_eq!(bench.doc.component_status(item(block)), Some(ComponentStatus::Under));
 }
+
+#[test]
+fn ground_at_origin_moves_aligns_and_grounds() {
+    let mut bench = Bench::new();
+    let (_, block) = table_and_box(&mut bench);
+    bench.cell(CellOp::GroundAtOrigin(vec![block.erase()])).unwrap();
+    assert_eq!(bench.doc.get(block).unwrap().placement, Placement::default());
+    assert!(bench.doc.component_flag(Occurrence::Item(block.erase()), ComponentFlag::Grounded));
+    // One undo step puts it back, free.
+    bench.history.undo(&mut bench.doc).unwrap();
+    assert_eq!(bench.doc.get(block).unwrap().placement.xyz, [0.3, 0.2, 1.4]);
+    assert!(!bench.doc.component_flag(Occurrence::Item(block.erase()), ComponentFlag::Grounded));
+}
+
+#[test]
+fn place_at_component_origin_aligns_and_constrains_to_the_other_origin() {
+    let mut bench = Bench::new();
+    let (table, block) = table_and_box(&mut bench);
+    let created = bench
+        .cell(CellOp::PlaceAtComponentOrigin { item: block.erase(), target: Occurrence::Item(table.erase()) })
+        .unwrap();
+    assert_eq!(created.len(), 3, "three flush constraints");
+    assert!(close(bench.pose(block).translation, bench.pose(table).translation));
+    assert_eq!(bench.doc.component_dof(block.erase()).unwrap().total, 0, "fully constrained");
+    // It follows the table.
+    let mut moved = bench.doc.get(table).unwrap().clone();
+    moved.placement.xyz = [1.0, 1.0, 0.5];
+    bench.cell(CellOp::SetBody { id: table, body: moved }).unwrap();
+    assert!(close(bench.pose(block).translation, DVec3::new(1.0, 1.0, 0.5)));
+}

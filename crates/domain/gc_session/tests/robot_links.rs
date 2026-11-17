@@ -180,6 +180,9 @@ fn suppressed_bodies_and_robots_are_kept_but_not_drawn_checked_or_planned() {
     assert!(session.doc().get(body).is_some(), "kept");
     session.set_component(as_item(robot.erase()), ComponentFlag::Suppressed, true).unwrap();
     assert!(session.link_poses(robot).is_none(), "not drawn");
+    let both = [gc_session::CellItem::Robot(robot), gc_session::CellItem::Body(body)];
+    assert!(session.interference(&both, &[]).is_empty(), "left out of interference");
+    assert!(session.item_geometry(gc_session::CellItem::Robot(robot)).is_none());
     assert!(session.components().iter().all(|n| n.occurrence != as_item(robot.erase()) || n.suppressed));
     // One undo step each.
     session.undo();
