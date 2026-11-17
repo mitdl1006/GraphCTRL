@@ -520,6 +520,8 @@ messages! {
     /// Plan metric: the move was possible in a straight joint-space line.
     PlanStraight => ("직선 이동(플래너 불필요)", "Straight move (no planner needed)"),
     // --- frontend ---
+    /// Browser: the links of a robot.
+    BrowserLinks => ("링크", "Links"),
     /// Ribbon: the Joint command; the dialog's title.
     JointTitle => ("조인트", "Joint"),
     /// Joint dialog: the type chosen from the two origins.

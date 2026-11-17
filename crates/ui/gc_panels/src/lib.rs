@@ -176,7 +176,17 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
                         focus: false,
                         dim: false,
                     };
-                    if gc_ui::panel::tree_row(ui, row).deleted {
+                    let result = gc_ui::panel::tree_row(ui, row);
+                    if let Some(status) = session.relationship_status(id) {
+                        use gc_doc::RelationStatus;
+                        status_dot(
+                            ui,
+                            result.row.rect,
+                            Some(status == RelationStatus::Full),
+                            status == RelationStatus::Sick,
+                        );
+                    }
+                    if result.deleted {
                         action = Some(BrowserAction::Edit(Box::new(gc_doc::Command::Cell(
                             gc_doc::CellOp::DeleteRelationship(id),
                         ))));
@@ -323,6 +333,9 @@ fn browser_section(
             // Components have an origin folder of their own.
             if let CellItem::Body(_) | CellItem::Robot(_) = item {
                 origin_folder(ui, session, lang, state, gc_doc::Occurrence::Item(cell_any(item)), action);
+                if let CellItem::Robot(robot) = item {
+                    robot_links(ui, session, lang, state, robot, action);
+                }
             }
         }
     };
@@ -331,6 +344,76 @@ fn browser_section(
             egui::CollapsingHeader::new(title).default_open(true).show(ui, rows);
         }
         None => rows(ui),
+    }
+}
+
+/// The links of a robot as components of their own, nested like the kinematic chain, each with an origin
+/// folder (a joint origin can be picked on any of them).
+fn robot_links(
+    ui: &mut Ui,
+    session: &Session,
+    lang: Lang,
+    state: &ParamsUi,
+    robot: gc_core::Id<gc_doc::Robot>,
+    action: &mut Option<BrowserAction>,
+) {
+    let links = session.robot_links(robot);
+    if links.is_empty() {
+        return;
+    }
+    let depth = |node: &gc_doc::ComponentNode| {
+        let mut depth = 0;
+        let mut parent = node.parent;
+        while let Some(gc_doc::Occurrence::Link { index, .. }) = parent {
+            depth += 1;
+            parent = links
+                .iter()
+                .find(|l| l.occurrence == gc_doc::Occurrence::Link { robot, index })
+                .and_then(|l| l.parent);
+        }
+        depth
+    };
+    ui.indent(("gc_robot_links", robot.raw()), |ui| {
+        egui::CollapsingHeader::new(tr!(lang, BrowserLinks))
+            .id_salt(("gc_robot_links_folder", robot.raw()))
+            .default_open(false)
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 1.0;
+                for node in &links {
+                    let text = format!("{}{}:1", "  ".repeat(depth(node)), node.name);
+                    let row = TreeRow {
+                        icon: Icon::Robot,
+                        text: &text,
+                        selected: false,
+                        visible: None,
+                        delete: None,
+                        edit: None,
+                        focus: false,
+                        dim: false,
+                    };
+                    gc_ui::panel::tree_row(ui, row);
+                    origin_folder(ui, session, lang, state, node.occurrence, action);
+                }
+            });
+    });
+}
+
+/// A small dot at the right of a row: filled (fully constrained), hollow (can still move) or a dash
+/// (not satisfied), as Inventor marks components and constraints.
+fn status_dot(ui: &Ui, row: egui::Rect, full: Option<bool>, sick: bool) {
+    let at = egui::pos2(row.right() - 34.0, row.center().y);
+    let painter = ui.painter();
+    if sick {
+        painter.line_segment(
+            [at - egui::vec2(4.0, 0.0), at + egui::vec2(4.0, 0.0)],
+            egui::Stroke::new(2.0, colors::ERROR),
+        );
+    } else if let Some(full) = full {
+        if full {
+            painter.circle_filled(at, 4.0, colors::text());
+        } else {
+            painter.circle_stroke(at, 3.5, egui::Stroke::new(1.3, colors::text()));
+        }
     }
 }
 
@@ -503,6 +586,15 @@ fn node_row(
         dim: inactive,
     };
     let result = gc_ui::panel::tree_row(ui, row);
+    if let Some(status) = session.component_status(node.any) {
+        use gc_doc::ComponentStatus;
+        status_dot(
+            ui,
+            result.row.rect,
+            Some(status == ComponentStatus::Full),
+            status == ComponentStatus::Unknown,
+        );
+    }
     match result.edited {
         Some(true) => {
             if let Some((item, name)) = state.rename.take() {

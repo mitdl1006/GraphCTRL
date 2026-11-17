@@ -3019,3 +3019,34 @@ fn the_joint_dialog_joins_two_components_rigidly() {
     let sideways = session.doc().get(moving).unwrap().placement.xyz[0];
     assert!(sideways.abs() < 1e-6, "the origins coincide now: {sideways}");
 }
+
+/// The links of a robot are components below it in the browser, each with an origin folder; a link's
+/// origin can be shown like any component's.
+#[test]
+fn robot_links_are_components_below_the_robot() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("파일").click();
+    harness.run();
+    harness.get_by_label("예제 열기 (UR5e 셀)").click();
+    harness.run();
+    let robot = harness.state().session.doc().robots().iter().next().unwrap().0;
+    let links = harness.state().session.robot_links(robot);
+    assert!(links.len() >= 6, "{}", links.len());
+    let name = format!("{}:1", links[1].name);
+    harness.query_all_by_label("링크").next().unwrap().click();
+    harness.run();
+    harness.get_by_label_contains(&name);
+    // A link's origin can be shown through the session like any component's.
+    let occurrence = links[1].occurrence;
+    harness
+        .state_mut()
+        .session
+        .set_origin_visible(occurrence, &[gc_doc::OriginElement::Point], true)
+        .unwrap();
+    harness.run();
+    assert!(harness.state().session.origin_visible(occurrence, gc_doc::OriginElement::Point));
+}
