@@ -1117,6 +1117,22 @@ impl eframe::App for GraphCtrlApp {
                 });
             },
         );
+        // What the marking menu of the view asked for.
+        match self.viewport.take_request() {
+            Some(gc_viewport::ViewportRequest::Constrain) => self.constrain.start(),
+            Some(gc_viewport::ViewportRequest::PlaceComponent) => {
+                if let Some(path) = self.dialogs.open_mesh() {
+                    match self.session.add_mesh_body(&path) {
+                        Ok(_) => {
+                            self.notice = None;
+                            self.fit_view();
+                        }
+                        Err(error) => self.notice = Some(tr!(lang, FileError, error)),
+                    }
+                }
+            }
+            None => {}
+        }
         // The Constrain dialog picks origin planes, axes and points in the view.
         self.viewport.constrain_mode = self.constrain.picking();
         if let Some((occurrence, element)) = self.viewport.take_constrain_pick() {
