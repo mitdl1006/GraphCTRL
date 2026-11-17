@@ -3,6 +3,7 @@
 mod agent;
 mod app;
 mod diagnostics;
+mod drive;
 mod example;
 mod interference;
 mod measure;

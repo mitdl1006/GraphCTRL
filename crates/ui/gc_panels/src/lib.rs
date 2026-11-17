@@ -14,7 +14,7 @@ use gc_ui::Icon;
 use gc_ui::colors;
 use gc_ui::panel::TreeRow;
 
-pub use cell::{CellUi, cell, status_text};
+pub use cell::{CellUi, cell, problem_text, status_text};
 pub use pose::{PoseCalc, RotationInput, pose_calculator};
 
 /// What the user asked for in the browser.

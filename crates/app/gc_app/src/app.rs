@@ -251,6 +251,8 @@ pub struct GraphCtrlApp {
     measure: crate::measure::Measure,
     /// The Analyze Interference window.
     interference: crate::interference::Interference,
+    /// The Drive dialog.
+    drive: crate::drive::Drive,
     expression: String,
     ime: ImeTest,
     /// Whether the licence notices window is open.
@@ -334,6 +336,7 @@ impl GraphCtrlApp {
             agent,
             measure: crate::measure::Measure::default(),
             interference: crate::interference::Interference::default(),
+            drive: crate::drive::Drive::default(),
             expression: String::new(),
             ime: ImeTest { dimension: "25 mm".to_owned(), ..ImeTest::default() },
             notices: false,
@@ -358,6 +361,18 @@ impl GraphCtrlApp {
             last_autosave: 0.0,
             title: String::new(),
         }
+    }
+
+    /// Sets the Drive dialog's End value, for tests (typing into a drag value is awkward there).
+    #[doc(hidden)]
+    pub fn drive_end_for_test(&mut self, end: f64) {
+        self.drive.set_end(end);
+    }
+
+    /// Closes the Drive dialog as its close button does, for tests.
+    #[doc(hidden)]
+    pub fn close_drive_for_test(&mut self) {
+        self.drive.close(&mut self.session);
     }
 
     /// The viewport, for inspecting what it drew.
@@ -718,6 +733,9 @@ impl GraphCtrlApp {
                 if ui.button(tr!(lang, MenuMeasure)).clicked() {
                     self.measure.start(&self.session);
                 }
+                if ui.button(tr!(lang, MenuDrive)).clicked() {
+                    self.drive.start(&mut self.session);
+                }
                 if ui.button(tr!(lang, MenuInterference)).clicked() {
                     self.interference.start(&self.session);
                 }
@@ -1002,6 +1020,10 @@ impl eframe::App for GraphCtrlApp {
         });
         if self.interference.open {
             self.interference.window(&ctx, &self.session, lang);
+        }
+        if self.drive.open {
+            self.drive.tick(&ctx, &mut self.session);
+            self.drive.window(&ctx, &mut self.session, lang);
         }
         if self.measure.open {
             self.measure.window(&ctx, &self.session, lang);

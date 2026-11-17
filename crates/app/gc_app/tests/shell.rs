@@ -2460,3 +2460,65 @@ fn interference_lists_overlaps_and_ignores_them() {
     harness.run();
     harness.get_by_label("세트 #2 정의");
 }
+
+/// Tools > Drive (Inventor 2026 help, "To Drive Relationships in Assemblies":
+/// https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-B78E59C9-F9FB-4ED5-B60E-C9198770B1AF.htm):
+/// End defaults to Start + 10; Go to End shows the joint there; with Collision Detection the drive stops
+/// at the first collision; closing the dialog puts the robot back as the document has it.
+#[test]
+fn drive_moves_a_joint_and_stops_at_a_collision() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("파일").click();
+    harness.run();
+    harness.get_by_label("예제 열기 (UR5e 셀)").click();
+    harness.run();
+    let robot = harness.state().session.doc().robots().iter().next().unwrap().0;
+    let stored = harness.state().session.robot_joints(robot).unwrap();
+    harness.get_by_label("도구").click();
+    harness.run();
+    harness.get_by_label("구동").click();
+    harness.run();
+
+    harness.get_by_label("끝으로").click();
+    harness.run();
+    harness.get_by_label("현재 값 10.000°");
+    let shown = harness.state().session.robot_joints(robot).unwrap();
+    assert!((shown[0] - (stored[0] + 10f64.to_radians())).abs() < 1e-9);
+    harness.get_by_label("시작으로").click();
+    harness.run();
+
+    // Turn the shoulder toward the pillar with Collision Detection on: the drive stops on the way.
+    harness.get_by_label("자세히").click();
+    harness.run();
+    harness.get_by_label("충돌 감지").click();
+    harness.run();
+    harness.state_mut().drive_end_for_test(-90.0);
+    harness.get_by_label("정방향").click();
+    for _ in 0..200 {
+        harness.step();
+        if harness.query_by_label_contains("충돌 감지:").is_some() {
+            break;
+        }
+    }
+    harness.run_steps(2);
+    let label = harness.query_by_label_contains("충돌 감지:").map(|n| format!("{n:?}"));
+    let at = harness.state().session.robot_joints(robot).unwrap()[0].to_degrees();
+    assert!(label.is_some(), "the drive should stop at the pillar; shoulder at {at}°");
+    let stopped = harness.state().session.robot_joints(robot).unwrap()[0];
+    assert!(stopped < stored[0] && stopped > stored[0] - 90f64.to_radians(), "{stopped}");
+    if gpu {
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        harness.render().unwrap().save(out.join("review-29-drive.png")).unwrap();
+    }
+
+    // Closing restores the document's pose; nothing was committed.
+    let undo_depth = harness.state().session.history().undo_depth();
+    harness.state_mut().close_drive_for_test();
+    harness.run();
+    assert_eq!(harness.state().session.robot_joints(robot).unwrap(), stored);
+    assert_eq!(harness.state().session.history().undo_depth(), undo_depth);
+}

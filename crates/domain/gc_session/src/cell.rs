@@ -392,6 +392,8 @@ pub(crate) struct CellState {
     comparisons: BTreeMap<Id<MotionPath>, (String, Vec<CompareRow>)>,
     robots: BTreeMap<Id<Robot>, Arc<LoadedRobot>>,
     jog: Option<(Id<Robot>, Vec<f64>)>,
+    /// A pose shown by Drive: never committed, and not touched by the jog previews.
+    drive: Option<(Id<Robot>, Vec<f64>)>,
     body: Option<(Id<Body>, Body)>,
     base: Option<(Id<Robot>, Placement)>,
     tcp: Option<(Id<Robot>, Placement)>,
@@ -436,6 +438,7 @@ impl Default for CellState {
             comparisons: BTreeMap::new(),
             robots: BTreeMap::new(),
             jog: None,
+            drive: None,
             body: None,
             base: None,
             tcp: None,
@@ -1095,6 +1098,11 @@ impl Session {
         {
             return Some(planned.sample(time));
         }
+        if let Some((id, q)) = &self.cell.drive
+            && *id == robot
+        {
+            return Some(q.clone());
+        }
         match &self.cell.jog {
             Some((id, q)) if *id == robot => Some(q.clone()),
             _ => self.doc.get(robot).map(|r| r.joints.clone()),
@@ -1569,6 +1577,24 @@ impl Session {
         let clamped = joints.iter().zip(limits).map(|(q, (lo, hi))| q.clamp(*lo, *hi)).collect();
         self.cell.playback = None;
         self.cell.jog = Some((robot, clamped));
+    }
+
+    /// Shows a robot at joint values without changing the document (Drive): the values are clamped to
+    /// the limits, and the pose stays until [`Self::end_drive`].
+    pub fn drive_show(&mut self, robot: Id<Robot>, joints: &[f64]) {
+        let Some(loaded) = self.robot_model(robot) else { return };
+        if joints.len() != loaded.chain.dof() {
+            return;
+        }
+        let limits = loaded.chain.lower().iter().zip(loaded.chain.upper());
+        let clamped = joints.iter().zip(limits).map(|(q, (lo, hi))| q.clamp(*lo, *hi)).collect();
+        self.cell.playback = None;
+        self.cell.drive = Some((robot, clamped));
+    }
+
+    /// Ends Drive: the robot is shown as the document has it again.
+    pub fn end_drive(&mut self) {
+        self.cell.drive = None;
     }
 
     /// Commits the jog preview as one undo step.

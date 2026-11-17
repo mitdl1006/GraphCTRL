@@ -1572,6 +1572,7 @@ dependencies = [
  "gc_plugin_planners",
  "gc_plugin_ur",
  "gc_render",
+ "gc_robot",
  "gc_robotics_api",
  "gc_scene",
  "gc_session",

@@ -660,6 +660,34 @@ messages! {
     InterferenceAgain => ("다시 분석", "Analyze again"),
     /// Interference: the volumes are estimated on a grid.
     InterferenceEstimate => ("체적은 격자 표본으로 추정합니다(충돌 형상 기준). 항목을 두 번 클릭하면 확대합니다.", "Volumes are estimated on a sample grid (collision shapes). Double-click an entry to zoom to it."),
+    // --- Drive (Inventor: right-click a relationship > Drive) ---
+    /// Tools menu and the window title.
+    MenuDrive => ("구동", "Drive"),
+    DriveRobot => ("로봇", "Robot"),
+    DriveJoint => ("관절", "Joint"),
+    DriveStart => ("시작", "Start"),
+    DriveEnd => ("끝", "End"),
+    /// Drive: seconds between steps.
+    DrivePause => ("일시 중지 지연(초)", "Pause Delay (s)"),
+    DriveMore => ("자세히", "More"),
+    DriveCollision => ("충돌 감지", "Collision Detection"),
+    DriveIncrement => ("증분", "Increment"),
+    DriveByValue => ("값의 양", "Amount of Value"),
+    DriveBySteps => ("총 단계 수", "Total # of Steps"),
+    DriveRepetitions => ("반복", "Repetitions"),
+    DriveStartEnd => ("시작/끝", "Start/End"),
+    DriveStartEndStart => ("시작/끝/시작", "Start/End/Start"),
+    DriveForward => ("정방향", "Forward"),
+    DriveReverse => ("역방향", "Reverse"),
+    DriveStop => ("중지", "Stop"),
+    DriveStepForward => ("한 단계 앞으로", "Single Step Forward"),
+    DriveStepReverse => ("한 단계 뒤로", "Single Step Reverse"),
+    DriveToStart => ("시작으로", "Go to Start"),
+    DriveToEnd => ("끝으로", "Go to End"),
+    /// Drive: the joint value now. `{0}` the value with its unit.
+    DriveValue => ("현재 값 {0}", "Value {0}"),
+    /// Drive: collision detection stopped the motion. `{0}` what collided, `{1}` the value.
+    DriveCollided => ("충돌 감지: {0} ({1}에서 멈춤)", "Collision detected: {0} (stopped at {1})"),
     // --- AI agent API ---
     /// Tools menu: the window that connects AI agents (MCP).
     MenuAgent => ("AI 에이전트 연결", "AI agent connection"),
