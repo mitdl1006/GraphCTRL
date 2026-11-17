@@ -1875,6 +1875,7 @@ fn an_agent_adds_a_robot_over_mcp() {
         let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
         harness.render().unwrap().save(out.join("review-25-agent-connection.png")).unwrap();
     }
+}
 
 /// Help > Log shows what was logged.
 #[test]
