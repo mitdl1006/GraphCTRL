@@ -44,12 +44,12 @@ GraphCTRL의 현재 상태(있음 / 없음 / 다름)를 적었다. 아이콘과 
 
 | 탭 | 원문으로 확인된 패널·명령 | 출처 | GraphCTRL | 상태 |
 |---|---|---|---|---|
-| 조립 (Assemble) | 관계(Relationships) 패널: 구속(Constrain), 조인트(Joint), 조립(Assemble, 옛 방식). 구성(Component) 패널: 배치 계열(검색 요약, 원문 미확인). 관리(Manage) 패널에 부품 목록(검색 요약) | S18, S19, S20, S6 | "로봇" 탭: 로봇 추가, 바디 추가, 좌표계, 경로, 계획, 재생. 구속·조인트 탭 없음 | 다름 |
+| 조립 (Assemble) | 관계(Relationships) 패널: 구속(Constrain), 조인트(Joint), 조립(Assemble, 옛 방식). 구성(Component) 패널: **배치(Place)**, Content Center에서 배치(검색 요약). 생산성(Productivity) 패널: **구성요소 원점에 배치(Place at Component Origin)**. 관리(Manage) 패널의 부품 목록은 검색 요약 | S18, S19, S20, S6, GUID-2C55B507(원문 확인), GUID-E7A45820(원문 확인) | "로봇" 탭: 로봇 추가, 바디 추가, 좌표계, 경로, 계획, 재생. 구속·조인트 탭 없음 | 다름 |
 | 설계 (Design) | 미수집 | — | 없음 | 없음 |
 | 3D 모델 | 미수집 | — | "3D 모델" 탭: 3D 스케치, 3D 구속 | 다름 |
 | 스케치 | 작성(Create) 패널: 문자(Text) 등. 접근 경로는 Format Text Reference([GUID-23757F14…](https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-23757F14-BE7A-479B-B967-C79A71FBFCF1.htm)). 2D 스케치 명령 전체는 미수집 | — | "스케치" 탭: 선·원·호·사각형, 구속, 치수, 스케치 마무리 | 있음(부분) |
-| 검사 (Inspect) | 원문 미확인(검색으로 전용 페이지를 찾지 못함) | — | 없음. 측정은 도구 메뉴 | 없음 |
-| 도구 (Tools) | 옵션(Options) 패널: 사용자 지정(Customize), 응용 프로그램 옵션(Application Options), 문서 설정(Document Settings), 애드인(Add-ins). 재질·외관(Material and Appearance) 패널: 외관(Appearance) 등([GUID-5F5AB893…](https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-5F5AB893-224F-4F62-BE55-7FD018F059E2.htm)) | S21, 위 링크 | 메뉴 "도구"(포즈 변환 계산기, 측정, 성능 오버레이, AI 에이전트 연결). 리본 탭 아님 | 다름 |
+| 검사 (Inspect) | 간섭(Interference) 패널: **간섭 분석(Analyze Interference)**, **접촉 솔버 활성화(Activate Contact Solver)** — GUID-80DED0A6, GUID-FA1A8282(원문 확인). 패널 전체 목록은 미수집 | GUID-80DED0A6, GUID-FA1A8282 | 도구 메뉴 > 간섭 분석. 접촉 솔버 없음 | 다름 |
+| 도구 (Tools) | 측정(Measure) 패널: **Measure**(원문 확인, GUID-1805AB8F). 옵션(Options) 패널: 사용자 지정(Customize), 응용 프로그램 옵션(Application Options), 문서 설정(Document Settings), 애드인(Add-ins). 재질·외관(Material and Appearance) 패널: 외관(Appearance) 등([GUID-5F5AB893…](https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-5F5AB893-224F-4F62-BE55-7FD018F059E2.htm)) | S21, 위 링크 | 메뉴 "도구"(포즈 변환 계산기, 측정, 성능 오버레이, AI 에이전트 연결). 리본 탭 아님 | 다름 |
 | 관리 (Manage) | 원문 미확인 | — | 없음 | 없음 |
 | 뷰 (View) | 외형(Appearance), 창(Windows) 패널. 창 패널에 사용자 인터페이스(User Interface) 드롭다운: 탐색 막대, 상태바, 마킹 메뉴 체크 | S13, S17, S21 | "뷰" 탭: 홈, 정면, 평면, 우측, 전체 보기, 직교/원근 | 있음(부분) |
 | 환경 (Environments) | 시작(Begin) 패널: Studio 등 특수 환경 진입. 종료/마침은 오른쪽 끝 | S1, S7 | 없음 | 없음 |
@@ -149,11 +149,13 @@ GraphCTRL 열은 현재 구현(README, 소스의 키 처리)과 비교한 것이
 
 ## 7. 남은 일 (다음 단계)
 
-1. **목차 GUID 찾기**: 검색은 `allowed_domains: ["help.autodesk.com"]`로 "Inventor 2026 help <명령 이름>"을 치면 `cloudhelp/2026/ENU/Inventor-Help/files/GUID-*.htm`이 나온다. 페이지를 curl로 받은 뒤 `Pages in this section`과 `Parent page` 링크를 따라간다(이 방법으로 S11 하위 17개 페이지 확인).
-2. **남은 탭 패널 목록**: Assemble 탭의 구성(Component) 패널 명령 전체, Tools 탭의 Material and Appearance 등, Inspect·Manage·Environments 탭 패널. 검색 "ribbon reference"와 탭 이름으로 찾는다.
-3. **남은 상태바 항목**과 **브라우저 노드 전체**.
-4. §6 단축키는 S4의 "일부 표"다. 전체 목록은 Inventor 키보드 단축키 PDF로 대조한다.
-
+- **완료**: 조립·검사·도구 탭의 확인된 패널(§2), 마킹 메뉴, 탐색 막대, ViewCube 26개 부분, 브라우저 패널 구성, 상태바 위치와 역할.
+- **미수집(이번 라운드에서도 못 찾음)**:
+  1. 조립 탭 구성 패널 명령 전체, 3D 모델 탭 전체, 스케치 탭 2D 명령 전체, 뷰 탭 외형 패널(검색 결과에 없음), 관리 탭, 환경 탭의 나머지 패널.
+  2. 상태바 항목 목록(검색 요약의 "스케치 완전 구속 표시" 등은 원문 미확인).
+  3. 브라우저 노드 전체 구조(조립 브라우저 전용 페이지 GUID-5F975252 계열은 아직 열지 않음).
+- 방법: 2026 페이지의 "Access" 줄과 "Parent page" 링크를 따라가는 방식이 가장 확실하다. 검색은 `allowed_domains: ["help.autodesk.com"]`를 쓰고, 버전이 2024 이하인 결과는 참고만 한다.
+- §6 단축키는 S4의 "일부 표"다. 전체 목록은 PDF와 대조한다.
 
 ## 8. 요약: 가장 큰 차이
 
