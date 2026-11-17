@@ -520,6 +520,22 @@ messages! {
     /// Plan metric: the move was possible in a straight joint-space line.
     PlanStraight => ("직선 이동(플래너 불필요)", "Straight move (no planner needed)"),
     // --- frontend ---
+    /// Browser: the links of a robot.
+    BrowserLinks => ("링크", "Links"),
+    /// Ribbon: the Joint command; the dialog's title.
+    JointTitle => ("조인트", "Joint"),
+    /// Joint dialog: the type chosen from the two origins.
+    JointAutomatic => ("자동", "Automatic"),
+    /// Joint dialog: a joint that removes all freedom.
+    JointRigid => ("강체", "Rigid"),
+    /// Joint dialog: a joint with one rotation.
+    JointRotational => ("회전", "Rotational"),
+    /// Joint dialog: the origin on the component that moves.
+    JointFirst => ("첫 번째 원점", "First origin"),
+    /// Joint dialog: the origin on the component that stays.
+    JointSecond => ("두 번째 원점", "Second origin"),
+    /// Joint dialog: reverse the direction of the component.
+    JointFlip => ("구성요소 뒤집기", "Flip component"),
     /// Marking menu of the assembly environment: place a component.
     MarkPlace => ("부품 배치", "Place component"),
     /// Marking menu of the assembly environment: move a component.

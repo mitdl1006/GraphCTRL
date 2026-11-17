@@ -3013,3 +3013,82 @@ fn project_cut_edges_adds_the_cut_of_the_selected_part() {
         "{xs:?}"
     );
 }
+
+/// The Joint dialog: the centre points (joint origins) of two components, type Automatic gives a rigid
+/// joint, and the first component moves onto the second.
+#[test]
+fn the_joint_dialog_joins_two_components_rigidly() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.05, 0.05, 0.05] };
+    let app = harness.state_mut();
+    app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    let placement = gc_doc::Placement { xyz: [0.12, 0.0, 0.0], rpy: [0.0; 3] };
+    let moving = app.session.add_body(solid, placement).unwrap();
+    app.fit_view();
+    app.viewport_mut().camera.pan([0.0, 0.0], [-250.0, 0.0], [1280.0, 700.0]);
+    harness.run();
+
+    harness.get_by_label("로봇").click();
+    harness.run();
+    harness.get_by_label("조인트").click();
+    harness.run_steps(5);
+    let click = |harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, world: gc_math::DVec3| {
+        let at = harness.state().viewport().screen_of(world).unwrap();
+        harness.event(egui::Event::PointerMoved(at));
+        harness.run_steps(3);
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.run_steps(3);
+        }
+    };
+    click(&mut harness, gc_math::DVec3::new(0.12, 0.0, 0.0));
+    harness.get_by_label_contains("첫 번째 원점: Body2:1");
+    click(&mut harness, gc_math::DVec3::new(0.0, 0.0, 0.0));
+    harness.get_by_label_contains("두 번째 원점: Body1:1");
+    harness.get_by_label("확인").click();
+    harness.run();
+    let session = &harness.state().session;
+    assert_eq!(session.relationships().len(), 1, "{:?}", session.last_error());
+    let sideways = session.doc().get(moving).unwrap().placement.xyz[0];
+    assert!(sideways.abs() < 1e-6, "the origins coincide now: {sideways}");
+}
+
+/// The links of a robot are components below it in the browser, each with an origin folder; a link's
+/// origin can be shown like any component's.
+#[test]
+fn robot_links_are_components_below_the_robot() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("파일").click();
+    harness.run();
+    harness.get_by_label("예제 열기 (UR5e 셀)").click();
+    harness.run();
+    let robot = harness.state().session.doc().robots().iter().next().unwrap().0;
+    let links = harness.state().session.robot_links(robot);
+    assert!(links.len() >= 6, "{}", links.len());
+    let name = format!("{}:1", links[1].name);
+    harness.query_all_by_label("링크").next().unwrap().click();
+    harness.run();
+    harness.get_by_label_contains(&name);
+    // A link's origin can be shown through the session like any component's.
+    let occurrence = links[1].occurrence;
+    harness
+        .state_mut()
+        .session
+        .set_origin_visible(occurrence, &[gc_doc::OriginElement::Point], true)
+        .unwrap();
+    harness.run();
+    assert!(harness.state().session.origin_visible(occurrence, gc_doc::OriginElement::Point));
+}
