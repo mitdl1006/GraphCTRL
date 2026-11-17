@@ -38,6 +38,9 @@ pub use document::{ChangeSet, Contents, DocDelta, Document, Frame, FrameKind, Pa
 pub use gc_sketch::Sketch;
 pub use history::History;
 pub use placement::{ComponentOrigin, WorkShape};
-pub use relate::{AxisSense, Geometry, RelationKind, Relationship, Selection, Unsolved};
+pub use relate::{
+    AxisSense, ComponentStatus, Dof, Geometry, RelationKind, RelationStatus, Relationship, Selection,
+    Unsolved,
+};
 pub use tree::ComponentNode;
 pub use txn::{DocError, Txn};

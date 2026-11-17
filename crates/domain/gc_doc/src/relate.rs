@@ -426,6 +426,30 @@ impl Document {
     /// Solves all relationships: the new world poses of the components that move. Grounded components
     /// stay; so do components no relationship touches.
     pub fn solve_relationships(&self) -> Result<Vec<(AnyId, DPose3)>, Unsolved> {
+        let (owners, terms) = self.gather()?;
+        let start: Vec<DPose3> = owners.iter().map(|o| o.pose).collect();
+        let mut poses = start.clone();
+        rough_turns(&owners, &terms, &mut poses);
+        least_squares(&owners, &terms, &mut poses);
+        let sick: Vec<Id<Relationship>> = terms
+            .iter()
+            .filter(|t| term_residuals(t, &poses).iter().any(|r| r.abs() > 1e-7))
+            .map(|t| t.id)
+            .collect();
+        if !sick.is_empty() {
+            return Err(Unsolved { sick });
+        }
+        Ok(owners
+            .iter()
+            .zip(&poses)
+            .zip(&start)
+            .filter(|((o, now), before)| o.free && **now != **before)
+            .map(|((o, now), _)| (o.item, *now))
+            .collect())
+    }
+
+    /// The components the active relationships touch and the relationships ready to evaluate.
+    fn gather(&self) -> Result<(Vec<Owner>, Vec<Term>), Unsolved> {
         let mut owners: Vec<Owner> = Vec::new();
         let mut terms: Vec<Term> = Vec::new();
         let index_of = |doc: &Document, owners: &mut Vec<Owner>, item: AnyId| -> Option<usize> {
@@ -459,25 +483,7 @@ impl Document {
                 sign: sense_sign(&relationship.kind, now),
             });
         }
-        let start: Vec<DPose3> = owners.iter().map(|o| o.pose).collect();
-        let mut poses = start.clone();
-        rough_turns(&owners, &terms, &mut poses);
-        least_squares(&owners, &terms, &mut poses);
-        let sick: Vec<Id<Relationship>> = terms
-            .iter()
-            .filter(|t| term_residuals(t, &poses).iter().any(|r| r.abs() > 1e-7))
-            .map(|t| t.id)
-            .collect();
-        if !sick.is_empty() {
-            return Err(Unsolved { sick });
-        }
-        Ok(owners
-            .iter()
-            .zip(&poses)
-            .zip(&start)
-            .filter(|((o, now), before)| o.free && **now != **before)
-            .map(|((o, now), _)| (o.item, *now))
-            .collect())
+        Ok((owners, terms))
     }
 }
 
@@ -697,5 +703,130 @@ impl Document {
         } else {
             RelationKind::Rigid { flip: false }
         }
+    }
+}
+
+/// The freedom a component has left: how many independent motions the relationships allow it, with the
+/// others held where they are (docs/ux/inventor-assembly-parity.md, P1-10).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Dof {
+    /// All remaining degrees of freedom (0 to 6).
+    pub total: u8,
+    /// Of those, pure translations (0 to 3); the rest involve turning.
+    pub translation: u8,
+}
+
+impl Dof {
+    /// Remaining degrees of freedom that involve turning.
+    pub fn rotation(&self) -> u8 {
+        self.total - self.translation
+    }
+}
+
+/// A component's constraint status in the browser (Inventor 2026 help, To Manage the Display of Constraint
+/// Status in the Browser, GUID-A0573060-3778-4D6F-9431-28587D837CC7): black dot, hollow dot, dash.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ComponentStatus {
+    /// Fully constrained (or grounded): a black dot.
+    Full,
+    /// Under constrained: a hollow dot.
+    Under,
+    /// Not known, because a relationship on it is not satisfied: a dash.
+    Unknown,
+}
+
+/// The state of a single relationship.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RelationStatus {
+    /// Satisfied, and the components it ties are fully constrained (or grounded).
+    Full,
+    /// Satisfied, but a component it ties can still move.
+    Under,
+    /// Not satisfied where the components stand.
+    Sick,
+}
+
+/// The rank of a column set (row-major `m × n`) by Gram–Schmidt with a relative tolerance.
+fn rank(jac: &[f64], m: usize, n: usize, columns: &[usize]) -> usize {
+    let mut basis: Vec<Vec<f64>> = Vec::new();
+    for &c in columns {
+        let mut v: Vec<f64> = (0..m).map(|r| jac[r * n + c]).collect();
+        for b in &basis {
+            let dot: f64 = v.iter().zip(b).map(|(x, y)| x * y).sum();
+            v.iter_mut().zip(b).for_each(|(x, y)| *x -= dot * y);
+        }
+        let norm = v.iter().map(|x| x * x).sum::<f64>().sqrt();
+        if norm > 1e-6 {
+            basis.push(v.iter().map(|x| x / norm).collect());
+        }
+    }
+    basis.len()
+}
+
+impl Document {
+    /// The freedom a component has left under the relationships, the other components held still.
+    /// Grounded: none; untouched by relationships: all six. `None` when it is not a component that moves.
+    pub fn component_dof(&self, item: AnyId) -> Option<Dof> {
+        self.owner_pose(item)?;
+        if self.component_flag(Occurrence::Item(item), ComponentFlag::Grounded) {
+            return Some(Dof { total: 0, translation: 0 });
+        }
+        let Ok((owners, terms)) = self.gather() else { return Some(Dof { total: 6, translation: 3 }) };
+        let Some(index) = owners.iter().position(|o| o.item == item) else {
+            return Some(Dof { total: 6, translation: 3 });
+        };
+        let terms: Vec<Term> = terms.into_iter().filter(|t| t.owners.contains(&index)).collect();
+        let mut poses: Vec<DPose3> = owners.iter().map(|o| o.pose).collect();
+        let base = all_residuals(&terms, &poses);
+        let m = base.len();
+        let h = 1e-7;
+        let mut jac = vec![0.0; m * 6];
+        for p in 0..6 {
+            let mut step = [0.0; 6];
+            step[p] = h;
+            let saved = poses[index];
+            poses[index] = stepped(&saved, &step);
+            let moved = all_residuals(&terms, &poses);
+            poses[index] = saved;
+            for row in 0..m {
+                jac[row * 6 + p] = (moved[row] - base[row]) / h;
+            }
+        }
+        let fixed = rank(&jac, m, 6, &[0, 1, 2, 3, 4, 5]);
+        let fixed_translation = rank(&jac, m, 6, &[0, 1, 2]);
+        #[allow(clippy::cast_possible_truncation, reason = "ranks are at most 6")]
+        Some(Dof { total: (6 - fixed) as u8, translation: (3 - fixed_translation) as u8 })
+    }
+
+    /// The constraint status dot of a component.
+    pub fn component_status(&self, item: AnyId) -> Option<ComponentStatus> {
+        let dof = self.component_dof(item)?;
+        let sick = self.relationships().iter().any(|(id, r)| {
+            (r.first.occurrence.owner() == item || r.second.occurrence.owner() == item)
+                && self.relationship_status(id) == Some(RelationStatus::Sick)
+        });
+        Some(if sick {
+            ComponentStatus::Unknown
+        } else if dof.total == 0 {
+            ComponentStatus::Full
+        } else {
+            ComponentStatus::Under
+        })
+    }
+
+    /// The status of a relationship: sick when it is not satisfied, full when the components it
+    /// ties have no freedom left, otherwise under-constrained. `None` when it does not exist.
+    pub fn relationship_status(&self, id: Id<Relationship>) -> Option<RelationStatus> {
+        let relationship = self.get(id)?;
+        let (owners, terms) = self.gather().ok()?;
+        let term = terms.iter().find(|t| t.id == id)?;
+        let poses: Vec<DPose3> = owners.iter().map(|o| o.pose).collect();
+        if term_residuals(term, &poses).iter().any(|r| r.abs() > 1e-7) {
+            return Some(RelationStatus::Sick);
+        }
+        let held = [relationship.first.occurrence.owner(), relationship.second.occurrence.owner()]
+            .iter()
+            .all(|item| self.component_dof(*item).is_some_and(|d| d.total == 0));
+        Some(if held { RelationStatus::Full } else { RelationStatus::Under })
     }
 }

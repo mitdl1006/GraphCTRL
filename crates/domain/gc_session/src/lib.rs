@@ -544,6 +544,22 @@ impl Session {
         gc_doc::Document::automatic_joint(first, second)
     }
 
+    /// The freedom a component has left under the assembly relationships (the DOF symbol): total and pure
+    /// translations. Grounded: none; unconstrained: six.
+    pub fn component_dof(&self, item: gc_core::AnyId) -> Option<gc_doc::Dof> {
+        self.doc.component_dof(item)
+    }
+
+    /// The constraint status dot of a component in the browser: full (black), under (hollow), unknown (dash).
+    pub fn component_status(&self, item: gc_core::AnyId) -> Option<gc_doc::ComponentStatus> {
+        self.doc.component_status(item)
+    }
+
+    /// The status of an assembly relationship: full, under-constrained or sick.
+    pub fn relationship_status(&self, id: Id<gc_doc::Relationship>) -> Option<gc_doc::RelationStatus> {
+        self.doc.relationship_status(id)
+    }
+
     /// A component's origin folder in the world: centre point, axes and planes (assembly P1-2).
     pub fn component_origin(&self, occurrence: gc_doc::Occurrence) -> Option<gc_doc::ComponentOrigin> {
         self.doc.component_origin(occurrence)

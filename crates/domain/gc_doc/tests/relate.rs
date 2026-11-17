@@ -346,3 +346,44 @@ fn a_tool_is_mounted_by_its_joint_origin_on_the_flange() {
     assert!(close(flipped.rotation * DVec3::Z, -DVec3::Z));
     assert!(close(flipped.translation + flipped.rotation * DVec3::new(0.0, 0.0, -0.05), DVec3::ZERO));
 }
+
+#[test]
+fn remaining_freedom_and_status_points_follow_the_relationships() {
+    use gc_doc::{Dof, RelationStatus};
+    let mut bench = Bench::new();
+    let (table, block) = table_and_box(&mut bench);
+    let item = |b: Id<Body>| b.erase();
+    assert_eq!(bench.doc.component_dof(item(table)), Some(Dof { total: 0, translation: 0 }), "grounded");
+    assert_eq!(bench.doc.component_dof(item(block)), Some(Dof { total: 6, translation: 3 }), "free");
+    // A face mate leaves sliding on the table (2) and turning about its normal (1).
+    let mate = bench
+        .relate(Relationship {
+            name: "Mate:1".into(),
+            kind: RelationKind::Mate { offset: 0.0, sense: AxisSense::Opposed },
+            first: on(block, bottom(0.2)),
+            second: on(table, top(1.0)),
+        })
+        .unwrap();
+    let dof = bench.doc.component_dof(item(block)).unwrap();
+    assert_eq!((dof.total, dof.translation, dof.rotation()), (3, 2, 1));
+    assert_eq!(bench.doc.relationship_status(mate), Some(RelationStatus::Under));
+    // Turned into a rotational joint, one turn is left; as a rigid joint nothing is, and the point is full.
+    let rotational = Relationship {
+        name: "Joint".into(),
+        kind: RelationKind::Rotational { flip: true },
+        first: on(block, Geometry::origin_frame()),
+        second: on(table, table_frame()),
+    };
+    bench.cell(CellOp::SetRelationship { id: mate, relationship: rotational.clone() }).unwrap();
+    let dof = bench.doc.component_dof(item(block)).unwrap();
+    assert_eq!((dof.total, dof.translation), (1, 0));
+    let rigid = Relationship { kind: RelationKind::Rigid { flip: true }, ..rotational };
+    bench.cell(CellOp::SetRelationship { id: mate, relationship: rigid }).unwrap();
+    assert_eq!(bench.doc.component_dof(item(block)).unwrap().total, 0);
+    assert_eq!(bench.doc.relationship_status(mate), Some(RelationStatus::Full));
+    use gc_doc::ComponentStatus;
+    assert_eq!(bench.doc.component_status(item(block)), Some(ComponentStatus::Full));
+    assert_eq!(bench.doc.component_status(item(table)), Some(ComponentStatus::Full), "grounded");
+    bench.history.undo(&mut bench.doc).unwrap();
+    assert_eq!(bench.doc.component_status(item(block)), Some(ComponentStatus::Under));
+}

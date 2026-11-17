@@ -1,5 +1,19 @@
 # 백엔드 인계 (2026-11-17)
 
+## 2026-11-18 — 어셈블리 P1-10 구속 상태·남은 자유도
+
+근거(원문): Degrees of freedom in assemblies `GUID-6E131E5A-438B-4008-94F3-D3A3E92EF44C.htm`(처음 6 = 병진 3 + 회전 3, 구속은 자유도를
+줄이고 조인트는 자유도를 명시), To Manage the Display of Constraint Status in the Browser `GUID-A0573060-3778-4D6F-9431-28587D837CC7.htm`
+(**컴포넌트별** 점: 검은 점 = 완전 구속, 속 빈 점 = 미구속, 대시 = 알 수 없음; Hide Fully Constrained / Show Constraint State 메뉴).
+
+- `session.component_dof(item) -> Option<gc_doc::Dof{total, translation}>`(+`rotation()`): 다른 컴포넌트를 고정했을 때 남은 독립 운동 수
+  (관계 잔차의 자코비안 계수로 계산). 고정 = 0, 관계 없음 = 6/3. 예: 면 Mate → 3(병진 2 + 회전 1), Insert·Rotational → 1, Rigid → 0.
+- `session.component_status(item) -> Option<gc_doc::ComponentStatus::{Full, Under, Unknown}>` — 브라우저 점(검은/속 빈/대시).
+  Unknown = 그 컴포넌트에 걸린 관계가 만족되지 않음.
+- `session.relationship_status(id) -> Option<gc_doc::RelationStatus::{Full, Under, Sick}>` — Relationships 폴더 행 표시용(원문의 점은
+  컴포넌트 단위라는 점 주의).
+- 테스트 `gc_doc/tests/relate.rs::remaining_freedom_and_status_points_follow_the_relationships`.
+
 ## 2026-11-18 — QA 버그 2건(원점 표시), Unsolvable 메시지
 
 - 리드 브랜치 병합. `qa_origin_folder`의 두 `#[ignore]` 해제: ① 이미 보이는 원점 요소를 다시 보이면 중복 저장 → 처음 보인 순서대로 한 번만,
