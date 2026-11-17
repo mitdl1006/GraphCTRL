@@ -1,5 +1,14 @@
 # 백엔드 인계 (2026-11-17)
 
+## 2026-11-18 — 매개변수 이름 바꾸기(리드 요청)
+
+- `Command::RenameParam{id, name}`: 이름 형식·중복 검사(`EditError::BadName`), 이 매개변수를 쓰는 다른 매개변수와 모든 스케치 치수의 수식 안
+  이름을 같은 트랜잭션에서 바꿈(구문 트리의 이름 위치만 바꾸므로 `w`가 `width`의 일부일 때 등은 건드리지 않음), undo 1단계, 값은 그대로.
+  세션 래퍼 없이 `session.execute(&Command::RenameParam{..})`(매개변수 명령은 원래 execute로 씀). 테스트 `gc_doc/tests/document.rs`.
+- 모델 매개변수(d0, d1 …, 치수를 수식에서 참조) 검토: 가능하다. 제안 — 치수마다 문서 전역 이름(`Dimension.name`, 새 치수에 다음 `dN`)을
+  두고 `scope_of`에 치수 값을 넣으며, `propagate`의 의존 순서에 치수↔매개변수를 함께 넣는다(순환 금지). 스케치 저장 형식에 필드 하나 추가
+  (serde 기본값으로 기존 파일은 열 때 이름 부여). 인벤터 원문(매개변수 대화상자) 확인 후 진행 — 지금 구현하지 않았다.
+
 ## 2026-11-18 새벽 2 — 어셈블리 P1-11 Rigid·Rotational 조인트, 로봇 마운트, 툴→플랜지
 
 - `RelationKind::{Rigid{flip}, Rotational{flip}}` — 구속과 같은 `Relationship`/`add_relationship`로 추가, 같은 솔버로 풀림.
