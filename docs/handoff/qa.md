@@ -74,3 +74,16 @@
   2. **삭제된 컴포넌트에 대해 `origin_visible`이 계속 true**(`origins_shown`에 낡은 항목이 남아 저장됨). 같은 위치. 재현: `-- --ignored a_deleted_components_origin`
   3. **측정 원통: `closest`(가장 가까운 두 점)가 `distance`와 맞지 않음** — 원통–모서리·면·원통에서 `closest`는 축 위의 점이고 `distance`는 표면 간격이라 오버레이 선 길이가 값과 다르다(원통–점은 맞음). 담당: 백엔드(`gc_session/src/measure.rs` `with_cylinder`). 재현: `cargo test -p gc_session --test qa_assembly_edges -- --ignored cylinder_closest_points`
 - **미검증**: 측정의 누적 값(Accumulated Properties)과 3점 각도는 `gc_app` 내부 상태(`pub(crate)`)라 헤드리스 테스트 불가 — 3점 각도는 `u·w` 공식이 UI 코드에 인라인이다. 리드가 계산 부분을 `gc_session`(순수 함수)로 옮기면 경계 테스트(같은 점 두 개 → 각도 정의 안 됨, 일직선 0·180°, 영벡터)를 추가하겠다.
+
+## 2026-11-17 Mate/Flush/Insert 수용 테스트·3점 각도·탐색 막대 확인 (리드 merge, f4460bd·d164b8f 포함)
+
+- 근거(Inventor 2026 도움말): Mate/Flush GUID-0F500089-4F69-41C5-AFE8-B58AC9E8E15E, Insert GUID-97DD5557-FAEE-46FA-845D-11123D725BA9, Constrain 레퍼런스 GUID-EBD2C784-0E71-452A-B5F2-22738D22D45A, Measure GUID-1805AB8F-F782-4B24-A332-B4F2E10A3D00, 탐색 막대 GUID-FAAB453E-31EB-46B8-9A74-3BF7A4D88EC9.
+- **`gc_session/tests/qa_relations.rs`(9개 통과, 1개 BUG ignore)**:
+  - 수용 시나리오(P1-9): 고정된 상자 윗면과 로봇 베이스 바닥을 Mate → 로봇이 상자 위로 이동(z = 0.5, 직립), 상자는 그대로, Undo 1단계; 20 mm 간격은 정확히 그만큼 상승; 상자를 옮기면 로봇이 따라감; 전부 Undo하면 두 위치가 원래대로 비트 동일.
+  - 관계 삭제는 구성요소를 제자리에 둠(되돌아가지 않음), Undo로 관계 복원.
+  - 거부(문서·히스토리 불변): 충돌 오프셋, NaN·무한 오프셋, NaN 평면·영 법선·무한 축, 자기 자신과의 관계, Flush에 점·Insert에 평면, 기존 관계를 NaN으로 편집. 같은 구속 반복은 무해. 체인(C 고정 ← B ← A)은 C를 옮기면 함께 이동, 닫히지 않는 고리는 거부.
+  - 음수 오프셋(파고들기 −100 mm)은 허용, 1e6·1e12 오프셋도 유한하게 풀리거나 거부. Predict Offset: 베이스가 상자 윗면 뒤(아래)에 있으면 Mate −0.5, 0.3 m 위로 올리면 Mate +0.3. 관계는 저장·열기 후에도 유지되고 상자를 옮기면 따라감.
+  - **3점 각도 `gc_session::angle_at`**: 직각 90°, 일직선 180°, 접힘 0°, 60° 확인, 두 팔 교환 대칭, 팔 길이 무관, 항상 0..π, 정점과 같은 점·피코미터 이내·NaN·무한은 `None`.
+- **새 버그 1건 (낮은 심각도)**: `Session::predict_relationship`이 **NaN 선택에 `Some(Flush { offset: NaN })`을 돌려줌**(대화상자에 NaN 오프셋이 들어갈 수 있음; `add_relationship`은 NaN을 거부하므로 문서는 안전). 담당: 백엔드 `gc_doc/src/relate.rs::predict_relationship`. 재현: `cargo test -p gc_session --test qa_relations -- --ignored predicting_from_a_non_finite`
+- **아직 없는 것(P1-9/10)**: 관계 폴더의 **상태 점**(검은 점 완전 구속 / 속 빈 점 미구속)과 DOF 기호에 해당하는 API가 `gc_session`에 없음 → 어셈블리 스텁 a10에 남김. 관계 "폴더" 자체는 `relationships()`로 목록만 제공(순서 = 생성 순서; 이름 규칙 `Mate:1`은 UI 쪽).
+- **프론트엔드 d164b8f 확인**: 어셈블리 트리(`Cell1` > `관계`·`표현` 폴더, 컴포넌트 `UR5e_1:1`·`Body1:1` — 인벤터의 `이름:번호` 발생 표기와 같음), 상태바 "구성요소 2", 탐색 막대(초점 이동·모두 확대·홈 뷰, Esc로 도구 종료)가 FE 자체 kittest(`the_navigation_bar_and_the_assembly_tree`)로 통과. **도움말 대비 차이**: 도움말(탐색 막대)은 Customize 메뉴·닫기·도킹 위치·불투명도를 설명하는데 구현엔 없음(P2); `inventor-parity.md` P1-7이 요구한 Orbit·Look At·Zoom Window 버튼은 아직 없음.
