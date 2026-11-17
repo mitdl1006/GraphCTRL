@@ -1,0 +1,369 @@
+//! Editing a sketch: adding geometry, constraints and dimensions, solving and deleting.
+
+use std::collections::BTreeSet;
+
+use gc_core::{Id, IdAlloc};
+use gc_solver::{AddOutcome, Blame, DepKind, SolveReport, Status};
+
+use crate::bind::{Binding, solver_id};
+use crate::model::{
+    Curve, CurveGeom, DimKind, Dimension, ExternalRef, GeoConstraint, PointKind, SkPoint, Sketch,
+};
+
+/// Why a sketch edit was refused.
+#[derive(Clone, Debug, PartialEq, thiserror::Error)]
+pub enum SketchError {
+    /// A point id that the sketch does not have.
+    #[error("the sketch has no such point")]
+    MissingPoint,
+    /// A curve id that the sketch does not have.
+    #[error("the sketch has no such curve")]
+    MissingCurve,
+    /// A constraint or dimension id that the sketch does not have.
+    #[error("the sketch has no such constraint or dimension")]
+    MissingItem,
+    /// The constraint does not apply to this kind of curve (e.g. the radius of a line).
+    #[error("this does not apply to that kind of curve")]
+    WrongCurveKind,
+    /// The item belongs to 2D sketches but the sketch is 3D, or the reverse.
+    #[error("this is not available in this kind of sketch")]
+    WrongSpace,
+    /// A value outside its domain: a length that is not positive, an angle outside (0, 360°).
+    #[error("the value is out of range")]
+    InvalidValue,
+    /// The sketch cannot be solved with the change; it was left as it was.
+    #[error("the sketch cannot be solved with this change ({0:?})")]
+    Unsolved(Status),
+}
+
+/// A sketch item, as named in reports.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Item {
+    /// A point (reported when it is a fixed reference).
+    Point(Id<SkPoint>),
+    /// A curve (reported for the implicit constraints of an arc).
+    Curve(Id<Curve>),
+    /// A geometric constraint.
+    Constraint(Id<GeoConstraint>),
+    /// A dimension.
+    Dimension(Id<Dimension>),
+}
+
+/// The state of a sketch after a solve.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SketchReport {
+    /// How the solve ended.
+    pub status: Status,
+    /// Remaining degrees of freedom: how many more dimensions the sketch needs.
+    pub dof: usize,
+    /// Redundant and conflicting items: `(item, what it depends on, how)`.
+    pub dependencies: Vec<(Item, Vec<Item>, DepKind)>,
+    /// Items that refer to collapsed geometry.
+    pub degenerate: Vec<Item>,
+    free_points: BTreeSet<Id<SkPoint>>,
+    free_radii: BTreeSet<Id<Curve>>,
+}
+
+impl SketchReport {
+    /// True when the point can still move.
+    pub fn point_is_free(&self, point: Id<SkPoint>) -> bool {
+        self.free_points.contains(&point)
+    }
+
+    /// True when any part of the curve can still move (shown in the "under-constrained" colour).
+    pub fn curve_is_free(&self, sketch: &Sketch, curve: Id<Curve>) -> bool {
+        self.free_radii.contains(&curve)
+            || sketch.curves.get(&curve).is_some_and(|c| c.points().iter().any(|p| self.point_is_free(*p)))
+    }
+}
+
+/// The result of trying to add a constraint or driving dimension.
+#[derive(Clone, Debug, PartialEq)]
+pub enum AddResult<T> {
+    /// It was added and the sketch re-solved.
+    Added {
+        /// The id of the new item.
+        id: Id<T>,
+        /// The state of the sketch.
+        report: SketchReport,
+    },
+    /// It follows from existing items; the sketch is unchanged.
+    Redundant(Vec<Item>),
+    /// It contradicts existing items; the sketch is unchanged.
+    Conflicting(Vec<Item>),
+}
+
+impl Sketch {
+    fn item_of(&self, raw: u64) -> Option<Item> {
+        let raw = std::num::NonZeroU64::new(raw)?;
+        if self.constraints.contains_key(&Id::from_raw(raw)) {
+            Some(Item::Constraint(Id::from_raw(raw)))
+        } else if self.dimensions.contains_key(&Id::from_raw(raw)) {
+            Some(Item::Dimension(Id::from_raw(raw)))
+        } else if self.curves.contains_key(&Id::from_raw(raw)) {
+            Some(Item::Curve(Id::from_raw(raw)))
+        } else if self.points.contains_key(&Id::from_raw(raw)) {
+            Some(Item::Point(Id::from_raw(raw)))
+        } else {
+            None
+        }
+    }
+
+    fn items(&self, blame: &[Blame]) -> Vec<Item> {
+        let set: BTreeSet<Item> = blame
+            .iter()
+            .filter_map(|b| match b {
+                Blame::Row(c, _) | Blame::Merged(c) => self.item_of(c.0),
+            })
+            .collect();
+        set.into_iter().collect()
+    }
+
+    fn report(&self, binding: &Binding, solved: &SolveReport) -> SketchReport {
+        let own = |c: gc_solver::ConstraintId| self.item_of(c.0);
+        SketchReport {
+            status: solved.status,
+            dof: solved.dof,
+            dependencies: solved
+                .dependencies
+                .iter()
+                .filter_map(|d| Some((own(d.row.0)?, self.items(&d.with), d.kind)))
+                .collect(),
+            degenerate: solved.degenerate.iter().filter_map(|c| own(*c)).collect(),
+            free_points: binding
+                .points
+                .iter()
+                .filter(|(_, params)| params.iter().any(|p| solved.is_mobile(*p)))
+                .map(|(id, _)| *id)
+                .collect(),
+            free_radii: binding
+                .radii
+                .iter()
+                .filter(|(_, p)| solved.is_mobile(**p))
+                .map(|(id, _)| *id)
+                .collect(),
+        }
+    }
+
+    /// Adds a free point.
+    pub fn add_point(&mut self, alloc: &mut IdAlloc, pos: [f64; 3]) -> Id<SkPoint> {
+        let id = alloc.alloc();
+        self.points.insert(id, SkPoint { pos, kind: PointKind::Free });
+        id
+    }
+
+    /// Adds a reference point that follows outside geometry. The caller keeps its position up to date.
+    pub fn add_external(&mut self, alloc: &mut IdAlloc, source: ExternalRef, pos: [f64; 3]) -> Id<SkPoint> {
+        let id = alloc.alloc();
+        self.points.insert(id, SkPoint { pos, kind: PointKind::External(source) });
+        id
+    }
+
+    /// Adds a line with its own two end points.
+    pub fn add_line(&mut self, alloc: &mut IdAlloc, a: [f64; 3], b: [f64; 3]) -> Id<Curve> {
+        let (a, b) = (self.add_point(alloc, a), self.add_point(alloc, b));
+        let id = alloc.alloc();
+        self.curves.insert(id, Curve { geom: CurveGeom::Line { a, b }, construction: false });
+        id
+    }
+
+    /// Adds a circle with its own centre point.
+    pub fn add_circle(
+        &mut self,
+        alloc: &mut IdAlloc,
+        centre: [f64; 3],
+        radius: f64,
+    ) -> Result<Id<Curve>, SketchError> {
+        if self.is_spatial() {
+            return Err(SketchError::WrongSpace);
+        }
+        if !(radius.is_finite() && radius > 0.0) {
+            return Err(SketchError::InvalidValue);
+        }
+        let c = self.add_point(alloc, centre);
+        let id = alloc.alloc();
+        self.curves.insert(id, Curve { geom: CurveGeom::Circle { c, r: radius }, construction: false });
+        Ok(id)
+    }
+
+    /// Adds an arc (counter-clockwise from `start` to `end`) with its own three points. The end point is
+    /// moved onto the circle through `start`.
+    pub fn add_arc(
+        &mut self,
+        alloc: &mut IdAlloc,
+        centre: [f64; 3],
+        start: [f64; 3],
+        end: [f64; 3],
+    ) -> Result<Id<Curve>, SketchError> {
+        if self.is_spatial() {
+            return Err(SketchError::WrongSpace);
+        }
+        let radius = ((start[0] - centre[0]).powi(2) + (start[1] - centre[1]).powi(2)).sqrt();
+        let reach = ((end[0] - centre[0]).powi(2) + (end[1] - centre[1]).powi(2)).sqrt();
+        if !(radius.is_finite() && radius > 0.0 && reach.is_finite() && reach > 0.0) {
+            return Err(SketchError::InvalidValue);
+        }
+        let scale = radius / reach;
+        let end = [centre[0] + (end[0] - centre[0]) * scale, centre[1] + (end[1] - centre[1]) * scale, 0.0];
+        let (c, s, e) =
+            (self.add_point(alloc, centre), self.add_point(alloc, start), self.add_point(alloc, end));
+        let id = alloc.alloc();
+        self.curves.insert(id, Curve { geom: CurveGeom::Arc { c, s, e }, construction: false });
+        Ok(id)
+    }
+
+    /// Solves the sketch. Coordinates change only when the result is [`Status::Solved`].
+    pub fn solve(&mut self) -> Result<SketchReport, SketchError> {
+        let mut binding = self.bind(None)?;
+        let solved = binding.sys.solve();
+        let report = self.report(&binding, &solved);
+        if solved.status == Status::Solved {
+            self.write_back(&binding.sys, &binding.points, &binding.radii);
+        }
+        Ok(report)
+    }
+
+    /// How far the stored coordinates are from satisfying the constraints, relative to the tolerance
+    /// (at most 1 when the sketch is consistent). Used to check loaded files without changing them.
+    pub fn violation(&self) -> Result<f64, SketchError> {
+        Ok(self.bind(None)?.sys.violation())
+    }
+
+    fn add_outcome<T>(
+        &mut self,
+        binding: &Binding,
+        id: Id<T>,
+        outcome: AddOutcome,
+        insert: impl FnOnce(&mut Self),
+    ) -> Result<AddResult<T>, SketchError> {
+        match outcome {
+            AddOutcome::Added(solved) | AddOutcome::AddedSingular(solved) => {
+                insert(self);
+                self.write_back(&binding.sys, &binding.points, &binding.radii);
+                Ok(AddResult::Added { id, report: self.report(binding, &solved) })
+            }
+            AddOutcome::Redundant { with } => Ok(AddResult::Redundant(self.items(&with))),
+            AddOutcome::Conflicting { with } => Ok(AddResult::Conflicting(self.items(&with))),
+            AddOutcome::Failed(status) => Err(SketchError::Unsolved(status)),
+        }
+    }
+
+    /// Adds a geometric constraint if it is consistent and removes freedom.
+    pub fn try_add_constraint(
+        &mut self,
+        alloc: &mut IdAlloc,
+        constraint: GeoConstraint,
+    ) -> Result<AddResult<GeoConstraint>, SketchError> {
+        let mut binding = self.bind(None)?;
+        let lowered = binding.lower_constraint(self, &constraint)?;
+        let id: Id<GeoConstraint> = alloc.alloc();
+        let outcome = binding.sys.try_add(solver_id(id), lowered);
+        self.add_outcome(&binding, id, outcome, |sketch| {
+            sketch.constraints.insert(id, constraint);
+        })
+    }
+
+    /// Adds a driving dimension if it is consistent and removes freedom. When it is refused as redundant
+    /// or conflicting, the caller may offer [`Sketch::add_reference_dimension`] instead.
+    pub fn try_add_dimension(
+        &mut self,
+        alloc: &mut IdAlloc,
+        kind: DimKind,
+        source: &str,
+        value: f64,
+        text_pos: [f64; 2],
+    ) -> Result<AddResult<Dimension>, SketchError> {
+        let mut binding = self.bind(None)?;
+        let lowered = binding.lower_dimension(self, &kind, value)?;
+        let id: Id<Dimension> = alloc.alloc();
+        let outcome = binding.sys.try_add(solver_id(id), lowered);
+        self.add_outcome(&binding, id, outcome, |sketch| {
+            let dimension = Dimension { kind, source: source.to_owned(), value, driving: true, text_pos };
+            sketch.dimensions.insert(id, dimension);
+        })
+    }
+
+    /// Adds a reference dimension: it shows a measurement and constrains nothing.
+    pub fn add_reference_dimension(
+        &mut self,
+        alloc: &mut IdAlloc,
+        kind: DimKind,
+        text_pos: [f64; 2],
+    ) -> Id<Dimension> {
+        let id = alloc.alloc();
+        let dimension = Dimension { kind, source: String::new(), value: 0.0, driving: false, text_pos };
+        self.dimensions.insert(id, dimension);
+        id
+    }
+
+    /// Changes the value of a driving dimension. The geometry follows continuously; if the new value
+    /// cannot be reached the sketch is left unchanged and the error says why.
+    pub fn set_dimension(
+        &mut self,
+        id: Id<Dimension>,
+        source: &str,
+        value: f64,
+    ) -> Result<SketchReport, SketchError> {
+        let dimension = self.dimensions.get(&id).ok_or(SketchError::MissingItem)?;
+        if !dimension.driving {
+            return Err(SketchError::InvalidValue);
+        }
+        let mut binding = self.bind(None)?;
+        binding.lower_dimension(self, &dimension.kind, value)?; // validates the value's domain
+        let solved = binding.sys.set_dimension(solver_id(id), value);
+        if solved.status != Status::Solved {
+            return Err(SketchError::Unsolved(solved.status));
+        }
+        if let Some(dimension) = self.dimensions.get_mut(&id) {
+            dimension.value = value;
+            source.clone_into(&mut dimension.source);
+        }
+        self.write_back(&binding.sys, &binding.points, &binding.radii);
+        Ok(self.report(&binding, &solved))
+    }
+
+    /// Deletes items together with everything that depends on them: a curve takes its points with it,
+    /// and constraints and dimensions that refer to deleted geometry go too. Reference points that follow
+    /// outside geometry are never deleted this way.
+    pub fn delete(&mut self, items: &[Item]) {
+        let mut points: BTreeSet<Id<SkPoint>> = BTreeSet::new();
+        let mut curves: BTreeSet<Id<Curve>> = BTreeSet::new();
+        for item in items {
+            match *item {
+                Item::Point(p) => {
+                    let owned = self.curves.values().any(|c| c.points().contains(&p));
+                    let external =
+                        self.points.get(&p).is_some_and(|p| matches!(p.kind, PointKind::External(_)));
+                    if !owned && !external {
+                        points.insert(p);
+                    }
+                }
+                Item::Curve(c) => {
+                    curves.insert(c);
+                }
+                Item::Constraint(c) => {
+                    self.constraints.remove(&c);
+                }
+                Item::Dimension(d) => {
+                    self.dimensions.remove(&d);
+                }
+            }
+        }
+        for curve in &curves {
+            if let Some(removed) = self.curves.remove(curve) {
+                points.extend(removed.points());
+            }
+        }
+        for point in &points {
+            self.points.remove(point);
+        }
+        self.constraints.retain(|_, c| {
+            Self::constraint_points(c).iter().all(|p| !points.contains(p))
+                && Self::constraint_curves(c).iter().all(|c| !curves.contains(c))
+        });
+        self.dimensions.retain(|_, d| {
+            let (dim_points, dim_curves) = Self::dimension_refs(&d.kind);
+            dim_points.iter().all(|p| !points.contains(p)) && dim_curves.iter().all(|c| !curves.contains(c))
+        });
+    }
+}

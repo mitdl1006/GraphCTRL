@@ -1,3 +1,25 @@
-//! Sketch model, solver binding, snapping/inference, 3D placement and measurement.
+//! Sketches: points, lines, circles and arcs with geometric constraints and dimensions.
+//!
+//! A [`Sketch`] is plain data. Solving, adding constraints with redundancy checks and dragging are done by
+//! translating it to a [`gc_solver::System`] and writing the result back. A sketch that was changed
+//! through this API always satisfies its driving constraints: an edit that cannot be solved is refused
+//! and leaves the sketch as it was.
+//!
+//! Conventions: a planar sketch lies in the XY plane of its frame (U = +X, V = +Y, normal = +Z); positions
+//! are metres, angles radians. Every curve owns its end points; shared corners are `Coincident`
+//! constraints, which the solver turns into bit-identical coordinates.
 
 #![forbid(unsafe_code)]
+#![cfg_attr(test, allow(clippy::float_cmp, reason = "tests compare exactly representable values"))]
+
+mod bind;
+mod drag;
+mod edit;
+mod model;
+
+pub use drag::{SketchDrag, SketchGrab};
+pub use edit::{AddResult, Item, SketchError, SketchReport};
+pub use gc_solver::{DepKind, DragRefused, FrameOutcome, Status};
+pub use model::{
+    Curve, CurveGeom, DimKind, Dimension, ExternalRef, GeoConstraint, PointKind, SkPoint, Sketch, Space,
+};

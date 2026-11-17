@@ -1,0 +1,281 @@
+//! Translation between a sketch and the solver's parameters and constraints.
+
+use std::collections::BTreeMap;
+
+use gc_core::Id;
+use gc_solver::{Constraint, ConstraintId, Line2, P2, P3, ParamId, Round, System};
+
+use crate::edit::SketchError;
+use crate::model::{Curve, CurveGeom, DimKind, Dimension, GeoConstraint, PointKind, SkPoint, Sketch};
+
+/// A solver system built from a sketch, with the maps to get back.
+pub(crate) struct Binding {
+    pub sys: System,
+    pub points: BTreeMap<Id<SkPoint>, Vec<ParamId>>,
+    pub radii: BTreeMap<Id<Curve>, ParamId>,
+}
+
+/// The solver id of a sketch item: its document-wide raw id. Blame from the solver maps straight back.
+pub(crate) fn solver_id<T>(id: Id<T>) -> ConstraintId {
+    ConstraintId(id.raw().get())
+}
+
+impl Binding {
+    fn params(&self, point: Id<SkPoint>) -> Result<&[ParamId], SketchError> {
+        self.points.get(&point).map(Vec::as_slice).ok_or(SketchError::MissingPoint)
+    }
+
+    fn p2(&self, point: Id<SkPoint>) -> Result<P2, SketchError> {
+        match self.params(point)? {
+            [x, y] => Ok([*x, *y]),
+            _ => Err(SketchError::WrongSpace),
+        }
+    }
+
+    fn p3(&self, point: Id<SkPoint>) -> Result<P3, SketchError> {
+        match self.params(point)? {
+            [x, y, z] => Ok([*x, *y, *z]),
+            _ => Err(SketchError::WrongSpace),
+        }
+    }
+
+    fn line(&self, sketch: &Sketch, curve: Id<Curve>) -> Result<Line2, SketchError> {
+        let (a, b) = sketch.line(curve).ok_or(SketchError::WrongCurveKind)?;
+        Ok(Line2 { a: self.p2(a)?, b: self.p2(b)? })
+    }
+
+    fn round(&self, sketch: &Sketch, curve: Id<Curve>) -> Result<Round, SketchError> {
+        let (centre, _) = sketch.round(curve).ok_or(SketchError::WrongCurveKind)?;
+        let r = *self.radii.get(&curve).ok_or(SketchError::WrongCurveKind)?;
+        Ok(Round { c: self.p2(centre)?, r })
+    }
+
+    pub fn lower_constraint(&self, sketch: &Sketch, c: &GeoConstraint) -> Result<Constraint, SketchError> {
+        let spatial = sketch.is_spatial();
+        Ok(match *c {
+            GeoConstraint::Coincident(p, q) if spatial => Constraint::Coincident3(self.p3(p)?, self.p3(q)?),
+            GeoConstraint::Coincident(p, q) => Constraint::Coincident(self.p2(p)?, self.p2(q)?),
+            GeoConstraint::PointOnCurve(p, curve) => match self.line(sketch, curve) {
+                Ok(line) => Constraint::PointOnLine(self.p2(p)?, line),
+                Err(_) => Constraint::PointOnCircle(self.p2(p)?, self.round(sketch, curve)?),
+            },
+            GeoConstraint::Midpoint(p, line) => Constraint::Midpoint(self.p2(p)?, self.line(sketch, line)?),
+            GeoConstraint::Horizontal(p, q) => Constraint::Horizontal(self.p2(p)?, self.p2(q)?),
+            GeoConstraint::Vertical(p, q) => Constraint::Vertical(self.p2(p)?, self.p2(q)?),
+            GeoConstraint::Parallel(a, b) => {
+                Constraint::Parallel(self.line(sketch, a)?, self.line(sketch, b)?)
+            }
+            GeoConstraint::Perpendicular(a, b) => {
+                Constraint::Perpendicular(self.line(sketch, a)?, self.line(sketch, b)?)
+            }
+            GeoConstraint::Collinear(a, b) => {
+                Constraint::Collinear(self.line(sketch, a)?, self.line(sketch, b)?)
+            }
+            GeoConstraint::Tangent { a, b, side, external } => {
+                match (self.line(sketch, a), self.line(sketch, b)) {
+                    (Ok(line), Err(_)) => {
+                        Constraint::TangentLineCircle { line, round: self.round(sketch, b)?, side }
+                    }
+                    (Err(_), Ok(line)) => {
+                        Constraint::TangentLineCircle { line, round: self.round(sketch, a)?, side }
+                    }
+                    (Err(_), Err(_)) => Constraint::TangentCircleCircle {
+                        a: self.round(sketch, a)?,
+                        b: self.round(sketch, b)?,
+                        external,
+                    },
+                    (Ok(_), Ok(_)) => return Err(SketchError::WrongCurveKind),
+                }
+            }
+            GeoConstraint::Equal(a, b) => match (self.line(sketch, a), self.line(sketch, b)) {
+                (Ok(l1), Ok(l2)) => Constraint::EqualLength(l1, l2),
+                (Err(_), Err(_)) => Constraint::EqualRadius(self.round(sketch, a)?, self.round(sketch, b)?),
+                _ => return Err(SketchError::WrongCurveKind),
+            },
+            GeoConstraint::Concentric(a, b) => {
+                Constraint::Coincident(self.round(sketch, a)?.c, self.round(sketch, b)?.c)
+            }
+            GeoConstraint::Symmetric { p, q, axis } => {
+                Constraint::Symmetric { p: self.p2(p)?, q: self.p2(q)?, axis: self.line(sketch, axis)? }
+            }
+            GeoConstraint::Fix(p) => Constraint::Fix(self.params(p)?.to_vec()),
+            GeoConstraint::AlongAxis { p, q, axis } if axis < 3 => {
+                Constraint::AlongAxis { p: self.p3(p)?, q: self.p3(q)?, axis }
+            }
+            GeoConstraint::OnPlane { p, axis } if axis < 3 => {
+                Constraint::CoordValue { param: self.p3(p)?[axis], value: 0.0 }
+            }
+            GeoConstraint::AlongAxis { .. } | GeoConstraint::OnPlane { .. } => {
+                return Err(SketchError::InvalidValue);
+            }
+        })
+    }
+
+    pub fn lower_dimension(
+        &self,
+        sketch: &Sketch,
+        kind: &DimKind,
+        value: f64,
+    ) -> Result<Constraint, SketchError> {
+        let is_angle = matches!(kind, DimKind::Angle { .. });
+        let in_domain = if is_angle { value > 0.0 && value < std::f64::consts::TAU } else { value > 0.0 };
+        if !value.is_finite() || !in_domain {
+            return Err(SketchError::InvalidValue);
+        }
+        Ok(match *kind {
+            DimKind::Distance { p, q } if sketch.is_spatial() => {
+                Constraint::Distance3 { p: self.p3(p)?, q: self.p3(q)?, value }
+            }
+            DimKind::Distance { p, q } => Constraint::Distance { p: self.p2(p)?, q: self.p2(q)?, value },
+            DimKind::HDistance { p, q, sign } => {
+                Constraint::HDistance { p: self.p2(p)?, q: self.p2(q)?, sign, value }
+            }
+            DimKind::VDistance { p, q, sign } => {
+                Constraint::VDistance { p: self.p2(p)?, q: self.p2(q)?, sign, value }
+            }
+            DimKind::PointLine { p, line, side } => {
+                Constraint::PointLineDistance { p: self.p2(p)?, line: self.line(sketch, line)?, side, value }
+            }
+            DimKind::Angle { l1, rev1, l2, rev2 } => Constraint::Angle {
+                l1: self.line(sketch, l1)?,
+                rev1,
+                l2: self.line(sketch, l2)?,
+                rev2,
+                value,
+            },
+            DimKind::Radius(curve) => Constraint::Radius { round: self.round(sketch, curve)?, value },
+            DimKind::Diameter(curve) => Constraint::Diameter { round: self.round(sketch, curve)?, value },
+            DimKind::PlaneDistance { p, axis, side } if axis < 3 => {
+                Constraint::CoordValue { param: self.p3(p)?[axis], value: side * value }
+            }
+            DimKind::PlaneDistance { .. } => return Err(SketchError::InvalidValue),
+        })
+    }
+}
+
+impl Sketch {
+    /// Builds the solver system. `skip` leaves out one constraint or dimension (the one being edited).
+    pub(crate) fn bind(&self, skip: Option<ConstraintId>) -> Result<Binding, SketchError> {
+        let mut binding = Binding { sys: System::new(), points: BTreeMap::new(), radii: BTreeMap::new() };
+        let spatial = self.is_spatial();
+        for (id, point) in &self.points {
+            let params = if spatial {
+                binding.sys.add_point3(point.pos[0], point.pos[1], point.pos[2]).to_vec()
+            } else {
+                binding.sys.add_point2(point.pos[0], point.pos[1]).to_vec()
+            };
+            binding.points.insert(*id, params);
+        }
+        for (id, curve) in &self.curves {
+            match curve.geom {
+                CurveGeom::Line { .. } => {}
+                CurveGeom::Circle { .. } | CurveGeom::Arc { .. } if spatial => {
+                    return Err(SketchError::WrongSpace);
+                }
+                CurveGeom::Circle { r, .. } => {
+                    binding.radii.insert(*id, binding.sys.add_radius(r));
+                }
+                CurveGeom::Arc { s, e, .. } => {
+                    let (_, radius) = self.round(*id).ok_or(SketchError::MissingPoint)?;
+                    binding.radii.insert(*id, binding.sys.add_radius(radius));
+                    let arc = Constraint::Arc {
+                        round: binding.round(self, *id)?,
+                        start: binding.p2(s)?,
+                        end: binding.p2(e)?,
+                    };
+                    binding.sys.add(solver_id(*id), arc);
+                }
+            }
+        }
+        for (id, point) in &self.points {
+            if matches!(point.kind, PointKind::External(_)) {
+                binding.sys.add(solver_id(*id), Constraint::Fix(binding.params(*id)?.to_vec()));
+            }
+        }
+        for (id, constraint) in &self.constraints {
+            if Some(solver_id(*id)) != skip {
+                let lowered = binding.lower_constraint(self, constraint)?;
+                binding.sys.add(solver_id(*id), lowered);
+            }
+        }
+        for (id, dimension) in self.dimensions.iter().filter(|(_, d)| d.driving) {
+            if Some(solver_id(*id)) != skip {
+                let lowered = binding.lower_dimension(self, &dimension.kind, dimension.value)?;
+                binding.sys.add(solver_id(*id), lowered);
+            }
+        }
+        Ok(binding)
+    }
+
+    /// Copies positions and radii from a solver system back into the sketch. Returns whether any changed.
+    pub(crate) fn write_back(
+        &mut self,
+        sys: &System,
+        points: &BTreeMap<Id<SkPoint>, Vec<ParamId>>,
+        radii: &BTreeMap<Id<Curve>, ParamId>,
+    ) -> bool {
+        let mut changed = false;
+        for (id, params) in points {
+            if let Some(point) = self.points.get_mut(id) {
+                for (axis, param) in params.iter().enumerate() {
+                    let value = sys.value(*param);
+                    changed |= point.pos[axis].to_bits() != value.to_bits();
+                    point.pos[axis] = value;
+                }
+            }
+        }
+        for (id, param) in radii {
+            if let Some(Curve { geom: CurveGeom::Circle { r, .. }, .. }) = self.curves.get_mut(id) {
+                let value = sys.value(*param);
+                changed |= r.to_bits() != value.to_bits();
+                *r = value;
+            }
+        }
+        changed
+    }
+
+    /// The value a dimension of this kind currently has, measured with the same signs as the driving
+    /// constraint, so switching a dimension between driving and reference keeps its value.
+    pub fn measure(&self, kind: &DimKind) -> Option<f64> {
+        let pos = |p: Id<SkPoint>| self.pos(p);
+        let dir = |line: Id<Curve>, reversed: bool| -> Option<[f64; 2]> {
+            let (a, b) = self.line(line)?;
+            let (a, b) = (pos(a)?, pos(b)?);
+            let sign = if reversed { -1.0 } else { 1.0 };
+            Some([sign * (b[0] - a[0]), sign * (b[1] - a[1])])
+        };
+        Some(match *kind {
+            DimKind::Distance { p, q } => {
+                let (p, q) = (pos(p)?, pos(q)?);
+                (0..3).map(|k| (q[k] - p[k]).powi(2)).sum::<f64>().sqrt()
+            }
+            DimKind::HDistance { p, q, sign } => sign * (pos(q)?[0] - pos(p)?[0]),
+            DimKind::VDistance { p, q, sign } => sign * (pos(q)?[1] - pos(p)?[1]),
+            DimKind::PointLine { p, line, side } => {
+                let (a, b) = self.line(line)?;
+                let (a, b, p) = (pos(a)?, pos(b)?, pos(p)?);
+                let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+                let length = (dx * dx + dy * dy).sqrt();
+                if length == 0.0 {
+                    return None;
+                }
+                side * (dx * (p[1] - a[1]) - dy * (p[0] - a[0])) / length
+            }
+            DimKind::Angle { l1, rev1, l2, rev2 } => {
+                let (u, w) = (dir(l1, rev1)?, dir(l2, rev2)?);
+                gc_math::fm::atan2(u[0] * w[1] - u[1] * w[0], u[0] * w[0] + u[1] * w[1])
+                    .rem_euclid(std::f64::consts::TAU)
+            }
+            DimKind::Radius(curve) => self.round(curve)?.1,
+            DimKind::Diameter(curve) => 2.0 * self.round(curve)?.1,
+            DimKind::PlaneDistance { p, axis, side } => side * *pos(p)?.get(axis)?,
+        })
+    }
+}
+
+impl Dimension {
+    /// The value to display: the driving value, or the measurement for a reference dimension.
+    pub fn display_value(&self, sketch: &Sketch) -> Option<f64> {
+        if self.driving { Some(self.value) } else { sketch.measure(&self.kind) }
+    }
+}
