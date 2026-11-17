@@ -6,7 +6,7 @@
 |---|---|---|
 | 0. 골격·환경 | 완료(한글 입력 시험만 사용자 확인 대기) | 증거: [evidence/stage-0.md](evidence/stage-0.md). Windows에서 빌드·실행 확인됨(`-j`로 동시 작업 수 제한). `gen-ur`는 Stage 2b, `bench-quality`는 Stage 3a에서 추가 |
 | 1. 기반 + 계약 동결 | 완료 | foundation 7개 + api 2개. CI: Windows 빌드·테스트 통과 확인 |
-| 2a / 2b 헤드리스 도메인 | 진행 중 | `gc_solver`, `gc_sketch`, `gc_doc`, `gc_tools`, `gc_session`(스케치 범위) 완료. 화면까지 연결됨. 로봇·경로 계획 헤드리스 쪽(`gc_robot`, `gc_plan`, `gc_collide`, `gc_traj`, `gc_motion`) 완료. 다음: 플러그인(플래너·메시·UR), 문서·세션에 로봇/경로 엔티티, 화면 연결 |
+| 2a / 2b 헤드리스 도메인 | 대부분 완료 | `gc_solver`, `gc_sketch`, `gc_doc`, `gc_tools`, `gc_session`(스케치 범위) 완료. 화면까지 연결됨. 로봇·경로 계획 헤드리스 쪽(`gc_robot`, `gc_plan`, `gc_collide`, `gc_traj`, `gc_motion`) 완료. 다음: 플러그인(플래너·메시·UR), 문서·세션에 로봇/경로 엔티티, 화면 연결 |
 | 3a / 3b 통합 도메인 | 대기 | |
 | 4. UI 키트·뷰포트 | UI 체크포인트 도달 — 사용자 확인 대기 | 증거: [evidence/stage-4.md](evidence/stage-4.md) |
 | 5a–5f 앱 조립 | 진행 중 | 5c 첫 조각: 로봇 탭(샘플 로봇·바디·웨이포인트·경로·계획·재생)이 화면에서 동작 |
@@ -14,9 +14,14 @@
 
 ## 작업 순서
 
-혼자 순차로 구현하므로, 눈에 보이는 기능이 먼저 나오도록 스케치 쪽을 먼저 세로로 완성한다:
-`gc_solver → gc_sketch → gc_doc → gc_tools → gc_session → gc_draw → gc_render → gc_ui → gc_viewport → 앱(셸 + 2D 스케치)`.
-그다음 로봇·경로 계획 쪽(`gc_robot → gc_collide → gc_plan → gc_traj → gc_motion → 플러그인`)을 붙인다.
+스케치 쪽을 먼저 화면까지 완성했고(2D → 3D), 이어서 로봇·경로 계획 쪽을 화면까지 연결했다. 지금은 두 쪽이 이어져
+"스케치한 선을 로봇이 따라간다"가 동작한다. 다음 후보:
+
+1. UR3e/UR10e/UR16e + `gen-ur`, UR 해석적 IK
+2. 뷰포트에서 로봇·바디 선택, 드래그 기즈모, 웨이포인트 고스트
+3. 3D 스케치 점 드래그·글리프, 트림 도구
+4. 직선 이동의 TCP 속도 상한, 툴 형상(충돌), 웨이포인트 순서 편집
+5. 자동 저장/복구, 예제 열기, 설정, 라이선스 고지, 플래너 플러그인 래핑, 큰 메시 비동기 로드
 
 ## 크레이트별 상태
 
