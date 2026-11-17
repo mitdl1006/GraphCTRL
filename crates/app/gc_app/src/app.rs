@@ -251,6 +251,20 @@ pub struct GraphCtrlApp {
     ime: ImeTest,
     /// Whether the licence notices window is open.
     notices: bool,
+    /// Whether the log window is open.
+    log_open: bool,
+    /// Whether the side panels let the 3D scene show through.
+    translucent: bool,
+    /// Whether the dark colour scheme is in use.
+    dark: bool,
+    /// The ribbon tab that was open before the current sketch, and whether a sketch was open last frame.
+    tab_before_sketch: Tab,
+    was_sketching: bool,
+    /// The widths of the floating panels, and whether they are open.
+    left_width: f32,
+    right_width: f32,
+    left_open: bool,
+    right_open: bool,
     /// Whether the about window is open.
     about: bool,
     /// The pose calculator, when its window is open.
@@ -272,7 +286,14 @@ impl GraphCtrlApp {
     /// Creates the app: installs fonts and theme and captures the wgpu render state when there is one.
     pub fn new(cc: &eframe::CreationContext<'_>, options: RunOptions) -> Self {
         gc_ui::fonts::install(&cc.egui_ctx);
-        gc_ui::install_theme(&cc.egui_ctx);
+        // The application starts dark unless the user chose light; without a settings folder (tests) it is
+        // light, so that pictures and pixel counts do not depend on the scheme.
+        let dark = options
+            .settings_dir
+            .as_deref()
+            .map(gc_persist::places::load_settings)
+            .is_some_and(|settings| !settings.light_theme);
+        gc_ui::install_theme(&cc.egui_ctx, dark);
         let robot_dir = library_dir(options.robot_dir.as_deref());
         let packages = robot_dir.as_deref().map(gc_session::library::scan).unwrap_or_default();
         let licences = notices(&packages);
@@ -284,6 +305,7 @@ impl GraphCtrlApp {
             options.settings_dir.as_deref().map(gc_persist::places::load_settings).unwrap_or_default();
         let lang = Lang::from_code(&settings.language).unwrap_or_default();
         let agent = crate::agent::Agent::new(&settings);
+        let translucent = !settings.opaque_panels;
         let mut session = Session::new();
         session.set_resources(resources);
         session.set_kinematics(kinematics.factories);
@@ -309,6 +331,15 @@ impl GraphCtrlApp {
             expression: String::new(),
             ime: ImeTest { dimension: "25 mm".to_owned(), ..ImeTest::default() },
             notices: false,
+            log_open: false,
+            translucent,
+            dark,
+            tab_before_sketch: Tab::Model,
+            was_sketching: false,
+            left_width: 210.0,
+            right_width: 330.0,
+            left_open: true,
+            right_open: true,
             about: false,
             pose_calc: None,
             dialogs: Box::new(NativeDialogs),
@@ -326,6 +357,16 @@ impl GraphCtrlApp {
     /// The viewport, for inspecting what it drew.
     pub fn viewport(&self) -> &Viewport {
         &self.viewport
+    }
+
+    /// Frames everything in the view, as "fit" in the View tab does.
+    pub fn fit_view(&mut self) {
+        self.viewport.fit(&self.session, [1000.0, 700.0]);
+    }
+
+    /// The viewport, for tests that move the view.
+    pub fn viewport_mut(&mut self) -> &mut Viewport {
+        &mut self.viewport
     }
 
     /// Opens the in-place editor of a dimension, as a double click on its text does.
@@ -651,6 +692,9 @@ impl GraphCtrlApp {
                 if ui.button(tr!(lang, MenuAbout)).clicked() {
                     self.about = true;
                 }
+                if ui.button(tr!(lang, MenuLog)).clicked() {
+                    self.log_open = true;
+                }
                 if ui.button(tr!(lang, MenuLicences)).clicked() {
                     self.notices = true;
                 }
@@ -715,6 +759,8 @@ impl GraphCtrlApp {
             agent_enabled: self.agent.enabled,
             agent_port: self.agent.port,
             agent_token: self.agent.token.clone(),
+            opaque_panels: !self.translucent,
+            light_theme: !self.dark,
             ..Default::default()
         };
         if let Err(error) = gc_persist::places::save_settings(dir, &settings) {
@@ -745,6 +791,22 @@ impl GraphCtrlApp {
 
     /// The licences of what ships with the application: its own, the bundled font's and the UR robot
     /// descriptions'.
+    /// Help > Log: the last lines of the log, newest at the bottom.
+    fn log_window(&mut self, ctx: &egui::Context) {
+        let mut open = self.log_open;
+        egui::Window::new(tr!(self.lang, MenuLog)).open(&mut open).default_size([640.0, 360.0]).show(
+            ctx,
+            |ui| {
+                egui::ScrollArea::both().stick_to_bottom(true).auto_shrink([false, false]).show(ui, |ui| {
+                    for line in crate::diagnostics::recent_log() {
+                        ui.label(egui::RichText::new(line).monospace().size(11.5));
+                    }
+                });
+            },
+        );
+        self.log_open = open;
+    }
+
     fn notices_window(&mut self, ctx: &egui::Context) {
         let mut open = self.notices;
         egui::Window::new(tr!(self.lang, MenuLicences)).open(&mut open).default_size([560.0, 480.0]).show(
@@ -827,7 +889,21 @@ impl eframe::App for GraphCtrlApp {
             self.autosave();
         }
 
+        // Starting a sketch opens the sketch tab; finishing it brings back the tab that was open before.
+        let sketching = self.session.active_sketch().is_some();
+        if sketching != self.was_sketching {
+            // A tab the user went to on purpose (the robot tab, to make a frame from sketch points) stays.
+            if sketching && self.tab == Tab::Model {
+                self.tab = Tab::Sketch;
+            } else if !sketching && self.tab == Tab::Sketch {
+                self.tab = self.tab_before_sketch;
+            }
+            self.was_sketching = sketching;
+        } else if !sketching {
+            self.tab_before_sketch = self.tab;
+        }
         egui::Panel::top("menu").show(ui, |ui| self.menu(ui));
+        let looks = (self.translucent, self.dark);
         let mut ribbon_action = None;
         egui::Panel::top("ribbon").show(ui, |ui| {
             ribbon_action = ribbon::show(
@@ -837,9 +913,17 @@ impl eframe::App for GraphCtrlApp {
                 &mut self.viewport,
                 &mut self.cell,
                 &self.library,
+                &mut self.translucent,
+                &mut self.dark,
                 lang,
             );
         });
+        if looks != (self.translucent, self.dark) {
+            if looks.1 != self.dark {
+                gc_ui::install_theme(&ctx, self.dark);
+            }
+            self.save_settings();
+        }
         if ribbon_action == Some(ribbon::RibbonAction::ImportRobot)
             && let Some(path) = self.dialogs.open_urdf()
         {
@@ -876,47 +960,86 @@ impl eframe::App for GraphCtrlApp {
                 lang,
                 self.viewport.background().has_gpu(),
                 self.notice.as_deref(),
+                (self.session.active_sketch().is_some() && !self.session.sketch_is_spatial())
+                    .then_some(&mut self.viewport.slice),
             );
         });
-        // The side panels keep their width: the user can drag it within a range, content never widens it.
-        egui::Panel::left("browser").default_size(210.0).size_range(180.0..=360.0).show(ui, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                match gc_panels::browser(ui, &self.session, lang, &mut self.params) {
-                    Some(BrowserAction::EditSketch(id)) => {
-                        self.session.enter_sketch(id);
-                        self.tab = Tab::Sketch;
-                    }
-                    // A refused edit (still in use, bad expression) is explained in the status bar.
-                    Some(BrowserAction::Edit(command)) => {
-                        self.cell.playing = false;
-                        if self.session.execute(&command).is_ok()
-                            && matches!(*command, gc_doc::Command::AddParam { .. })
-                        {
-                            self.params = gc_panels::ParamsUi::default();
-                        }
-                    }
-                    Some(BrowserAction::Select(item)) => self.session.select_item(item),
-                    Some(BrowserAction::Plan(path)) => {
-                        self.cell.playing = false;
-                        self.session.plan(path);
-                    }
-                    Some(BrowserAction::Show(item, visible)) => {
-                        if let Some(look) = self.session.shown_look(item) {
-                            drop(self.session.set_look(item, gc_doc::Look { hidden: !visible, ..look }));
-                        }
-                    }
-                    None => {}
-                }
-            });
-        });
-        egui::Panel::right("properties").default_size(330.0).size_range(280.0..=520.0).show(ui, |ui| {
-            ui.set_max_width(ui.available_width());
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                gc_panels::properties(ui, &mut self.session, lang, &mut self.expression);
-                gc_panels::cell(ui, &mut self.session, lang, &mut self.cell);
-            });
-        });
+        // The 3D view fills the window; the browser and the properties float over it, see-through, and
+        // the view's own overlays keep to what they leave free.
+        let stage = ui.available_rect_before_wrap();
+        let reserved =
+            |open: bool, width: f32| if open { width + 2.0 * gc_ui::colors::PANEL_MARGIN } else { 44.0 };
+        self.viewport.clear = Some(egui::Rect::from_min_max(
+            egui::pos2(stage.left() + reserved(self.left_open, self.left_width), stage.top()),
+            egui::pos2(stage.right() - reserved(self.right_open, self.right_width), stage.bottom()),
+        ));
         egui::CentralPanel::no_frame().show(ui, |ui| self.viewport.ui(ui, &mut self.session, lang));
+        let opaque = !self.translucent;
+        side_panel(
+            &ctx,
+            SidePanel {
+                id: "browser",
+                left: true,
+                stage,
+                width: &mut self.left_width,
+                range: 180.0..=360.0,
+                open: &mut self.left_open,
+                opaque,
+                title: tr!(lang, PanelBrowser),
+                lang,
+            },
+            |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    match gc_panels::browser(ui, &self.session, lang, &mut self.params) {
+                        Some(BrowserAction::EditSketch(id)) => {
+                            self.session.enter_sketch(id);
+                            self.tab = Tab::Sketch;
+                        }
+                        // A refused edit (still in use, bad expression) is explained in the status bar.
+                        Some(BrowserAction::Edit(command)) => {
+                            self.cell.playing = false;
+                            if self.session.execute(&command).is_ok()
+                                && matches!(*command, gc_doc::Command::AddParam { .. })
+                            {
+                                self.params = gc_panels::ParamsUi::default();
+                            }
+                        }
+                        Some(BrowserAction::Select(item)) => self.session.select_item(item),
+                        Some(BrowserAction::Plan(path)) => {
+                            self.cell.playing = false;
+                            self.session.plan(path);
+                        }
+                        Some(BrowserAction::Show(item, visible)) => {
+                            if let Some(look) = self.session.shown_look(item) {
+                                drop(self.session.set_look(item, gc_doc::Look { hidden: !visible, ..look }));
+                            }
+                        }
+                        None => {}
+                    }
+                });
+            },
+        );
+        side_panel(
+            &ctx,
+            SidePanel {
+                id: "properties",
+                left: false,
+                stage,
+                width: &mut self.right_width,
+                range: 280.0..=520.0,
+                open: &mut self.right_open,
+                opaque,
+                title: tr!(lang, PanelProperties),
+                lang,
+            },
+            |ui| {
+                ui.set_max_width(ui.available_width());
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    gc_panels::properties(ui, &mut self.session, lang, &mut self.expression);
+                    gc_panels::cell(ui, &mut self.session, lang, &mut self.cell);
+                });
+            },
+        );
         self.reference_question(&ctx);
         self.unsaved_question(&ctx);
         self.recover_question(&ctx);
@@ -925,6 +1048,9 @@ impl eframe::App for GraphCtrlApp {
         }
         if self.notices {
             self.notices_window(&ctx);
+        }
+        if self.log_open {
+            self.log_window(&ctx);
         }
         if self.about {
             self.about_window(&ctx);
@@ -958,13 +1084,111 @@ impl eframe::App for GraphCtrlApp {
 
 /// Runs the desktop application until the window closes.
 pub fn run(options: RunOptions) -> anyhow::Result<()> {
-    let native = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("GraphCTRL")
-            .with_inner_size([1440.0, 900.0])
-            .with_min_inner_size([960.0, 600.0]),
-        ..Default::default()
-    };
+    crate::diagnostics::install_diagnostics(options.settings_dir.as_deref());
+    log::info!("GraphCTRL {} starts", env!("CARGO_PKG_VERSION"));
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_title("GraphCTRL")
+        .with_inner_size([1440.0, 900.0])
+        .with_min_inner_size([960.0, 600.0]);
+    if let Some(icon) = crate::diagnostics::window_icon() {
+        viewport = viewport.with_icon(icon);
+    }
+    let native = eframe::NativeOptions { viewport, ..Default::default() };
     eframe::run_native("graphctrl", native, Box::new(move |cc| Ok(Box::new(GraphCtrlApp::new(cc, options)))))
         .map_err(|err| anyhow::anyhow!("the application window could not be started: {err}"))
+}
+
+/// What a floating side panel needs.
+struct SidePanel<'a> {
+    id: &'static str,
+    /// On the left edge of the stage, else on the right.
+    left: bool,
+    /// The area the panel floats in.
+    stage: egui::Rect,
+    width: &'a mut f32,
+    range: std::ops::RangeInclusive<f32>,
+    open: &'a mut bool,
+    opaque: bool,
+    /// The panel's name, for the button that folds it.
+    title: &'a str,
+    lang: Lang,
+}
+
+/// A panel that floats over the viewport: rounded, see-through, with a handle on its inner edge that
+/// changes its width and a button that folds it away. The mouse never reaches the viewport through it.
+fn side_panel(ctx: &egui::Context, panel: SidePanel<'_>, content: impl FnOnce(&mut egui::Ui)) {
+    let margin = gc_ui::colors::PANEL_MARGIN;
+    let SidePanel { id, left, stage, width, range, open, opaque, title, lang } = panel;
+    let fold_label = |open: bool| {
+        if open { tr!(lang, PanelFold, title) } else { tr!(lang, PanelUnfold, title) }
+    };
+    if !*open {
+        // Folded: a small button in the corner brings it back.
+        let corner = if left {
+            stage.left_top() + egui::vec2(margin, margin)
+        } else {
+            stage.right_top() + egui::vec2(-margin - 28.0, margin)
+        };
+        egui::Area::new(egui::Id::unique(("gc_panel_unfold", id)))
+            .fixed_pos(corner)
+            .order(egui::Order::Middle)
+            .show(ctx, |ui| {
+                let label = fold_label(false);
+                let button = ui.add_sized(
+                    [28.0, 28.0],
+                    egui::Button::new(if left { ">" } else { "<" }).fill(gc_ui::panel_fill(opaque)),
+                );
+                button.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &label));
+                if button.on_hover_text(&label).clicked() {
+                    *open = true;
+                }
+            });
+        return;
+    }
+    *width = width.clamp(*range.start(), *range.end());
+    let size = egui::vec2(*width, (stage.height() - 2.0 * margin).max(80.0));
+    let min = if left {
+        stage.left_top() + egui::vec2(margin, margin)
+    } else {
+        egui::pos2(stage.right() - margin - size.x, stage.top() + margin)
+    };
+    let rect = egui::Rect::from_min_size(min, size);
+    egui::Area::new(egui::Id::unique(("gc_panel", id))).fixed_pos(min).order(egui::Order::Middle).show(
+        ctx,
+        |ui| {
+            // Registered first, so the panel's widgets win and the empty parts still keep the mouse.
+            ui.interact(rect, egui::Id::unique(("gc_panel_block", id)), egui::Sense::click_and_drag());
+            gc_ui::panel_frame(opaque).show(ui, |ui| {
+                ui.set_min_size(size - egui::vec2(18.0, 18.0));
+                ui.set_max_size(size - egui::vec2(18.0, 18.0));
+                content(ui);
+            });
+            // The handle on the inner edge.
+            let edge = if left { rect.right() } else { rect.left() };
+            let handle = egui::Rect::from_min_max(
+                egui::pos2(edge - 4.0, rect.top() + 10.0),
+                egui::pos2(edge + 4.0, rect.bottom() - 10.0),
+            );
+            let drag = ui.interact(handle, egui::Id::unique(("gc_panel_edge", id)), egui::Sense::drag());
+            if drag.hovered() || drag.dragged() {
+                ctx.set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+            }
+            if drag.dragged() {
+                let dx = drag.drag_delta().x;
+                *width = (*width + if left { dx } else { -dx }).clamp(*range.start(), *range.end());
+            }
+            // The fold button.
+            // Top right corner, clear of the panel's header at the left.
+            let button_rect = egui::Rect::from_min_size(
+                egui::pos2(rect.right() - 30.0, rect.top() + 6.0),
+                egui::vec2(22.0, 22.0),
+            );
+            let label = fold_label(true);
+            let button = ui.put(button_rect, egui::Button::new(if left { "<" } else { ">" }).small());
+            button.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &label));
+            if button.on_hover_text(&label).clicked() {
+                *open = false;
+            }
+        },
+    );
 }

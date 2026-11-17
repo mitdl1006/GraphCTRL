@@ -34,6 +34,8 @@ struct View<'a> {
     rect: Rect,
     camera: &'a Camera,
     size: [f64; 2],
+    /// Whether constraint glyphs are drawn.
+    show_constraints: bool,
 }
 
 impl View<'_> {
@@ -67,6 +69,7 @@ fn view_of<'a>(ui: &egui::Ui, rect: Rect, camera: &'a Camera) -> View<'a> {
         rect,
         camera,
         size: [f64::from(rect.width()), f64::from(rect.height())],
+        show_constraints: true,
     }
 }
 
@@ -75,7 +78,7 @@ pub(crate) fn under(ui: &egui::Ui, rect: Rect, camera: &Camera, session: &Sessio
     let view = view_of(ui, rect, camera);
     // A gradient from light at the top to a little darker at the bottom, as in CAD programs.
     let mut gradient = egui::Mesh::default();
-    let (top, bottom) = (colors::BACKGROUND_TOP, colors::BACKGROUND_BOTTOM);
+    let (top, bottom) = (colors::background_top(), colors::background_bottom());
     for (corner, colour) in [
         (rect.left_top(), top),
         (rect.right_top(), top),
@@ -108,16 +111,25 @@ pub(crate) fn under(ui: &egui::Ui, rect: Rect, camera: &Camera, session: &Sessio
 }
 
 /// Paints what lies over the solids: axes, sketches, traces, waypoints and tool previews.
-pub(crate) fn over(ui: &egui::Ui, rect: Rect, camera: &Camera, session: &Session, scene: &Scene, gpu: bool) {
-    let view = view_of(ui, rect, camera);
+pub(crate) fn over(
+    ui: &egui::Ui,
+    rect: Rect,
+    camera: &Camera,
+    session: &Session,
+    scene: &Scene,
+    gpu: bool,
+    show_constraints: bool,
+) {
+    let mut view = view_of(ui, rect, camera);
+    view.show_constraints = show_constraints;
     let active = session.active_sketch();
     axes(&view);
     for (id, sketch) in session.doc().sketches().iter() {
         let plane = plane_of(session, sketch);
         if active.is_some_and(|(active_id, _)| active_id == id) {
             active_sketch(&view, &plane, sketch, session);
-        } else {
-            let stroke = Stroke::new(1.2, colors::INACTIVE);
+        } else if session.doc().is_visible(id.erase()) && !session.doc().is_inactive(id.erase()) {
+            let stroke = Stroke::new(1.2, colors::inactive());
             for curve in sketch.curves.values() {
                 curve_path(&view, &plane, curve, |p| sketch.pos(p), None, stroke);
             }
@@ -143,7 +155,7 @@ pub(crate) fn trace_style(trace: &gc_scene::Trace) -> (Color32, f32) {
     match highlight_colour(trace.highlight) {
         Some(colour) => (colour, 4.5),
         None if trace.current => (colors::TRACE, 2.5),
-        None => (colors::INACTIVE, 2.5),
+        None => (colors::inactive(), 2.5),
     }
 }
 
@@ -162,7 +174,7 @@ fn cell(view: &View<'_>, scene: &Scene, gpu: bool) {
             if let Some(ring) = highlight_colour(emphasis) {
                 view.painter.circle_stroke(at, 9.0, Stroke::new(2.5, ring));
             }
-            view.text(pos2(at.x - 6.0, at.y + 6.0), Align2::RIGHT_TOP, name, 13.0, colors::DIMENSION);
+            view.text(pos2(at.x - 6.0, at.y + 6.0), Align2::RIGHT_TOP, name, 13.0, colors::dimension());
         }
     }
     // The tool centre point of each robot: a small frame, X red, Y green, Z blue.
@@ -245,7 +257,7 @@ fn grid(view: &View<'_>, plane: &SketchPlane) {
             let major = index % 5 == 0;
             let stroke = Stroke::new(
                 if major { 1.0 } else { 0.5 },
-                if major { colors::GRID_MAJOR } else { colors::GRID },
+                if major { colors::grid_major() } else { colors::grid() },
             );
             let other = 1 - axis;
             let mut a = [0.0; 3];
@@ -324,7 +336,7 @@ fn active_sketch(view: &View<'_>, plane: &SketchPlane, sketch: &Sketch, session:
         } else if free {
             colors::FREE
         } else {
-            colors::CONSTRAINED
+            colors::constrained()
         };
         let width = if selection.contains(&Item::Curve(*id)) { 2.6 } else { 1.8 };
         curve_path(view, plane, curve, pos, session.radius(*id), Stroke::new(width, color));
@@ -338,7 +350,7 @@ fn active_sketch(view: &View<'_>, plane: &SketchPlane, sketch: &Sketch, session:
         } else if free {
             colors::FREE
         } else {
-            colors::CONSTRAINED
+            colors::constrained()
         };
         view.painter.rect_filled(
             Rect::from_center_size(at, vec2(5.0, 5.0) * if selected { 1.6 } else { 1.0 }),
@@ -390,9 +402,9 @@ fn spatial_marks(view: &View<'_>, plane: &SketchPlane, sketch: &Sketch, session:
         let color = if selection.contains(&Item::Dimension(*id)) {
             colors::SELECTED
         } else if dimension.driving {
-            colors::DIMENSION
+            colors::dimension()
         } else {
-            colors::REFERENCE
+            colors::reference()
         };
         // A height is drawn down to the plane it is measured from.
         if let gc_sketch::DimKind::PlaneDistance { p, axis, .. } = dimension.kind
@@ -492,6 +504,9 @@ pub(crate) fn glyph_spots(
 
 /// Small letters next to the geometry that say which constraints apply.
 fn glyphs(view: &View<'_>, plane: &SketchPlane, sketch: &Sketch, session: &Session) {
+    if !view.show_constraints {
+        return;
+    }
     for spot in glyph_spots(plane, sketch, session, |w| view.screen(w)) {
         let selected = session.selection().contains(&Item::Constraint(spot.id));
         let color = if selected { colors::SELECTED } else { colors::GLYPH };
@@ -514,9 +529,9 @@ fn dimension_marks(
     let color = if selected {
         colors::SELECTED
     } else if dimension.driving {
-        colors::DIMENSION
+        colors::dimension()
     } else {
-        colors::REFERENCE
+        colors::reference()
     };
     let stroke = Stroke::new(1.0, color);
     let xy = |p| session.point_pos(p).map(|p| [p[0], p[1]]);
@@ -592,7 +607,7 @@ fn dimension_marks(
     if let Some(at) = view.screen(world(text_at)) {
         let galley = view.painter.layout_no_wrap(label, FontId::proportional(13.0), color);
         let frame = Rect::from_center_size(at, galley.size() + vec2(6.0, 2.0));
-        view.painter.rect_filled(frame, 2.0, colors::BACKGROUND_TOP);
+        view.painter.rect_filled(frame, 2.0, colors::background_top());
         view.painter.galley(frame.min + vec2(3.0, 1.0), galley, color);
     }
 }

@@ -7,6 +7,10 @@ use gc_scene::Scene;
 
 use crate::paint::trace_style;
 
+/// How far behind the sketch plane the slice starts, metres: faces that lie in the plane (a body resting
+/// on it) are cut away too, so that nothing covers the plane.
+const SLICE_TOLERANCE: f64 = -1e-5;
+
 /// The most edges drawn for one mesh: past it a scanned or finely tessellated mesh would turn into a
 /// web of lines, so only its sharpest edges (70°) are kept, or none.
 const EDGE_BUDGET: usize = 3000;
@@ -47,7 +51,14 @@ impl Background {
         self.stats
     }
 
-    pub(crate) fn paint(&mut self, ui: &egui::Ui, rect: egui::Rect, camera: &Camera, scene: &Scene) {
+    pub(crate) fn paint(
+        &mut self,
+        ui: &egui::Ui,
+        rect: egui::Rect,
+        camera: &Camera,
+        scene: &Scene,
+        slice: Option<(gc_math::DVec3, f64)>,
+    ) {
         let Some(rs) = self.render_state.as_ref() else { return };
         let ppp = ui.pixels_per_point();
         #[allow(
@@ -136,6 +147,20 @@ impl Background {
                 clip_from_relative: narrow(camera.clip_from_eye_relative(size, extent)),
                 light: vec3(light),
                 forward: vec3(forward),
+                // Slicing: what lies in front of the sketch plane (towards the eye) is cut away.
+                slice: slice.map(|(normal, offset)| {
+                    #[allow(clippy::cast_possible_truncation, reason = "GPU data is f32")]
+                    let plane = [
+                        normal.x as f32,
+                        normal.y as f32,
+                        normal.z as f32,
+                        (normal.dot(eye) - offset - SLICE_TOLERANCE) as f32,
+                    ];
+                    plane
+                }),
+            };
+            let removed = |p: gc_math::DVec3| {
+                slice.is_some_and(|(normal, offset)| normal.dot(p) - offset > SLICE_TOLERANCE)
             };
             // Transparent where nothing is drawn, so that the grid painted underneath shows through.
             let clear = [0.0; 4];
@@ -162,6 +187,9 @@ impl Background {
                 let c = solid.color;
                 let color = [c[0] * 0.30, c[1] * 0.30, c[2] * 0.32, c[3]];
                 for [a, b] in segments.iter() {
+                    if removed(solid.pose * *a) && removed(solid.pose * *b) {
+                        continue;
+                    }
                     edges.push(EdgeVertex { position: vec3(solid.pose * *a - eye), color });
                     edges.push(EdgeVertex { position: vec3(solid.pose * *b - eye), color });
                 }

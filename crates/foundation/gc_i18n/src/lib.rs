@@ -520,6 +520,64 @@ messages! {
     /// Plan metric: the move was possible in a straight joint-space line.
     PlanStraight => ("직선 이동(플래너 불필요)", "Straight move (no planner needed)"),
     // --- frontend ---
+    /// Status bar button: cut away what hides the sketch plane (F7).
+    StatusSlice => ("그래픽 자르기 (F7)", "Slice Graphics (F7)"),
+    /// Sketch context menu: end the command in progress.
+    CmdDone => ("완료", "Done"),
+    /// Browser menu: rename in place.
+    CmdRename => ("이름 바꾸기", "Rename"),
+    /// Browser menu: suppress an item (kept, not computed).
+    CmdSuppress => ("억제", "Suppress"),
+    /// Browser menu: bring a suppressed item back.
+    CmdUnsuppress => ("억제 해제", "Unsuppress"),
+    /// Status bar: the name is taken by another item of the same kind.
+    ErrNameTaken => ("같은 이름이 이미 있습니다", "That name is already taken"),
+    /// View tab: the dark colour scheme.
+    ViewDarkTheme => ("어두운 테마", "Dark theme"),
+    /// Ribbon group of the View tab that holds the panel options.
+    GroupPanels => ("패널", "Panels"),
+    /// Folds a floating side panel away. `{0}` is the panel's name.
+    PanelFold => ("{0} 접기", "Fold {0}"),
+    /// Brings a folded side panel back. `{0}` is the panel's name.
+    PanelUnfold => ("{0} 펼치기", "Unfold {0}"),
+    /// View tab: whether the side panels let the 3D scene show through.
+    ViewPanelsSeeThrough => ("패널 반투명", "See-through panels"),
+    /// Help menu: the log window.
+    MenuLog => ("로그", "Log"),
+    /// Plan card: what the checks guarantee. `{0}` padding mm, `{1}` step mm, `{2}` step degrees, `{3}` clearance mm.
+    PlanGuarantee => ("패딩 {0} mm, 검사 간격 {1} mm·{2}°에서 볼록 충돌 모델이 장애물과 {3} mm 이상 떨어짐", "Padding {0} mm; with check steps of {1} mm and {2} degrees the convex collision model stays at least {3} mm from obstacles"),
+    /// Plan card: the guarantee holds only at the checked states.
+    PlanGuaranteeSampled => ("검사한 상태에서만 확인됨(상태 사이는 보증하지 않음)", "Checked at the sampled states only (nothing is guaranteed between them)"),
+    /// Plan card: what the guarantee leaves out.
+    PlanGuaranteeExcluded => ("제외: 검사하지 않는 쌍(ACM), 닫힌 메시 안에서 시작한 바디, 컨트롤러 추종 오차", "Not covered: pairs that are not checked (ACM), bodies that start inside a closed mesh, controller tracking error"),
+    /// Plan card: contact allowances lower the padding.
+    PlanGuaranteeContact => ("접촉 허용 구간에서는 패딩 0", "Padding is 0 where contact is allowed"),
+    /// Robot properties: the list of link pairs that are checked or not.
+    PanelAcm => ("충돌 검사 쌍(ACM)", "Collision pairs (ACM)"),
+    /// Reason a link pair is not checked: joined by a joint.
+    AcmAdjacent => ("인접", "adjacent"),
+    /// Reason a link pair is not checked: touching in the zero pose.
+    AcmTouching => ("영자세에서 닿음", "touching at zero pose"),
+    /// A link pair that is checked.
+    AcmChecked => ("검사", "checked"),
+    /// A link pair as shown in the list. `{0}` and `{1}` are link names.
+    AcmPair => ("{0} - {1}", "{0} - {1}"),
+    /// Path properties: contact allowances.
+    PanelContacts => ("접촉 허용", "Contact allowances"),
+    /// A contact allowance. `{0}` step number, `{1}` link, `{2}` body.
+    ContactRow => ("{0}번째 이동: {1} - {2}", "Move {0}: {1} - {2}"),
+    /// Contact allowance option: along the whole motion.
+    ContactWhole => ("이동 전체", "Whole motion"),
+    /// Contact allowance option: overlap allowed.
+    ContactTouch => ("겹침 허용", "Allow overlap"),
+    /// Contact allowance form: the move.
+    ContactMove => ("이동", "Move"),
+    /// Contact allowance form: the robot link.
+    ContactLink => ("링크", "Link"),
+    /// Contact allowance form: the obstacle.
+    ContactObstacle => ("장애물", "Obstacle"),
+    /// Contact allowance form: add.
+    ContactAdd => ("접촉 허용 추가", "Allow contact"),
     /// Sketch tools that are planned and shown disabled until the document supports them.
     /// Ribbon group of sketch tools that are not available yet.
     GroupPlanned => ("예정", "Planned"),

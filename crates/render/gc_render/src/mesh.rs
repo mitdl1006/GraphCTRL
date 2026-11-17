@@ -53,6 +53,9 @@ pub struct View {
     pub light: [f32; 3],
     /// Direction the camera looks along.
     pub forward: [f32; 3],
+    /// A slicing plane `(normal, offset)` in eye-relative coordinates: what lies on the side the normal
+    /// points to (`dot(normal, p) + offset > 0`) is not drawn. `None`: nothing is cut away.
+    pub slice: Option<[f32; 4]>,
 }
 
 /// What a frame cost.
@@ -71,6 +74,7 @@ struct ViewUniform {
     light: [f32; 4],
     forward: [f32; 4],
     viewport: [f32; 4],
+    slice: [f32; 4],
 }
 
 #[repr(C)]
@@ -336,7 +340,13 @@ impl MeshRenderer {
             clip_from_relative: view.clip_from_relative,
             light: [view.light[0], view.light[1], view.light[2], 0.0],
             forward: [view.forward[0], view.forward[1], view.forward[2], 0.0],
-            viewport: [target.size().0 as f32, target.size().1 as f32, 0.0, 0.0],
+            viewport: [
+                target.size().0 as f32,
+                target.size().1 as f32,
+                if view.slice.is_some() { 1.0 } else { 0.0 },
+                0.0,
+            ],
+            slice: view.slice.unwrap_or([0.0; 4]),
         };
         // Lines: one small record each, drawn after the opaque solids and before the translucent ones.
         let line_records: Vec<LineRaw> =

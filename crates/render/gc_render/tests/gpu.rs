@@ -40,7 +40,7 @@ mod meshes {
         #[allow(clippy::cast_possible_truncation, reason = "GPU vectors are f32")]
         let forward = [f.x as f32, f.y as f32, f.z as f32];
         let clip = camera.clip_from_eye_relative([f64::from(SIZE.0), f64::from(SIZE.1)], 3.0);
-        (camera, View { clip_from_relative: narrow(clip), light: forward, forward })
+        (camera, View { clip_from_relative: narrow(clip), light: forward, forward, slice: None })
     }
 
     #[allow(clippy::cast_possible_truncation, reason = "GPU matrices are f32")]

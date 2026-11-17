@@ -16,8 +16,9 @@ use gc_i18n::{Lang, tr};
 use gc_math::{Aabb, DPose3, DVec3, Plane};
 use gc_scene::Scene;
 use gc_session::Session;
+use gc_sketch::CurveGeom;
 use gc_sketch::Space;
-use gc_tools::{Key as ToolKey, ToolEvent};
+use gc_tools::{Key as ToolKey, ToolEvent, ToolKind};
 use gc_ui::colors;
 
 pub use paint::{format_angle, format_length};
@@ -69,6 +70,18 @@ pub(crate) fn plane_of(session: &Session, sketch: &Sketch) -> SketchPlane {
 pub struct Viewport {
     /// Whether the frame time and draw statistics are shown in the corner.
     pub perf_overlay: bool,
+    /// Slice Graphics (F7): the part of the model in front of the sketch plane is cut away while a 2D
+    /// sketch is edited.
+    pub slice: bool,
+    /// Whether the constraint glyphs are drawn (F8 shows them, F9 hides them).
+    pub show_constraints: bool,
+    /// A selection box being dragged in a sketch: where the mouse went down.
+    box_select: Option<egui::Pos2>,
+    /// A point of a 3D sketch being dragged: the working plane's normal axis and the level it keeps.
+    spatial_drag: Option<(usize, f64)>,
+    /// The part of the window that no floating panel covers. The view cube and the statistics sit in its
+    /// corners and "fit" frames the model in it. `None`: the whole viewport.
+    pub clear: Option<egui::Rect>,
     /// Smoothed frame time in seconds.
     frame_time: f32,
     background: Background,
@@ -97,6 +110,11 @@ impl Viewport {
     pub fn new(render_state: Option<egui_wgpu::RenderState>) -> Self {
         Self {
             perf_overlay: false,
+            clear: None,
+            spatial_drag: None,
+            slice: false,
+            show_constraints: true,
+            box_select: None,
             frame_time: 0.0,
             background: Background::new(render_state),
             camera: Camera { distance: 0.35, ..Camera::default() },
@@ -146,7 +164,22 @@ impl Viewport {
         if bounds.is_empty() || bounds.diagonal() < 1e-6 {
             bounds = Aabb::from_points([DVec3::splat(-0.05), DVec3::splat(0.05)]);
         }
-        self.camera.fit(&bounds, size);
+        match self.clear.filter(|_| !self.rect.is_negative()) {
+            Some(clear) if self.rect.width() > 1.0 => {
+                // Frame the model in what the panels leave free, then move it to the middle of that.
+                let free = [f64::from(clear.width()), f64::from(clear.height())];
+                self.camera.fit(&bounds, free);
+                let whole = [f64::from(self.rect.width()), f64::from(self.rect.height())];
+                let shift = clear.center() - self.rect.center();
+                let middle = [whole[0] * 0.5, whole[1] * 0.5];
+                self.camera.pan(
+                    middle,
+                    [middle[0] + f64::from(shift.x), middle[1] + f64::from(shift.y)],
+                    whole,
+                );
+            }
+            _ => self.camera.fit(&bounds, size),
+        }
     }
 
     /// Shows the viewport and feeds the user's input to the view and to the session's tool.
@@ -173,6 +206,7 @@ impl Viewport {
             .or_else(|| ui.input(|i| i.pointer.latest_pos()))
             .filter(|p| rect.contains(*p));
         if let (Some((_, plane)), None, true) = (active, self.navigating, session.sketch_is_spatial()) {
+            self.spatial_drag_input(ui, &response, rect, session, &plane, cursor);
             self.spatial_input(ui, &response, rect, session, &plane, cursor);
         } else if let (Some((_, plane)), None) = (active, self.navigating) {
             let on_sketch = |p: egui::Pos2| {
@@ -189,6 +223,42 @@ impl Viewport {
                     && let Some(pos) = ui.input(|i| i.pointer.press_origin()).and_then(on_sketch)
                 {
                     session.tool_event(ToolEvent::DragStart { pos, px });
+                    // A drag that grabbed nothing with the select tool draws a selection box.
+                    if !session.is_dragging() && session.tool() == ToolKind::Select {
+                        self.box_select = ui.input(|i| i.pointer.press_origin());
+                    }
+                }
+                if let (Some(start), Some(now)) = (self.box_select, cursor) {
+                    let crossing = now.x < start.x;
+                    let rect_box = egui::Rect::from_two_pos(start, now);
+                    let color = colors::SELECTED;
+                    let painter = ui.painter();
+                    painter.rect_filled(rect_box, 0.0, color.gamma_multiply(0.12));
+                    // Window (left to right): solid; crossing (right to left): dashed.
+                    let stroke = egui::Stroke::new(1.0, color);
+                    if crossing {
+                        painter.add(egui::Shape::dashed_line(
+                            &[
+                                rect_box.left_top(),
+                                rect_box.right_top(),
+                                rect_box.right_bottom(),
+                                rect_box.left_bottom(),
+                                rect_box.left_top(),
+                            ],
+                            stroke,
+                            5.0,
+                            3.0,
+                        ));
+                    } else {
+                        painter.rect_stroke(rect_box, 0.0, stroke, egui::StrokeKind::Inside);
+                    }
+                    ui.ctx().request_repaint();
+                }
+                if response.drag_stopped_by(PointerButton::Primary)
+                    && let Some(start) = self.box_select.take()
+                    && let (Some(a), Some(b)) = (on_sketch(start), cursor.and_then(on_sketch))
+                {
+                    select_in_box(session, a, b, b[0] < a[0], ctrl || ui.input(|i| i.modifiers.shift));
                 }
                 if response.dragged_by(PointerButton::Primary) {
                     if let Some(pos) = cursor.and_then(on_sketch) {
@@ -232,10 +302,42 @@ impl Viewport {
             self.cell_input(ui, &response, rect, session, lang);
         }
 
+        // Right click in a sketch: finish the command in progress, or the sketch.
+        if active.is_some() && self.navigating.is_none() {
+            response.context_menu(|ui| {
+                if ui.button(tr!(lang, CmdDone)).clicked() {
+                    session.tool_event(ToolEvent::Key(ToolKey::Escape));
+                    ui.close();
+                }
+                if ui.button(tr!(lang, CmdFinishSketch)).clicked() {
+                    session.finish_sketch();
+                    ui.close();
+                }
+            });
+        }
+
         let scene = Scene::of(session);
         paint::under(ui, rect, &self.camera, session);
-        self.background.paint(ui, rect, &self.camera, &scene);
-        paint::over(ui, rect, &self.camera, session, &scene, self.background.has_gpu());
+        // Finishing the sketch restores the sliced graphics.
+        if active.is_none() || session.sketch_is_spatial() {
+            self.slice = false;
+        }
+        let slice = active.filter(|_| self.slice).map(|(_, plane)| {
+            // The side of the plane the eye is on is cut away.
+            let toward_eye =
+                if plane.normal.dot(self.camera.forward()) < 0.0 { plane.normal } else { -plane.normal };
+            (toward_eye, toward_eye.dot(plane.origin))
+        });
+        self.background.paint(ui, rect, &self.camera, &scene, slice);
+        paint::over(
+            ui,
+            rect,
+            &self.camera,
+            session,
+            &scene,
+            self.background.has_gpu(),
+            self.show_constraints,
+        );
         self.view_cube(ui, rect, lang);
         if self.perf_overlay {
             self.perf(ui, rect, lang);
@@ -257,7 +359,10 @@ impl Viewport {
         let painter = ui.painter_at(rect);
         let galley = painter.layout_no_wrap(text, egui::FontId::monospace(12.0), egui::Color32::WHITE);
         let frame = egui::Rect::from_min_size(
-            egui::pos2(rect.left() + 8.0, rect.bottom() - 8.0 - galley.size().y - 6.0),
+            egui::pos2(
+                self.clear.unwrap_or(rect).left() + 8.0,
+                self.clear.unwrap_or(rect).bottom() - 8.0 - galley.size().y - 6.0,
+            ),
             galley.size() + egui::vec2(12.0, 6.0),
         );
         painter.rect_filled(frame, 4.0, egui::Color32::from_black_alpha(170));
@@ -270,9 +375,10 @@ impl Viewport {
     fn view_cube(&mut self, ui: &mut egui::Ui, rect: egui::Rect, lang: Lang) {
         /// Pixels per cube unit (the cube's half-size).
         const HALF: f32 = 27.0;
-        let centre = rect.right_top() + egui::vec2(-74.0, 74.0);
+        let free = self.clear.unwrap_or(rect);
+        let centre = free.right_top() + egui::vec2(-74.0, 74.0);
         let area = egui::Rect::from_center_size(centre, egui::Vec2::splat(124.0));
-        self.cube_centre = rect.contains_rect(area).then_some(centre);
+        self.cube_centre = free.contains_rect(area).then_some(centre);
         if self.cube_centre.is_none() {
             return;
         }
@@ -285,9 +391,9 @@ impl Viewport {
             |c: [f64; 2]| egui::pos2(centre.x + c[0] as f32 * HALF, centre.y - c[1] as f32 * HALF);
         let hovered = response.hover_pos().and_then(|p| viewcube::pick(&self.camera, to_cube(p)));
         let painter = ui.painter_at(rect);
-        let stroke = egui::Stroke::new(1.0, colors::CUBE_EDGE);
+        let stroke = egui::Stroke::new(1.0, colors::cube_edge());
         for face in viewcube::visible_faces(&self.camera) {
-            let fill = if hovered == Some(face.normal) { colors::CUBE_HOVER } else { colors::CUBE_FACE };
+            let fill = if hovered == Some(face.normal) { colors::cube_hover() } else { colors::cube_face() };
             let corners = face.corners;
             painter.add(egui::Shape::convex_polygon(corners.map(to_screen).to_vec(), fill, stroke));
             // A face seen nearly edge-on is too thin for its name.
@@ -314,7 +420,7 @@ impl Viewport {
                     egui::Align2::CENTER_CENTER,
                     name,
                     font,
-                    colors::CUBE_EDGE,
+                    colors::cube_edge(),
                 );
             }
         }
@@ -323,7 +429,7 @@ impl Viewport {
             painter.circle_filled(
                 to_screen(viewcube::screen_of(&self.camera, target)),
                 6.0,
-                colors::CUBE_HOVER,
+                colors::cube_hover(),
             );
             painter.circle_stroke(to_screen(viewcube::screen_of(&self.camera, target)), 6.0, stroke);
         }
@@ -431,6 +537,82 @@ impl Viewport {
         }
     }
 
+    /// Dragging a point of a 3D sketch with the select tool moves it in the plane through it that the
+    /// working plane sets; the solver keeps the constraints.
+    fn spatial_drag_input(
+        &mut self,
+        ui: &egui::Ui,
+        response: &egui::Response,
+        rect: egui::Rect,
+        session: &mut Session,
+        plane: &SketchPlane,
+        cursor: Option<egui::Pos2>,
+    ) {
+        if session.tool() != gc_tools::ToolKind::Select {
+            return;
+        }
+        let size = [f64::from(rect.width()), f64::from(rect.height())];
+        let to_view = |p: egui::Pos2| [f64::from(p.x - rect.left()), f64::from(p.y - rect.top())];
+        let local = |w: DVec3| {
+            let d = w - plane.origin;
+            DVec3::new(d.dot(plane.u), d.dot(plane.v), d.dot(plane.normal))
+        };
+        let turned = |d: DVec3| DVec3::new(d.dot(plane.u), d.dot(plane.v), d.dot(plane.normal));
+        let camera = self.camera;
+        let on_screen = move |p: DVec3| camera.project(plane.world(p.to_array()), size);
+        let points: Vec<(Id<gc_sketch::SkPoint>, DVec3)> = match session.active_sketch() {
+            Some((_, sketch)) => sketch
+                .points
+                .keys()
+                .filter_map(|id| Some((*id, DVec3::from_array(session.point_pos(*id)?))))
+                .collect(),
+            None => return,
+        };
+        let away = |screen: [f64; 2]| {
+            move |p: DVec3| {
+                on_screen(p).map(|s| ((s[0] - screen[0]).powi(2) + (s[1] - screen[1]).powi(2)).sqrt())
+            }
+        };
+        let on_plane = |at: egui::Pos2, axis: usize, level: f64| -> Option<[f64; 3]> {
+            let ray = camera.ray(to_view(at), size);
+            let (origin, dir) = (local(ray.origin), turned(ray.dir));
+            let (o, d) = (origin.to_array(), dir.to_array());
+            (d[axis].abs() > 0.1).then(|| {
+                let t = (level - o[axis]) / d[axis];
+                [o[0] + d[0] * t, o[1] + d[1] * t, o[2] + d[2] * t]
+            })
+        };
+        if response.drag_started_by(PointerButton::Primary)
+            && let Some(press) = ui.input(|i| i.pointer.press_origin())
+        {
+            let distance = away(to_view(press));
+            let grabbed = points
+                .iter()
+                .filter_map(|(id, pos)| Some((distance(*pos)?, *id, *pos)))
+                .filter(|(d, _, _)| *d <= gc_tools::tolerance::POINT_PX)
+                .min_by(|a, b| a.0.total_cmp(&b.0));
+            let axis = session.spatial_plane();
+            if let Some((_, id, pos)) = grabbed
+                && let Some(start) = on_plane(press, axis, pos[axis])
+                && session.spatial_drag_start(id, start)
+            {
+                self.spatial_drag = Some((axis, pos[axis]));
+            }
+        }
+        if let Some((axis, level)) = self.spatial_drag {
+            if response.dragged_by(PointerButton::Primary) {
+                if let Some(to) = cursor.and_then(|at| on_plane(at, axis, level)) {
+                    drop(session.spatial_drag_move(to));
+                }
+                ui.ctx().request_repaint();
+            }
+            if response.drag_stopped_by(PointerButton::Primary) {
+                session.spatial_drag_end();
+                self.spatial_drag = None;
+            }
+        }
+    }
+
     /// Input of a 3D sketch: the line tool places points along the cursor's ray, the other tools get what
     /// is under the cursor on screen.
     fn spatial_input(
@@ -518,6 +700,9 @@ impl Viewport {
             };
             // A glyph is picked by its letters, before the geometry under them.
             let glyph = paint::glyph_spots(plane, sketch, session, |w| {
+                if !self.show_constraints {
+                    return None;
+                }
                 let p = camera.project(w, size)?;
                 #[allow(clippy::cast_possible_truncation, reason = "screen coordinates fit f32")]
                 Some(egui::pos2(rect.left() + p[0] as f32, rect.top() + p[1] as f32))
@@ -675,6 +860,18 @@ impl Viewport {
         if session.sketch_is_spatial() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Tab)) {
             session.cycle_spatial_plane();
         }
+        if ctx.input(|i| i.key_pressed(Key::F7))
+            && session.active_sketch().is_some()
+            && !session.sketch_is_spatial()
+        {
+            self.slice = !self.slice;
+        }
+        if ctx.input(|i| i.key_pressed(Key::F8)) {
+            self.show_constraints = true;
+        }
+        if ctx.input(|i| i.key_pressed(Key::F9)) {
+            self.show_constraints = false;
+        }
         let (escape, delete) = ctx.input(|i| (i.key_pressed(Key::Escape), i.key_pressed(Key::Delete)));
         // Outside sketches the keys are about the selected item of the cell.
         if session.active_sketch().is_none() {
@@ -737,4 +934,81 @@ fn segment_distance(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
     };
     let q = [a[0] + t * d[0] - p[0], a[1] + t * d[1] - p[1]];
     (q[0] * q[0] + q[1] * q[1]).sqrt()
+}
+
+/// Selects what a selection box takes: dragged from left to right only what lies wholly inside (window),
+/// from right to left also what the box touches (crossing). With Ctrl or Shift the selection is kept and
+/// each item found is toggled; otherwise it is replaced.
+fn select_in_box(session: &mut Session, a: [f64; 2], b: [f64; 2], crossing: bool, keep: bool) {
+    let (lo, hi) = ([a[0].min(b[0]), a[1].min(b[1])], [a[0].max(b[0]), a[1].max(b[1])]);
+    let inside = |p: [f64; 3]| p[0] >= lo[0] && p[0] <= hi[0] && p[1] >= lo[1] && p[1] <= hi[1];
+    let overlaps = |min: [f64; 2], max: [f64; 2]| {
+        max[0] >= lo[0] && min[0] <= hi[0] && max[1] >= lo[1] && min[1] <= hi[1]
+    };
+    let wholly = |min: [f64; 2], max: [f64; 2]| {
+        min[0] >= lo[0] && max[0] <= hi[0] && min[1] >= lo[1] && max[1] <= hi[1]
+    };
+    let Some((_, sketch)) = session.active_sketch() else { return };
+    let mut found: Vec<gc_sketch::Item> = Vec::new();
+    for id in sketch.points.keys() {
+        if session.point_pos(*id).is_some_and(inside) {
+            found.push(gc_sketch::Item::Point(*id));
+        }
+    }
+    for (id, curve) in &sketch.curves {
+        let pos = |p| session.point_pos(p);
+        let bounds = match curve.geom {
+            CurveGeom::Line { a, b } => pos(a).zip(pos(b)).map(|(p, q)| {
+                ([p[0].min(q[0]), p[1].min(q[1])], [p[0].max(q[0]), p[1].max(q[1])], Some((p, q)))
+            }),
+            CurveGeom::Circle { c, .. } | CurveGeom::Arc { c, .. } => {
+                let r = session.radius(*id).unwrap_or(0.0);
+                pos(c).map(|c| ([c[0] - r, c[1] - r], [c[0] + r, c[1] + r], None))
+            }
+        };
+        let Some((min, max, ends)) = bounds else { continue };
+        let hit = if crossing {
+            // A line is taken when an end is inside or it crosses the box; a round curve by its bounds.
+            match ends {
+                Some((p, q)) => inside(p) || inside(q) || segment_crosses_box(p, q, lo, hi),
+                None => overlaps(min, max),
+            }
+        } else {
+            wholly(min, max)
+        };
+        if hit {
+            found.push(gc_sketch::Item::Curve(*id));
+        }
+    }
+    if !keep {
+        session.tool_event(ToolEvent::ClickItem { item: None, pos: [0.0; 2], modifier: false });
+    }
+    for item in found {
+        session.tool_event(ToolEvent::ClickItem { item: Some(item), pos: [0.0; 2], modifier: true });
+    }
+}
+
+/// Whether the segment `p`–`q` passes through the box `lo`–`hi` (Liang–Barsky).
+fn segment_crosses_box(p: [f64; 3], q: [f64; 3], lo: [f64; 2], hi: [f64; 2]) -> bool {
+    let (mut t0, mut t1) = (0.0_f64, 1.0_f64);
+    let delta = [q[0] - p[0], q[1] - p[1]];
+    for axis in 0..2 {
+        let (origin, d) = (p[axis], delta[axis]);
+        if d.abs() < 1e-15 {
+            if origin < lo[axis] || origin > hi[axis] {
+                return false;
+            }
+        } else {
+            let (mut a, mut b) = ((lo[axis] - origin) / d, (hi[axis] - origin) / d);
+            if a > b {
+                std::mem::swap(&mut a, &mut b);
+            }
+            t0 = t0.max(a);
+            t1 = t1.min(b);
+            if t0 > t1 {
+                return false;
+            }
+        }
+    }
+    true
 }

@@ -69,6 +69,10 @@ pub struct Settings {
     pub agent_port: u16,
     /// The access token agents must send; empty until one is made.
     pub agent_token: String,
+    /// The side panels are opaque instead of letting the 3D scene show through (default: see-through).
+    pub opaque_panels: bool,
+    /// The light colour scheme instead of the dark one (default: dark, as in Inventor 2026).
+    pub light_theme: bool,
 }
 
 /// The settings file in the settings folder.
