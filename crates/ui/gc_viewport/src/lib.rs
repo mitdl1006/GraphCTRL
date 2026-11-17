@@ -69,6 +69,9 @@ pub(crate) fn plane_of(session: &Session, sketch: &Sketch) -> SketchPlane {
 pub struct Viewport {
     /// Whether the frame time and draw statistics are shown in the corner.
     pub perf_overlay: bool,
+    /// The part of the window that no floating panel covers. The view cube and the statistics sit in its
+    /// corners and "fit" frames the model in it. `None`: the whole viewport.
+    pub clear: Option<egui::Rect>,
     /// Smoothed frame time in seconds.
     frame_time: f32,
     background: Background,
@@ -97,6 +100,7 @@ impl Viewport {
     pub fn new(render_state: Option<egui_wgpu::RenderState>) -> Self {
         Self {
             perf_overlay: false,
+            clear: None,
             frame_time: 0.0,
             background: Background::new(render_state),
             camera: Camera { distance: 0.35, ..Camera::default() },
@@ -146,7 +150,22 @@ impl Viewport {
         if bounds.is_empty() || bounds.diagonal() < 1e-6 {
             bounds = Aabb::from_points([DVec3::splat(-0.05), DVec3::splat(0.05)]);
         }
-        self.camera.fit(&bounds, size);
+        match self.clear.filter(|_| !self.rect.is_negative()) {
+            Some(clear) if self.rect.width() > 1.0 => {
+                // Frame the model in what the panels leave free, then move it to the middle of that.
+                let free = [f64::from(clear.width()), f64::from(clear.height())];
+                self.camera.fit(&bounds, free);
+                let whole = [f64::from(self.rect.width()), f64::from(self.rect.height())];
+                let shift = clear.center() - self.rect.center();
+                let middle = [whole[0] * 0.5, whole[1] * 0.5];
+                self.camera.pan(
+                    middle,
+                    [middle[0] + f64::from(shift.x), middle[1] + f64::from(shift.y)],
+                    whole,
+                );
+            }
+            _ => self.camera.fit(&bounds, size),
+        }
     }
 
     /// Shows the viewport and feeds the user's input to the view and to the session's tool.
@@ -257,7 +276,10 @@ impl Viewport {
         let painter = ui.painter_at(rect);
         let galley = painter.layout_no_wrap(text, egui::FontId::monospace(12.0), egui::Color32::WHITE);
         let frame = egui::Rect::from_min_size(
-            egui::pos2(rect.left() + 8.0, rect.bottom() - 8.0 - galley.size().y - 6.0),
+            egui::pos2(
+                self.clear.unwrap_or(rect).left() + 8.0,
+                self.clear.unwrap_or(rect).bottom() - 8.0 - galley.size().y - 6.0,
+            ),
             galley.size() + egui::vec2(12.0, 6.0),
         );
         painter.rect_filled(frame, 4.0, egui::Color32::from_black_alpha(170));
@@ -270,9 +292,10 @@ impl Viewport {
     fn view_cube(&mut self, ui: &mut egui::Ui, rect: egui::Rect, lang: Lang) {
         /// Pixels per cube unit (the cube's half-size).
         const HALF: f32 = 27.0;
-        let centre = rect.right_top() + egui::vec2(-74.0, 74.0);
+        let free = self.clear.unwrap_or(rect);
+        let centre = free.right_top() + egui::vec2(-74.0, 74.0);
         let area = egui::Rect::from_center_size(centre, egui::Vec2::splat(124.0));
-        self.cube_centre = rect.contains_rect(area).then_some(centre);
+        self.cube_centre = free.contains_rect(area).then_some(centre);
         if self.cube_centre.is_none() {
             return;
         }

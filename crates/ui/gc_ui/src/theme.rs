@@ -57,6 +57,32 @@ pub mod colors {
     pub const TEXT: Color32 = Color32::from_rgb(0x1F, 0x23, 0x28);
     /// Labels and notes.
     pub const MUTED: Color32 = Color32::from_rgb(0x6B, 0x72, 0x80);
+    /// Opacity of the floating side panels when they are see-through (0.84 of 255).
+    pub const PANEL_ALPHA: u8 = 214;
+    /// Space between a floating panel and the edge of the viewport, in points.
+    pub const PANEL_MARGIN: f32 = 8.0;
+}
+
+/// The fill of a floating side panel: the surface colour, see-through unless `opaque`.
+pub fn panel_fill(opaque: bool) -> egui::Color32 {
+    let surface = colors::SURFACE;
+    let alpha = if opaque { 255 } else { colors::PANEL_ALPHA };
+    egui::Color32::from_rgba_unmultiplied(surface.r(), surface.g(), surface.b(), alpha)
+}
+
+/// The frame of a floating side panel: rounded, hairline border, a soft shadow.
+pub fn panel_frame(opaque: bool) -> egui::Frame {
+    egui::Frame::new()
+        .fill(panel_fill(opaque))
+        .stroke(egui::Stroke::new(1.0, colors::BORDER))
+        .corner_radius(10)
+        .inner_margin(egui::Margin::same(8))
+        .shadow(egui::Shadow {
+            offset: [0, 2],
+            blur: 12,
+            spread: 0,
+            color: egui::Color32::from_black_alpha(40),
+        })
 }
 
 /// Applies the light theme: white raised surfaces on a light grey ground, hairline borders, rounded

@@ -63,6 +63,8 @@ pub struct Settings {
     pub version: u32,
     /// The interface language as a code (`ko`, `en`); empty for the default.
     pub language: String,
+    /// The side panels are opaque instead of letting the 3D scene show through (default: see-through).
+    pub opaque_panels: bool,
 }
 
 /// The settings file in the settings folder.

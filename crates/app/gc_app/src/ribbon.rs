@@ -64,6 +64,7 @@ pub(crate) fn show(
     viewport: &mut Viewport,
     cell: &mut CellUi,
     library: &[crate::app::LibraryRobot],
+    translucent: &mut bool,
     lang: Lang,
 ) -> Option<RibbonAction> {
     let mut action = None;
@@ -188,6 +189,13 @@ pub(crate) fn show(
                         .clicked()
                     {
                         viewport.camera.ortho = false;
+                    }
+                });
+                ribbon_group(ui, tr!(lang, GroupPanels), |ui| {
+                    if ribbon_button(ui, Icon::View, tr!(lang, ViewPanelsSeeThrough), *translucent, true)
+                        .clicked()
+                    {
+                        *translucent = !*translucent;
                     }
                 });
             }

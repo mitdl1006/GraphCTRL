@@ -520,6 +520,14 @@ messages! {
     /// Plan metric: the move was possible in a straight joint-space line.
     PlanStraight => ("직선 이동(플래너 불필요)", "Straight move (no planner needed)"),
     // --- frontend ---
+    /// Ribbon group of the View tab that holds the panel options.
+    GroupPanels => ("패널", "Panels"),
+    /// Folds a floating side panel away. `{0}` is the panel's name.
+    PanelFold => ("{0} 접기", "Fold {0}"),
+    /// Brings a folded side panel back. `{0}` is the panel's name.
+    PanelUnfold => ("{0} 펼치기", "Unfold {0}"),
+    /// View tab: whether the side panels let the 3D scene show through.
+    ViewPanelsSeeThrough => ("패널 반투명", "See-through panels"),
     /// Help menu: the log window.
     MenuLog => ("로그", "Log"),
     /// Plan card: what the checks guarantee. `{0}` padding mm, `{1}` step mm, `{2}` step degrees, `{3}` clearance mm.

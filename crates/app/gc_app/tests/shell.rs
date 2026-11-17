@@ -466,6 +466,8 @@ fn ur5e_close_up_renders_with_gpu() {
     harness.run();
     harness.query_all_by_label("원기둥").last().unwrap().click();
     harness.run();
+    harness.get_by_label("TCP를 툴 끝으로").scroll_to_me();
+    harness.run();
     harness.get_by_label("TCP를 툴 끝으로").click();
     harness.run();
     let stored = harness.state().session.doc().get(robot).unwrap();
@@ -1316,6 +1318,9 @@ fn a_3d_sketch_is_drawn_in_the_viewport() {
         })
         .unwrap();
     let world = app.session.active_sketch().map(|_| app.session.point_pos(q).unwrap()).unwrap();
+    // The panels float over the view now: move the drawing out from under the properties panel.
+    app.viewport_mut().camera.pan([0.0, 0.0], [-300.0, 0.0], [1280.0, 700.0]);
+    harness.run();
     let at = harness.state().viewport().screen_of(gc_math::DVec3::from_array(world)).unwrap();
     // The letters sit up and to the right of the point.
     let glyph = at + egui::vec2(8.0 + 14.0, -14.5);
@@ -1791,4 +1796,67 @@ fn the_log_window_shows_the_log() {
     harness.get_by_label("로그").click();
     harness.run();
     assert!(harness.query_by_label_contains("a line for the log window").is_some());
+}
+
+/// The browser and the properties float over the 3D view: the view fills the window, the panels can be
+/// folded, the mouse does not reach the view through them, and the view's overlays keep clear of them.
+#[test]
+fn the_side_panels_float_over_the_view() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("파일").click();
+    harness.run();
+    harness.get_by_label("예제 열기 (UR5e 셀)").click();
+    harness.run();
+    harness.get_by_label("뷰").click();
+    harness.run();
+    harness.get_by_label("전체 보기").click();
+    harness.run();
+
+    // The cube sits left of the properties panel (330 wide plus margins), not under it.
+    let (cube, half) = harness.state().viewport().view_cube_placement().unwrap();
+    assert!(cube.x + half < 1280.0 - 330.0 - 16.0, "{cube:?}");
+    // The view fills the window behind the panels.
+    let clear = harness.state().viewport().clear.unwrap();
+    assert!(clear.left() > 200.0 && clear.right() < 960.0, "{clear:?}");
+
+    if gpu {
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        harness.render().unwrap().save(out.join("review-29-floating-panels.png")).unwrap();
+    }
+
+    // A click on the properties panel's empty part is not a click in the view: nothing gets selected.
+    harness.state_mut().session.select_item(None);
+    let on_panel = egui::pos2(1280.0 - 8.0 - 160.0, 700.0);
+    harness.event(egui::Event::PointerMoved(on_panel));
+    harness.run();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: on_panel,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run();
+    }
+    assert!(harness.state().session.selected_item().is_none());
+
+    // Folding the properties gives its room back to the view.
+    harness.get_by_label("속성 접기").click();
+    harness.run();
+    let clear = harness.state().viewport().clear.unwrap();
+    assert!(clear.right() > 1200.0, "{clear:?}");
+    harness.get_by_label("속성 펼치기").click();
+    harness.run();
+    assert!(harness.state().viewport().clear.unwrap().right() < 960.0);
+
+    // The see-through option can be switched off in the View tab.
+    harness.get_by_label("패널 반투명").click();
+    harness.run();
+    harness.get_by_label("패널 반투명").click();
+    harness.run();
 }
