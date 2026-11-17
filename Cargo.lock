@@ -1611,6 +1611,8 @@ dependencies = [
  "gc_sketch",
  "gc_tools",
  "log",
+ "serde",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.21",
 ]

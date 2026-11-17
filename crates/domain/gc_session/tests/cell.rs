@@ -964,3 +964,46 @@ fn a_waypoint_is_measured_from_the_frame_chosen_without_moving() {
     session.undo();
     assert!(matches!(session.doc().get(waypoint).unwrap().target, WaypointTarget::InBase { .. }));
 }
+
+#[test]
+fn robots_come_from_the_library_and_projects_refer_to_it() {
+    use gc_session::library;
+    let directory = tempfile::tempdir().unwrap();
+    // A library with one package, and a folder that is not a package.
+    let lib = directory.path().join("robots");
+    std::fs::create_dir_all(lib.join("arm")).unwrap();
+    std::fs::create_dir_all(lib.join("notes")).unwrap();
+    std::fs::write(lib.join("arm/arm.urdf"), six_axis()).unwrap();
+    std::fs::write(
+        lib.join("arm/robot.json"),
+        r#"{ "name": "Arm", "vendor": "Test", "description": "arm.urdf", "license": "LICENSE", "license_name": "MIT" }"#,
+    )
+    .unwrap();
+    std::fs::write(lib.join("arm/LICENSE"), "licence text").unwrap();
+    let packages = library::scan(&lib);
+    assert_eq!(packages.len(), 1);
+    assert_eq!((packages[0].id.as_str(), packages[0].info.name.as_str()), ("arm", "Arm"));
+    assert_eq!(packages[0].license_text().as_deref(), Some("licence text"));
+    assert_eq!(library::find(&[directory.path().join("a/b")]), Some(lib.clone()), "found from below");
+
+    // Added from the library, the robot refers to it by name; a saved project keeps that name.
+    let mut session = Session::new();
+    session.set_robot_library(Some(lib.clone()));
+    let robot = session.add_library_robot(&packages[0]).unwrap();
+    assert_eq!(session.doc().get(robot).unwrap().resource_dir, "library://arm");
+    assert!(session.robot_model(robot).is_some());
+    let file = directory.path().join("project/cell.gctrl");
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    session.save_as(&file).unwrap();
+    assert!(std::fs::read_to_string(&file).unwrap().contains("\"library://arm\""));
+    assert!(!directory.path().join("project/cell_files").exists(), "nothing copied");
+
+    // Opened elsewhere with the library somewhere else, the robot is found there.
+    let moved = directory.path().join("other/robots");
+    std::fs::create_dir_all(moved.parent().unwrap()).unwrap();
+    std::fs::rename(&lib, &moved).unwrap();
+    let mut reopened = Session::new();
+    reopened.set_robot_library(Some(moved));
+    reopened.open(&file).unwrap();
+    assert!(reopened.robot_model(robot).is_some());
+}

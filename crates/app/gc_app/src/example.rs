@@ -8,12 +8,15 @@ use gc_sketch::DimKind;
 /// Where the arm starts: upright, tool pointing down.
 const HOME: [f64; 6] = [0.0, -1.9, 1.7, -1.37, -1.57, 0.0];
 
-/// Replaces the session's document with the example cell and starts planning its path. `urdf` is the
-/// UR5e's description from the robot library.
-pub fn open(session: &mut Session, urdf: &str) -> Result<(), String> {
+/// The library robot the example cell is built around.
+pub(crate) const ROBOT: &str = "UR5e";
+
+/// Replaces the session's document with the example cell and starts planning its path. `robot` is the
+/// library's [`ROBOT`].
+pub(crate) fn open(session: &mut Session, robot: &crate::app::LibraryRobot) -> Result<(), String> {
     let failed = |e: gc_doc::EditError| e.to_string();
     session.new_document();
-    let robot = session.add_robot("UR5e", urdf)?;
+    let robot = robot.add(session)?;
     session.jog(robot, &HOME);
     session.end_jog();
 

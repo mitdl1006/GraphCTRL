@@ -12,6 +12,7 @@
 #![cfg_attr(test, allow(clippy::float_cmp, reason = "tests compare exactly representable values"))]
 
 mod cell;
+pub mod library;
 mod project;
 mod spatial;
 

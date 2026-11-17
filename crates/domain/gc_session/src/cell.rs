@@ -383,6 +383,8 @@ pub(crate) struct CellState {
     resources: Option<Resources>,
     /// Plugins that offer closed-form inverse kinematics.
     kinematics: Vec<Arc<dyn gc_robotics_api::KinematicsFactory>>,
+    /// The robot library folder, where `library://` resource folders point.
+    library: Option<std::path::PathBuf>,
     /// The collision scene of the cell as it is shown, with what it was built from, and the last
     /// question asked of it with its answer. Rebuilt when a robot or a body moves.
     scene: std::cell::RefCell<Option<(String, RobotScene)>>,
@@ -418,6 +420,7 @@ impl Default for CellState {
             playback: None,
             resources: None,
             kinematics: Vec::new(),
+            library: None,
             files: BTreeMap::new(),
             meshes: BTreeMap::new(),
             scene: std::cell::RefCell::new(None),
@@ -437,7 +440,7 @@ impl CellState {
                     &robot.urdf,
                     Some((&robot.base_link, &robot.tip_link)),
                     self.resources.as_ref(),
-                    &robot.resource_dir,
+                    &self.resolve(&robot.resource_dir),
                 )
             {
                 // The first plugin that recognises the chain gives its closed form.
@@ -492,6 +495,14 @@ fn read_mesh_file(path: &str) -> Result<Arc<MeshData>, String> {
 }
 
 impl CellState {
+    /// A robot's resource folder as a path on this machine: `library://<package>` inside the library.
+    fn resolve(&self, resource_dir: &str) -> String {
+        match (resource_dir.strip_prefix(crate::library::LIBRARY_SCHEME), &self.library) {
+            (Some(package), Some(library)) => library.join(package).to_string_lossy().into_owned(),
+            _ => resource_dir.to_owned(),
+        }
+    }
+
     /// Makes sure the mesh of a body's solid is loaded at its scale.
     fn read_body_mesh(&mut self, solid: &Solid) {
         let Solid::Mesh { file, scale } = solid else { return };
@@ -735,8 +746,27 @@ impl Session {
         self.add_robot_from(&name, &urdf, &dir).map_err(|e| format!("{}:\n{e}", path.display()))
     }
 
+    /// Sets the robot library folder (where `library://` resource folders point) and reloads the robots.
+    pub fn set_robot_library(&mut self, dir: Option<std::path::PathBuf>) {
+        self.cell.library = dir;
+        self.cell.robots.clear();
+        self.cell.sync(&self.doc);
+    }
+
+    /// The robot library folder, when there is one.
+    pub fn robot_library(&self) -> Option<&std::path::Path> {
+        self.cell.library.as_deref()
+    }
+
+    /// Adds a robot from a package of the robot library at the world origin.
+    pub fn add_library_robot(&mut self, package: &crate::library::Package) -> Result<Id<Robot>, String> {
+        let name = format!("{}_{}", package.info.name, self.doc.robots().len() + 1);
+        self.add_robot_from(&name, &package.urdf()?, &package.resource_dir())
+    }
+
     fn add_robot_from(&mut self, name: &str, urdf: &str, resource_dir: &str) -> Result<Id<Robot>, String> {
-        let (loaded, base_link, tip_link) = load(urdf, None, self.cell.resources.as_ref(), resource_dir)?;
+        let dir = self.cell.resolve(resource_dir);
+        let (loaded, base_link, tip_link) = load(urdf, None, self.cell.resources.as_ref(), &dir)?;
         let robot = Robot {
             name: name.to_owned(),
             urdf: urdf.to_owned(),
