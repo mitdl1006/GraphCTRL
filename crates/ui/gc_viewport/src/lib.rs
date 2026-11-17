@@ -67,6 +67,10 @@ pub(crate) fn plane_of(session: &Session, sketch: &Sketch) -> SketchPlane {
 
 /// The viewport widget and its view state.
 pub struct Viewport {
+    /// Whether the frame time and draw statistics are shown in the corner.
+    pub perf_overlay: bool,
+    /// Smoothed frame time in seconds.
+    frame_time: f32,
     background: Background,
     /// The view camera.
     pub camera: Camera,
@@ -92,6 +96,8 @@ impl Viewport {
     /// A viewport that renders its background with `render_state` when there is one.
     pub fn new(render_state: Option<egui_wgpu::RenderState>) -> Self {
         Self {
+            perf_overlay: false,
+            frame_time: 0.0,
             background: Background::new(render_state),
             camera: Camera { distance: 0.35, ..Camera::default() },
             preset: NavPreset::Inventor,
@@ -231,8 +237,32 @@ impl Viewport {
         self.background.paint(ui, rect, &self.camera, &scene);
         paint::over(ui, rect, &self.camera, session, &scene, self.background.has_gpu());
         self.view_cube(ui, rect, lang);
+        if self.perf_overlay {
+            self.perf(ui, rect, lang);
+        }
         self.value_box(ui, rect, session, size);
         self.dimension_box(ui, rect, session, size);
+    }
+
+    /// Frame time, draw calls and triangles in the bottom-left corner. Keeps the viewport repainting, so the
+    /// frame time is the time of a frame and not of the wait between inputs.
+    fn perf(&mut self, ui: &egui::Ui, rect: egui::Rect, lang: Lang) {
+        let dt = ui.input(|i| i.unstable_dt).clamp(0.0, 1.0);
+        self.frame_time = if self.frame_time == 0.0 { dt } else { self.frame_time * 0.9 + dt * 0.1 };
+        let ms = self.frame_time * 1000.0;
+        let fps = if self.frame_time > 0.0 { 1.0 / self.frame_time } else { 0.0 };
+        let stats = self.background.stats();
+        let text =
+            tr!(lang, PerfStats, format!("{ms:.1}"), format!("{fps:.0}"), stats.draw_calls, stats.triangles);
+        let painter = ui.painter_at(rect);
+        let galley = painter.layout_no_wrap(text, egui::FontId::monospace(12.0), egui::Color32::WHITE);
+        let frame = egui::Rect::from_min_size(
+            egui::pos2(rect.left() + 8.0, rect.bottom() - 8.0 - galley.size().y - 6.0),
+            galley.size() + egui::vec2(12.0, 6.0),
+        );
+        painter.rect_filled(frame, 4.0, egui::Color32::from_black_alpha(170));
+        painter.galley(frame.min + egui::vec2(6.0, 3.0), galley, egui::Color32::WHITE);
+        ui.ctx().request_repaint();
     }
 
     /// The view cube in the top-right corner: shows how the view is turned; clicking a face, an edge or a
@@ -486,8 +516,23 @@ impl Viewport {
                     .filter(|(d, _)| *d <= gc_tools::tolerance::CURVE_PX)
                     .min_by(|a, b| a.0.total_cmp(&b.0))
             };
-            let item = point
-                .map(|(_, id)| gc_sketch::Item::Point(id))
+            // A glyph is picked by its letters, before the geometry under them.
+            let glyph = paint::glyph_spots(plane, sketch, session, |w| {
+                let p = camera.project(w, size)?;
+                #[allow(clippy::cast_possible_truncation, reason = "screen coordinates fit f32")]
+                Some(egui::pos2(rect.left() + p[0] as f32, rect.top() + p[1] as f32))
+            })
+            .into_iter()
+            .map(|spot| {
+                let half = 3.5 * spot.label.len().max(1) as f32;
+                let centre = if spot.label.is_empty() { spot.at } else { spot.at + egui::vec2(half, -5.0) };
+                (centre.distance(at) - half.min(8.0), spot.id)
+            })
+            .filter(|(d, _)| *d <= 6.0)
+            .min_by(|a, b| a.0.total_cmp(&b.0));
+            let item = glyph
+                .map(|(_, id)| gc_sketch::Item::Constraint(id))
+                .or_else(|| point.map(|(_, id)| gc_sketch::Item::Point(id)))
                 .or_else(|| line().map(|(_, id)| gc_sketch::Item::Curve(id)));
             session.tool_event(ToolEvent::ClickItem { item, pos: [0.0; 2], modifier: ctrl });
         }

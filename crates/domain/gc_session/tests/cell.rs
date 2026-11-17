@@ -59,6 +59,22 @@ fn a_path_around_a_pillar_is_planned_goes_stale_and_plays_back() {
     assert_eq!(session.doc().get(robot).unwrap().joints, LEFT.to_vec());
     session.set_playback(None);
 
+    // Nudging the obstacle makes the plan stale; the old path still clears it, so planning again keeps
+    // it as it was instead of finding another one (plan 5.8, re-planning ladder).
+    let nudged = gc_doc::Body {
+        placement: Placement { xyz: [0.55, 0.0, 0.699], rpy: [0.0; 3] },
+        ..session.doc().get(pillar).unwrap().clone()
+    };
+    let first_path = session.planned(path).unwrap().segments[0].path.clone();
+    session.execute(&Command::Cell(CellOp::SetBody { id: pillar, body: nudged })).unwrap();
+    assert_eq!(session.plan_status(path), PlanStatus::Stale);
+    assert_eq!(session.plan(path), PlanStatus::Ready, "{:?}", session.plan_error(path));
+    let kept = &session.planned(path).unwrap().segments[0];
+    assert!(kept.reused);
+    assert_eq!(kept.path, first_path);
+    assert!(session.undo());
+    assert_eq!(session.plan(path), PlanStatus::Ready);
+
     // Moving the obstacle makes the plan stale; undoing that makes it current again.
     let moved = gc_doc::Body {
         placement: Placement { xyz: [0.0, 0.9, 0.7], rpy: [0.0; 3] },
@@ -990,4 +1006,125 @@ fn robots_come_from_the_library_and_projects_refer_to_it() {
     reopened.set_robot_library(Some(moved));
     reopened.open(&file).unwrap();
     assert!(reopened.robot_model(robot).is_some());
+}
+
+#[test]
+fn link_pairs_can_be_listed_and_switched_and_plans_carry_a_guarantee() {
+    use gc_motion::PairReason;
+    let mut session = Session::new();
+    let robot = session.add_robot("Robot1", &six_axis()).unwrap();
+    let pairs = session.link_pairs(robot).unwrap();
+    assert!(pairs.iter().any(|p| p.reason == PairReason::Adjacent && !p.checked));
+    let checked = pairs.iter().find(|p| p.reason == PairReason::Checked).unwrap().clone();
+    assert!(checked.checked);
+
+    // Switching a pair off is a document edit (undoable) that shows in the list.
+    session.set_pair_checked(robot, &checked.b, &checked.a, false).unwrap();
+    let now = session.link_pairs(robot).unwrap();
+    assert!(!now.iter().find(|p| p.a == checked.a && p.b == checked.b).unwrap().checked);
+    assert_eq!(session.doc().get(robot).unwrap().acm_overrides.len(), 1);
+    // Back to what the description implies: the override goes.
+    session.set_pair_checked(robot, &checked.a, &checked.b, true).unwrap();
+    assert!(session.doc().get(robot).unwrap().acm_overrides.is_empty());
+    assert!(session.set_pair_checked(robot, "no_such_link", &checked.b, true).is_err());
+
+    // A plan carries its guarantee; a pair choice makes it stale.
+    session.jog(robot, &RIGHT);
+    session.end_jog();
+    let there = session.add_waypoint_here(robot).unwrap();
+    session.jog(robot, &LEFT);
+    session.end_jog();
+    let path = session.add_path(robot, vec![there]).unwrap();
+    assert_eq!(session.plan(path), PlanStatus::Ready, "{:?}", session.plan_error(path));
+    let guarantee = session.planned(path).unwrap().guarantee().unwrap();
+    assert_eq!(guarantee.padding_nominal, gc_session::PADDING);
+    assert!(guarantee.holds_between_states());
+    session.set_pair_checked(robot, &checked.a, &checked.b, false).unwrap();
+    assert_eq!(session.plan_status(path), PlanStatus::Stale);
+
+    // A contact allowance is stored with the path and makes the plan stale too.
+    session.plan(path);
+    let body = session
+        .add_body(Solid::Box { size: [0.05, 0.05, 0.05] }, Placement { xyz: [0.0, 0.9, 0.0], rpy: [0.0; 3] })
+        .unwrap();
+    session.plan(path);
+    session.allow_contact(path, 0, "tool0", body).unwrap();
+    assert_eq!(session.doc().get(path).unwrap().contacts.len(), 1);
+    assert_eq!(session.plan_status(path), PlanStatus::Stale);
+    assert!(session.allow_contact(path, 5, "tool0", body).is_err(), "no waypoint at position 5");
+}
+
+#[test]
+fn a_planner_from_a_plugin_is_found_by_its_id() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use gc_robotics_api::{
+        MotionPlanner, PlanControl, PlanFailure, PlanOutput, PlanRequest, PlannerCaps, PlannerDescriptor,
+        StateChecker,
+    };
+
+    /// Goes straight to the first goal through a midpoint, and counts its calls.
+    struct Midpoint(PlannerDescriptor, AtomicUsize);
+    impl MotionPlanner for Midpoint {
+        fn descriptor(&self) -> &PlannerDescriptor {
+            &self.0
+        }
+        fn plan(
+            &self,
+            req: &PlanRequest<'_>,
+            checker: &dyn StateChecker,
+            _control: &dyn PlanControl,
+        ) -> Result<PlanOutput, PlanFailure> {
+            self.1.fetch_add(1, Ordering::Relaxed);
+            let dof = req.start.len();
+            let goal = &req.goals[..dof];
+            let middle: Vec<f64> = req.start.iter().zip(goal).map(|(a, b)| (a + b) / 2.0).collect();
+            if !(checker.motion_valid(req.start, &middle) && checker.motion_valid(&middle, goal)) {
+                return Err(PlanFailure::NoValidGoal);
+            }
+            let path = [req.start, middle.as_slice(), goal].concat();
+            Ok(PlanOutput { path, goal_index: 0, cost: 0.0, stats: Default::default() })
+        }
+    }
+    let planner = Arc::new(Midpoint(
+        PlannerDescriptor {
+            id: "test.midpoint".to_owned(),
+            name: gc_plugin_api::Text::new("중점", "Midpoint"),
+            version: 1,
+            params: Default::default(),
+            caps: PlannerCaps::default(),
+        },
+        AtomicUsize::new(0),
+    ));
+    let mut session = Session::new();
+    session.set_planners(vec![planner.clone() as Arc<dyn MotionPlanner>]);
+    assert!(session.planner_choices().iter().any(|(id, _, en)| id == "test.midpoint" && en == "Midpoint"));
+    assert_eq!(session.planner_choices()[0].0, "rrt_connect");
+
+    let robot = session.add_robot("Robot1", &six_axis()).unwrap();
+    session.jog(robot, &RIGHT);
+    session.end_jog();
+    let there = session.add_waypoint_here(robot).unwrap();
+    session.jog(robot, &LEFT);
+    session.end_jog();
+    // A small block on the straight joint line, so that the planner is asked.
+    let path = session.add_path(robot, vec![there]).unwrap();
+    session
+        .execute(&Command::Cell(CellOp::SetPlanner { id: path, planner: "test.midpoint".into(), seed: 0 }))
+        .unwrap();
+    assert_eq!(session.plan(path), PlanStatus::Ready, "{:?}", session.plan_error(path));
+    // The straight line was free: no planner needed.
+    assert_eq!(planner.1.load(Ordering::Relaxed), 0);
+    session
+        .add_body(Solid::Box { size: [0.1, 0.1, 1.4] }, Placement { xyz: [0.55, 0.0, 0.7], rpy: [0.0; 3] })
+        .unwrap();
+    session.plan(path);
+    assert!(planner.1.load(Ordering::Relaxed) > 0, "the plugin planner was asked");
+    // An id nobody offers is refused with the id.
+    session
+        .execute(&Command::Cell(CellOp::SetPlanner { id: path, planner: "nobody".into(), seed: 0 }))
+        .unwrap();
+    assert_eq!(session.plan(path), PlanStatus::Failed);
+    assert!(session.plan_error(path).unwrap().contains("nobody"));
 }

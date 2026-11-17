@@ -1,6 +1,5 @@
 //! A robot in its cell: the collision model and the validity checks built on it.
 
-use std::cell::RefCell;
 use std::sync::Arc;
 
 use gc_collide::{BodyId, CollideError, Proximity, ShapeDesc, World, hulls_of};
@@ -52,7 +51,60 @@ pub enum StateProblem {
     Unknown,
 }
 
+/// Where a [`ContactAllowance`] applies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ContactScope {
+    /// Near the waypoints of the motion: while the tool centre point is within the radius of the start
+    /// or the goal.
+    Waypoint,
+    /// Along the whole motion.
+    Segment,
+}
+
+/// Lets a robot part come closer to an obstacle than the padding where the work needs it (plan 5.7):
+/// the pair is checked without padding there, and touching is refused unless `allow_touch`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContactAllowance {
+    /// The robot link (a tool is part of the link that carries it).
+    pub body: String,
+    /// The obstacle.
+    pub obstacle: String,
+    /// Where it applies.
+    pub scope: ContactScope,
+    /// For [`ContactScope::Waypoint`]: how far from a waypoint the tool centre point may be, metres
+    /// (50 mm by default).
+    pub radius: f64,
+    /// Overlap is allowed too, not only a gap below the padding.
+    pub allow_touch: bool,
+}
+
+impl ContactAllowance {
+    /// The usual allowance: no padding within 50 mm of a waypoint, no touching.
+    pub fn near_waypoint(body: &str, obstacle: &str) -> Self {
+        Self {
+            body: body.to_owned(),
+            obstacle: obstacle.to_owned(),
+            scope: ContactScope::Waypoint,
+            radius: 0.05,
+            allow_touch: false,
+        }
+    }
+}
+
+/// A contact allowance with its bodies found and its waypoints placed.
+#[derive(Clone, Debug)]
+struct Contact {
+    link: BodyId,
+    obstacle: BodyId,
+    /// `None`: everywhere. Otherwise the points the tool centre point must be near, and how near.
+    near: Option<(Vec<gc_math::DVec3>, f64)>,
+    allow_touch: bool,
+    /// The pair was excluded from checking anyway.
+    excluded: bool,
+}
+
 /// A robot placed in a cell with obstacles.
+#[derive(Clone)]
 pub struct RobotScene {
     model: Arc<RobotModel>,
     chain: Chain,
@@ -67,6 +119,39 @@ pub struct RobotScene {
     tool: DPose3,
     /// Largest joint step between checked states of a motion, before refinement.
     resolution: f64,
+    /// Per link: the largest distance of a point of its collision body from the link's origin (0 without
+    /// a body).
+    link_radius: Vec<f64>,
+    /// Per chain coordinate: the model joint, whether it slides, and the links (with bodies) it moves.
+    movers: Vec<(usize, bool, Vec<usize>)>,
+    /// Contact allowances in force.
+    contacts: Vec<Contact>,
+    /// Link pairs excluded from checking by default, and why.
+    exclusions: Vec<(BodyId, BodyId, PairReason)>,
+}
+
+/// Why a pair of robot links is or is not checked by default.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PairReason {
+    /// Joined by a joint: not checked.
+    Adjacent,
+    /// Touching in the zero configuration, so designed to: not checked.
+    TouchingAtZero,
+    /// Checked.
+    Checked,
+}
+
+/// A pair of robot links and how it is checked ([`RobotScene::link_pairs`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LinkPair {
+    /// One link.
+    pub a: String,
+    /// The other link (`a < b`).
+    pub b: String,
+    /// What the description implies.
+    pub reason: PairReason,
+    /// Whether the pair is checked now, after the user's choices.
+    pub checked: bool,
 }
 
 impl RobotScene {
@@ -95,6 +180,7 @@ impl RobotScene {
         let tip_link = model.link(tip_link).unwrap_or(model.root);
         let mut missing = Vec::new();
         let mut link_bodies = Vec::with_capacity(model.links.len());
+        let mut link_radius = Vec::with_capacity(model.links.len());
         for (index, link) in model.links.iter().enumerate() {
             let mut shapes = Vec::new();
             // A tool is part of the link that carries it.
@@ -132,25 +218,89 @@ impl RobotScene {
                     },
                 }
             }
+            link_radius.push(
+                shapes
+                    .iter()
+                    .map(|(pose, shape)| pose.translation.length() + shape.radius())
+                    .fold(0.0, f64::max),
+            );
             link_bodies.push(if shapes.is_empty() {
                 None
             } else {
                 Some(world.add_body(&link.name, true, padding, &shapes)?)
             });
         }
+        let mut exclusions = Vec::new();
         for joint in &model.joints {
             if let (Some(a), Some(b)) = (link_bodies[joint.parent], link_bodies[joint.child]) {
                 world.allow(a, b);
+                exclusions.push((a, b, PairReason::Adjacent));
             }
         }
+        // Links that no chain joint moves (the base, typically) keep their distance to every obstacle
+        // whatever the configuration: checking them tells nothing about a motion, and a base standing on
+        // a table would otherwise make every configuration invalid.
+        let static_links: Vec<BodyId> = {
+            let mut still = Vec::new();
+            let mut moved = Vec::new();
+            model.link_poses(&chain.expand(&vec![0.0; chain.dof()]), &mut still);
+            model.link_poses(&chain.expand(&vec![0.7; chain.dof()]), &mut moved);
+            link_bodies
+                .iter()
+                .zip(still.iter().zip(&moved))
+                .filter_map(|(body, (a, b))| body.filter(|_| a == b))
+                .collect()
+        };
         for obstacle in obstacles {
             let body =
                 world.add_body(&obstacle.name, false, 0.0, &[(DPose3::IDENTITY, obstacle.shape.clone())])?;
             world.set_pose(body, obstacle.pose);
+            for link in &static_links {
+                world.allow(*link, body);
+            }
         }
+        // The links each chain joint moves: those below its child link in the tree.
+        let parent_joint: Vec<Option<usize>> = (0..model.links.len())
+            .map(|link| model.joints.iter().position(|joint| joint.child == link))
+            .collect();
+        let movers = chain
+            .active_joints()
+            .iter()
+            .map(|&joint| {
+                let below = (0..model.links.len())
+                    .filter(|&link| link_bodies[link].is_some())
+                    .filter(|&link| {
+                        let mut at = link;
+                        // Walk up the tree (at most once per joint, so a malformed tree cannot loop).
+                        for _ in 0..=model.joints.len() {
+                            match parent_joint[at] {
+                                Some(j) if j == joint => return true,
+                                Some(j) => at = model.joints[j].parent,
+                                None => return false,
+                            }
+                        }
+                        false
+                    })
+                    .collect();
+                (joint, model.joints[joint].kind == gc_robot::JointKind::Prismatic, below)
+            })
+            .collect();
         let tool = DPose3::IDENTITY;
-        let mut scene =
-            Self { model, chain, base, world, link_bodies, tip_link, tool, resolution: 0.02, padding };
+        let mut scene = Self {
+            model,
+            chain,
+            base,
+            world,
+            link_bodies,
+            tip_link,
+            tool,
+            resolution: 0.02,
+            padding,
+            link_radius,
+            movers,
+            contacts: Vec::new(),
+            exclusions,
+        };
         // Links that touch in the zero configuration are designed to: they are not checked either.
         scene.place(&vec![0.0; scene.chain.dof()]);
         let bodies: Vec<BodyId> = scene.link_bodies.iter().flatten().copied().collect();
@@ -158,6 +308,7 @@ impl RobotScene {
             for b in &bodies[i + 1..] {
                 if !scene.world.is_allowed(*a, *b) && scene.world.proximity(*a, *b)? == Proximity::Colliding {
                     scene.world.allow(*a, *b);
+                    scene.exclusions.push((*a, *b, PairReason::TouchingAtZero));
                 }
             }
         }
@@ -229,7 +380,31 @@ impl RobotScene {
         {
             return Some(StateProblem::JointLimit { joint: self.chain.joint_names()[joint].clone() });
         }
-        self.place_in(world, q);
+        let poses = self.link_poses(q);
+        for (pose, body) in poses.iter().zip(&self.link_bodies) {
+            if let Some(body) = body {
+                world.set_pose(*body, *pose);
+            }
+        }
+        if !self.contacts.is_empty() {
+            let tip = (poses[self.tip_link] * self.tool).translation;
+            for contact in &self.contacts {
+                let active = contact
+                    .near
+                    .as_ref()
+                    .is_none_or(|(points, radius)| points.iter().any(|p| (*p - tip).length() <= *radius));
+                match (active, contact.allow_touch) {
+                    (true, true) => world.allow(contact.link, contact.obstacle),
+                    (true, false) => world.set_pair_padding(contact.link, contact.obstacle, Some(0.0)),
+                    (false, _) => {
+                        world.set_pair_padding(contact.link, contact.obstacle, None);
+                        if !contact.excluded {
+                            world.disallow(contact.link, contact.obstacle);
+                        }
+                    }
+                }
+            }
+        }
         match world.first_hit() {
             Ok(None) => None,
             Ok(Some(hit)) => {
@@ -260,6 +435,133 @@ impl RobotScene {
         self.padding
     }
 
+    /// The scene with contact allowances in force for a motion whose waypoints put the tool centre point
+    /// at `waypoints` (world positions). Returns the allowances naming a body or obstacle the scene does
+    /// not have; they are left out.
+    #[must_use]
+    pub fn with_contacts(
+        mut self,
+        allowances: &[ContactAllowance],
+        waypoints: &[gc_math::DVec3],
+    ) -> (Self, Vec<ContactAllowance>) {
+        let mut unknown = Vec::new();
+        self.contacts.clear();
+        for allowance in allowances {
+            let link = self.world.find(&allowance.body).filter(|b| self.link_bodies.contains(&Some(*b)));
+            let obstacle =
+                self.world.find(&allowance.obstacle).filter(|b| !self.link_bodies.contains(&Some(*b)));
+            let (Some(link), Some(obstacle)) = (link, obstacle) else {
+                unknown.push(allowance.clone());
+                continue;
+            };
+            let near = match allowance.scope {
+                ContactScope::Segment => None,
+                ContactScope::Waypoint => Some((waypoints.to_vec(), allowance.radius.max(0.0))),
+            };
+            let excluded = self.world.is_allowed(link, obstacle);
+            self.contacts.push(Contact {
+                link,
+                obstacle,
+                near,
+                allow_touch: allowance.allow_touch,
+                excluded,
+            });
+        }
+        (self, unknown)
+    }
+
+    /// Every pair of robot links with collision geometry: why it is or is not checked by default, and
+    /// whether it is checked now. Sorted by name.
+    pub fn link_pairs(&self) -> Vec<LinkPair> {
+        let bodies: Vec<BodyId> = self.link_bodies.iter().flatten().copied().collect();
+        let mut pairs = Vec::new();
+        for (i, a) in bodies.iter().enumerate() {
+            for b in &bodies[i + 1..] {
+                let reason = self
+                    .exclusions
+                    .iter()
+                    .find(|(x, y, _)| (x == a && y == b) || (x == b && y == a))
+                    .map_or(PairReason::Checked, |(_, _, reason)| *reason);
+                let (na, nb) = (self.world.name(*a).to_owned(), self.world.name(*b).to_owned());
+                let (na, nb) = if na <= nb { (na, nb) } else { (nb, na) };
+                pairs.push(LinkPair { a: na, b: nb, reason, checked: !self.world.is_allowed(*a, *b) });
+            }
+        }
+        pairs.sort_by(|x, y| (&x.a, &x.b).cmp(&(&y.a, &y.b)));
+        pairs
+    }
+
+    /// The scene with the user's choices for link pairs: `(a, b, true)` checks a pair excluded by default,
+    /// `(a, b, false)` stops checking one. Names that are not links with geometry are ignored.
+    #[must_use]
+    pub fn with_pair_choices(mut self, choices: &[(String, String, bool)]) -> Self {
+        let link = |scene: &Self, name: &str| {
+            scene.world.find(name).filter(|body| scene.link_bodies.contains(&Some(*body)))
+        };
+        for (a, b, check) in choices {
+            if let (Some(x), Some(y)) = (link(&self, a), link(&self, b))
+                && x != y
+            {
+                if *check {
+                    self.world.disallow(x, y);
+                } else {
+                    self.world.allow(x, y);
+                }
+            }
+        }
+        self
+    }
+
+    /// True when contact allowances are in force: some pairs are then checked without padding somewhere.
+    pub fn has_contacts(&self) -> bool {
+        !self.contacts.is_empty()
+    }
+
+    /// An upper bound of how far any point of a robot body moves on the joint-space segment from `a` to
+    /// `b` (metres): `Σ_j r_j·|Δq_j|`, where `r_j` is the largest distance from joint `j` to a point of a
+    /// body it moves, taken at both ends (a sliding joint moves everything below it by `|Δq_j|`).
+    pub fn sweep_bound(&self, a: &[f64], b: &[f64]) -> f64 {
+        let ends = [self.link_poses(a), self.link_poses(b)];
+        let mut total = 0.0;
+        for (k, (joint, slides, below)) in self.movers.iter().enumerate() {
+            let delta = (b.get(k).copied().unwrap_or(0.0) - a.get(k).copied().unwrap_or(0.0)).abs();
+            if *slides {
+                total += delta;
+                continue;
+            }
+            let pivot_link = self.model.joints[*joint].child;
+            let radius = ends
+                .iter()
+                .flat_map(|poses| {
+                    let pivot = poses[pivot_link].translation;
+                    below.iter().map(move |link| {
+                        (poses[*link].translation - pivot).length() + self.link_radius[*link]
+                    })
+                })
+                .fold(0.0, f64::max);
+            total += radius * delta;
+        }
+        total
+    }
+
+    /// The body pairs that are never checked (neighbouring links, links that touch in the zero
+    /// configuration, the base against obstacles, ...), by name.
+    pub fn excluded_pairs(&self) -> Vec<(String, String)> {
+        self.world.allowed_pairs()
+    }
+
+    /// A fingerprint of [`RobotScene::excluded_pairs`] (FNV-1a), recorded in a [`crate::Guarantee`].
+    pub fn excluded_pairs_hash(&self) -> u64 {
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        for (a, b) in self.excluded_pairs() {
+            for byte in a.bytes().chain([0]).chain(b.bytes()).chain([0]) {
+                hash ^= u64::from(byte);
+                hash = hash.wrapping_mul(0x0100_0000_01b3);
+            }
+        }
+        hash
+    }
+
     /// A validity checker for planning at a fraction of the normal checking step (`fineness` 1 is the
     /// normal step, 0.25 a quarter of it). It owns a working copy of the collision world.
     ///
@@ -281,14 +583,14 @@ impl RobotScene {
         for body in self.link_bodies.iter().flatten() {
             world.set_padding(*body, self.padding + margin);
         }
-        Checker { scene: self, world: RefCell::new(world), margin, resolution }
+        Checker { scene: self, world: std::sync::Mutex::new(world), margin, resolution }
     }
 }
 
 /// Answers the planners' validity questions for a [`RobotScene`].
 pub struct Checker<'a> {
     scene: &'a RobotScene,
-    world: RefCell<World>,
+    world: std::sync::Mutex<World>,
     margin: f64,
     /// Largest joint step between checked states of a motion.
     resolution: f64,
@@ -303,7 +605,8 @@ impl Checker<'_> {
 
 impl Validity for Checker<'_> {
     fn state_valid(&self, q: &[f64]) -> bool {
-        self.scene.problem_in(&mut self.world.borrow_mut(), q).is_none()
+        // A poisoned lock means a check panicked: nothing is valid then.
+        self.world.lock().is_ok_and(|mut world| self.scene.problem_in(&mut world, q).is_none())
     }
 
     fn motion_valid(&self, a: &[f64], b: &[f64]) -> bool {

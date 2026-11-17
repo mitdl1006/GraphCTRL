@@ -1344,6 +1344,7 @@ dependencies = [
  "gc_panels",
  "gc_persist",
  "gc_plugin_api",
+ "gc_plugin_planners",
  "gc_plugin_ur",
  "gc_render",
  "gc_robotics_api",

@@ -36,7 +36,7 @@ pub trait Validity {
 }
 
 /// Lets the caller stop a running planner.
-pub trait Control {
+pub trait Control: Sync {
     /// True once planning should stop.
     fn cancelled(&self) -> bool;
 }

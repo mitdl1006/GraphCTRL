@@ -19,7 +19,8 @@ mod history;
 mod txn;
 
 pub use cell::{
-    Body, CellOp, Look, MotionPath, Placement, Robot, Solid, Tool, Waypoint, WaypointTarget, WorkFrame,
+    AcmOverride, Body, CellOp, ContactAllowance, Look, MotionPath, Placement, Robot, Solid, Tool, Waypoint,
+    WaypointTarget, WorkFrame,
 };
 pub use command::{Applied, Command, Created, EditError, EndSnap, SketchOp, apply};
 pub use document::{ChangeSet, Contents, DocDelta, Document, Frame, FrameKind, Param, Store, Table};

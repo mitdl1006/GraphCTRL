@@ -383,6 +383,7 @@ pub(crate) fn dimension_anchor(
 
 /// Dimensions and the line in progress of a 3D sketch.
 fn spatial_marks(view: &View<'_>, plane: &SketchPlane, sketch: &Sketch, session: &Session) {
+    glyphs(view, plane, sketch, session);
     let selection = session.selection();
     for (id, dimension) in &sketch.dimensions {
         let Some(anchor) = dimension_anchor(session, sketch, &dimension.kind) else { continue };
@@ -428,8 +429,22 @@ fn spatial_marks(view: &View<'_>, plane: &SketchPlane, sketch: &Sketch, session:
     }
 }
 
-/// Small letters next to the geometry that say which constraints apply.
-fn glyphs(view: &View<'_>, plane: &SketchPlane, sketch: &Sketch, session: &Session) {
+/// One constraint glyph: which constraint, its letters (empty for a coincidence, drawn as a ring) and
+/// where it sits on screen.
+pub(crate) struct GlyphSpot {
+    pub(crate) id: gc_core::Id<gc_sketch::GeoConstraint>,
+    pub(crate) label: &'static str,
+    pub(crate) at: egui::Pos2,
+}
+
+/// Where the glyphs of the constraints of a sketch go. Glyphs that land on the same spot are stacked
+/// instead of drawn over each other. `screen` projects a world position into the window.
+pub(crate) fn glyph_spots(
+    plane: &SketchPlane,
+    sketch: &Sketch,
+    session: &Session,
+    screen: impl Fn(DVec3) -> Option<egui::Pos2>,
+) -> Vec<GlyphSpot> {
     let point = |p| session.point_pos(p).map(|p| plane.world(p));
     let middle = |curve: gc_core::Id<Curve>| -> Option<DVec3> {
         match sketch.curves.get(&curve)?.geom {
@@ -441,11 +456,12 @@ fn glyphs(view: &View<'_>, plane: &SketchPlane, sketch: &Sketch, session: &Sessi
         }
     };
     let mut used: std::collections::BTreeMap<(i32, i32), f32> = std::collections::BTreeMap::new();
+    let mut spots = Vec::new();
     for (id, constraint) in &sketch.constraints {
         let (label, anchor) = match *constraint {
             GeoConstraint::Coincident(p, _) => {
-                if let Some(at) = point(p).and_then(|w| view.screen(w)) {
-                    view.painter.circle_stroke(at, 4.5, Stroke::new(1.2, colors::GLYPH));
+                if let Some(at) = point(p).and_then(&screen) {
+                    spots.push(GlyphSpot { id: *id, label: "", at });
                 }
                 continue;
             }
@@ -461,21 +477,29 @@ fn glyphs(view: &View<'_>, plane: &SketchPlane, sketch: &Sketch, session: &Sessi
             GeoConstraint::Concentric(_, b) => ("O", middle(b)),
             GeoConstraint::Symmetric { p, .. } => ("sym", point(p)),
             GeoConstraint::Fix(p) => ("fix", point(p)),
-            GeoConstraint::AlongAxis { q, .. } => ("ax", point(q)),
+            GeoConstraint::AlongAxis { q, axis, .. } => (["ax X", "ax Y", "ax Z"][axis % 3], point(q)),
             GeoConstraint::OnPlane { p, .. } => ("pl", point(p)),
         };
-        let Some(at) = anchor.and_then(|w| view.screen(w)) else { continue };
-        // Glyphs that land on the same spot are stacked instead of drawn over each other.
+        let Some(at) = anchor.and_then(&screen) else { continue };
         #[allow(clippy::cast_possible_truncation, reason = "coarse screen cell")]
         let cell = ((at.x / 16.0) as i32, (at.y / 16.0) as i32);
         let stack = used.entry(cell).or_insert(0.0);
-        let color = if session.selection().contains(&Item::Constraint(*id)) {
-            colors::SELECTED
+        spots.push(GlyphSpot { id: *id, label, at: at + vec2(8.0 + *stack, -9.0) });
+        *stack += 16.0 * label.len().max(1) as f32 * 0.6;
+    }
+    spots
+}
+
+/// Small letters next to the geometry that say which constraints apply.
+fn glyphs(view: &View<'_>, plane: &SketchPlane, sketch: &Sketch, session: &Session) {
+    for spot in glyph_spots(plane, sketch, session, |w| view.screen(w)) {
+        let selected = session.selection().contains(&Item::Constraint(spot.id));
+        let color = if selected { colors::SELECTED } else { colors::GLYPH };
+        if spot.label.is_empty() {
+            view.painter.circle_stroke(spot.at, 4.5, Stroke::new(1.2, color));
         } else {
-            colors::GLYPH
-        };
-        view.text(at + vec2(8.0 + *stack, -9.0), Align2::LEFT_BOTTOM, label, 11.0, color);
-        *stack += 16.0;
+            view.text(spot.at, Align2::LEFT_BOTTOM, spot.label, 11.0, color);
+        }
     }
 }
 

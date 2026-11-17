@@ -1,6 +1,6 @@
 //! The planners: RRT-Connect, RRT, RRT*, Informed RRT* and PRM.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 
 use crate::rng::Rng;
 use crate::simplify::path_cost;
@@ -18,7 +18,7 @@ pub enum Algorithm {
     RrtStar,
     /// RRT* that, once it has a path, samples only where a shorter one could be.
     InformedRrtStar,
-    /// A roadmap of random states searched with A*.
+    /// A roadmap of random states searched with A*, its joins checked lazily (only on the way found).
     Prm,
 }
 
@@ -33,7 +33,7 @@ pub struct Options {
     pub max_iterations: u64,
     /// Upper bound on single-state validity checks (motion checks count the states they examine).
     pub max_state_checks: u64,
-    /// PRM: number of roadmap states.
+    /// PRM: roadmap states added per round (a round is added when the roadmap does not connect).
     pub prm_samples: usize,
     /// PRM: neighbours each state is connected to.
     pub prm_neighbours: usize,
@@ -247,6 +247,38 @@ impl Search<'_> {
         self.goals.iter().map(|(_, g)| g.to_vec()).collect()
     }
 
+    /// Grows `tree` from its node nearest to the goal at `position` (in `self.goals`) straight towards
+    /// that goal, one extension step at a time, until the goal is in reach or the way is blocked. Returns
+    /// the node from which the goal itself is reached (the goal is not added to the tree).
+    fn connect_to_goal(
+        &self,
+        tree: &mut Tree,
+        children: &mut Vec<Vec<usize>>,
+        monitor: &mut Monitor<'_>,
+        position: usize,
+    ) -> Option<usize> {
+        let goal = self.goals[position].1;
+        let mut at = tree.nearest(self.space, goal);
+        loop {
+            let (step, reached) = self.space.steer(tree.get(at), goal, self.options.range);
+            // The goal is known to be valid; an intermediate state is checked first.
+            if !((reached || monitor.state(&step)) && monitor.motion(tree.get(at), &step)) {
+                return None;
+            }
+            if reached {
+                return Some(at);
+            }
+            let d = self.space.distance(tree.get(at), &step);
+            let added = tree.add(&step, at, d);
+            children.push(Vec::new());
+            children[at].push(added);
+            at = added;
+            if monitor.stats.state_checks >= self.options.max_state_checks || monitor.control.cancelled() {
+                return None;
+            }
+        }
+    }
+
     fn rrt_connect(&self, monitor: &mut Monitor<'_>, rng: &mut Rng) -> Result<Found, f64> {
         let dof = self.space.dof();
         let mut from_start = Tree::new(dof);
@@ -305,18 +337,29 @@ impl Search<'_> {
     fn rrt(&self, monitor: &mut Monitor<'_>, rng: &mut Rng) -> Result<Found, f64> {
         let mut tree = Tree::new(self.space.dof());
         tree.add_root(self.start, 0);
+        let mut children: Vec<Vec<usize>> = vec![Vec::new()];
         while monitor.proceed() {
-            let target = if rng.unit() < self.options.goal_bias {
-                self.goals[rng.below(self.goals.len())].1.to_vec()
-            } else {
-                self.window.sample(rng)
-            };
+            // Now and then head for a goal as far as the way is free, instead of one step at a time:
+            // uniform samples alone rarely bring a six-dimensional tree within one step of a goal.
+            if rng.unit() < self.options.goal_bias {
+                let position = rng.below(self.goals.len());
+                if let Some(node) = self.connect_to_goal(&mut tree, &mut children, monitor, position) {
+                    let mut path = tree.branch(node);
+                    path.push(self.goals[position].1.to_vec());
+                    path.dedup();
+                    monitor.stats.nodes = tree.len() as u64;
+                    return Ok((path, self.goals[position].0));
+                }
+                continue;
+            }
+            let target = self.window.sample(rng);
             let near = tree.nearest(self.space, &target);
             let (new, _) = self.space.steer(tree.get(near), &target, self.options.range);
             if !(monitor.state(&new) && monitor.motion(tree.get(near), &new)) {
                 continue;
             }
             let added = tree.add(&new, near, self.space.distance(tree.get(near), &new));
+            children.push(Vec::new());
             for (index, goal) in &self.goals {
                 if within_range(&new, goal, self.options.range) && monitor.motion(&new, goal) {
                     let mut path = tree.branch(added);
@@ -342,12 +385,37 @@ impl Search<'_> {
             tree.cost[link.0] + self.space.distance(tree.get(link.0), self.goals[link.1].1)
         };
         while monitor.proceed() {
-            let mut sample = self.window.sample(rng);
-            // Until a goal is connected, steer towards one now and then, as plain RRT does: uniform
-            // samples alone rarely land within one step of a goal in six dimensions.
-            if best.is_none() && rng.unit() < self.options.goal_bias {
-                sample = self.goals[rng.below(self.goals.len())].1.to_vec();
+            // Until a goal is connected the tree grows as plain RRT's does: choosing parents and
+            // rewiring cost many motion checks per new state and only pay off once there is a path to
+            // improve. Rewiring from then on still makes the result converge to the shortest path.
+            if best.is_none() {
+                if rng.unit() < self.options.goal_bias {
+                    let position = rng.below(self.goals.len());
+                    if let Some(node) = self.connect_to_goal(&mut tree, &mut children, monitor, position) {
+                        best = Some((node, position));
+                    }
+                    continue;
+                }
+                let sample = self.window.sample(rng);
+                let near = tree.nearest(self.space, &sample);
+                let (new, _) = self.space.steer(tree.get(near), &sample, self.options.range);
+                if !(monitor.state(&new) && monitor.motion(tree.get(near), &new)) {
+                    continue;
+                }
+                let added = tree.add(&new, near, self.space.distance(tree.get(near), &new));
+                children.push(Vec::new());
+                children[near].push(added);
+                for (position, (_, goal)) in self.goals.iter().enumerate() {
+                    if best.is_none()
+                        && within_range(&new, goal, self.options.range)
+                        && monitor.motion(&new, goal)
+                    {
+                        best = Some((added, position));
+                    }
+                }
+                continue;
             }
+            let mut sample = self.window.sample(rng);
             if let (true, Some(link)) = (informed, best) {
                 // Only states through which a shorter path could pass are worth sampling.
                 let bound = total(&tree, link);
@@ -437,75 +505,84 @@ impl Search<'_> {
         }
     }
 
+    /// Lazy PRM: a roadmap of valid random states joined to their nearest neighbours without checking the
+    /// joins; the shortest way through it is searched, and only the joins on that way are checked. A join
+    /// that fails is removed and the search repeated. When the roadmap does not connect start and goal,
+    /// another batch of states is added while the budget lasts.
     fn prm(&self, monitor: &mut Monitor<'_>, rng: &mut Rng) -> Result<Found, f64> {
         // Node 0 is the start, nodes 1..=g are the goals, the rest are samples.
         let mut nodes: Vec<Vec<f64>> = vec![self.start.to_vec()];
         nodes.extend(self.goal_states());
-        while nodes.len() < self.options.prm_samples + 1 + self.goals.len() && monitor.proceed() {
-            let sample = self.window.sample(rng);
-            if monitor.state(&sample) {
-                nodes.push(sample);
-            }
-        }
-        monitor.stats.nodes = nodes.len() as u64;
+        let goal_count = self.goals.len();
+        // Joins per node: (other node, length); and what is known about each join.
         let mut edges: Vec<Vec<(usize, f64)>> = vec![Vec::new(); nodes.len()];
-        let mut tried: BTreeSet<(usize, usize)> = BTreeSet::new();
-        for a in 0..nodes.len() {
-            let mut near: Vec<(f64, usize)> = (0..nodes.len())
-                .filter(|b| *b != a)
-                .map(|b| (self.space.distance(&nodes[a], &nodes[b]), b))
-                .collect();
-            near.sort_by(|x, y| x.0.total_cmp(&y.0).then(x.1.cmp(&y.1)));
-            for (d, b) in near.into_iter().take(self.options.prm_neighbours) {
-                if monitor.stats.state_checks >= self.options.max_state_checks || monitor.control.cancelled()
-                {
-                    break;
-                }
-                if tried.insert((a.min(b), a.max(b))) && monitor.motion(&nodes[a], &nodes[b]) {
-                    edges[a].push((b, d));
-                    edges[b].push((a, d));
-                }
-            }
-        }
-        // Dijkstra from the start (the graph is small; a heuristic would gain little).
-        let mut cost = vec![f64::INFINITY; nodes.len()];
-        let mut previous = vec![usize::MAX; nodes.len()];
-        let mut done = vec![false; nodes.len()];
-        cost[0] = 0.0;
+        let mut known: BTreeMap<(usize, usize), bool> = BTreeMap::new();
+        let batch = self.options.prm_samples.max(1);
+        // Joins checked and found free.
+        let mut checked: BTreeSet<(usize, usize)> = BTreeSet::new();
         loop {
-            let next = (0..nodes.len())
-                .filter(|i| !done[*i] && cost[*i].is_finite())
-                .min_by(|a, b| cost[*a].total_cmp(&cost[*b]).then(a.cmp(b)));
-            let Some(at) = next else { break };
-            done[at] = true;
-            for (to, d) in &edges[at] {
-                if cost[at] + d < cost[*to] {
-                    cost[*to] = cost[at] + d;
-                    previous[*to] = at;
+            // Grow the roadmap by one batch of valid states.
+            let first_new = nodes.len();
+            let mut added = 0;
+            while added < batch && monitor.proceed() {
+                let sample = self.window.sample(rng);
+                if monitor.state(&sample) {
+                    nodes.push(sample);
+                    added += 1;
                 }
             }
-        }
-        let reached = (1..=self.goals.len())
-            .filter(|g| cost[*g].is_finite())
-            .min_by(|a, b| cost[*a].total_cmp(&cost[*b]).then(a.cmp(b)));
-        match reached {
-            Some(goal_node) => {
-                let mut path = Vec::new();
-                let mut at = goal_node;
-                while at != usize::MAX {
-                    path.push(nodes[at].clone());
-                    at = previous[at];
+            edges.resize(nodes.len(), Vec::new());
+            // Join every new state (and, in the first round, the start and goals) to its nearest ones.
+            let from = if first_new == 1 + goal_count { 0 } else { first_new };
+            for a in from..nodes.len() {
+                let mut near: Vec<(f64, usize)> = (0..nodes.len())
+                    .filter(|b| *b != a)
+                    .map(|b| (self.space.distance(&nodes[a], &nodes[b]), b))
+                    .collect();
+                near.sort_by(|x, y| x.0.total_cmp(&y.0).then(x.1.cmp(&y.1)));
+                for (d, b) in near.into_iter().take(self.options.prm_neighbours) {
+                    let key = (a.min(b), a.max(b));
+                    if let std::collections::btree_map::Entry::Vacant(entry) = known.entry(key) {
+                        // Not checked yet: `true` means "assumed free".
+                        entry.insert(true);
+                        edges[a].push((b, d));
+                        edges[b].push((a, d));
+                    }
                 }
-                path.reverse();
-                Ok((path, self.goals[goal_node - 1].0))
             }
-            None => {
-                let connected = (0..nodes.len()).filter(|i| cost[*i].is_finite());
-                let closest = connected
-                    .flat_map(|i| self.goals.iter().map(move |(_, g)| (i, *g)))
-                    .map(|(i, g)| self.space.distance(&nodes[i], g))
-                    .fold(f64::INFINITY, f64::min);
-                Err(closest)
+            // Search, check the joins of the way found, repeat until a way holds or none is left.
+            while let Some(way) = shortest_way(&nodes, &edges, &known, goal_count, self.space) {
+                let mut holds = true;
+                for pair in way.windows(2) {
+                    let key = (pair[0].min(pair[1]), pair[0].max(pair[1]));
+                    if checked.contains(&key) {
+                        continue;
+                    }
+                    if monitor.stats.state_checks >= self.options.max_state_checks
+                        || monitor.control.cancelled()
+                    {
+                        monitor.stats.nodes = nodes.len() as u64;
+                        return Err(closest_to_goals(&nodes, &edges, &known, goal_count, self.space));
+                    }
+                    if monitor.motion(&nodes[pair[0]], &nodes[pair[1]]) {
+                        checked.insert(key);
+                    } else {
+                        known.insert(key, false);
+                        holds = false;
+                        break;
+                    }
+                }
+                if holds {
+                    monitor.stats.nodes = nodes.len() as u64;
+                    let goal_node = *way.last().unwrap_or(&1);
+                    let path = way.iter().map(|i| nodes[*i].clone()).collect();
+                    return Ok((path, self.goals[goal_node - 1].0));
+                }
+            }
+            if added < batch {
+                // The budget or the iteration limit ran out while sampling.
+                monitor.stats.nodes = nodes.len() as u64;
+                return Err(closest_to_goals(&nodes, &edges, &known, goal_count, self.space));
             }
         }
     }
@@ -518,6 +595,102 @@ impl Search<'_> {
             Algorithm::InformedRrtStar => self.rrt_star(monitor, rng, true),
             Algorithm::Prm => self.prm(monitor, rng),
         }
+    }
+}
+
+/// A* over the roadmap's joins not known to be blocked, from node 0 to the nearest of nodes
+/// `1..=goal_count`. Ties are broken by node index, so the result is deterministic.
+fn shortest_way(
+    nodes: &[Vec<f64>],
+    edges: &[Vec<(usize, f64)>],
+    known: &BTreeMap<(usize, usize), bool>,
+    goal_count: usize,
+    space: &Space,
+) -> Option<Vec<usize>> {
+    let heuristic = |i: usize| {
+        (1..=goal_count).map(|g| space.distance(&nodes[i], &nodes[g])).fold(f64::INFINITY, f64::min)
+    };
+    let mut cost = vec![f64::INFINITY; nodes.len()];
+    let mut previous = vec![usize::MAX; nodes.len()];
+    let mut done = vec![false; nodes.len()];
+    let mut open = BinaryHeap::new();
+    cost[0] = 0.0;
+    open.push(Open { estimate: heuristic(0), node: 0 });
+    while let Some(Open { node: at, .. }) = open.pop() {
+        if done[at] {
+            continue;
+        }
+        done[at] = true;
+        if (1..=goal_count).contains(&at) {
+            let mut way = vec![at];
+            let mut back = at;
+            while previous[back] != usize::MAX {
+                back = previous[back];
+                way.push(back);
+            }
+            way.reverse();
+            return Some(way);
+        }
+        for (to, d) in &edges[at] {
+            if known.get(&(at.min(*to), at.max(*to))) == Some(&false) {
+                continue;
+            }
+            let through = cost[at] + d;
+            if through < cost[*to] {
+                cost[*to] = through;
+                previous[*to] = at;
+                open.push(Open { estimate: through + heuristic(*to), node: *to });
+            }
+        }
+    }
+    None
+}
+
+/// How close the part of the roadmap reachable from the start (over joins not known to be blocked) comes
+/// to a goal.
+fn closest_to_goals(
+    nodes: &[Vec<f64>],
+    edges: &[Vec<(usize, f64)>],
+    known: &BTreeMap<(usize, usize), bool>,
+    goal_count: usize,
+    space: &Space,
+) -> f64 {
+    let mut seen = vec![false; nodes.len()];
+    let mut stack = vec![0];
+    seen[0] = true;
+    let mut closest = f64::INFINITY;
+    while let Some(at) = stack.pop() {
+        for g in 1..=goal_count {
+            closest = closest.min(space.distance(&nodes[at], &nodes[g]));
+        }
+        for (to, _) in &edges[at] {
+            if !seen[*to] && known.get(&(at.min(*to), at.max(*to))) != Some(&false) {
+                seen[*to] = true;
+                stack.push(*to);
+            }
+        }
+    }
+    closest
+}
+
+/// An entry of the A* queue: the smallest estimate first, then the lowest node.
+#[derive(PartialEq)]
+struct Open {
+    estimate: f64,
+    node: usize,
+}
+
+impl Eq for Open {}
+
+impl Ord for Open {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        other.estimate.total_cmp(&self.estimate).then(other.node.cmp(&self.node))
+    }
+}
+
+impl PartialOrd for Open {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
     }
 }
 
