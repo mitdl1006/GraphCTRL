@@ -607,7 +607,9 @@ impl RobotScene {
     /// checked, and a finer checker needs less extra room.
     pub fn checker(&self, fineness: f64) -> Checker<'_> {
         let resolution = self.resolution * fineness;
-        self.checker_with(resolution * self.chain.reach(), resolution)
+        // The farthest a robot point can be from a joint: the chain plus what the tip link carries.
+        let reach = self.chain.reach() + self.link_radius.get(self.tip_link).copied().unwrap_or(0.0);
+        self.checker_with(resolution * reach, resolution)
     }
 
     /// A checker for the required padding alone, used for the final check of a timed motion.
@@ -617,7 +619,7 @@ impl RobotScene {
 
     fn checker_with(&self, margin: f64, resolution: f64) -> Checker<'_> {
         let mut world = self.world.clone();
-        for body in self.link_bodies.iter().flatten() {
+        for body in self.link_bodies.iter().flatten().chain(&self.tool_body) {
             world.set_padding(*body, self.padding + margin);
         }
         Checker { scene: self, world: std::sync::Mutex::new(world), margin, resolution }
