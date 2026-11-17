@@ -927,6 +927,15 @@ messages! {
     ParamKindDiameter => ("지름", "diameter"),
     /// Parameters: a reference (driven) dimension's equation cannot be edited.
     ParamDriven => ("(참조)", "(reference)"),
+    /// Assemble tab > Position: ground or free the selected component (Inventor's Grounded).
+    CmdGround => ("접지", "Grounded"),
+    /// Status: the selected component was grounded / freed. `{0}` its name.
+    GroundOn => ("{0}을(를) 접지했습니다.", "{0} is grounded."),
+    GroundOff => ("{0}의 접지를 풀었습니다.", "{0} is no longer grounded."),
+    /// Status: an assembly file is being read; `{0}` meshes are still loading.
+    ImportLoading => ("불러오는 중… (메시 {0}개 남음)", "Loading… ({0} meshes to go)"),
+    /// Status: reading an assembly file failed. `{0}` why.
+    ImportFailed => ("가져오기 실패: {0}", "Import failed: {0}"),
     // --- Project Cut Edges (Inventor: Sketch tab > Create panel) ---
     ToolCutEdges => ("절단 모서리 투영", "Project Cut Edges"),
     /// Status: how many cut edges were projected. `{0}` the count.

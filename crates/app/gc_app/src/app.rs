@@ -266,6 +266,10 @@ pub struct GraphCtrlApp {
     pattern: crate::pattern::Pattern,
     /// The Parameters dialog.
     parameters: crate::parameters::Parameters,
+    /// An assembly import was started and its outcome not yet shown.
+    importing: bool,
+    /// The status bar says meshes are loading.
+    loading_shown: bool,
     expression: String,
     ime: ImeTest,
     /// Whether the licence notices window is open.
@@ -356,6 +360,8 @@ impl GraphCtrlApp {
             joint: crate::constrain::Joint::default(),
             pattern: crate::pattern::Pattern::default(),
             parameters: crate::parameters::Parameters::default(),
+            importing: false,
+            loading_shown: false,
             expression: String::new(),
             ime: ImeTest { dimension: "25 mm".to_owned(), ..ImeTest::default() },
             notices: false,
@@ -398,6 +404,30 @@ impl GraphCtrlApp {
     #[doc(hidden)]
     pub fn close_drive_for_test(&mut self) {
         self.drive.close(&mut self.session);
+    }
+
+    /// Says in the status bar while meshes or an assembly file are loading, and why an import failed
+    /// (once, when it finishes).
+    fn import_notice(&mut self, lang: Lang) {
+        let loading = self.session.meshes_loading();
+        // `None` while the file is being read (or nothing was imported); then whether it failed.
+        let status = self.session.import_status().map(|r| r.as_ref().err().cloned());
+        if status.is_none() && self.importing {
+            // Still reading the file.
+            self.notice = Some(tr!(lang, ImportLoading, loading.max(1)));
+            return;
+        }
+        if self.importing {
+            self.importing = false;
+            self.notice = status.flatten().map(|error| tr!(lang, ImportFailed, error));
+        }
+        if loading > 0 {
+            self.notice = Some(tr!(lang, ImportLoading, loading));
+            self.loading_shown = true;
+        } else if self.loading_shown {
+            self.loading_shown = false;
+            self.notice = None;
+        }
     }
 
     /// The viewport, for inspecting what it drew.
@@ -919,6 +949,7 @@ impl eframe::App for GraphCtrlApp {
         let lang = self.lang;
         self.shortcuts(&ctx);
         self.session.poll_jobs();
+        self.import_notice(lang);
         // Agents' calls are carried out here, between frames, like the user's own edits.
         let before = (self.session.doc().robots().len(), self.session.doc().bodies().len());
         if let Some(edit) = self.agent.serve(&ctx, &mut self.session, &self.packages) {
@@ -997,6 +1028,20 @@ impl eframe::App for GraphCtrlApp {
             Some(ribbon::RibbonAction::StartJoint) => self.joint.start(),
             Some(ribbon::RibbonAction::StartPattern) => self.pattern.start(Vec::new()),
             Some(ribbon::RibbonAction::StartParameters) => self.parameters.open = true,
+            Some(ribbon::RibbonAction::ToggleGround) => {
+                let name = self
+                    .session
+                    .selected_occurrence()
+                    .and_then(|o| {
+                        self.session.components().into_iter().find(|n| n.occurrence == o).map(|n| n.name)
+                    })
+                    .unwrap_or_default();
+                self.notice = Some(match self.session.toggle_ground_selected() {
+                    Ok(true) => tr!(lang, GroundOn, name),
+                    Ok(false) => tr!(lang, GroundOff, name),
+                    Err(error) => tr!(lang, FileError, error),
+                });
+            }
             Some(ribbon::RibbonAction::ProjectCutEdges) => {
                 self.notice = Some(match crate::cut_edges::project_cut_edges(&mut self.session) {
                     Ok(count) => tr!(lang, CutEdgesDone, count),
@@ -1032,7 +1077,8 @@ impl eframe::App for GraphCtrlApp {
             // An assembly file (glTF, STEP) is read by a job; its parts arrive with the next frames.
             if crate::assembly_import::is_assembly(&path) {
                 self.session.import_assembly(&path.to_string_lossy(), crate::assembly_import::importer());
-                self.notice = None;
+                self.importing = true;
+                self.notice = Some(tr!(lang, ImportLoading, 1));
             } else {
                 match self.session.add_mesh_body(&path) {
                     Ok(_) => {
