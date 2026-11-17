@@ -151,6 +151,8 @@ fn large_meshes(count: usize, triangles: usize, frames: usize) -> String {
     std::fs::write(&file, sphere_stl(triangles, 0.25)).expect("the mesh file");
     let file = file.to_string_lossy().into_owned();
     let mut session = Session::new();
+    // As the application runs it: mesh files are read on job threads.
+    session.set_executor(gc_jobs::Executor::thread());
     let floor = session
         .add_body(Solid::Box { size: [20.0, 20.0, 0.1] }, Placement { xyz: [0.0, 0.0, -0.05], rpy: [0.0; 3] })
         .unwrap();
@@ -188,6 +190,13 @@ fn large_meshes(count: usize, triangles: usize, frames: usize) -> String {
         bodies
     });
     let bodies = cold_load;
+    // The window stays live meanwhile: placeholders until the meshes arrive.
+    let (_, arrive_ms) = timed(|| {
+        while session.meshes_loading() > 0 {
+            session.poll_jobs();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    });
     let mut times: Vec<f64> =
         (0..frames.max(1)).map(|_| timed(|| std::hint::black_box(frame(&session))).1).collect();
     times.sort_by(f64::total_cmp);
@@ -232,7 +241,8 @@ fn large_meshes(count: usize, triangles: usize, frames: usize) -> String {
     format!(
         "\n## Large meshes ({count} mesh bodies × {triangles} triangles, mates to the floor)\n\n\
          | step | time | budget | verdict |\n|---|---|---|---|\n\
-         | adding the bodies (file read, BVH) | {load_ms:.1} ms | — | — |\n\
+         | adding the bodies: blocking (document edits only) | {load_ms:.1} ms | — | — |\n\
+         | … then until every mesh is in (background: scale, BVH) | {arrive_ms:.1} ms | — | — |\n\
          | frame queries, p95 of {frames} | {frame_p95:.3} ms | {BUDGET_MS} ms | {} |\n\
          | drag step (move + solve + commit) | {drag_ms:.2} ms | {INTERACTIVE_MS} ms | {} |\n\
          | constraint solve alone | {solve_ms:.2} ms | {INTERACTIVE_MS} ms | {} |\n\

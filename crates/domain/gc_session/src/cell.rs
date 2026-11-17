@@ -395,6 +395,12 @@ pub struct ContactStop {
     pub second: gc_core::AnyId,
 }
 
+/// An assembly file read in the background, its meshes shared and their collision shapes built.
+type ImportLoad = Result<(gc_doc::Assembly, Vec<Arc<MeshData>>), String>;
+
+/// A mesh file read in the background: the file as read and the mesh at its scale.
+type MeshLoad = Result<(Arc<MeshData>, MeshRef), String>;
+
 /// Component poses, as a list and as a map.
 type Poses = Vec<(gc_core::AnyId, DPose3)>;
 type PoseMap = BTreeMap<gc_core::AnyId, DPose3>;
@@ -404,7 +410,7 @@ pub(crate) struct CellState {
     job: Option<PlanJob>,
     compare_job: Option<CompareJob>,
     /// An assembly file being read in the background, and what came of the last one.
-    import_job: Option<JobHandle<Result<crate::assembly::Imported, String>>>,
+    import_job: Option<JobHandle<ImportLoad>>,
     import_result: Option<Result<Id<gc_doc::Assembly>, String>>,
     comparisons: BTreeMap<Id<MotionPath>, (String, Vec<CompareRow>)>,
     robots: BTreeMap<Id<Robot>, Arc<LoadedRobot>>,
@@ -448,6 +454,8 @@ pub(crate) struct CellState {
     ghost: std::cell::RefCell<Option<(String, Ghost)>>,
     /// Mesh files of bodies by path: the triangles as stored, or why the file could not be read.
     files: BTreeMap<String, Result<Arc<MeshData>, String>>,
+    /// Mesh files being read (and their collision shapes built) in the background, by mesh key.
+    mesh_jobs: BTreeMap<String, (String, JobHandle<MeshLoad>)>,
     /// The same at the scale a body asks for, by path and scale.
     pub(crate) meshes: BTreeMap<String, MeshRef>,
 }
@@ -487,6 +495,7 @@ impl Default for CellState {
             planners: Vec::new(),
             library: None,
             files: BTreeMap::new(),
+            mesh_jobs: BTreeMap::new(),
             meshes: BTreeMap::new(),
             scene: std::cell::RefCell::new(None),
             asked: std::cell::RefCell::new(None),
@@ -570,21 +579,57 @@ impl CellState {
     }
 
     /// Makes sure the mesh of a body's solid is loaded at its scale.
+    /// Starts reading a body's or tool's mesh file in the background (the file as read, scaled, with its
+    /// collision shape built), unless it is loaded or on its way. With the inline executor it is there on
+    /// return.
     fn read_body_mesh(&mut self, solid: &Solid) {
         let Solid::Mesh { file, scale } = solid else { return };
         let key = scaled_key(file, [*scale; 3]);
-        if self.meshes.contains_key(&key) {
+        if self.meshes.contains_key(&key) || self.mesh_jobs.contains_key(&key) {
             return;
         }
-        let stored = self.files.entry(file.clone()).or_insert_with(|| read_mesh_file(file));
-        if let Ok(data) = stored
-            && let Some(mesh) = scaled(data, [*scale; 3])
-        {
-            // Build its collision shape now, while the file is being read anyway, rather than in the
-            // middle of a drag or drive (tens of milliseconds for a large mesh).
+        let known = match self.files.get(file) {
+            Some(Err(_)) => return,
+            Some(Ok(data)) => Some(Arc::clone(data)),
+            None => None,
+        };
+        let (path, scale) = (file.clone(), *scale);
+        let job = self.executor.spawn("mesh", move |_| {
+            let data = match known {
+                Some(data) => data,
+                None => read_mesh_file(&path)?,
+            };
+            let mesh = scaled(&data, [scale; 3]).ok_or_else(|| format!("{path}: cannot scale the mesh"))?;
+            // Its collision shape too, so that the first drag or measurement does not build it.
             gc_collide::prepare_mesh(&mesh.data);
-            self.meshes.insert(key, mesh);
+            Ok((data, mesh))
+        });
+        self.mesh_jobs.insert(key, (file.clone(), job));
+        self.collect_meshes();
+    }
+
+    /// Takes in the meshes that have finished loading. True when one arrived (or failed).
+    pub(crate) fn collect_meshes(&mut self) -> bool {
+        let mut arrived = false;
+        let keys: Vec<String> = self.mesh_jobs.keys().cloned().collect();
+        for key in keys {
+            let Some((file, mut job)) = self.mesh_jobs.remove(&key) else { continue };
+            match job.poll() {
+                None => {
+                    self.mesh_jobs.insert(key, (file, job));
+                }
+                Some(JobOutcome::Done(Ok((data, mesh)))) => {
+                    self.files.insert(file, Ok(data));
+                    self.meshes.insert(key, mesh);
+                    arrived = true;
+                }
+                Some(JobOutcome::Done(Err(reason)) | JobOutcome::Failed(reason)) => {
+                    self.files.insert(file, Err(reason));
+                    arrived = true;
+                }
+            }
         }
+        arrived
     }
 
     fn body_mesh(&self, solid: &Solid) -> Option<&MeshRef> {
@@ -824,6 +869,14 @@ impl Session {
         assembly: gc_doc::Assembly,
         meshes: Vec<MeshData>,
     ) -> Result<Id<gc_doc::Assembly>, String> {
+        self.add_assembly_shared(assembly, meshes.into_iter().map(Arc::new).collect())
+    }
+
+    fn add_assembly_shared(
+        &mut self,
+        assembly: gc_doc::Assembly,
+        meshes: Vec<Arc<MeshData>>,
+    ) -> Result<Id<gc_doc::Assembly>, String> {
         if meshes.len() != assembly.meshes.len() {
             return Err(format!(
                 "{}: {} meshes for {} entries",
@@ -849,7 +902,13 @@ impl Session {
         }
         self.cell.import_result = None;
         let file = file.to_owned();
-        self.cell.import_job = Some(self.cell.executor.spawn("import", move |_| read(&file)));
+        self.cell.import_job = Some(self.cell.executor.spawn("import", move |_| {
+            let (assembly, meshes) = read(&file)?;
+            // The collision shapes too, on this thread, so that contact and interference find them built.
+            let meshes: Vec<Arc<MeshData>> = meshes.into_iter().map(Arc::new).collect();
+            meshes.iter().for_each(gc_collide::prepare_mesh);
+            Ok((assembly, meshes))
+        }));
         self.poll_jobs();
     }
 
@@ -963,6 +1022,20 @@ impl Session {
     /// not be read (see [`Session::mesh_error`]).
     pub fn body_mesh(&self, solid: &Solid) -> Option<&MeshRef> {
         self.cell.body_mesh(solid)
+    }
+
+    /// True while a body's or tool's mesh is still being read in the background: draw a placeholder
+    /// (its body is in the document already; the mesh arrives with [`Session::poll_jobs`]).
+    pub fn mesh_pending(&self, solid: &Solid) -> bool {
+        match solid {
+            Solid::Mesh { file, scale } => self.cell.mesh_jobs.contains_key(&scaled_key(file, [*scale; 3])),
+            _ => false,
+        }
+    }
+
+    /// How many mesh files are still being read.
+    pub fn meshes_loading(&self) -> usize {
+        self.cell.mesh_jobs.len()
     }
 
     /// Why a mesh file could not be read.
@@ -1329,8 +1402,80 @@ impl Session {
             .collect()
     }
 
-    /// A component's shapes at a pose, for the contact solver: bodies at the pose, robots as shown
-    /// (they are obstacles, never pushed). Assemblies are not analysed yet.
+    /// Collision Detection for Drive (Inventor 2026 help, About the Contact Solver and Component
+    /// Collision, GUID-0BBD4ACE-7BD1-40BF-A011-74416B229035: separate from the contact solver; a collision
+    /// stops the motion): the first pair where a component Drive moved now overlaps another component
+    /// deeper than they did where the document has them (touching is not a collision). Hidden, disabled and
+    /// suppressed components take no part. `None` when nothing collides.
+    pub fn drive_collision(&self) -> Option<(gc_core::AnyId, gc_core::AnyId)> {
+        const TOLERANCE: f64 = 1e-6;
+        let doc = &self.doc;
+        let analysed = |item: gc_core::AnyId| {
+            let o = gc_doc::Occurrence::Item(item);
+            doc.component_flag(o, gc_doc::ComponentFlag::Visible)
+                && doc.component_flag(o, gc_doc::ComponentFlag::Enabled)
+                && !doc.is_component_suppressed(item)
+        };
+        let all: Vec<gc_core::AnyId> = doc
+            .bodies()
+            .iter()
+            .map(|(id, _)| id.erase())
+            .chain(doc.robots().iter().map(|(id, _)| id.erase()))
+            .chain(doc.assemblies().iter().map(|(id, _)| id.erase()))
+            .filter(|item| analysed(*item))
+            .collect();
+        let stored =
+            |item: gc_core::AnyId| doc.component_origin(gc_doc::Occurrence::Item(item)).map(|o| o.pose);
+        let shown =
+            |item: gc_core::AnyId| self.cell.relation_drive.get(&item).map(pose_of).or_else(|| stored(item));
+        for (a, placement) in &self.cell.relation_drive {
+            let pose_a = pose_of(placement);
+            let moved = stored(*a).is_some_and(|was| {
+                (was.translation - pose_a.translation).length() > 1e-9
+                    || was.rotation.angle_between(pose_a.rotation) > 1e-9
+            });
+            if !moved || !analysed(*a) {
+                continue;
+            }
+            let Some(geometry_a) = self.contact_geometry(*a, &pose_a) else { continue };
+            for b in all.iter().copied().filter(|b| b != a) {
+                let Some(geometry_b) = shown(b).and_then(|p| self.contact_geometry(b, &p)) else { continue };
+                let Ok(Some(hit)) = geometry_a.penetration(&geometry_b, TOLERANCE) else { continue };
+                if hit.depth > self.stored_depth(*a, b) + TOLERANCE {
+                    return Some((*a, b));
+                }
+            }
+        }
+        None
+    }
+
+    /// The name of a body, robot or assembly.
+    pub fn component_name(&self, item: gc_core::AnyId) -> Option<String> {
+        match item.kind {
+            gc_core::Kind::Body => self.doc.get(Id::<Body>::from_raw(item.raw)).map(|b| b.name.clone()),
+            gc_core::Kind::RobotInstance => {
+                self.doc.get(Id::<Robot>::from_raw(item.raw)).map(|r| r.name.clone())
+            }
+            gc_core::Kind::Assembly => {
+                self.doc.get(Id::<gc_doc::Assembly>::from_raw(item.raw)).map(|a| a.name.clone())
+            }
+            _ => None,
+        }
+    }
+
+    /// How deep two components overlap where the document has them (0 when apart or touching).
+    fn stored_depth(&self, a: gc_core::AnyId, b: gc_core::AnyId) -> f64 {
+        let stored =
+            |item: gc_core::AnyId| self.doc.component_origin(gc_doc::Occurrence::Item(item)).map(|o| o.pose);
+        let (Some(pa), Some(pb)) = (stored(a), stored(b)) else { return 0.0 };
+        let (Some(ga), Some(gb)) = (self.contact_geometry(a, &pa), self.contact_geometry(b, &pb)) else {
+            return 0.0;
+        };
+        ga.penetration(&gb, 0.0).ok().flatten().map_or(0.0, |p| p.depth)
+    }
+
+    /// A component's shapes at a pose, for the contact solver: bodies and imported assemblies (their rigid
+    /// parts as shown) at the pose, robots as shown (they are obstacles, never pushed).
     fn contact_geometry(&self, item: gc_core::AnyId, pose: &DPose3) -> Option<gc_collide::Geometry> {
         match item.kind {
             gc_core::Kind::Body => {
@@ -1339,14 +1484,31 @@ impl Session {
                 gc_collide::Geometry::from_shapes(&[(*pose, shape)]).ok()
             }
             gc_core::Kind::RobotInstance => self.item_geometry(CellItem::Robot(Id::from_raw(item.raw))),
+            gc_core::Kind::Assembly => {
+                let id = Id::<gc_doc::Assembly>::from_raw(item.raw);
+                let assembly = self.doc.get(id)?;
+                let meshes = self.cell.assemblies.of(assembly).ok()?;
+                let keep = self.doc.parts_shown(id, true);
+                let shapes: Vec<(DPose3, ShapeDesc)> =
+                    crate::assembly::shown_parts(assembly, pose, meshes, &keep)
+                        .into_iter()
+                        .filter_map(|part| {
+                            // Parts with scale in their matrix are left out (their triangles would have to be
+                            // transformed for every query).
+                            let at = crate::assembly::rigid(&part.matrix)?;
+                            Some((at, ShapeDesc::Mesh(Arc::clone(&part.mesh.data))))
+                        })
+                        .collect();
+                if shapes.is_empty() { None } else { gc_collide::Geometry::from_shapes(&shapes).ok() }
+            }
             _ => None,
         }
     }
 
-    /// True when contact may push a component: a body that is not grounded and that no active
+    /// True when contact may push a component: a body or assembly that is not grounded and that no active
     /// relationship holds.
     fn pushable(&self, item: gc_core::AnyId) -> bool {
-        item.kind == gc_core::Kind::Body
+        matches!(item.kind, gc_core::Kind::Body | gc_core::Kind::Assembly)
             && !self.doc.component_flag(gc_doc::Occurrence::Item(item), gc_doc::ComponentFlag::Grounded)
             && !self.doc.relationships().iter().any(|(id, r)| {
                 !self.doc.is_inactive(id.erase())
@@ -1381,14 +1543,6 @@ impl Session {
         let pose = |item: gc_core::AnyId, pushed: &BTreeMap<gc_core::AnyId, DPose3>| {
             imposed.get(&item).or_else(|| pushed.get(&item)).copied().or_else(|| stored(item))
         };
-        // How deep a pair already overlapped where the document has it: only going deeper is contact.
-        let depth_before = |a: gc_core::AnyId, b: gc_core::AnyId| -> f64 {
-            let (Some(pa), Some(pb)) = (stored(a), stored(b)) else { return 0.0 };
-            let (Some(ga), Some(gb)) = (self.contact_geometry(a, &pa), self.contact_geometry(b, &pb)) else {
-                return 0.0;
-            };
-            ga.penetration(&gb, 0.0).ok().flatten().map_or(0.0, |p| p.depth)
-        };
         let mut last = None;
         for _round in 0..32 {
             let mut changed = false;
@@ -1405,7 +1559,7 @@ impl Session {
                     let Some(pose_b) = pose(b, pushed) else { continue };
                     let Some(geometry_b) = self.contact_geometry(b, &pose_b) else { continue };
                     let Ok(Some(hit)) = geometry_a.penetration(&geometry_b, TOLERANCE) else { continue };
-                    if hit.depth <= depth_before(a, b) + TOLERANCE {
+                    if hit.depth <= self.stored_depth(a, b) + TOLERANCE {
                         continue;
                     }
                     if imposed.contains_key(&b) || !self.pushable(b) {
@@ -2305,7 +2459,7 @@ impl Session {
 
     /// Collects finished background work. Returns true when something arrived. Call once per frame.
     pub fn poll_jobs(&mut self) -> bool {
-        let mut arrived = false;
+        let mut arrived = self.cell.collect_meshes();
         if let Some((path, inputs, mut job)) = self.cell.compare_job.take() {
             match job.poll() {
                 None => self.cell.compare_job = Some((path, inputs, job)),
@@ -2320,7 +2474,7 @@ impl Session {
             match job.poll() {
                 None => self.cell.import_job = Some(job),
                 Some(JobOutcome::Done(Ok((assembly, meshes)))) => {
-                    self.cell.import_result = Some(self.add_assembly(assembly, meshes));
+                    self.cell.import_result = Some(self.add_assembly_shared(assembly, meshes));
                     arrived = true;
                 }
                 Some(JobOutcome::Done(Err(reason)) | JobOutcome::Failed(reason)) => {

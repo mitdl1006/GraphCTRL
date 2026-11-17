@@ -1,5 +1,20 @@
 # 백엔드 인계 (2026-11-17)
 
+## 2026-11-18 — 메시 로드 잡 · 어셈블리 접촉 · Drive 충돌 감지(리드 ①②③)
+
+- ① 바디·툴 메시 파일은 `gc_jobs` 잡에서 읽고(배율 적용 + 충돌 형상 BVH까지) `poll_jobs`가 받아들인다. 바디는 문서에 즉시 들어가고(undo 1단계),
+  메시가 오는 것은 편집이 아니다. 자리표시용 `session.mesh_pending(&solid)`, `meshes_loading()`. 실패는 그대로 `mesh_error(file)`.
+  기본(인라인) 실행기에서는 반환 시 이미 와 있어 기존 동작과 같다. 어셈블리 가져오기 잡도 메시 충돌 형상을 그 스레드에서 미리 만든다(열 때의 sync 경로도).
+  벤치(스레드 실행기): 20×10만 삼각형 추가가 화면을 막는 시간 1.3 s → 0.03 s, 전부 도착까지 ~0.55 s(병렬).
+  남은 것: `add_mesh_body`는 mm/m 판정 때문에 STL을 한 번 동기로 읽는다(파싱만, BVH는 잡).
+- ② 어셈블리(가져온 GLB/STEP)도 접촉 솔버 참가: 보이는 부품 중 강체 행렬인 것(배율 있는 부품은 제외). 접지·관계 없으면 밀리고(`driven_placement`, `assembly_parts`가 밀린 위치로 그림), 아니면 정지.
+- ③ Drive 대화상자(`gc_app/src/drive.rs`, 리드 허락): 원문상 Collision Detection은 접촉 솔버와 별개(접촉 세트 없이도 검사, 충돌 시 정지)라서
+  둘 다 둔다 — 먼저 `session.contact_stop()`(솔버가 켜져 있을 때 스스로 멈춘 경우), Collision Detection이 켜져 있으면 `session.drive_collision()`.
+  `drive_collision`은 프레임마다 `interference`(24³ 격자 부피 추정)를 부르던 것을 대신해, 구동으로 실제 움직인 컴포넌트만 AABB+침투로 검사하고
+  문서 위치보다 더 깊어질 때만 충돌(닿아 있는 것은 아님). 숨김·비활성·억제 제외. 이름은 `session.component_name(AnyId)`.
+  `shell.rs::drive_moves_a_mated_block_and_stops_at_a_collision` 통과.
+- 테스트: `gc_session/tests/mesh_jobs.rs`, `contact.rs`(어셈블리, 충돌 감지 추가).
+
 ## 2026-11-18 — 대형 메시 성능(리드 ③)
 
 `bench_scene`에 "Large meshes" 표 추가(`--meshes 20 --triangles 100000` 기본, `cargo xtask bench-quality`가 보고서에 덧붙임).
