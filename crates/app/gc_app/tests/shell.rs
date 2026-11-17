@@ -2790,3 +2790,102 @@ fn the_navigation_bar_and_the_assembly_tree() {
     press(&mut harness, "홈 뷰");
     press(&mut harness, "모두 확대");
 }
+
+/// The Constrain dialog: pick the origin planes of two components in the view, press OK, and the first
+/// component moves to the second; the constraint is listed in the browser's Relationships folder.
+#[test]
+fn the_constrain_dialog_mates_two_components() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.05, 0.05, 0.05] };
+    let app = harness.state_mut();
+    let fixed = app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    let placement = gc_doc::Placement { xyz: [0.12, 0.0, 0.0], rpy: [0.0; 3] };
+    let moving = app.session.add_body(solid, placement).unwrap();
+    app.fit_view();
+    app.viewport_mut().camera.pan([0.0, 0.0], [-250.0, 0.0], [1280.0, 700.0]);
+    harness.run();
+
+    harness.get_by_label("로봇").click();
+    harness.run();
+    harness.get_by_label("구속").click();
+    harness.run_steps(5);
+    let click = |harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, world: gc_math::DVec3| {
+        let at = harness.state().viewport().screen_of(world).unwrap();
+        harness.event(egui::Event::PointerMoved(at));
+        harness.run_steps(3);
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.run_steps(3);
+        }
+    };
+    // First the Z axis that moves, then the one that stays.
+    click(&mut harness, gc_math::DVec3::new(0.12, 0.0, 0.06));
+    harness.get_by_label_contains("첫 번째 선택: Body2:1 · 축");
+    click(&mut harness, gc_math::DVec3::new(0.0, 0.0, 0.06));
+    harness.get_by_label_contains("두 번째 선택: Body1:1 · 축");
+    harness.get_by_label("확인").click();
+    harness.run();
+    let session = &harness.state().session;
+    assert_eq!(session.relationships().len(), 1, "{:?}", session.last_error());
+    let sideways = session.doc().get(moving).unwrap().placement.xyz[0];
+    assert!(sideways.abs() < 1e-6, "the axes coincide now: {sideways}");
+    let _ = fixed;
+}
+
+/// Section views (View tab > Appearance): a half section cuts the model by a plane; a quarter section
+/// takes a second plane after Continue; Delete brings the model back.
+#[test]
+fn section_views_cut_the_model() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.4, 0.4, 0.4] };
+    let placement = gc_doc::Placement { xyz: [0.0, 0.0, 0.2], rpy: [0.0; 3] };
+    harness.state_mut().session.add_body(solid, placement).unwrap();
+    harness.state_mut().fit_view();
+    harness.get_by_label("뷰").click();
+    harness.run();
+    let whole = gpu.then(|| harness.render().unwrap());
+
+    harness.get_by_label("1/2 단면").click();
+    harness.run_steps(3);
+    let section = harness.state().viewport().section.clone().unwrap();
+    assert_eq!(section.planes.len(), 1);
+    assert!(section.editing.is_some());
+    if let Some(whole) = whole {
+        let cut = harness.render().unwrap();
+        let different = whole.pixels().zip(cut.pixels()).filter(|(a, b)| a != b).count();
+        assert!(different > 5000, "{different} pixels changed");
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        cut.save(out.join("review-34-half-section.png")).unwrap();
+    }
+    // OK applies it; the toolbar goes away and the cut stays.
+    harness.get_by_label("확인").click();
+    harness.run_steps(3);
+    assert!(harness.state().viewport().section.as_ref().unwrap().editing.is_none());
+
+    // A quarter section goes on to a second plane.
+    harness.get_by_label("1/4 단면").click();
+    harness.run_steps(3);
+    harness.get_by_label("계속").click();
+    harness.run_steps(3);
+    assert_eq!(harness.state().viewport().section.as_ref().unwrap().planes.len(), 2);
+    harness.get_by_label("확인").click();
+    harness.run_steps(3);
+
+    harness.get_by_label("단면 삭제").click();
+    harness.run_steps(3);
+    assert!(harness.state().viewport().section.is_none());
+}

@@ -56,6 +56,10 @@ pub struct View {
     /// A slicing plane `(normal, offset)` in eye-relative coordinates: what lies on the side the normal
     /// points to (`dot(normal, p) + offset > 0`) is not drawn. `None`: nothing is cut away.
     pub slice: Option<[f32; 4]>,
+    /// A second slicing plane, for quarter and three-quarter sections.
+    pub slice2: Option<[f32; 4]>,
+    /// With two planes: cut away what lies on the cut side of either (true) or of both (false).
+    pub slice_union: bool,
 }
 
 /// What a frame cost.
@@ -75,6 +79,7 @@ struct ViewUniform {
     forward: [f32; 4],
     viewport: [f32; 4],
     slice: [f32; 4],
+    slice2: [f32; 4],
 }
 
 #[repr(C)]
@@ -340,13 +345,19 @@ impl MeshRenderer {
             clip_from_relative: view.clip_from_relative,
             light: [view.light[0], view.light[1], view.light[2], 0.0],
             forward: [view.forward[0], view.forward[1], view.forward[2], 0.0],
+            // z: how many slicing planes are in use; w: 1 when two planes cut away the union.
             viewport: [
                 target.size().0 as f32,
                 target.size().1 as f32,
-                if view.slice.is_some() { 1.0 } else { 0.0 },
-                0.0,
+                match (view.slice, view.slice2) {
+                    (Some(_), Some(_)) => 2.0,
+                    (Some(_), None) | (None, Some(_)) => 1.0,
+                    (None, None) => 0.0,
+                },
+                if view.slice_union { 1.0 } else { 0.0 },
             ],
-            slice: view.slice.unwrap_or([0.0; 4]),
+            slice: view.slice.or(view.slice2).unwrap_or([0.0; 4]),
+            slice2: if view.slice.is_some() { view.slice2.unwrap_or([0.0; 4]) } else { [0.0; 4] },
         };
         // Lines: one small record each, drawn after the opaque solids and before the translucent ones.
         let line_records: Vec<LineRaw> =

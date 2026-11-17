@@ -64,6 +64,8 @@ pub(crate) enum RibbonAction {
     StartInterference,
     /// Open the drive dialog.
     StartDrive,
+    /// Open the Constrain dialog.
+    StartConstrain,
     /// Open the parameters dialog.
     StartParameters,
 }
@@ -229,6 +231,29 @@ pub(crate) fn show(
                         viewport.camera.ortho = false;
                     }
                 });
+                ribbon_group(ui, tr!(lang, GroupAppearance), |ui| {
+                    for (kind, label) in [
+                        (gc_viewport::SectionKind::Half, Msg::SectionHalf),
+                        (gc_viewport::SectionKind::Quarter, Msg::SectionQuarter),
+                        (gc_viewport::SectionKind::ThreeQuarter, Msg::SectionThreeQuarter),
+                    ] {
+                        let active = viewport.section.as_ref().is_some_and(|s| s.kind == kind);
+                        if ribbon_button(ui, Icon::LookAt, label.text(lang), active, true).clicked() {
+                            viewport.section = Some(gc_viewport::Section::new(kind));
+                        }
+                    }
+                    if ribbon_button(
+                        ui,
+                        Icon::Finish,
+                        tr!(lang, SectionDelete),
+                        false,
+                        viewport.section.is_some(),
+                    )
+                    .clicked()
+                    {
+                        viewport.section = None;
+                    }
+                });
                 ribbon_group(ui, tr!(lang, GroupPanels), |ui| {
                     if ribbon_button(ui, Icon::View, tr!(lang, ViewPanelsSeeThrough), *translucent, true)
                         .clicked()
@@ -258,6 +283,9 @@ fn robot_tab(
     let path = cell.active_path(session);
     // Failures of these commands are shown in the status bar.
     ribbon_group(ui, tr!(lang, GroupRelationships), |ui| {
+        if ribbon_button(ui, Icon::Frame, tr!(lang, ConstrainTitle), false, true).clicked() {
+            action = Some(RibbonAction::StartConstrain);
+        }
         if ribbon_button(ui, Icon::Play, tr!(lang, MenuDrive), false, robot.is_some()).clicked() {
             action = Some(RibbonAction::StartDrive);
         }

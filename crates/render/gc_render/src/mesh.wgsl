@@ -7,6 +7,7 @@ struct View {
     // Its z is 1 when a slicing plane cuts away what lies on its normal's side.
     viewport: vec4<f32>,
     slice: vec4<f32>,
+    slice2: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> view: View;
 
@@ -36,8 +37,18 @@ fn vs_main(
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-    if (view.viewport.z > 0.5 && dot(view.slice.xyz, in.relative) + view.slice.w > 0.0) {
-        discard;
+    if (view.viewport.z > 0.5) {
+        let first = dot(view.slice.xyz, in.relative) + view.slice.w > 0.0;
+        if (view.viewport.z < 1.5) {
+            if (first) { discard; }
+        } else {
+            let second = dot(view.slice2.xyz, in.relative) + view.slice2.w > 0.0;
+            if (view.viewport.w > 0.5) {
+                if (first || second) { discard; }
+            } else {
+                if (first && second) { discard; }
+            }
+        }
     }
     // Face normal from the surface itself: no vertex normals are needed and flat faces stay flat.
     var normal = normalize(cross(dpdx(in.relative), dpdy(in.relative)));

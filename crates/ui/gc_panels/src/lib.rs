@@ -163,19 +163,37 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
         .default_open(true)
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 1.0;
-            for title in [tr!(lang, BrowserRelationships), tr!(lang, BrowserRepresentations)] {
-                let row = TreeRow {
-                    icon: Icon::Path,
-                    text: title,
-                    selected: false,
-                    visible: None,
-                    delete: None,
-                    edit: None,
-                    focus: false,
-                    dim: false,
-                };
-                gc_ui::panel::tree_row(ui, row);
-            }
+            egui::CollapsingHeader::new(tr!(lang, BrowserRelationships)).default_open(true).show(ui, |ui| {
+                for (id, relationship) in session.relationships() {
+                    let delete = tr!(lang, CmdDeleteItem, relationship.name);
+                    let row = TreeRow {
+                        icon: Icon::Path,
+                        text: &relationship.name,
+                        selected: false,
+                        visible: None,
+                        delete: Some(&delete),
+                        edit: None,
+                        focus: false,
+                        dim: false,
+                    };
+                    if gc_ui::panel::tree_row(ui, row).deleted {
+                        action = Some(BrowserAction::Edit(Box::new(gc_doc::Command::Cell(
+                            gc_doc::CellOp::DeleteRelationship(id),
+                        ))));
+                    }
+                }
+            });
+            let row = TreeRow {
+                icon: Icon::Path,
+                text: tr!(lang, BrowserRepresentations),
+                selected: false,
+                visible: None,
+                delete: None,
+                edit: None,
+                focus: false,
+                dim: false,
+            };
+            gc_ui::panel::tree_row(ui, row);
             egui::CollapsingHeader::new(tr!(lang, BrowserOrigin)).default_open(false).show(ui, |ui| {
                 for (_, frame) in
                     session.doc().frames().iter().filter(|(_, f)| f.kind == FrameKind::OriginPlane)
@@ -661,6 +679,7 @@ pub fn status_bar(
                 gc_doc::EditError::Sketch(SketchError::Unsolved(_)) => Msg::ErrUnsolved,
                 gc_doc::EditError::InUse => Msg::ErrInUse,
                 gc_doc::EditError::NameTaken => Msg::ErrNameTaken,
+                gc_doc::EditError::Unsolvable(_) => Msg::ErrUnsolvable,
                 gc_doc::EditError::BadValue => Msg::ErrBadValue,
                 gc_doc::EditError::Underconstrained => Msg::ErrUnderconstrained,
                 gc_doc::EditError::DegenerateFrame => Msg::ErrDegenerateFrame,

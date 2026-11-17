@@ -18,11 +18,17 @@ const POINT_PX: f64 = 8.0;
 const LINE_PX: f64 = 6.0;
 
 /// The origin elements the user showed, with their component's origin in the world.
-pub(crate) fn visible(session: &Session) -> Vec<(Occurrence, ComponentOrigin, Vec<OriginElement>)> {
+pub(crate) fn visible(
+    session: &Session,
+    all: bool,
+) -> Vec<(Occurrence, ComponentOrigin, Vec<OriginElement>)> {
     let mut found = Vec::new();
     for node in session.components() {
-        let shown: Vec<OriginElement> =
-            ALL.iter().copied().filter(|element| session.origin_visible(node.occurrence, *element)).collect();
+        let shown: Vec<OriginElement> = ALL
+            .iter()
+            .copied()
+            .filter(|element| all || session.origin_visible(node.occurrence, *element))
+            .collect();
         if shown.is_empty() {
             continue;
         }
@@ -58,8 +64,9 @@ pub(crate) fn paint(
     screen: &impl Fn(DVec3) -> Option<Pos2>,
     session: &Session,
     selected: Option<(Occurrence, OriginElement)>,
+    all: bool,
 ) {
-    for (occurrence, origin, elements) in visible(session) {
+    for (occurrence, origin, elements) in visible(session, all) {
         for element in elements {
             let chosen = selected == Some((occurrence, element));
             match element {
@@ -100,10 +107,11 @@ pub(crate) fn pick(
     size: [f64; 2],
     session: &Session,
     at: [f64; 2],
+    all: bool,
 ) -> Option<(Occurrence, OriginElement)> {
     let near =
         |p: DVec3| camera.project(p, size).map(|s| ((s[0] - at[0]).powi(2) + (s[1] - at[1]).powi(2)).sqrt());
-    let shown = visible(session);
+    let shown = visible(session, all);
     let mut best: Option<(f64, u8, Occurrence, OriginElement)> = None;
     let mut consider = |distance: f64, rank: u8, occurrence: Occurrence, element: OriginElement| {
         if best.is_none_or(|(d, r, _, _)| (rank, distance) < (r, d)) {

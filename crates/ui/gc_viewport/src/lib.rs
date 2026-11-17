@@ -8,6 +8,7 @@ mod gizmo;
 mod hud;
 mod origin;
 mod paint;
+mod section;
 mod target;
 
 use egui::{Key, PointerButton, Sense, vec2};
@@ -25,6 +26,7 @@ use gc_ui::colors;
 
 pub use origin::ALL as ORIGIN_ELEMENTS;
 pub use paint::{format_angle, format_length};
+pub use section::{Section, SectionKind, SectionPlane};
 pub use target::Background;
 
 /// The plane a sketch lies in, with its in-plane axes.
@@ -81,6 +83,10 @@ enum NavTool {
 pub struct Viewport {
     /// Whether the frame time and draw statistics are shown in the corner.
     pub perf_overlay: bool,
+    /// The Constrain dialog is open: every origin element is drawn and a click picks one for it.
+    pub constrain_mode: bool,
+    /// What the last click picked for the Constrain dialog.
+    constrain_pick: Option<(gc_doc::Occurrence, gc_doc::OriginElement)>,
     /// The navigation tool chosen on the navigation bar: it works with the left button until it ends.
     nav_tool: Option<NavTool>,
     /// The origin element (plane, axis, point) of a component that is selected in the view or the browser.
@@ -91,6 +97,8 @@ pub struct Viewport {
     hud: hud::Hud,
     /// Whether the heads-up display (dynamic input) is on.
     pub hud_on: bool,
+    /// The section view, in progress or applied.
+    pub section: Option<Section>,
     /// Slice Graphics (F7): the part of the model in front of the sketch plane is cut away while a 2D
     /// sketch is edited.
     pub slice: bool,
@@ -138,11 +146,14 @@ impl Viewport {
             perf_overlay: false,
             clear: None,
             spatial_drag: None,
+            constrain_mode: false,
+            constrain_pick: None,
             nav_tool: None,
             origin_selected: None,
             origin_menu: None,
             hud: hud::Hud::default(),
             hud_on: true,
+            section: None,
             slice: false,
             show_constraints: true,
             box_select: None,
@@ -355,12 +366,17 @@ impl Viewport {
         if active.is_none() || session.sketch_is_spatial() {
             self.slice = false;
         }
-        let slice = active.filter(|_| self.slice).map(|(_, plane)| {
-            // The side of the plane the eye is on is cut away.
-            let toward_eye =
-                if plane.normal.dot(self.camera.forward()) < 0.0 { plane.normal } else { -plane.normal };
-            (toward_eye, toward_eye.dot(plane.origin))
-        });
+        let slice = if let Some(section) = &self.section {
+            section.slicing()
+        } else {
+            let one = active.filter(|_| self.slice).map(|(_, plane)| {
+                // The side of the plane the eye is on is cut away.
+                let toward_eye =
+                    if plane.normal.dot(self.camera.forward()) < 0.0 { plane.normal } else { -plane.normal };
+                (toward_eye, toward_eye.dot(plane.origin))
+            });
+            target::Slicing { planes: one.into_iter().collect(), union: false }
+        };
         self.background.paint(ui, rect, &self.camera, &scene, slice);
         paint::over(
             ui,
@@ -378,7 +394,22 @@ impl Viewport {
                 #[allow(clippy::cast_possible_truncation, reason = "screen coordinates fit f32")]
                 Some(egui::pos2(rect.left() + p[0] as f32, rect.top() + p[1] as f32))
             };
-            origin::paint(&ui.painter_at(rect), &screen, session, self.origin_selected);
+            origin::paint(&ui.painter_at(rect), &screen, session, self.origin_selected, self.constrain_mode);
+        }
+        if let Some(section) = &self.section {
+            let camera = self.camera;
+            let screen = |world: DVec3| {
+                let p = camera.project(world, size)?;
+                #[allow(clippy::cast_possible_truncation, reason = "screen coordinates fit f32")]
+                Some(egui::pos2(rect.left() + p[0] as f32, rect.top() + p[1] as f32))
+            };
+            section.paint_plane(&ui.painter_at(rect), &screen, session);
+        }
+        if let Some(section) = &mut self.section
+            && section::toolbar(ui.ctx(), section, self.clear.unwrap_or(rect), lang)
+                == section::ToolbarAction::Cancel
+        {
+            self.section = None;
         }
         if self.hud_on && active.is_some() && !session.sketch_is_spatial() {
             self.hud.show(ui.ctx(), session, cursor, lang);
@@ -416,6 +447,11 @@ impl Viewport {
         painter.rect_filled(frame, 4.0, egui::Color32::from_black_alpha(170));
         painter.galley(frame.min + egui::vec2(6.0, 3.0), galley, egui::Color32::WHITE);
         ui.ctx().request_repaint();
+    }
+
+    /// The origin element the last click picked for the Constrain dialog, once.
+    pub fn take_constrain_pick(&mut self) -> Option<(gc_doc::Occurrence, gc_doc::OriginElement)> {
+        self.constrain_pick.take()
     }
 
     /// The navigation bar under the view cube: zoom all, pan, zoom, orbit and look at, with a home button
@@ -989,13 +1025,16 @@ impl Viewport {
         if session.hover_item(hovered) {
             ui.ctx().request_repaint();
         }
-        if self.measure_features && response.clicked_by(PointerButton::Primary) {
+        if self.constrain_mode && response.clicked_by(PointerButton::Primary) {
+            let at = response.interact_pointer_pos().map(to_view);
+            self.constrain_pick = at.and_then(|at| origin::pick(&self.camera, size, session, at, true));
+        } else if self.measure_features && response.clicked_by(PointerButton::Primary) {
             let at = response.interact_pointer_pos().map(to_view);
             self.measure_pick = Some(at.and_then(|at| self.pick_feature(session, at, size)));
         } else if !on_handles && response.clicked_by(PointerButton::Primary) {
             // Origin planes, axes and points that are shown come before the solids behind them.
             let at = response.interact_pointer_pos().map(to_view);
-            self.origin_selected = at.and_then(|at| origin::pick(&self.camera, size, session, at));
+            self.origin_selected = at.and_then(|at| origin::pick(&self.camera, size, session, at, false));
             let picked = if self.origin_selected.is_some() {
                 None
             } else {
@@ -1005,7 +1044,7 @@ impl Viewport {
         }
         if response.secondary_clicked() {
             let at = response.interact_pointer_pos().map(to_view);
-            self.origin_menu = at.and_then(|at| origin::pick(&self.camera, size, session, at));
+            self.origin_menu = at.and_then(|at| origin::pick(&self.camera, size, session, at, false));
             if self.origin_menu.is_some() {
                 self.origin_selected = self.origin_menu;
                 self.context_item = None;
