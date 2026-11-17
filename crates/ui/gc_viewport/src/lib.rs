@@ -8,6 +8,7 @@ mod gizmo;
 mod hud;
 mod origin;
 mod paint;
+mod radial;
 mod section;
 mod target;
 
@@ -26,6 +27,7 @@ use gc_ui::colors;
 
 pub use origin::ALL as ORIGIN_ELEMENTS;
 pub use paint::{format_angle, format_length};
+pub use radial::ViewportRequest;
 pub use section::{Section, SectionKind, SectionPlane};
 pub use target::Background;
 
@@ -91,12 +93,15 @@ pub struct Viewport {
     nav_tool: Option<NavTool>,
     /// The origin element (plane, axis, point) of a component that is selected in the view or the browser.
     pub origin_selected: Option<(gc_doc::Occurrence, gc_doc::OriginElement)>,
-    /// The origin plane under the right-click menu.
-    origin_menu: Option<(gc_doc::Occurrence, gc_doc::OriginElement)>,
     /// The heads-up display of the drawing tools.
     hud: hud::Hud,
     /// Whether the heads-up display (dynamic input) is on.
     pub hud_on: bool,
+    /// The marking menu of the graphics window and the commands it offers.
+    marking: gc_ui::marking::MarkingMenu,
+    marking_set: radial::Set,
+    /// What the view asks the application to do (the Constrain dialog, placing a component).
+    request: Option<ViewportRequest>,
     /// The section view, in progress or applied.
     pub section: Option<Section>,
     /// Slice Graphics (F7): the part of the model in front of the sketch plane is cut away while a 2D
@@ -131,7 +136,6 @@ pub struct Viewport {
     /// Where the viewport was drawn last.
     rect: egui::Rect,
     /// The item the context menu is about.
-    context_item: Option<gc_session::CellItem>,
     /// While true (the Measure command with the Edges and Faces priority), a click picks a corner, an
     /// edge or a face instead of selecting a component.
     pub measure_features: bool,
@@ -150,9 +154,11 @@ impl Viewport {
             constrain_pick: None,
             nav_tool: None,
             origin_selected: None,
-            origin_menu: None,
             hud: hud::Hud::default(),
             hud_on: true,
+            marking: gc_ui::marking::MarkingMenu::default(),
+            marking_set: radial::Set::default(),
+            request: None,
             section: None,
             slice: false,
             show_constraints: true,
@@ -170,7 +176,6 @@ impl Viewport {
             picker: gc_scene::Picker::default(),
             gizmo: None,
             rect: egui::Rect::NOTHING,
-            context_item: None,
             measure_features: false,
             measure_pick: None,
         }
@@ -343,21 +348,50 @@ impl Viewport {
                 ui.ctx().request_repaint();
             }
         } else if active.is_none() && self.navigating.is_none() {
-            self.cell_input(ui, &response, rect, session, lang);
+            self.cell_input(ui, &response, rect, session);
         }
 
-        // Right click in a sketch: finish the command in progress, or the sketch.
-        if active.is_some() && self.navigating.is_none() {
-            response.context_menu(|ui| {
-                if ui.button(tr!(lang, CmdDone)).clicked() {
-                    session.tool_event(ToolEvent::Key(ToolKey::Escape));
-                    ui.close();
+        // The marking menu: a right press opens it (in a sketch or among the components); a quick mark
+        // toward a command picks it, otherwise the radial menu and its overflow list show.
+        let secondary_pressed = ui.input(|i| i.pointer.button_pressed(PointerButton::Secondary));
+        if secondary_pressed && response.hovered() && self.navigating.is_none() && !self.marking.is_open() {
+            let at = ui.input(|i| i.pointer.press_origin().or(i.pointer.interact_pos()));
+            self.marking_set = if active.is_some() {
+                radial::Set::sketch(session.sketch_is_spatial())
+            } else {
+                // What is under the cursor is selected, and decides the short menu.
+                let view = at.map(to_view);
+                let origin = view.and_then(|p| origin::pick(&self.camera, size, session, p, false));
+                let item =
+                    if origin.is_some() { None } else { view.and_then(|p| self.pick_item(session, p, size)) };
+                self.origin_selected = origin;
+                session.select_item(item);
+                radial::Set::assembly(item, origin)
+            };
+            if let Some(at) = at {
+                self.marking.press(at, ui.input(|i| i.time));
+            }
+        }
+        if self.marking.is_open() {
+            let radial: Vec<Option<gc_ui::marking::MarkingItem>> =
+                self.marking_set.radial.iter().map(|cmd| cmd.map(|cmd| cmd.item(session, lang))).collect();
+            let overflow: Vec<gc_ui::marking::MarkingItem> =
+                self.marking_set.overflow.iter().map(|cmd| cmd.item(session, lang)).collect();
+            let picked = self.marking.show(ui.ctx(), &radial, &overflow);
+            let cmd = picked.and_then(|pick| match pick {
+                gc_ui::marking::MarkingPick::Radial(sector) => {
+                    self.marking_set.radial.get(sector).copied().flatten()
                 }
-                if ui.button(tr!(lang, CmdFinishSketch)).clicked() {
-                    session.finish_sketch();
-                    ui.close();
-                }
+                gc_ui::marking::MarkingPick::Overflow(index) => self.marking_set.overflow.get(index).copied(),
             });
+            if let Some(cmd) = cmd {
+                match radial::run(cmd, session) {
+                    radial::Effect::None => {}
+                    radial::Effect::Request(request) => self.request = Some(request),
+                    radial::Effect::Home => self.camera.look(StandardView::Iso),
+                    radial::Effect::Fit => self.fit(session, [1000.0, 700.0]),
+                }
+            }
         }
 
         let scene = Scene::of(session);
@@ -447,6 +481,11 @@ impl Viewport {
         painter.rect_filled(frame, 4.0, egui::Color32::from_black_alpha(170));
         painter.galley(frame.min + egui::vec2(6.0, 3.0), galley, egui::Color32::WHITE);
         ui.ctx().request_repaint();
+    }
+
+    /// What the view asks the application to do, once.
+    pub fn take_request(&mut self) -> Option<ViewportRequest> {
+        self.request.take()
     }
 
     /// The origin element the last click picked for the Constrain dialog, once.
@@ -1011,7 +1050,6 @@ impl Viewport {
         response: &egui::Response,
         rect: egui::Rect,
         session: &mut Session,
-        lang: Lang,
     ) {
         let size = [f64::from(rect.width()), f64::from(rect.height())];
         let to_view = |p: egui::Pos2| [f64::from(p.x - rect.left()), f64::from(p.y - rect.top())];
@@ -1041,36 +1079,6 @@ impl Viewport {
                 response.interact_pointer_pos().and_then(|p| self.pick_item(session, to_view(p), size))
             };
             session.select_item(picked);
-        }
-        if response.secondary_clicked() {
-            let at = response.interact_pointer_pos().map(to_view);
-            self.origin_menu = at.and_then(|at| origin::pick(&self.camera, size, session, at, false));
-            if self.origin_menu.is_some() {
-                self.origin_selected = self.origin_menu;
-                self.context_item = None;
-                session.select_item(None);
-            } else {
-                self.context_item =
-                    response.interact_pointer_pos().and_then(|p| self.pick_item(session, to_view(p), size));
-                session.select_item(self.context_item);
-            }
-        }
-        if let Some((occurrence, element)) = self.origin_menu {
-            response.context_menu(|ui| {
-                if let gc_doc::OriginElement::Plane(plane) = element
-                    && ui.button(tr!(lang, CmdSketchHere)).clicked()
-                {
-                    // A refusal is shown in the status bar.
-                    drop(session.create_sketch_on_component(occurrence, plane));
-                    ui.close();
-                }
-                if ui.button(tr!(lang, CmdHide)).clicked() {
-                    drop(session.set_origin_visible(occurrence, &[element], false));
-                    ui.close();
-                }
-            });
-        } else if let Some(item) = self.context_item {
-            response.context_menu(|ui| item_menu(ui, session, lang, item));
         }
     }
 

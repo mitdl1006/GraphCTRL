@@ -520,6 +520,12 @@ messages! {
     /// Plan metric: the move was possible in a straight joint-space line.
     PlanStraight => ("직선 이동(플래너 불필요)", "Straight move (no planner needed)"),
     // --- frontend ---
+    /// Marking menu of the assembly environment: place a component.
+    MarkPlace => ("부품 배치", "Place component"),
+    /// Marking menu of the assembly environment: move a component.
+    MarkMove => ("컴포넌트 이동", "Move component"),
+    /// Marking menu of the assembly environment: rotate a component.
+    MarkRotate => ("컴포넌트 회전", "Rotate component"),
     /// View tab group of appearance commands (section views).
     GroupAppearance => ("외형", "Appearance"),
     /// Section view types and mini-toolbar.
@@ -843,6 +849,12 @@ messages! {
     ParamKindDiameter => ("지름", "diameter"),
     /// Parameters: a reference (driven) dimension's equation cannot be edited.
     ParamDriven => ("(참조)", "(reference)"),
+    // --- Project Cut Edges (Inventor: Sketch tab > Create panel) ---
+    ToolCutEdges => ("절단 모서리 투영", "Project Cut Edges"),
+    /// Status: how many cut edges were projected. `{0}` the count.
+    CutEdgesDone => ("절단 모서리 {0}개를 투영했습니다.", "Projected {0} cut edges."),
+    /// Status: the sketch plane cuts nothing.
+    CutEdgesNone => ("스케치 평면이 자르는 모서리가 없습니다.", "The sketch plane cuts no edges."),
     // --- AI agent API ---
     /// Tools menu: the window that connects AI agents (MCP).
     MenuAgent => ("AI 에이전트 연결", "AI agent connection"),

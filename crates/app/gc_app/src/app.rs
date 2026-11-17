@@ -962,6 +962,15 @@ impl eframe::App for GraphCtrlApp {
             Some(ribbon::RibbonAction::StartDrive) => self.drive.start(&mut self.session),
             Some(ribbon::RibbonAction::StartConstrain) => self.constrain.start(),
             Some(ribbon::RibbonAction::StartParameters) => self.parameters.open = true,
+            Some(ribbon::RibbonAction::ProjectCutEdges) => {
+                self.notice = Some(match crate::cut_edges::project_cut_edges(&mut self.session) {
+                    Ok(count) => tr!(lang, CutEdgesDone, count),
+                    Err(crate::cut_edges::CutError::Refused(why)) => tr!(lang, FileError, why),
+                    Err(crate::cut_edges::CutError::NothingCut | crate::cut_edges::CutError::NoSketch) => {
+                        tr!(lang, CutEdgesNone).to_owned()
+                    }
+                });
+            }
             _ => {}
         }
         if ribbon_action == Some(ribbon::RibbonAction::ImportRobot)
@@ -1117,6 +1126,22 @@ impl eframe::App for GraphCtrlApp {
                 });
             },
         );
+        // What the marking menu of the view asked for.
+        match self.viewport.take_request() {
+            Some(gc_viewport::ViewportRequest::Constrain) => self.constrain.start(),
+            Some(gc_viewport::ViewportRequest::PlaceComponent) => {
+                if let Some(path) = self.dialogs.open_mesh() {
+                    match self.session.add_mesh_body(&path) {
+                        Ok(_) => {
+                            self.notice = None;
+                            self.fit_view();
+                        }
+                        Err(error) => self.notice = Some(tr!(lang, FileError, error)),
+                    }
+                }
+            }
+            None => {}
+        }
         // The Constrain dialog picks origin planes, axes and points in the view.
         self.viewport.constrain_mode = self.constrain.picking();
         if let Some((occurrence, element)) = self.viewport.take_constrain_pick() {

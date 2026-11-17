@@ -200,6 +200,12 @@ pub enum SketchOp {
         /// The radius as typed, e.g. `"5 mm"`.
         radius: String,
     },
+    /// Adds fixed lines (sketch coordinates), as projected reference geometry: Project Cut Edges puts the
+    /// edges where the sketch plane cuts the model into the sketch this way. One undo step.
+    ProjectedLines {
+        /// Start and end of each line.
+        lines: Vec<([f64; 3], [f64; 3])>,
+    },
     /// Applies an edit and marks the curves it creates as construction geometry (the Format panel's
     /// Construction toggle held while drawing). One undo step.
     AsConstruction(Box<SketchOp>),
@@ -824,6 +830,20 @@ fn sketch_op(
         SketchOp::AddConstraint(constraint) => {
             created.push(Created::Constraint(added(sketch.try_add_constraint(ids, *constraint)?)?));
             "Constraint"
+        }
+        SketchOp::ProjectedLines { lines } => {
+            if lines.is_empty() || lines.iter().any(|(a, b)| !a.iter().chain(b).all(|v| v.is_finite())) {
+                return Err(SketchError::InvalidValue.into());
+            }
+            for (a, b) in lines {
+                let line = sketch.add_line(ids, *a, *b);
+                created.push(Created::Curve(line));
+                if let Some((start, end)) = sketch.line(line) {
+                    infer(sketch, ids, GeoConstraint::Fix(start), &mut created);
+                    infer(sketch, ids, GeoConstraint::Fix(end), &mut created);
+                }
+            }
+            "Project Cut Edges"
         }
         SketchOp::AddDimension { kind, source, text_pos } => {
             let value = evaluate(source, scope, field_unit(kind))?;
