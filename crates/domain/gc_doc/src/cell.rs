@@ -528,6 +528,34 @@ pub(crate) fn set_timeline(
 ) -> Result<(), EditError> {
     let existing = txn.doc().timeline().map(|(id, _)| id);
     let order = txn.doc().model_order();
+    // States of components that no longer exist are dropped whenever the state is written (undoing the
+    // delete brings the component back together with the state as it was before this write).
+    let gone: Vec<crate::design::Occurrence> = txn
+        .doc()
+        .timeline()
+        .map(|(_, t)| {
+            let c = &t.components;
+            c.grounded
+                .iter()
+                .chain(&c.disabled)
+                .chain(&c.hidden)
+                .chain(&c.suppressed)
+                .copied()
+                .chain(c.origins_shown.iter().map(|(o, _)| *o))
+                .filter(|o| !txn.doc().has_occurrence(*o))
+                .collect()
+        })
+        .unwrap_or_default();
+    let edit = |t: &mut crate::design::Timeline| {
+        if !gone.is_empty() {
+            let c = &mut t.components;
+            for list in [&mut c.grounded, &mut c.disabled, &mut c.hidden, &mut c.suppressed] {
+                list.retain(|o| !gone.contains(o));
+            }
+            c.origins_shown.retain(|(o, _)| !gone.contains(o));
+        }
+        edit(t);
+    };
     match existing {
         Some(id) => {
             txn.modify(id, |t: &mut crate::design::Timeline, _| {
@@ -978,7 +1006,11 @@ pub(crate) fn settle(txn: &mut Txn<'_>) -> Result<(), EditError> {
     if txn.doc().relationships().is_empty() {
         return Ok(());
     }
-    let moves = txn.doc().solve_relationships().map_err(|u| EditError::Unsolvable(u.sick))?;
+    let moves = txn.doc().solve_relationships().map_err(|u| {
+        let names =
+            u.sick.iter().map(|id| txn.doc().get(*id).map_or_else(String::new, |r| r.name.clone())).collect();
+        EditError::Unsolvable { ids: u.sick, names }
+    })?;
     for (item, pose) in moves {
         let placement =
             Placement { xyz: pose.translation.to_array(), rpy: gc_math::rpy_from_quat(pose.rotation) };

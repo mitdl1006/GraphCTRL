@@ -196,7 +196,9 @@ fn origin_planes_can_be_mated_and_impossible_constraints_are_refused() {
         first: on(block, bottom(0.2)),
         second: on(table, top(1.0)),
     });
-    assert!(matches!(result, Err(EditError::Unsolvable(_))), "{result:?}");
+    let Err(error @ EditError::Unsolvable { .. }) = result else { panic!("{result:?}") };
+    let message = error.to_string();
+    assert!(message.contains("Flush:1") || message.contains("Mate:2"), "names the constraints: {message}");
     assert_eq!(bench.doc.relationships(), before.relationships());
     assert_eq!(bench.doc.bodies(), before.bodies());
 

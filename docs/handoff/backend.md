@@ -1,5 +1,13 @@
 # 백엔드 인계 (2026-11-17)
 
+## 2026-11-18 — QA 버그 2건(원점 표시), Unsolvable 메시지
+
+- 리드 브랜치 병합. `qa_origin_folder`의 두 `#[ignore]` 해제: ① 이미 보이는 원점 요소를 다시 보이면 중복 저장 → 처음 보인 순서대로 한 번만,
+  ② 삭제된 컴포넌트의 `origin_visible`이 true → `has_occurrence` 확인 + 모델 트리 상태를 쓸 때 없는 컴포넌트의 상태(고정·비활성·숨김·억제·원점 표시)를
+  정리(삭제를 되돌리면 그 쓰기 이전 상태가 함께 돌아옴).
+- `EditError::Unsolvable{ids, names}` — Display: "these assembly constraints cannot be satisfied together: Mate:1, Flush:2"(이름 포함).
+  UI 문구로 쓰려면 `names`를 i18n 문장에 넣으면 된다.
+
 ## 2026-11-18 — 매개변수 이름 바꾸기(리드 요청)
 
 - `Command::RenameParam{id, name}`: 이름 형식·중복 검사(`EditError::BadName`), 이 매개변수를 쓰는 다른 매개변수와 모든 스케치 치수의 수식 안

@@ -438,9 +438,14 @@ pub enum EditError {
     /// A value is not a finite number, not positive where it must be, or of the wrong length.
     #[error("a value is out of range")]
     BadValue,
-    /// Assembly constraints cannot all be satisfied; these are not.
-    #[error("the assembly constraints cannot all be satisfied")]
-    Unsolvable(Vec<Id<crate::relate::Relationship>>),
+    /// Assembly constraints cannot all be satisfied; these are not (ids and names, in the same order).
+    #[error("these assembly constraints cannot be satisfied together: {}", names.join(", "))]
+    Unsolvable {
+        /// The constraints that are not satisfied.
+        ids: Vec<Id<crate::relate::Relationship>>,
+        /// Their names as shown in the Relationships folder.
+        names: Vec<String>,
+    },
 }
 
 /// Unit of a bare number in a dimension field.
