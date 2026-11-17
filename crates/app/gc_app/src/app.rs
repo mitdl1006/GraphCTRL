@@ -71,7 +71,12 @@ impl FileDialogs for NativeDialogs {
     }
 
     fn open_mesh(&mut self) -> Option<PathBuf> {
-        rfd::FileDialog::new().add_filter("STL, COLLADA", &["stl", "STL", "dae", "DAE"]).pick_file()
+        rfd::FileDialog::new()
+            .add_filter(
+                "STL, COLLADA, glTF, STEP",
+                &["stl", "STL", "dae", "DAE", "glb", "GLB", "gltf", "GLTF", "stp", "STP", "step", "STEP"],
+            )
+            .pick_file()
     }
 
     fn open_urdf(&mut self) -> Option<PathBuf> {
@@ -323,6 +328,7 @@ impl GraphCtrlApp {
         session.set_kinematics(kinematics.factories);
         session.set_planners(kinematics.planners);
         session.set_robot_library(robot_dir);
+        session.set_assembly_reader(crate::assembly_import::reader());
         if options.background_jobs {
             let notifier = std::sync::Arc::new(Repaint(cc.egui_ctx.clone()));
             session.set_executor(gc_jobs::Executor::thread().with_notifier(notifier));
@@ -1018,12 +1024,18 @@ impl eframe::App for GraphCtrlApp {
         if ribbon_action == Some(ribbon::RibbonAction::ImportMesh)
             && let Some(path) = self.dialogs.open_mesh()
         {
-            match self.session.add_mesh_body(&path) {
-                Ok(_) => {
-                    self.notice = None;
-                    self.viewport.fit(&self.session, [1000.0, 700.0]);
+            // An assembly file (glTF, STEP) is read by a job; its parts arrive with the next frames.
+            if crate::assembly_import::is_assembly(&path) {
+                self.session.import_assembly(&path.to_string_lossy(), crate::assembly_import::importer());
+                self.notice = None;
+            } else {
+                match self.session.add_mesh_body(&path) {
+                    Ok(_) => {
+                        self.notice = None;
+                        self.viewport.fit(&self.session, [1000.0, 700.0]);
+                    }
+                    Err(error) => self.notice = Some(tr!(lang, FileError, error)),
                 }
-                Err(error) => self.notice = Some(tr!(lang, FileError, error)),
             }
         }
         egui::Panel::bottom("status").show(ui, |ui| {
