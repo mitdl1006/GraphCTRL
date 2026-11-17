@@ -1210,3 +1210,44 @@ fn imported_equipment_is_an_obstacle_that_can_be_suppressed_and_reloaded() {
     changed.open(&project).unwrap();
     assert!(changed.assembly_parts(id).unwrap_err().contains("changed"));
 }
+
+#[test]
+fn an_assembly_is_imported_by_a_job_and_failures_are_reported() {
+    use std::sync::Arc;
+    let mut session = Session::new();
+    assert!(session.import_status().is_none());
+    let triangle =
+        || gc_mesh::MeshData::new(vec![[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], vec![0, 1, 2]).unwrap();
+    session.import_assembly(
+        "cell.glb",
+        Arc::new(move |file: &str| {
+            let assembly = gc_doc::Assembly {
+                name: "Cell".into(),
+                file: file.into(),
+                placement: Placement::default(),
+                parts: vec![gc_doc::AssemblyPart {
+                    name: "Plate".into(),
+                    parent: None,
+                    matrix: [
+                        [1.0, 0.0, 0.0, 0.0],
+                        [0.0, 1.0, 0.0, 0.0],
+                        [0.0, 0.0, 1.0, 0.0],
+                        [0.0, 0.0, 0.0, 1.0],
+                    ],
+                    meshes: vec![0],
+                }],
+                meshes: vec![gc_doc::AssemblyMesh { name: "Plate".into(), color: [1.0; 4], triangles: 1 }],
+                look: Default::default(),
+            };
+            Ok((assembly, vec![triangle()]))
+        }),
+    );
+    let id = *session.import_status().unwrap().as_ref().unwrap();
+    assert_eq!(session.doc().get(id).unwrap().file, "cell.glb");
+    assert_eq!(session.assembly_parts(id).unwrap().len(), 1);
+    assert!(session.undo(), "the import is one undo step");
+    assert!(session.doc().get(id).is_none());
+
+    session.import_assembly("broken.glb", Arc::new(|file: &str| Err(format!("{file}: not a glTF file"))));
+    assert!(session.import_status().unwrap().as_ref().unwrap_err().contains("broken.glb"));
+}

@@ -386,6 +386,9 @@ pub(crate) struct CellState {
     executor: Executor,
     job: Option<PlanJob>,
     compare_job: Option<CompareJob>,
+    /// An assembly file being read in the background, and what came of the last one.
+    import_job: Option<JobHandle<Result<crate::assembly::Imported, String>>>,
+    import_result: Option<Result<Id<gc_doc::Assembly>, String>>,
     comparisons: BTreeMap<Id<MotionPath>, (String, Vec<CompareRow>)>,
     robots: BTreeMap<Id<Robot>, Arc<LoadedRobot>>,
     jog: Option<(Id<Robot>, Vec<f64>)>,
@@ -428,6 +431,8 @@ impl Default for CellState {
             executor: Executor::inline(),
             job: None,
             compare_job: None,
+            import_job: None,
+            import_result: None,
             comparisons: BTreeMap::new(),
             robots: BTreeMap::new(),
             jog: None,
@@ -794,6 +799,24 @@ impl Session {
             Some(Created::Assembly(id)) => Ok(*id),
             _ => Err("the assembly was not added".to_owned()),
         }
+    }
+
+    /// Reads an assembly file in the background with `read` (a plugin's reader turned into the document's
+    /// form) and adds it when [`Session::poll_jobs`] collects it (with the default executor, at once). An
+    /// import still running is cancelled. See [`Session::import_status`].
+    pub fn import_assembly(&mut self, file: &str, read: crate::assembly::Importer) {
+        if let Some(job) = self.cell.import_job.take() {
+            job.cancel();
+        }
+        self.cell.import_result = None;
+        let file = file.to_owned();
+        self.cell.import_job = Some(self.cell.executor.spawn("import", move |_| read(&file)));
+        self.poll_jobs();
+    }
+
+    /// `None` while an import runs (or none was started); then the new assembly, or why it failed.
+    pub fn import_status(&self) -> Option<&Result<Id<gc_doc::Assembly>, String>> {
+        if self.cell.import_job.is_some() { None } else { self.cell.import_result.as_ref() }
     }
 
     /// The meshes of an assembly placed in the world, to draw; or why they are not available.
@@ -1916,6 +1939,19 @@ impl Session {
                     arrived = true;
                 }
                 Some(JobOutcome::Done(None) | JobOutcome::Failed(_)) => arrived = true,
+            }
+        }
+        if let Some(mut job) = self.cell.import_job.take() {
+            match job.poll() {
+                None => self.cell.import_job = Some(job),
+                Some(JobOutcome::Done(Ok((assembly, meshes)))) => {
+                    self.cell.import_result = Some(self.add_assembly(assembly, meshes));
+                    arrived = true;
+                }
+                Some(JobOutcome::Done(Err(reason)) | JobOutcome::Failed(reason)) => {
+                    self.cell.import_result = Some(Err(reason));
+                    arrived = true;
+                }
             }
         }
         arrived | self.poll_plan()

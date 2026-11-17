@@ -20,7 +20,7 @@ mod spatial;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-pub use assembly::{AssemblyReader, ShownAssemblyPart};
+pub use assembly::{AssemblyReader, Imported, Importer, ShownAssemblyPart};
 pub use cell::{
     CellItem, CompareRow, Ghost, LoadedRobot, MeshRef, PADDING, PLANNERS, PlanStatus, PlannedPath, Reference,
     Resources, Shown, ShownPart,

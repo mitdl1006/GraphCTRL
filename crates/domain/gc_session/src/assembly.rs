@@ -20,6 +20,14 @@ use crate::cell::MeshRef;
 /// [`gc_doc::Assembly::meshes`]. The part tree comes from the document.
 pub type AssemblyReader = Arc<dyn Fn(&str) -> Result<Vec<MeshData>, String> + Send + Sync>;
 
+/// A freshly imported assembly: the document's part tree and the meshes, in the order of
+/// [`gc_doc::Assembly::meshes`].
+pub type Imported = (Assembly, Vec<MeshData>);
+
+/// Reads an assembly file for [`crate::Session::import_assembly`] (a plugin's reader turned into the
+/// document's form).
+pub type Importer = Arc<dyn Fn(&str) -> Result<Imported, String> + Send + Sync>;
+
 /// One mesh of one part of an assembly, placed in the world, ready to draw.
 #[derive(Clone, Debug)]
 pub struct ShownAssemblyPart {
