@@ -508,3 +508,135 @@ fn circular_patterns_turn_round_the_axis_and_stay_constrained() {
             .is_err()
     );
 }
+
+/// Inventor 2026 help, To Stretch, Scale, or Offset 2D Sketch Geometry
+/// (GUID-962CEE71-8BE4-4DA6-B51E-341319C64FA4): "By default, Inventor selects loops ... and constrains the
+/// offset geometry to be equidistant from the original curve"; Loop Select and Constrain Offset can be
+/// turned off.
+#[test]
+fn offset_takes_whole_loops_and_keeps_one_distance() {
+    let rectangle = |bench: &mut Bench| -> Vec<Id<Curve>> {
+        let created = bench
+            .op(SketchOp::AddRectangle { a: [0.0, 0.0], b: [0.2, 0.1], snap_a: Default::default() })
+            .unwrap();
+        Bench::curves(&created)
+    };
+    // One side picked; the loop is taken; the offset is outside and 10 mm away everywhere.
+    let mut bench = Bench::new();
+    let sides = rectangle(&mut bench);
+    let dof = bench.dof();
+    let created = bench
+        .op(SketchOp::Offset { curves: vec![sides[0]], distance: 0.01, loop_select: true, constrain: true })
+        .unwrap();
+    let made: Vec<Id<Curve>> =
+        Bench::curves(&created).into_iter().filter(|c| !bench.sketch().curves[c].construction).collect();
+    assert_eq!(made.len(), 4);
+    assert_eq!(bench.dof(), dof + 1, "the offset distance alone");
+    let corners: Vec<[f64; 3]> = made
+        .iter()
+        .flat_map(|c| {
+            let (a, b) = bench.sketch().line(*c).unwrap();
+            [bench.sketch().pos(a).unwrap(), bench.sketch().pos(b).unwrap()]
+        })
+        .collect();
+    let (min_x, max_x) =
+        corners.iter().fold((f64::MAX, f64::MIN), |(lo, hi), p| (lo.min(p[0]), hi.max(p[0])));
+    let (min_y, max_y) =
+        corners.iter().fold((f64::MAX, f64::MIN), |(lo, hi), p| (lo.min(p[1]), hi.max(p[1])));
+    assert!(
+        (min_x + 0.01).abs() < 1e-9
+            && (max_x - 0.21).abs() < 1e-9
+            && (min_y + 0.01).abs() < 1e-9
+            && (max_y - 0.11).abs() < 1e-9,
+        "{corners:?}"
+    );
+    // A negative distance goes inside.
+    let created = bench
+        .op(SketchOp::Offset { curves: vec![sides[1]], distance: -0.02, loop_select: true, constrain: true })
+        .unwrap();
+    let inner: Vec<[f64; 3]> = Bench::curves(&created)
+        .into_iter()
+        .filter(|c| !bench.sketch().curves[c].construction)
+        .flat_map(|c| {
+            let (a, _) = bench.sketch().line(c).unwrap();
+            [bench.sketch().pos(a).unwrap()]
+        })
+        .collect();
+    assert!(inner.iter().all(|p| p[0] > 0.0 && p[0] < 0.2 && p[1] > 0.0 && p[1] < 0.1), "{inner:?}");
+
+    // Constrain Offset off: each side keeps its own distance (four degrees of freedom).
+    let mut bench = Bench::new();
+    let sides = rectangle(&mut bench);
+    let dof = bench.dof();
+    bench
+        .op(SketchOp::Offset { curves: vec![sides[0]], distance: 0.01, loop_select: true, constrain: false })
+        .unwrap();
+    assert_eq!(bench.dof(), dof + 4);
+    // Loop Select off: only the picked side.
+    let created = bench
+        .op(SketchOp::Offset { curves: vec![sides[0]], distance: 0.01, loop_select: false, constrain: true })
+        .unwrap();
+    assert_eq!(
+        Bench::curves(&created).into_iter().filter(|c| !bench.sketch().curves[c].construction).count(),
+        1
+    );
+
+    // A slot (lines and arcs meeting tangentially) and a circle.
+    let mut bench = Bench::new();
+    let slot = Bench::curves(
+        &bench
+            .op(SketchOp::AddSlot {
+                a: [0.0; 3],
+                b: [0.2, 0.0, 0.0],
+                width: 0.1,
+                kind: gc_doc::SlotKind::CenterToCenter,
+            })
+            .unwrap(),
+    );
+    let dof = bench.dof();
+    let created = bench
+        .op(SketchOp::Offset { curves: vec![slot[0]], distance: 0.01, loop_select: true, constrain: true })
+        .unwrap();
+    assert_eq!(bench.dof(), dof + 1, "slot offset: its distance");
+    let arcs: Vec<f64> =
+        Bench::curves(&created).into_iter().filter_map(|c| bench.sketch().round(c).map(|(_, r)| r)).collect();
+    assert_eq!(arcs.len(), 2);
+    assert!(arcs.iter().all(|r| (r - 0.06).abs() < 1e-9), "{arcs:?}");
+    let circle = Bench::curves(
+        &bench
+            .op(SketchOp::AddCircle {
+                centre: [1.0, 0.0, 0.0],
+                radius: 0.05,
+                centre_snap: Default::default(),
+                rim_snap: Default::default(),
+            })
+            .unwrap(),
+    )[0];
+    let created = bench
+        .op(SketchOp::Offset { curves: vec![circle], distance: 0.02, loop_select: true, constrain: true })
+        .unwrap();
+    let r =
+        Bench::curves(&created).into_iter().find_map(|c| bench.sketch().round(c).map(|(_, r)| r)).unwrap();
+    assert!((r - 0.07).abs() < 1e-12);
+    // Refused: nothing, no distance, a circle offset to nothing.
+    assert!(
+        bench
+            .op(SketchOp::Offset { curves: vec![], distance: 0.01, loop_select: true, constrain: true })
+            .is_err()
+    );
+    assert!(
+        bench
+            .op(SketchOp::Offset { curves: vec![circle], distance: 0.0, loop_select: true, constrain: true })
+            .is_err()
+    );
+    assert!(
+        bench
+            .op(SketchOp::Offset {
+                curves: vec![circle],
+                distance: -0.06,
+                loop_select: true,
+                constrain: true
+            })
+            .is_err()
+    );
+}
