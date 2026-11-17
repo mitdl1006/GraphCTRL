@@ -33,6 +33,20 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 컴포넌트(occurrence) 선택·접지 토글 · 표현 폴더 · 최대 거리(리드 ①②③)
+
+- ① `session.selected_occurrence()`, `select_occurrence(Option<Occurrence>) -> bool`(없는 것은 거부·유지). CellItem 선택과의 관계:
+  바디·로봇은 둘 다(같은 것), 로봇 링크·툴을 고르면 CellItem은 그 로봇(로봇 패널), 어셈블리·부품은 CellItem 없음; `select_item`은 바디·로봇이면
+  occurrence도 그것, 웨이포인트·좌표계·경로면 없음. 접지 토글: `can_ground(occ)`(바디·로봇·어셈블리만), `toggle_ground_selected() -> Result<bool>`
+  (Undo 1단계). 문서는 링크·툴 접지를 거부(부품 접지는 저장되지만 효과 없음 — 기존 동작 유지).
+- ② 표현 폴더: `session.representation_folder() -> RepresentationFolder{views, positions(Primary 먼저)}`, 각 `RepresentationNode{name, active}`.
+  `Representations.active_view`(마지막으로 활성화한 뷰, 삭제 시 조정) 추가. 래퍼: `add_view_representation`, `activate_view_representation`,
+  `add_positional_representation`, `activate_positional_representation(Option)`, `delete_representation`.
+- ③ 측정 최대 거리(원문 GUID-1805AB8F-F782-4B24-A332-B4F2E10A3D00 "Toggle between Minimum Distance, Center to Center, and Maximum Distance"):
+  `PairMeasure.maximum: Option<Closest>`(점 두 개 포함), gc_collide `Geometry::farthest` — 상자·구·원통은 해석적 최원점, 메시·헐은 정점,
+  여러 시작점에서 번갈아 최원점 갱신(돌린 상자 쌍에서 전수 조사와 일치 테스트).
+- 테스트 `gc_session/tests/{occurrence_selection, measure_maximum}.rs`, gc_collide `farthest_is_the_largest_distance_between_the_shapes`.
+
 ## 2026-11-18 — 로봇 셀: 설비에 붙은 로봇 · 설비 기준 웨이포인트(리드 ①②)
 
 - ① end-to-end(`gc_session/tests/robot_mount.rs`): 로봇을 받침대에 Mate 또는 Rigid 조인트로 붙이고 받침대를 옮기면(크기도 바꿈) 로봇 베이스가 즉시 따라가고,

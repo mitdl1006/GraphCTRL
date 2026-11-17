@@ -64,6 +64,9 @@ pub struct Representations {
     /// The active position (`None`: [Primary]).
     #[serde(default)]
     pub active_position: Option<usize>,
+    /// The view representation activated last (shown checked in the browser), if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_view: Option<usize>,
     /// Component placements of [Primary] while another position is active, to go back to.
     #[serde(default)]
     pub primary_placements: Vec<(AnyId, Placement)>,
@@ -72,7 +75,10 @@ pub struct Representations {
 impl Representations {
     /// True when nothing is stored.
     pub fn is_empty(&self) -> bool {
-        self.views.is_empty() && self.positions.is_empty() && self.active_position.is_none()
+        self.views.is_empty()
+            && self.positions.is_empty()
+            && self.active_position.is_none()
+            && self.active_view.is_none()
     }
 }
 
@@ -185,6 +191,9 @@ pub(crate) fn activate_view(
         let t = view.transparency.iter().find(|(i, _)| *i == item).map_or(0.0, |(_, t)| t.clamp(0.0, 0.95));
         set_transparency(txn, item, t)?;
     }
+    let mut reps = txn.doc().representations();
+    reps.active_view = Some(index);
+    write(txn, reps)?;
     Ok((Vec::new(), "Activate view representation"))
 }
 
@@ -285,6 +294,11 @@ pub(crate) fn delete(
             return Err(EditError::BadValue);
         }
         reps.views.remove(i);
+        reps.active_view = match reps.active_view {
+            Some(a) if a == i => None,
+            Some(a) if a > i => Some(a - 1),
+            other => other,
+        };
     }
     if let Some(i) = position {
         if i >= reps.positions.len() {

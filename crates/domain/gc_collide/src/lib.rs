@@ -173,6 +173,42 @@ fn build(desc: &ShapeDesc) -> Result<(DPose3, SharedShape), CollideError> {
     })
 }
 
+/// The point of a shape (in its own frame) farthest from `p` (in the same frame).
+fn farthest_from(shape: &dyn parry3d_f64::shape::Shape, p: DVec3) -> DVec3 {
+    let away = |v: f64| if v > 0.0 { -1.0 } else { 1.0 };
+    if let Some(cuboid) = shape.as_cuboid() {
+        let h = cuboid.half_extents;
+        return DVec3::new(away(p.x) * h.x, away(p.y) * h.y, away(p.z) * h.z);
+    }
+    if let Some(ball) = shape.as_ball() {
+        let d = (-p).normalize_or(DVec3::X);
+        return d * ball.radius;
+    }
+    if let Some(cylinder) = shape.as_cylinder() {
+        // Along Y in the library's frame: the far rim.
+        let radial = DVec3::new(-p.x, 0.0, -p.z).normalize_or(DVec3::X) * cylinder.radius;
+        return radial + DVec3::Y * away(p.y) * cylinder.half_height;
+    }
+    let pick = |points: &[DVec3]| {
+        points
+            .iter()
+            .copied()
+            .max_by(|a, b| a.distance_squared(p).total_cmp(&b.distance_squared(p)))
+            .unwrap_or(DVec3::ZERO)
+    };
+    if let Some(mesh) = shape.as_trimesh() {
+        return pick(mesh.vertices());
+    }
+    if let Some(hull) = shape.as_convex_polyhedron() {
+        return pick(hull.points());
+    }
+    // Anything else: the far corner of its bounds.
+    let aabb = shape.compute_local_aabb();
+    let c = (aabb.mins + aabb.maxs) * 0.5;
+    let h = (aabb.maxs - aabb.mins) * 0.5;
+    c + DVec3::new(away(p.x - c.x) * h.x, away(p.y - c.y) * h.y, away(p.z - c.z) * h.z)
+}
+
 /// Triangle meshes already built, by the mesh they were built from: building one (its BVH) takes tens of
 /// milliseconds at 100,000 triangles, and the same mesh is asked for again and again (a body measured, a
 /// contact step, an interference run). Entries go when their mesh is dropped.
@@ -420,6 +456,48 @@ impl Geometry {
             }
         }
         Ok(deepest)
+    }
+
+    /// Where this geometry and another are farthest apart (Inventor's Measure, Maximum Distance): the
+    /// largest distance between a point of one and a point of the other, and those points. Exact for boxes,
+    /// spheres, cylinders and polyhedra (hulls and meshes: their vertices); found by alternating
+    /// farthest-point steps from several starts. `None` when either is empty.
+    pub fn farthest(&self, other: &Geometry) -> Option<Closest> {
+        let mut best: Option<Closest> = None;
+        for (pose_a, shape_a) in &self.parts {
+            for (pose_b, shape_b) in &other.parts {
+                let far_a = |p: DVec3| {
+                    pose_a.transform_point(farthest_from(&**shape_a, pose_a.inverse_transform_point(p)))
+                };
+                let far_b = |p: DVec3| {
+                    pose_b.transform_point(farthest_from(&**shape_b, pose_b.inverse_transform_point(p)))
+                };
+                // Starts: the shape's own extreme points along the axes, and its origin.
+                let mut starts = vec![pose_a.translation];
+                for axis in [DVec3::X, DVec3::Y, DVec3::Z] {
+                    for sign in [1.0, -1.0] {
+                        starts.push(far_a(pose_a.translation - axis * sign * 1e6));
+                    }
+                }
+                for start in starts {
+                    let (mut a, mut b) = (start, far_b(start));
+                    for _ in 0..32 {
+                        let next_a = far_a(b);
+                        let next_b = far_b(next_a);
+                        let done = next_a.distance(a) < 1e-12 && next_b.distance(b) < 1e-12;
+                        (a, b) = (next_a, next_b);
+                        if done {
+                            break;
+                        }
+                    }
+                    let distance = a.distance(b);
+                    if distance.is_finite() && best.is_none_or(|c| distance > c.distance) {
+                        best = Some(Closest { distance, on_first: a.to_array(), on_second: b.to_array() });
+                    }
+                }
+            }
+        }
+        best
     }
 
     /// Where this geometry and another come closest; `None` when either is empty.
@@ -736,6 +814,43 @@ mod tests {
         #[rustfmt::skip]
         let indices = vec![0,2,1, 0,3,2, 4,5,6, 4,6,7, 0,1,5, 0,5,4, 2,3,7, 2,7,6, 1,2,6, 1,6,5, 3,0,4, 3,4,7];
         Arc::new(MeshData::new(positions, indices).unwrap())
+    }
+
+    #[test]
+    fn farthest_is_the_largest_distance_between_the_shapes() {
+        let geometry = |pose: DPose3, desc: ShapeDesc| Geometry::from_shapes(&[(pose, desc)]).unwrap();
+        // Two spheres: centres apart plus both radii.
+        let a = geometry(at(0.0, 0.0, 0.0), ShapeDesc::Ball(0.1));
+        let b = geometry(at(1.0, 0.0, 0.0), ShapeDesc::Ball(0.2));
+        assert!((a.farthest(&b).unwrap().distance - 1.3).abs() < 1e-9);
+        // Two turned boxes: the farthest pair of corners, against brute force.
+        let turned =
+            |x: f64, angle: f64| DPose3::from_parts(DVec3::new(x, 0.3, 0.0), DQuat::from_rotation_z(angle));
+        let (pa, pb) = (turned(0.0, 0.4), turned(2.0, -0.7));
+        let (sa, sb) = ([0.2, 0.4, 0.1], [0.3, 0.1, 0.5]);
+        let corners = |pose: DPose3, s: [f64; 3]| -> Vec<DVec3> {
+            (0..8)
+                .map(|i| {
+                    let c = |k: usize| if i & (1 << k) == 0 { -0.5 } else { 0.5 };
+                    pose.transform_point(DVec3::new(c(0) * s[0], c(1) * s[1], c(2) * s[2]))
+                })
+                .collect()
+        };
+        let brute = corners(pa, sa)
+            .iter()
+            .flat_map(|p| corners(pb, sb).into_iter().map(move |q| p.distance(q)))
+            .fold(0.0, f64::max);
+        let found = geometry(pa, ShapeDesc::Box(sa)).farthest(&geometry(pb, ShapeDesc::Box(sb))).unwrap();
+        assert!((found.distance - brute).abs() < 1e-9, "{} vs {brute}", found.distance);
+        // A cylinder: its far rim. A mesh: its far vertex.
+        let cylinder = geometry(at(0.0, 0.0, 0.0), ShapeDesc::Cylinder { radius: 0.1, length: 0.4 });
+        let point = Geometry::point([1.0, 0.0, 0.0]);
+        let expected = (1.1f64 * 1.1 + 0.2 * 0.2).sqrt();
+        assert!((cylinder.farthest(&point).unwrap().distance - expected).abs() < 1e-9);
+        let cube = geometry(at(0.0, 0.0, 0.0), ShapeDesc::Mesh(cube_mesh()));
+        let far = cube.farthest(&point).unwrap();
+        assert!((far.distance - (1.5f64 * 1.5 + 0.5).sqrt()).abs() < 1e-6, "{far:?}");
+        assert!(Geometry::default().farthest(&point).is_none());
     }
 
     #[test]

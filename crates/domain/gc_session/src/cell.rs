@@ -438,6 +438,9 @@ pub(crate) struct CellState {
     frame: Option<(Id<WorkFrame>, WorkFrame)>,
     look: Option<(Shown, gc_doc::Look)>,
     selected: Option<CellItem>,
+    /// The selected component occurrence (a body, robot or assembly, an assembly part, a robot link or
+    /// tool), as the browser and the Ground toggle work with it.
+    occurrence: Option<gc_doc::Occurrence>,
     hovered: Option<CellItem>,
     plans: BTreeMap<Id<MotionPath>, Planned>,
     playback: Option<(Id<MotionPath>, f64)>,
@@ -493,6 +496,7 @@ impl Default for CellState {
             frame: None,
             look: None,
             selected: None,
+            occurrence: None,
             hovered: None,
             plans: BTreeMap::new(),
             playback: None,
@@ -1107,9 +1111,59 @@ impl Session {
         self.cell.selected.filter(|item| self.item_exists(*item))
     }
 
-    /// Selects an item of the cell, or nothing.
+    /// Selects an item of the cell, or nothing. A body or robot is also the selected occurrence; other
+    /// items (waypoints, frames, paths) leave no occurrence selected.
     pub fn select_item(&mut self, item: Option<CellItem>) {
         self.cell.selected = item.filter(|item| self.item_exists(*item));
+        self.cell.occurrence = match self.cell.selected {
+            Some(CellItem::Body(id)) => Some(gc_doc::Occurrence::Item(id.erase())),
+            Some(CellItem::Robot(id)) => Some(gc_doc::Occurrence::Item(id.erase())),
+            _ => None,
+        };
+    }
+
+    /// The selected component occurrence, if it still exists.
+    pub fn selected_occurrence(&self) -> Option<gc_doc::Occurrence> {
+        self.cell.occurrence.filter(|o| self.doc.has_occurrence(*o))
+    }
+
+    /// Selects a component occurrence (from the browser or by picking a part, link or tool), or nothing.
+    /// The cell item selection follows: a body or robot is selected as itself; a robot's link or tool
+    /// selects its robot (whose panels apply); an imported assembly or one of its parts selects no cell
+    /// item. Refused (nothing changes) for an occurrence that does not exist.
+    pub fn select_occurrence(&mut self, occurrence: Option<gc_doc::Occurrence>) -> bool {
+        if occurrence.is_some_and(|o| !self.doc.has_occurrence(o)) {
+            return false;
+        }
+        self.cell.occurrence = occurrence;
+        self.cell.selected = occurrence.and_then(|o| match o {
+            gc_doc::Occurrence::Item(item) => item
+                .downcast::<Body>()
+                .map(CellItem::Body)
+                .or_else(|| item.downcast::<Robot>().map(CellItem::Robot)),
+            gc_doc::Occurrence::Link { robot, .. } | gc_doc::Occurrence::Tool { robot } => {
+                Some(CellItem::Robot(robot))
+            }
+            gc_doc::Occurrence::Part { .. } => None,
+        });
+        true
+    }
+
+    /// True when the Ground toggle applies to the occurrence: a body, robot or imported assembly. (An
+    /// assembly part's grounded state can be stored but does not change anything, since parts move with
+    /// their assembly; a robot's links and tool cannot be grounded.)
+    pub fn can_ground(&self, occurrence: gc_doc::Occurrence) -> bool {
+        matches!(occurrence, gc_doc::Occurrence::Item(_)) && self.doc.has_occurrence(occurrence)
+    }
+
+    /// The Ground toggle on the selected occurrence: grounds it, or frees it when it is grounded. One
+    /// undo step; refused when nothing groundable is selected.
+    pub fn toggle_ground_selected(&mut self) -> Result<bool, EditError> {
+        let occurrence =
+            self.selected_occurrence().filter(|o| self.can_ground(*o)).ok_or(EditError::BadValue)?;
+        let grounded = self.doc.component_flag(occurrence, gc_doc::ComponentFlag::Grounded);
+        self.set_component(occurrence, gc_doc::ComponentFlag::Grounded, !grounded)?;
+        Ok(!grounded)
     }
 
     /// The item under the cursor (shown highlighted before it is clicked).

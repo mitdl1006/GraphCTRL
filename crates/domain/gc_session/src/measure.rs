@@ -28,6 +28,8 @@ pub struct PairMeasure {
     /// The minimum distance between their shapes and where it is; `None` when one has no shapes (a
     /// path) or they could not be measured.
     pub minimum: Option<Closest>,
+    /// The maximum distance between their shapes and where it is (Inventor's Maximum Distance).
+    pub maximum: Option<Closest>,
     /// The distance between their origins (Inventor's Center to Center).
     pub centre_to_centre: f64,
     /// The second origin minus the first, per world axis.
@@ -100,15 +102,16 @@ impl Session {
     /// What two selected items measure together; `None` when either is a path or gone.
     pub fn measure_pair(&self, first: CellItem, second: CellItem) -> Option<PairMeasure> {
         let (a, b) = (self.item_pose(first)?, self.item_pose(second)?);
-        let minimum = match (self.item_geometry(first), self.item_geometry(second)) {
-            (Some(ga), Some(gb)) => ga.closest(&gb).ok().flatten(),
-            _ => None,
+        let (minimum, maximum) = match (self.item_geometry(first), self.item_geometry(second)) {
+            (Some(ga), Some(gb)) => (ga.closest(&gb).ok().flatten(), ga.farthest(&gb)),
+            _ => (None, None),
         };
         let delta = b.translation - a.translation;
         let (za, zb) = (a.rotation * DVec3::Z, b.rotation * DVec3::Z);
         let angle = gc_math::fm::atan2(za.cross(zb).length(), za.dot(zb));
         Some(PairMeasure {
             minimum,
+            maximum,
             centre_to_centre: delta.length(),
             delta: delta.to_array(),
             angle: Some(angle),
