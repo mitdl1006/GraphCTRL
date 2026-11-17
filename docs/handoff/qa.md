@@ -42,3 +42,11 @@
 - **gc_agent 엣지 케이스**(`gc_agent/tests/qa_edges.rs`, 10개 통과): 모르는 이름·NaN·무한·빈 이름·빈 경로는 오류 메시지 + 문서 불변(리비전·히스토리 불변), 잘못된 인자 JSON(타입·길이·누락·null·없는 도구)은 앱에 닿기 전에 거부(호출 수 0 단언), 잘못된 JSON-RPC 봉투, 연속 25회·Undo/Redo 50회·읽기 호출 반복, 토큰 형식 변형(대소문자·접두 공백·쿼리·다른 헤더)과 GET/DELETE·다른 경로 거부, **재시작+토큰 변경 후 옛 토큰·옛 MCP 세션 거부**, 포트 충돌 시 주소가 든 오류, 앱 쪽이 오류를 답하거나 닫힌 경우의 오류 전달.
 - **새 버그 (낮은 심각도)**: `place_robot`이 `1e300` mm 같은 터무니없는 유한 위치를 받아들임(범위 검사 없음) — 담당: 백엔드(`gc_agent/src/exec.rs`·`gc_doc` 배치 검증). 재현: `cargo test -p gc_agent --test qa_edges -- --ignored an_absurd_placement_is_refused`. 뒤따르는 호출이 패닉하지는 않음(별도 통과 테스트).
 - 확인했으나 버그 아님: 헤더 끝 공백(`Bearer secret `)은 HTTP 계층이 잘라 내므로 통과 — 토큰 일치에는 영향 없음.
+
+## 2026-11-17 인벤터 동등성 테스트 (리드 우선순위 변경: 스케치 P1, 어셈블리 P1)
+
+- 리드·백엔드·프론트엔드 브랜치 merge. 백엔드가 P1-2~6·8·13을 올렸고(자체 테스트 `gc_session/tests/inventor_sketch.rs`), 프론트엔드가 P1-1·7·9·10 일부(F8/F9, 상자 선택, 우클릭 마무리, F7)를 올렸다.
+- **`gc_session/tests/qa_sketch_p1.rs`(10개 통과)**: 도움말 근거 경계 테스트 — Trim은 교차 없는 곡선을 **삭제**(S19 원문), Extend는 닿을 곡선이 없으면 불변, 불가능한 Fillet(반지름 0·음수·글자·1e400·평행선·너무 큰 반지름) 거부, 선 체인은 **선분당 Undo 1단계**(S9), 빈 체인의 Backspace·Close·더블클릭 무해, 길이 0 클릭, 일직선 3점 호·폭 0 사각형 거부, Ctrl은 추론 구속만 끄고 접선 호는 접선 유지, HUD 잘못된 값, Esc가 입력값 폐기. 모두 통과 — 이번 범위에서 새 버그 없음.
+- 확인 사실(원문 S19): Trim의 Ctrl+선택 경계 지정, 우클릭 Split/Extend 전환은 아직 테스트하지 않음(구현 여부 불명 → 백엔드에 확인 필요).
+- **미구현 항목은 `#[ignore = "FEATURE ..."]` 스텁 + 확인 절차**: 스케치 화면 쪽 5건(`gc_app/tests/qa_sketch_pending.rs`: HUD 입력창, Trim/Extend/Fillet 리본·단축키, 치수 `이름 = 값` 매개변수, Driven 토글·과구속 Accept/Cancel, 단축키 별칭), 어셈블리 P1 13건 전부(`gc_session/tests/qa_assembly_pending.rs`: 어셈블리 모델 자체가 없음). 기능이 올라오면 `#[ignore]`를 풀고 본문을 채운다.
+- 어셈블리 문서가 스스로 미확인으로 둔 것(Origin 폴더 항목 이름, 첫 컴포넌트 자동 고정 여부 A11 vs A18, 숨김 평면 피킹)은 리드 결정이 필요하다 — 결정되면 테스트에 고정.
