@@ -230,3 +230,74 @@ fn an_imported_assembly_is_a_fixed_reference_that_can_be_placed() {
     broken.parts[1].meshes = vec![3];
     assert!(cell(&mut doc, &mut history, CellOp::AddAssembly(broken)).is_err());
 }
+
+#[test]
+fn items_are_renamed_shown_hidden_and_their_dependents_listed() {
+    let mut doc = Document::new();
+    let mut history = History::default();
+    let (sketch, curves) = sketch_with_rectangle(&mut doc, &mut history);
+    let point_id = *doc.get(sketch).unwrap().points.keys().next().unwrap();
+    let Created::WorkFeature(point) = cell(
+        &mut doc,
+        &mut history,
+        CellOp::AddWorkFeature(work(
+            "Point1",
+            WorkGeometry::Point { at: PointRef::SketchPoint { sketch, point: point_id } },
+        )),
+    )
+    .unwrap()[0] else {
+        panic!()
+    };
+    let Created::WorkFeature(axis) = cell(
+        &mut doc,
+        &mut history,
+        CellOp::AddWorkFeature(work(
+            "Axis1",
+            WorkGeometry::AxisNormalToPlane {
+                plane: PlaneRef::Origin(OriginPlane::Xy),
+                through: PointRef::Work(point),
+            },
+        )),
+    )
+    .unwrap()[0] else {
+        panic!()
+    };
+    let Created::Feature(feature) =
+        cell(&mut doc, &mut history, CellOp::AddFeature(extrude(sketch, curves, Extent::Distance(0.1))))
+            .unwrap()[0]
+    else {
+        panic!()
+    };
+
+    // Rename: trimmed, one undo step; empty or taken names are refused.
+    run(&mut doc, &mut history, Command::Rename { item: point.erase(), name: "  Corner ".into() }).unwrap();
+    assert_eq!(doc.get(point).unwrap().name, "Corner");
+    assert!(matches!(
+        run(&mut doc, &mut history, Command::Rename { item: axis.erase(), name: "Corner".into() }),
+        Err(EditError::NameTaken)
+    ));
+    assert!(run(&mut doc, &mut history, Command::Rename { item: axis.erase(), name: "   ".into() }).is_err());
+    run(&mut doc, &mut history, Command::Rename { item: sketch.erase(), name: "Profile".into() }).unwrap();
+    assert_eq!(doc.get(sketch).unwrap().name, "Profile");
+    assert!(history.undo(&mut doc).is_some());
+    assert_eq!(doc.get(sketch).unwrap().name, "Sketch1");
+
+    // Visibility of any item is stored and read back the same way.
+    assert!(doc.is_visible(sketch.erase()));
+    run(&mut doc, &mut history, Command::SetVisible { item: sketch.erase(), visible: false }).unwrap();
+    assert!(!doc.is_visible(sketch.erase()) && doc.is_visible(feature.erase()));
+    run(&mut doc, &mut history, Command::SetVisible { item: sketch.erase(), visible: true }).unwrap();
+    assert!(doc.is_visible(sketch.erase()));
+
+    // What depends on the sketch: the point on it and the extrusion directly, the axis through the point.
+    let dependents = doc.dependents_of(sketch.erase());
+    assert_eq!(dependents.len(), 3);
+    assert!(dependents.contains(&point.erase()) && dependents.contains(&feature.erase()));
+    assert_eq!(*dependents.last().unwrap(), axis.erase(), "indirect dependents come after direct ones");
+    assert!(doc.dependents_of(axis.erase()).is_empty());
+
+    // The rollback marker's position in the tree order.
+    assert_eq!(doc.rollback_index(), None);
+    cell(&mut doc, &mut history, CellOp::SetRollback { after: Some(point.erase()) }).unwrap();
+    assert_eq!(doc.rollback_index(), Some(1));
+}

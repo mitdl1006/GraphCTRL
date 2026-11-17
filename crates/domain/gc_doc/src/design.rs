@@ -315,8 +315,9 @@ impl Entity for Assembly {
     fn refs(&self, _: &mut Vec<AnyId>) {}
 }
 
-/// The order of the model tree's design items (sketches, work features, features, assemblies), which of
-/// them are suppressed, and where the rollback marker stands. At most one per document.
+/// The model tree's state: the order of its design items (sketches, work features, features,
+/// assemblies), which items are suppressed or hidden, and where the rollback marker stands. At most one
+/// per document.
 ///
 /// It is read through [`crate::Document::model_order`], which drops ids that no longer exist and appends
 /// items it does not list, so commands that add or delete items need not keep it up to date.
@@ -330,6 +331,10 @@ pub struct Timeline {
     /// The last item computed; the items after it are rolled back. `None`: the marker is at the end.
     #[serde(default)]
     pub rollback_after: Option<AnyId>,
+    /// Items hidden in the viewport that keep no look of their own (sketches, waypoints, paths, work
+    /// frames, work features, features).
+    #[serde(default)]
+    pub hidden: Vec<AnyId>,
 }
 
 impl Entity for Timeline {

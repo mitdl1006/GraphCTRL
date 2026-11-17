@@ -1733,9 +1733,9 @@ impl Session {
     }
 
     /// Everything a plan of this path depends on, as text.
-    fn plan_inputs(&self, path: Id<MotionPath>) -> Option<String> {
+    fn plan_inputs(&self, path_id: Id<MotionPath>) -> Option<String> {
         let doc = &self.doc;
-        let path = doc.get(path)?;
+        let path = doc.get(path_id)?;
         let robot = doc.get(path.robot)?;
         let base = self.robot_model(path.robot).map(|loaded| base_frame(loaded, &robot.placement));
         let targets: Vec<String> = path
@@ -1774,6 +1774,10 @@ impl Session {
                 crate::assembly::active(doc)
                     .map(|(id, a)| (id, &a.file, &a.placement, &a.parts))
                     .collect::<Vec<_>>()
+            ) + &format!(
+                " {:?} {:?}",
+                doc.is_inactive(path_id.erase()),
+                path.waypoints.iter().map(|w| doc.is_inactive(w.erase())).collect::<Vec<_>>()
             ),
         )
     }
@@ -2047,6 +2051,9 @@ fn plan_path(
     control: &dyn Control,
 ) -> Result<PlannedPath, String> {
     let path = doc.get(path_id).ok_or("the path no longer exists")?;
+    if doc.is_inactive(path_id.erase()) {
+        return Err(format!("{} is suppressed", path.name));
+    }
     let robot = doc.get(path.robot).ok_or("the robot no longer exists")?;
     let mut plugin: Option<&dyn gc_robotics_api::MotionPlanner> = None;
     let (algorithm, seed, runs) = match strategy {
@@ -2089,6 +2096,10 @@ fn plan_path(
     let mut segments = Vec::with_capacity(path.waypoints.len());
     for (index, waypoint_id) in path.waypoints.iter().enumerate() {
         let waypoint = doc.get(*waypoint_id).ok_or("a waypoint no longer exists")?;
+        // A suppressed waypoint is skipped: the motion goes on to the next one.
+        if doc.is_inactive(waypoint_id.erase()) {
+            continue;
+        }
         let goal = match &waypoint.target {
             WaypointTarget::Joints(q) => Goal::Joints(q.clone()),
             target => {
@@ -2117,7 +2128,7 @@ fn plan_path(
             },
             contacts: contacts_of(doc, path, index),
         };
-        let planned = match previous.and_then(|p| p.segments.get(index)) {
+        let planned = match previous.and_then(|p| p.segments.get(segments.len())) {
             Some(old) => gc_motion::replan_using(&scene, &request, old, plugin, control),
             None => gc_motion::plan_motion_using(&scene, &request, plugin, control),
         };

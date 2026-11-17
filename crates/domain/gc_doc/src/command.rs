@@ -123,6 +123,22 @@ pub enum SketchOp {
 /// An edit of the document.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Command {
+    /// Renames a model-tree item (sketch, body, robot, waypoint, path, work frame, work feature,
+    /// feature, assembly). Refused when the name is empty or another item of the same kind has it.
+    Rename {
+        /// The item.
+        item: gc_core::AnyId,
+        /// The new name (leading and trailing spaces are dropped).
+        name: String,
+    },
+    /// Shows or hides a model-tree item. Bodies, robots and assemblies keep it in their look; other
+    /// items in the model tree's state.
+    SetVisible {
+        /// The item.
+        item: gc_core::AnyId,
+        /// True to show it.
+        visible: bool,
+    },
     /// Adds a named parameter. `angle` selects degrees instead of millimetres for bare numbers.
     AddParam {
         /// The name.
@@ -256,6 +272,9 @@ pub enum EditError {
     /// The points that set a work frame's axes coincide with its origin or lie on one line with it.
     #[error("the axis points do not give a frame")]
     DegenerateFrame,
+    /// Another item of the same kind already has this name.
+    #[error("the name is already taken")]
+    NameTaken,
     /// A value is not a finite number, not positive where it must be, or of the wrong length.
     #[error("a value is out of range")]
     BadValue,
@@ -534,6 +553,8 @@ fn run(txn: &mut Txn<'_>, command: &Command) -> Result<(Vec<Created>, &'static s
             txn.modify(*sketch, |s: &mut Sketch, ids| sketch_op(s, ids, op, &scope))?
         }
         Command::Cell(op) => crate::cell::run(txn, op),
+        Command::Rename { item, name } => crate::tree::rename(txn, *item, name),
+        Command::SetVisible { item, visible } => crate::tree::set_visible(txn, *item, *visible),
     }
 }
 

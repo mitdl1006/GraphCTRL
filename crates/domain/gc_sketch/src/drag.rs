@@ -54,7 +54,32 @@ impl Sketch {
     }
 }
 
+impl Sketch {
+    /// Starts dragging a point of a 3D sketch with the cursor at `cursor` (sketch-space coordinates: the
+    /// caller turns the mouse ray into a position, on a screen-parallel plane or along a locked axis).
+    /// Only points can be dragged this way.
+    pub fn begin_drag_3d(&self, point: Id<SkPoint>, cursor: [f64; 3]) -> Result<SketchDrag, DragRefused> {
+        if !self.is_spatial() {
+            return Err(DragRefused::NothingMobile);
+        }
+        let binding = self.bind(None).map_err(|_unbindable| DragRefused::Unsolved)?;
+        let grab = match binding.points.get(&point).map(Vec::as_slice) {
+            Some([x, y, z]) => Grab::Point3([*x, *y, *z]),
+            _ => return Err(DragRefused::NothingMobile),
+        };
+        match binding.sys.begin_drag_3d(&grab, cursor) {
+            Ok(drag) => Ok(SketchDrag { drag, points: binding.points, radii: binding.radii }),
+            Err((_, refused)) => Err(refused),
+        }
+    }
+}
+
 impl SketchDrag {
+    /// Moves a cursor in space (a drag started with [`Sketch::begin_drag_3d`]).
+    pub fn update_3d(&mut self, cursor: [f64; 3]) -> FrameOutcome {
+        self.drag.update_3d(cursor)
+    }
+
     /// Moves the cursor.
     pub fn update(&mut self, cursor: [f64; 2]) -> FrameOutcome {
         self.drag.update(cursor)

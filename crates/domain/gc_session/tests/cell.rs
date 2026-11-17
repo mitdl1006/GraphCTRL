@@ -1297,3 +1297,34 @@ fn work_features_are_placed_in_the_world() {
     );
     assert_eq!(session.work_shape(line), None);
 }
+
+#[test]
+fn suppressed_waypoints_are_skipped_and_a_suppressed_path_is_not_planned() {
+    let mut session = Session::new();
+    let robot = session.add_robot("Robot1", &six_axis()).unwrap();
+    session.jog(robot, &RIGHT);
+    session.end_jog();
+    let right = session.add_waypoint_here(robot).unwrap();
+    session.jog(robot, &[0.0, 0.3, 0.3, 0.0, 0.5, 0.0]);
+    session.end_jog();
+    let middle = session.add_waypoint_here(robot).unwrap();
+    session.jog(robot, &LEFT);
+    session.end_jog();
+    let path = session.add_path(robot, vec![middle, right]).unwrap();
+    assert_eq!(session.plan(path), PlanStatus::Ready);
+    assert_eq!(session.planned(path).unwrap().segments.len(), 2);
+
+    let suppress = |session: &mut Session, item: gc_core::AnyId, suppressed: bool| {
+        session.execute(&Command::Cell(CellOp::SetSuppressed { item, suppressed })).unwrap();
+    };
+    suppress(&mut session, middle.erase(), true);
+    assert_eq!(session.plan_status(path), PlanStatus::Stale);
+    assert_eq!(session.plan(path), PlanStatus::Ready, "{:?}", session.plan_error(path));
+    let planned = session.planned(path).unwrap();
+    assert_eq!(planned.segments.len(), 1, "straight on to the next waypoint");
+    assert_eq!(planned.sample(1e9), RIGHT.to_vec());
+
+    suppress(&mut session, path.erase(), true);
+    assert_eq!(session.plan(path), PlanStatus::Failed);
+    assert!(session.plan_error(path).unwrap().contains("suppressed"));
+}

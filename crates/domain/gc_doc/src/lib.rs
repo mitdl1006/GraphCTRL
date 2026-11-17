@@ -16,6 +16,7 @@ mod cell;
 mod command;
 mod document;
 mod history;
+mod tree;
 mod txn;
 
 mod design;

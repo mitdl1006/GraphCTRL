@@ -453,6 +453,30 @@ impl Session {
     }
 
     /// Commits the drag as one command, or as nothing at all when the geometry did not move.
+    /// Starts dragging a point of the active 3D sketch with the cursor at `cursor` (sketch-space
+    /// position: the viewport turns the mouse ray into a point on a screen-parallel plane or a locked
+    /// axis). Returns false when the point cannot move (fully constrained, or not a 3D sketch point).
+    pub fn spatial_drag_start(&mut self, point: Id<SkPoint>, cursor: [f64; 3]) -> bool {
+        self.drag = self.active_sketch().and_then(|(_, sketch)| sketch.begin_drag_3d(point, cursor).ok());
+        self.drag.is_some()
+    }
+
+    /// Moves the cursor of a 3D drag. The preview follows ([`Session::point_pos`]); a frame the
+    /// constraints refuse keeps the previous one.
+    pub fn spatial_drag_move(&mut self, cursor: [f64; 3]) -> Option<FrameOutcome> {
+        self.drag.as_mut().map(|drag| drag.update_3d(cursor))
+    }
+
+    /// Ends a 3D drag: the result is one undo step.
+    pub fn spatial_drag_end(&mut self) {
+        self.end_drag();
+    }
+
+    /// Drops a 3D drag without changing the document.
+    pub fn spatial_drag_cancel(&mut self) {
+        self.drag = None;
+    }
+
     fn end_drag(&mut self) {
         let (Some(drag), Some((_, sketch))) = (self.drag.take(), self.active_sketch()) else { return };
         let mut moved = sketch.clone();

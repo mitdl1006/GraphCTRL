@@ -353,7 +353,7 @@ pub enum CellOp {
         /// The item it goes before.
         before: Option<AnyId>,
     },
-    /// Suppresses a design item (kept, not computed) or brings it back.
+    /// Suppresses a design item, waypoint or path (kept, but not computed or planned) or brings it back.
     SetSuppressed {
         /// The item.
         item: AnyId,
@@ -510,7 +510,10 @@ fn finite(values: &[f64]) -> bool {
 }
 
 /// Changes the model tree's order, creating it on first use (with the current order written out).
-fn set_timeline(txn: &mut Txn<'_>, edit: impl FnOnce(&mut crate::design::Timeline)) -> Result<(), EditError> {
+pub(crate) fn set_timeline(
+    txn: &mut Txn<'_>,
+    edit: impl FnOnce(&mut crate::design::Timeline),
+) -> Result<(), EditError> {
     let existing = txn.doc().timeline().map(|(id, _)| id);
     let order = txn.doc().model_order();
     match existing {
@@ -858,7 +861,8 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
             Ok((Vec::new(), "Reorder"))
         }
         CellOp::SetSuppressed { item, suppressed } => {
-            if !txn.doc().model_order().contains(item) {
+            let motion = matches!(item.kind, Kind::Waypoint | Kind::Path) && txn.doc().contains(*item);
+            if !motion && !txn.doc().model_order().contains(item) {
                 return Err(EditError::BadValue);
             }
             set_timeline(txn, |t| {
