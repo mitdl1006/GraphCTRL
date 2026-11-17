@@ -203,7 +203,9 @@ pub fn solve(dh: &Dh, target: &DPose3, seed: Option<&[f64]>) -> Vec<([f64; 6], u
     let wrist = goal.translation - z6 * d6;
     let reach = fm::hypot(wrist.x, wrist.y);
     let mut found = Vec::new();
-    if reach < d4.abs() || reach < 1e-12 {
+    // The wrist centre must lie outside the cylinder of radius d4 around the base axis. On it (the arm
+    // pointing straight up, say) rounding can put it a hair inside: that still counts as on it.
+    if reach < d4.abs() * (1.0 - 1e-9) - 1e-12 || reach < 1e-12 {
         return found;
     }
     let psi = fm::atan2(wrist.y, wrist.x);

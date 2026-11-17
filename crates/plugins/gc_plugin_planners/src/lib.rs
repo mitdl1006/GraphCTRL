@@ -141,8 +141,9 @@ impl Validity for Checker<'_> {
         self.0.motion_valid(a, b)
     }
 
-    // The API's checker does not say how many states a motion check examines (see
-    // docs/handoff/backend.md): each motion counts as one state check until it does.
+    fn motion_cost(&self, a: &[f64], b: &[f64]) -> u64 {
+        self.0.motion_cost(a, b)
+    }
 }
 
 struct Cancel<'a>(&'a dyn PlanControl);

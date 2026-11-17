@@ -94,6 +94,8 @@ struct FrameV1 {
     parent: Option<Id<Frame>>,
     xyz: [f64; 3],
     quat_xyzw: [f64; 4],
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source: Option<gc_doc::PlaneSource>,
 }
 
 /// Version 1 of the file.
@@ -115,6 +117,14 @@ struct FileV1 {
     paths: BTreeMap<Id<MotionPath>, MotionPath>,
     #[serde(default)]
     work_frames: BTreeMap<Id<WorkFrame>, WorkFrame>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    work_features: BTreeMap<Id<gc_doc::WorkFeature>, gc_doc::WorkFeature>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    features: BTreeMap<Id<gc_doc::Feature>, gc_doc::Feature>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    assemblies: BTreeMap<Id<gc_doc::Assembly>, gc_doc::Assembly>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    timelines: BTreeMap<Id<gc_doc::Timeline>, gc_doc::Timeline>,
 }
 
 /// A loaded document.
@@ -163,6 +173,7 @@ pub fn to_text(doc: &Document) -> Result<String, PersistError> {
                         parent: f.parent,
                         xyz: f.xyz,
                         quat_xyzw: f.quat_xyzw,
+                        source: f.source,
                     },
                 )
             })
@@ -173,6 +184,10 @@ pub fn to_text(doc: &Document) -> Result<String, PersistError> {
         waypoints: doc.waypoints().iter().map(|(id, w)| (id, w.clone())).collect(),
         paths: doc.paths().iter().map(|(id, p)| (id, p.clone())).collect(),
         work_frames: doc.work_frames().iter().map(|(id, f)| (id, f.clone())).collect(),
+        work_features: doc.work_features().iter().map(|(id, f)| (id, f.clone())).collect(),
+        features: doc.features().iter().map(|(id, f)| (id, f.clone())).collect(),
+        assemblies: doc.assemblies().iter().map(|(id, a)| (id, a.clone())).collect(),
+        timelines: doc.timeline().map(|(id, t)| (id, t.clone())).into_iter().collect(),
     };
     let mut text = serde_json::to_string_pretty(&file)?;
     text.push('\n');
@@ -208,7 +223,17 @@ pub fn from_text(text: &str) -> Result<Loaded, PersistError> {
                 FrameKindV1::OriginPlane => FrameKind::OriginPlane,
                 FrameKindV1::User => FrameKind::User,
             };
-            (id, Frame { name: f.name, kind, parent: f.parent, xyz: f.xyz, quat_xyzw: f.quat_xyzw })
+            (
+                id,
+                Frame {
+                    name: f.name,
+                    kind,
+                    parent: f.parent,
+                    xyz: f.xyz,
+                    quat_xyzw: f.quat_xyzw,
+                    source: f.source,
+                },
+            )
         })
         .collect();
     let doc = Document::restore(Contents {
@@ -221,6 +246,10 @@ pub fn from_text(text: &str) -> Result<Loaded, PersistError> {
         waypoints: file.waypoints,
         paths: file.paths,
         work_frames: file.work_frames,
+        work_features: file.work_features,
+        features: file.features,
+        assemblies: file.assemblies,
+        timelines: file.timelines,
     })?;
     let needs_repair = doc
         .sketches()
@@ -336,6 +365,55 @@ mod tests {
             contacts: Vec::new(),
         };
         cell(&mut doc, CellOp::AddPath(path));
+        // The design side: a work plane, an extrusion of the sketch, an imported assembly, and a stored
+        // tree order with a suppressed item.
+        let plane = gc_doc::WorkFeature {
+            name: "Plane1".into(),
+            geometry: gc_doc::WorkGeometry::PlaneOffset {
+                base: gc_doc::PlaneRef::Origin(gc_doc::OriginPlane::Xy),
+                distance: 0.25,
+            },
+            visible: true,
+        };
+        let Created::WorkFeature(plane) = cell(&mut doc, CellOp::AddWorkFeature(plane))[0] else { panic!() };
+        let sketch = doc.sketches().iter().next().unwrap().0;
+        let extrude = gc_doc::Extrude {
+            sketch,
+            profile: Vec::new(),
+            extent: gc_doc::Extent::Distance(0.1),
+            reversed: false,
+        };
+        cell(
+            &mut doc,
+            CellOp::AddFeature(gc_doc::Feature {
+                name: "Field1".into(),
+                kind: gc_doc::FeatureKind::Extrude(extrude),
+            }),
+        );
+        let assembly = gc_doc::Assembly {
+            name: "Machine".into(),
+            file: "machine.glb".into(),
+            placement: Placement { xyz: [1.0, 0.0, 0.0], rpy: [0.0; 3] },
+            parts: vec![gc_doc::AssemblyPart {
+                name: "Frame".into(),
+                parent: None,
+                matrix: [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0],
+                ],
+                meshes: vec![0],
+            }],
+            meshes: vec![gc_doc::AssemblyMesh {
+                name: "Plate".into(),
+                color: [0.2, 0.4, 0.6, 1.0],
+                triangles: 2,
+            }],
+            look: Default::default(),
+        };
+        cell(&mut doc, CellOp::AddAssembly(assembly));
+        cell(&mut doc, CellOp::SetSuppressed { item: plane.erase(), suppressed: true });
         doc
     }
 

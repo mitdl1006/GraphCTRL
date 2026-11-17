@@ -87,11 +87,10 @@ fn damaged_targets_are_refused_without_panic() {
     }
 }
 
-/// The arm fully stretched (elbow exactly straight, the farthest the tool can be) is reachable because
-/// it came from forward kinematics, but the solver reports `OutOfReach` (rounding pushes the elbow
-/// cosine just past 1).
+/// The arm fully stretched straight up is reachable: the pose came from forward kinematics. (The wrist
+/// centre lies exactly on the cylinder of radius d4 around the base axis, and rounding used to put it a
+/// hair inside, which the solver took for out of reach.)
 #[test]
-#[ignore = "BUG: UR closed-form IK says OutOfReach for the exactly stretched arm (q3 = 0); see docs/handoff/qa.md"]
 fn the_fully_stretched_arm_is_reachable() {
     let mut registry = Registry::default();
     registry.load(&UrPlugin).unwrap();

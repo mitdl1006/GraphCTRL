@@ -256,3 +256,22 @@ fn a_tight_sampling_window_is_widened_when_the_way_leads_outside_it() {
     assert!(validate(&solution.path, &world));
     assert!(solution.path.iter().any(|q| q[1] > 9.0), "the path goes over the wall");
 }
+
+#[test]
+fn a_partial_shortcut_straightens_one_wandering_joint() {
+    use gc_plan::partial_shortcut;
+    // Over the wall's gap (y > 8) and back down; x wanders to 7 and back on the way down, which only the
+    // per-joint shortcut can straighten (the whole-state shortcut would cut through the wall).
+    let world = wall();
+    let space = arena();
+    let mut path =
+        vec![vec![1.0, 1.0], vec![4.0, 9.0], vec![6.0, 9.0], vec![8.5, 5.0], vec![7.0, 3.0], vec![9.0, 1.0]];
+    assert!(validate(&path, &world));
+    let before = path_cost(&space, &path);
+    let taken = partial_shortcut(&space, &mut path, &world, &mut Rng::new(5), 300);
+    assert!(taken > 0);
+    assert!(validate(&path, &world), "still valid");
+    assert!(path_cost(&space, &path) < before - 0.1, "{} vs {before}", path_cost(&space, &path));
+    assert_eq!(path.first().unwrap(), &vec![1.0, 1.0]);
+    assert_eq!(path.last().unwrap(), &vec![9.0, 1.0]);
+}

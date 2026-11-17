@@ -11,7 +11,9 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(test, allow(clippy::float_cmp, reason = "tests compare exactly representable values"))]
 
+mod assembly;
 mod cell;
+mod design;
 pub mod library;
 mod project;
 mod spatial;
@@ -19,10 +21,12 @@ mod spatial;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+pub use assembly::{AssemblyReader, Imported, Importer, ShownAssemblyPart};
 pub use cell::{
     CellItem, CompareRow, Ghost, LoadedRobot, MeshRef, PADDING, PLANNERS, PlanStatus, PlannedPath, Reference,
     Resources, Shown, ShownPart,
 };
+pub use design::WorkShape;
 use gc_core::{Id, Revision};
 use gc_doc::{Applied, Command, Created, Document, EditError, History, Sketch, SketchOp, apply};
 pub use gc_motion::StateProblem;
@@ -334,6 +338,75 @@ impl Session {
         }
     }
 
+    /// Creates a 2D sketch on a work plane and starts editing it. The sketch follows the plane.
+    pub fn create_sketch_on_work_plane(
+        &mut self,
+        plane: Id<gc_doc::WorkFeature>,
+    ) -> Result<Id<Sketch>, EditError> {
+        self.create_sketch_on(gc_doc::PlaneSource::Work(plane))
+    }
+
+    /// Creates a 2D sketch on the plane of a triangle of an imported part (a picked face) and starts
+    /// editing it: origin at the triangle's centre, normal out of its front side, X along its first
+    /// edge. The sketch follows the assembly when it is moved.
+    pub fn create_sketch_on_face(
+        &mut self,
+        assembly: Id<gc_doc::Assembly>,
+        part: usize,
+        mesh: usize,
+        triangle: usize,
+    ) -> Result<Id<Sketch>, EditError> {
+        let source = self.face_source(assembly, part, mesh, triangle).ok_or(EditError::BadValue)?;
+        self.create_sketch_on(source)
+    }
+
+    fn face_source(
+        &self,
+        assembly: Id<gc_doc::Assembly>,
+        part: usize,
+        mesh: usize,
+        triangle: usize,
+    ) -> Option<gc_doc::PlaneSource> {
+        let stored = self.doc.get(assembly)?;
+        if !stored.parts.get(part)?.meshes.contains(&u32::try_from(mesh).ok()?) {
+            return None;
+        }
+        let data = &self.cell.assemblies.of(stored).ok()?.get(mesh)?.data;
+        let corners = data.indices().get(triangle * 3..triangle * 3 + 3)?;
+        let at = |i: u32| {
+            data.positions()
+                .get(i as usize)
+                .map(|p| gc_math::DVec3::new(p[0].into(), p[1].into(), p[2].into()))
+        };
+        let (a, b, c) = (at(corners[0])?, at(corners[1])?, at(corners[2])?);
+        let normal = (b - a).cross(c - a);
+        if normal.length() < 1e-12 || (b - a).length() < 1e-12 {
+            return None;
+        }
+        let x = (b - a).normalize();
+        let z = normal.normalize();
+        let rotation = gc_math::DQuat::from_mat3(&gc_math::DMat3::from_cols(x, z.cross(x), z)).normalize();
+        Some(gc_doc::PlaneSource::Face {
+            assembly,
+            part: u32::try_from(part).ok()?,
+            triangle: (u32::try_from(mesh).ok()?, u32::try_from(triangle).ok()?),
+            xyz: ((a + b + c) / 3.0).to_array(),
+            quat_xyzw: rotation.to_array(),
+        })
+    }
+
+    fn create_sketch_on(&mut self, source: gc_doc::PlaneSource) -> Result<Id<Sketch>, EditError> {
+        let name = format!("Sketch{}", self.doc.sketches().len() + 1);
+        let created = self.execute(&Command::CreateSketchOn { name, source })?;
+        match created.first() {
+            Some(Created::Sketch(id)) => {
+                self.enter_sketch(*id);
+                Ok(*id)
+            }
+            _ => Err(gc_sketch::SketchError::MissingItem.into()),
+        }
+    }
+
     /// Creates a 3D sketch in the world frame and starts editing it.
     pub fn create_sketch_3d(&mut self) -> Result<Id<Sketch>, EditError> {
         let name = format!("Sketch{}", self.doc.sketches().len() + 1);
@@ -449,6 +522,30 @@ impl Session {
     }
 
     /// Commits the drag as one command, or as nothing at all when the geometry did not move.
+    /// Starts dragging a point of the active 3D sketch with the cursor at `cursor` (sketch-space
+    /// position: the viewport turns the mouse ray into a point on a screen-parallel plane or a locked
+    /// axis). Returns false when the point cannot move (fully constrained, or not a 3D sketch point).
+    pub fn spatial_drag_start(&mut self, point: Id<SkPoint>, cursor: [f64; 3]) -> bool {
+        self.drag = self.active_sketch().and_then(|(_, sketch)| sketch.begin_drag_3d(point, cursor).ok());
+        self.drag.is_some()
+    }
+
+    /// Moves the cursor of a 3D drag. The preview follows ([`Session::point_pos`]); a frame the
+    /// constraints refuse keeps the previous one.
+    pub fn spatial_drag_move(&mut self, cursor: [f64; 3]) -> Option<FrameOutcome> {
+        self.drag.as_mut().map(|drag| drag.update_3d(cursor))
+    }
+
+    /// Ends a 3D drag: the result is one undo step.
+    pub fn spatial_drag_end(&mut self) {
+        self.end_drag();
+    }
+
+    /// Drops a 3D drag without changing the document.
+    pub fn spatial_drag_cancel(&mut self) {
+        self.drag = None;
+    }
+
     fn end_drag(&mut self) {
         let (Some(drag), Some((_, sketch))) = (self.drag.take(), self.active_sketch()) else { return };
         let mut moved = sketch.clone();
