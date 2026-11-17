@@ -2592,3 +2592,61 @@ fn measure_gives_a_cylinders_diameter() {
     }
     harness.get_by_label_contains("원통 지름 100.000 mm · 반지름 50.000 mm · 길이 400.000 mm");
 }
+
+/// Manage tab > Parameters (Inventor 2026 help, "To Work with Parameters in Models":
+/// https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-595F9D8E-9EEA-4446-91AB-830E5BAE548E.htm):
+/// the sketch dimensions are listed as model parameters; Add Numeric adds a user parameter; a user
+/// parameter's equation is changed and a dimension made to use it; search filters the rows; Delete
+/// Parameter is refused while a dimension still uses it.
+#[test]
+fn the_parameters_dialog_lists_and_edits_parameters() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("파일").click();
+    harness.run();
+    harness.get_by_label("예제 열기 (UR5e 셀)").click();
+    harness.run();
+    harness.get_by_label("관리").click();
+    harness.run();
+    harness.get_by_label("매개변수").click();
+    harness.run();
+    harness.get_by_label("모델 매개변수");
+    let first = "Sketch1 · 거리 1";
+    assert!(harness.query_all_by_label(first).count() >= 1);
+    harness.get_by_label("450");
+
+    let type_into = |harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, row: &str, text: &str| {
+        let field = harness.get_by_role_and_label(egui::accesskit::Role::TextInput, row);
+        field.focus();
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        harness.get_by_role_and_label(egui::accesskit::Role::TextInput, row).type_text(text);
+        harness.key_press(egui::Key::Enter);
+        harness.run();
+    };
+    harness.get_by_label("숫자 추가").click();
+    harness.run();
+    type_into(&mut harness, "Param", "112.5 mm");
+    harness.get_by_label("112.5");
+    type_into(&mut harness, first, "Param * 4");
+    let sketch = harness.state().session.doc().sketches().iter().next().unwrap().1.clone();
+    let dimension = sketch.dimensions.iter().next().unwrap().1.clone();
+    assert_eq!(dimension.source, "Param * 4");
+    assert!((dimension.value - 0.45).abs() < 1e-12);
+
+    // Search narrows the rows; a parameter in use cannot be deleted (the dialog says why).
+    harness.get_by_role_and_label(egui::accesskit::Role::TextInput, "검색").focus();
+    harness.run();
+    harness.get_by_role_and_label(egui::accesskit::Role::TextInput, "검색").type_text("Param");
+    harness.run();
+    assert!(harness.query_by_label("Sketch1 · 거리 2").is_none());
+    harness.get_by_role_and_label(egui::accesskit::Role::Label, "Param").click_secondary();
+    harness.run();
+    harness.get_by_label("매개변수 삭제").click();
+    harness.run();
+    assert_eq!(harness.state().session.doc().params().len(), 1);
+    harness.get_by_label("완료").click();
+    harness.run();
+}
