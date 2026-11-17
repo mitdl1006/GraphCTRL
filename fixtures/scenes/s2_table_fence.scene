@@ -1,0 +1,15 @@
+# S2 — table and fence (plan appendix E). The robot stands on a table; a fence panel separates the
+# start (+Y side) from the goal (-Y side), and a perimeter fence surrounds the cell.
+title table + fence
+padding 0.005
+budget 20000
+box table 0 0 -0.03 1.6 1.6 0.04
+# The panel between start and goal: x 0.40..0.80, 20 mm thick, 0.40 m tall.
+box panel 0.6 0 0.19 0.4 0.02 0.40
+box fence_front 1.0 0 0.6 0.02 2.0 1.2
+box fence_back -1.0 0 0.6 0.02 2.0 1.2
+box fence_left 0 1.0 0.6 2.0 0.02 1.2
+box fence_right 0 -1.0 0.6 2.0 0.02 1.2
+# TCP (0.55, 0.3, 0.12), tool down, elbow up.
+start 0.2849 -0.9505 1.7780 -2.3982 -1.5708 -1.2859
+goal_pose 0.55 -0.3 0.12 180 0 0
