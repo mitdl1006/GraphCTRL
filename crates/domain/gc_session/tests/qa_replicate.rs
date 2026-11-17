@@ -388,9 +388,8 @@ fn assemble_offers_only_what_fits_the_picks() {
     std::hint::black_box(s.possible_relations(&on(a, plane(1.0)), &on(a, plane(-1.0))));
 }
 
-/// Naming a component twice in one request stores it twice: the set then lists it more than once.
+/// Naming a component twice in one request stores it once (it used to be stored twice).
 #[test]
-#[ignore = "BUG: set_contact_set stores duplicate entries; see docs/handoff/qa.md"]
 fn a_component_is_in_the_contact_set_once() {
     let (mut s, _, a, _) = cell();
     s.set_contact_set(&[a.erase(), a.erase()], true).unwrap();
@@ -399,9 +398,8 @@ fn a_component_is_in_the_contact_set_once() {
     assert!(s.doc().contact_set().is_empty());
 }
 
-/// A mirror across a plane with non-finite coordinates is accepted and puts the copy at NaN coordinates.
+/// A mirror across a plane with non-finite coordinates is refused (it used to make a copy at NaN).
 #[test]
-#[ignore = "BUG: mirror_components accepts a plane with NaN coordinates and makes a copy at NaN; see docs/handoff/qa.md"]
 fn mirroring_across_a_nan_plane_is_refused() {
     let (mut s, floor, a, _) = cell();
     let before = s.doc().clone();
@@ -414,9 +412,8 @@ fn mirroring_across_a_nan_plane_is_refused() {
     assert!(s.doc().same_content(&before));
 }
 
-/// Deleting a component leaves it in the contact set (a stale entry that is also saved).
+/// Deleting a component takes it out of the contact set (it used to stay, and be saved).
 #[test]
-#[ignore = "BUG: a deleted component stays in the contact set; see docs/handoff/qa.md"]
 fn a_deleted_component_leaves_the_contact_set() {
     let (mut s, _, _, b) = cell();
     s.set_contact_set(&[b.erase()], true).unwrap();

@@ -374,10 +374,13 @@ pub(crate) fn mirror(
     ground: bool,
 ) -> Result<(Vec<Created>, &'static str), EditError> {
     check_items(txn.doc(), items)?;
-    if !matches!(plane.geometry, Geometry::Plane { .. }) {
+    if !matches!(plane.geometry, Geometry::Plane { .. }) || !plane.geometry.is_finite() {
         return Err(EditError::BadValue);
     }
     let (point, normal) = txn.doc().selection_axis(plane).ok_or(EditError::BadValue)?;
+    if !point.is_finite() || !normal.is_finite() {
+        return Err(EditError::BadValue);
+    }
     let mirror = Mirror { point, normal };
     let mut created = Vec::new();
     let mut copies = Vec::with_capacity(items.len());

@@ -131,7 +131,7 @@ impl Geometry {
         (origin, z, x)
     }
 
-    fn is_finite(&self) -> bool {
+    pub(crate) fn is_finite(&self) -> bool {
         let (a, b) = match *self {
             Geometry::Plane { point, normal } => (point, normal),
             Geometry::Axis { point, direction } => (point, direction),
@@ -679,6 +679,10 @@ impl Document {
     /// offset; for other geometry a Mate at its current offset (axes: the closer sense). `None` when a
     /// component does not exist.
     pub fn predict_relationship(&self, first: &Selection, second: &Selection) -> Option<RelationKind> {
+        // Nothing to offer from geometry that is not a number (the offset would be NaN).
+        if !first.geometry.is_finite() || !second.geometry.is_finite() {
+            return None;
+        }
         let w1 = world(&self.owner_pose(first.occurrence.owner())?, &self.in_owner(first)?);
         let w2 = world(&self.owner_pose(second.occurrence.owner())?, &self.in_owner(second)?);
         if let (Some((c1, _)), Some((c2, n2))) = (w1.1, w2.1) {

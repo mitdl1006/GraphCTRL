@@ -62,9 +62,15 @@ impl Value {
 /// (`#1=(A(...) B(...))`), by name.
 type Records = Vec<(String, Vec<Value>)>;
 
+/// How deep parameter lists may nest: real files need a handful of levels; a damaged or hostile file must
+/// not exhaust the stack.
+const MAX_DEPTH: usize = 256;
+
 struct Parser<'a> {
     text: &'a [u8],
     at: usize,
+    /// Lists open around the current position.
+    depth: usize,
 }
 
 impl Parser<'_> {
@@ -106,6 +112,16 @@ impl Parser<'_> {
     }
 
     fn arguments(&mut self) -> Result<Vec<Value>, String> {
+        if self.depth >= MAX_DEPTH {
+            return Err(format!("lists nested deeper than {MAX_DEPTH} at byte {}", self.at));
+        }
+        self.depth += 1;
+        let result = self.arguments_inside();
+        self.depth -= 1;
+        result
+    }
+
+    fn arguments_inside(&mut self) -> Result<Vec<Value>, String> {
         self.expect(b'(')?;
         let mut out = Vec::new();
         if self.peek() == Some(b')') {
@@ -510,7 +526,7 @@ pub fn read_step(bytes: &[u8]) -> Result<Assembly, ImportError> {
     if find(bytes, b"ISO-10303-21").is_none() {
         return Err(ImportError::Unreadable("not a STEP (ISO 10303-21) file".to_owned()));
     }
-    let instances = Parser { text: bytes, at: 0 }.data().map_err(ImportError::Unreadable)?;
+    let instances = Parser { text: bytes, at: 0, depth: 0 }.data().map_err(ImportError::Unreadable)?;
     let model = Model { instances };
     let mut warnings = Vec::new();
     let unit = length_unit(&model, &mut warnings);

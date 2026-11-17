@@ -397,6 +397,29 @@ pub(crate) fn set_component(
     Ok((Vec::new(), label))
 }
 
+/// Drops the stored states (grounded, hidden, contact set, …) of components that no longer exist, so that
+/// a deleted component leaves no stale entry behind (undo brings both back). Run after every command.
+pub(crate) fn prune_states(txn: &mut Txn<'_>) -> Result<(), EditError> {
+    let Some((_, timeline)) = txn.doc().timeline() else { return Ok(()) };
+    let c = &timeline.components;
+    let stale = c
+        .grounded
+        .iter()
+        .chain(&c.disabled)
+        .chain(&c.hidden)
+        .chain(&c.suppressed)
+        .chain(&c.contact_set)
+        .chain(&c.dof_shown)
+        .copied()
+        .chain(c.origins_shown.iter().map(|(o, _)| *o))
+        .any(|o| !txn.doc().has_occurrence(o));
+    if stale {
+        // Writing the timeline drops them.
+        crate::cell::set_timeline(txn, |_| {})?;
+    }
+    Ok(())
+}
+
 /// Grounds a component just placed when it is the first one (Inventor: the first component placed is
 /// grounded, aligned with the assembly's origin).
 pub(crate) fn ground_if_first(txn: &mut Txn<'_>, first: bool, item: AnyId) -> Result<(), EditError> {

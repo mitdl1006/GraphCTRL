@@ -1374,6 +1374,7 @@ pub fn apply(doc: &mut Document, command: &Command) -> Result<Applied, EditError
     let (created, label) = run(&mut txn, command)?; // an early return drops `txn`, which rolls back
     crate::pattern::refresh(&mut txn)?;
     crate::project::refresh(&mut txn)?;
+    crate::tree::prune_states(&mut txn)?;
     name_dimensions(&mut txn)?;
     let (delta, changed) = txn.commit()?;
     Ok(Applied { delta, changed, created, label })

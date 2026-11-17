@@ -133,10 +133,9 @@ fn unterminated_text_is_bounded() {
     bounded("nothing", FOOTER);
 }
 
-/// A deeply nested list (a hostile file: 100 000 opening brackets) must be an error. It overflows the stack
-/// of the reader and aborts the whole process (a user opening a bad file loses their work).
+/// A deeply nested list (a hostile file: 100 000 opening brackets) must be an error. It used to overflow the
+/// stack and abort the whole process; the reader now refuses lists nested deeper than 256 levels.
 #[test]
-#[ignore = "BUG: read_step overflows the stack on deeply nested lists (process abort); see docs/handoff/qa.md"]
 fn a_deeply_nested_list_is_an_error_not_a_crash() {
     bounded("deep", &format!("#1=PRODUCT({}{});\n{FOOTER}", "(".repeat(100_000), ")".repeat(100_000)));
 }

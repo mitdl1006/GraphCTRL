@@ -1199,7 +1199,12 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
                 let set = &mut t.components.contact_set;
                 set.retain(|o| !items.iter().any(|i| *o == Occurrence::Item(*i)));
                 if *on {
-                    set.extend(items.iter().map(|i| Occurrence::Item(*i)));
+                    // Each component once, however often it is named.
+                    for item in items {
+                        if !set.contains(&Occurrence::Item(*item)) {
+                            set.push(Occurrence::Item(*item));
+                        }
+                    }
                 }
             })?;
             Ok((Vec::new(), if *on { "Contact set" } else { "Remove from contact set" }))
@@ -1225,7 +1230,11 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
                 let shown = &mut t.components.dof_shown;
                 shown.retain(|o| !items.iter().any(|i| *o == Occurrence::Item(*i)));
                 if *on {
-                    shown.extend(items.iter().map(|i| Occurrence::Item(*i)));
+                    for item in items {
+                        if !shown.contains(&Occurrence::Item(*item)) {
+                            shown.push(Occurrence::Item(*item));
+                        }
+                    }
                 }
             })?;
             Ok((Vec::new(), "Degrees of freedom"))
