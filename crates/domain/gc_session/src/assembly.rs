@@ -111,10 +111,19 @@ fn multiply(a: &[[f64; 4]; 4], b: &[[f64; 4]; 4]) -> [[f64; 4]; 4] {
 }
 
 /// The parts of an assembly placed at `pose`, one entry per mesh shown.
-pub(crate) fn shown_parts(assembly: &Assembly, pose: &DPose3, meshes: &[MeshRef]) -> Vec<ShownAssemblyPart> {
+/// `keep` says per part index whether it is included (see [`Document::parts_shown`]).
+pub(crate) fn shown_parts(
+    assembly: &Assembly,
+    pose: &DPose3,
+    meshes: &[MeshRef],
+    keep: &[bool],
+) -> Vec<ShownAssemblyPart> {
     let origin = placement_matrix(pose);
     let mut shown = Vec::new();
     for (index, part) in assembly.parts.iter().enumerate() {
+        if !keep.get(index).copied().unwrap_or(true) {
+            continue;
+        }
         let Some(local) = assembly.part_matrix(index) else { continue };
         let matrix = multiply(&origin, &local);
         for mesh in &part.meshes {
@@ -152,7 +161,8 @@ pub(crate) fn obstacles(
     let mut out = Vec::new();
     for (id, assembly) in active(doc) {
         let loaded = meshes.of(assembly)?;
-        for shown in shown_parts(assembly, &pose_of(&assembly.placement), loaded) {
+        let keep = doc.parts_shown(id, true);
+        for shown in shown_parts(assembly, &pose_of(&assembly.placement), loaded, &keep) {
             let name = format!("{}/{}", assembly.name, assembly.parts[shown.part].name);
             let (pose, mesh) = match rigid(&shown.matrix) {
                 Some(pose) => (pose, Arc::clone(&shown.mesh.data)),

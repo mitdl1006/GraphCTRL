@@ -25,13 +25,16 @@ pub use cell::{
     AcmOverride, Body, CellOp, ContactAllowance, Look, MotionPath, Placement, Robot, Solid, Tool, Waypoint,
     WaypointTarget, WorkFrame,
 };
-pub use command::{Applied, Command, Created, EditError, EndSnap, SketchOp, apply};
+pub use command::{
+    Applied, Command, Created, DimSlot, EditError, EndSnap, SketchOp, TangentArc, apply, tangent_arc,
+};
 pub use design::{
-    Assembly, AssemblyMesh, AssemblyPart, Extent, Extrude, Feature, FeatureKind, OriginPlane, PlaneRef,
-    PlaneSource, PointRef, Timeline, WorkFeature, WorkGeometry,
+    Assembly, AssemblyMesh, AssemblyPart, ComponentFlag, Components, Extent, Extrude, Feature, FeatureKind,
+    Occurrence, OriginPlane, PlaneRef, PlaneSource, PointRef, Timeline, WorkFeature, WorkGeometry,
 };
 pub use document::{ChangeSet, Contents, DocDelta, Document, Frame, FrameKind, Param, Store, Table};
 pub use gc_sketch::Sketch;
 pub use history::History;
 pub use placement::WorkShape;
+pub use tree::ComponentNode;
 pub use txn::{DocError, Txn};

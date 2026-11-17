@@ -221,3 +221,181 @@ fn a_dimension_can_be_made_driven_and_driving_again_unless_it_is_redundant() {
     ));
     assert!(!bench.sketch().dimensions[&dim].driving, "unchanged");
 }
+
+fn has(bench: &Bench, want: impl Fn(&GeoConstraint) -> bool) -> bool {
+    bench.sketch().constraints.values().any(want)
+}
+
+#[test]
+fn trimming_the_middle_of_a_line_leaves_two_collinear_pieces_tied_to_the_cutters() {
+    let mut bench = Bench::new();
+    let long = line(&mut bench, [0.0, 0.0], [3.0, 0.0]);
+    let (a, b) = bench.sketch().line(long).unwrap();
+    bench.op(SketchOp::AddConstraint(GeoConstraint::Horizontal(a, b))).unwrap();
+    let left = line(&mut bench, [1.0, -1.0], [1.0, 1.0]);
+    let right = line(&mut bench, [2.0, -1.0], [2.0, 1.0]);
+    let before = bench.dof();
+    let created = bench.op(SketchOp::Trim { curve: long, at: [1.5, 0.0] }).unwrap();
+    let pieces = Bench::curves(&created);
+    assert_eq!(pieces.len(), 1, "one new piece");
+    let piece = pieces[0];
+    // The original keeps its start and now ends on the left cutter; the new piece starts on the right one.
+    let (a2, b2) = bench.sketch().line(long).unwrap();
+    assert_eq!(a2, a);
+    assert_eq!(bench.xy(b2), [1.0, 0.0]);
+    let (c, d) = bench.sketch().line(piece).unwrap();
+    assert_eq!((bench.xy(c), bench.xy(d)), ([2.0, 0.0], [3.0, 0.0]));
+    assert!(has(&bench, |k| *k == GeoConstraint::PointOnCurve(b2, left)));
+    assert!(has(&bench, |k| *k == GeoConstraint::PointOnCurve(c, right)));
+    assert!(has(&bench, |k| matches!(k, GeoConstraint::Collinear(..))));
+    assert!(has(&bench, |k| *k == GeoConstraint::Horizontal(a, b2)), "the line stays horizontal");
+    // One more line (4) − collinear (2) − two ends on cutters (2): unchanged.
+    assert_eq!(bench.dof(), before);
+}
+
+#[test]
+fn trimming_an_overhang_ends_the_line_on_the_cutter_and_a_lone_curve_is_deleted() {
+    let mut bench = Bench::new();
+    let long = line(&mut bench, [0.0, 0.0], [2.0, 0.0]);
+    let cutter = line(&mut bench, [1.5, -1.0], [1.5, 1.0]);
+    bench.op(SketchOp::Trim { curve: long, at: [1.8, 0.0] }).unwrap();
+    let (a, b) = bench.sketch().line(long).unwrap();
+    assert_eq!((bench.xy(a), bench.xy(b)), ([0.0, 0.0], [1.5, 0.0]));
+    assert!(has(&bench, |k| *k == GeoConstraint::PointOnCurve(b, cutter)));
+
+    // At a cutter's end point the cut end is coincident with it.
+    let mut bench = Bench::new();
+    let long = line(&mut bench, [0.0, 0.0], [2.0, 0.0]);
+    let stem = line(&mut bench, [1.0, 0.0], [1.0, 1.0]);
+    let (foot, _) = bench.sketch().line(stem).unwrap();
+    bench.op(SketchOp::Trim { curve: long, at: [0.3, 0.0] }).unwrap();
+    let (a, _) = bench.sketch().line(long).unwrap();
+    assert_eq!(bench.xy(a), [1.0, 0.0]);
+    assert!(has(&bench, |k| *k == GeoConstraint::Coincident(foot, a)));
+
+    // Nothing crosses it: the trim deletes it.
+    let mut bench = Bench::new();
+    let lone = line(&mut bench, [0.0, 0.0], [1.0, 0.0]);
+    bench.op(SketchOp::Trim { curve: lone, at: [0.5, 0.0] }).unwrap();
+    assert!(bench.sketch().curves.is_empty());
+}
+
+#[test]
+fn a_trimmed_circle_becomes_an_arc_and_keeps_its_dimension() {
+    let mut bench = Bench::new();
+    let created = bench
+        .op(SketchOp::AddCircle {
+            centre: [0.0, 0.0, 0.0],
+            radius: 1.0,
+            centre_snap: EndSnap::default(),
+            rim_snap: EndSnap::default(),
+        })
+        .unwrap();
+    let circle = Bench::curves(&created)[0];
+    bench
+        .op(SketchOp::AddDimension {
+            kind: DimKind::Diameter(circle),
+            source: "2000 mm".into(),
+            text_pos: [0.0; 2],
+        })
+        .unwrap();
+    let chord = line(&mut bench, [0.0, -2.0], [0.0, 2.0]);
+    bench.op(SketchOp::Trim { curve: circle, at: [-1.0, 0.0] }).unwrap();
+    let CurveGeom::Arc { c, s, e } = bench.sketch().curves[&circle].geom else { panic!("an arc now") };
+    assert_eq!(bench.xy(c), [0.0, 0.0]);
+    // The right half is left: counter-clockwise from the bottom to the top.
+    let (s, e) = (bench.xy(s), bench.xy(e));
+    assert!(s[0].abs() < 1e-9 && (s[1] + 1.0).abs() < 1e-9, "{s:?}");
+    assert!(e[0].abs() < 1e-9 && (e[1] - 1.0).abs() < 1e-9, "{e:?}");
+    assert_eq!(bench.sketch().dimensions.len(), 1);
+    assert_eq!(
+        bench
+            .sketch()
+            .constraints
+            .values()
+            .filter(|k| matches!(k, GeoConstraint::PointOnCurve(_, l) if *l == chord))
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn trimming_an_arc_between_two_cutters_splits_it_on_one_circle() {
+    let mut bench = Bench::new();
+    let created = bench
+        .op(SketchOp::AddArcThrough {
+            a: [1.0, 0.0, 0.0],
+            b: [-1.0, 0.0, 0.0],
+            through: [0.0, 1.0, 0.0],
+            snap_a: EndSnap::default(),
+            snap_b: EndSnap::default(),
+        })
+        .unwrap();
+    let arc = Bench::curves(&created)[0];
+    line(&mut bench, [0.5, 0.0], [0.5, 2.0]);
+    line(&mut bench, [-0.5, 0.0], [-0.5, 2.0]);
+    let before = bench.dof();
+    let created = bench.op(SketchOp::Trim { curve: arc, at: [0.0, 1.0] }).unwrap();
+    let piece = Bench::curves(&created)[0];
+    let CurveGeom::Arc { e, .. } = bench.sketch().curves[&arc].geom else { panic!() };
+    let CurveGeom::Arc { s, .. } = bench.sketch().curves[&piece].geom else { panic!() };
+    let h = 0.75f64.sqrt();
+    assert!((bench.xy(e)[0] - 0.5).abs() < 1e-9 && (bench.xy(e)[1] - h).abs() < 1e-9);
+    assert!((bench.xy(s)[0] + 0.5).abs() < 1e-9 && (bench.xy(s)[1] - h).abs() < 1e-9);
+    assert!(has(&bench, |k| *k == GeoConstraint::Equal(arc, piece)));
+    // One more arc (5) − shared centre (2) − equal radius (1) − two ends on cutters (2).
+    assert_eq!(bench.dof(), before);
+}
+
+#[test]
+fn extend_lengthens_an_open_end_to_the_next_curve() {
+    let mut bench = Bench::new();
+    let short = line(&mut bench, [0.0, 0.0], [1.0, 0.0]);
+    let wall = line(&mut bench, [2.0, -1.0], [2.0, 1.0]);
+    line(&mut bench, [3.0, -1.0], [3.0, 1.0]);
+    bench.op(SketchOp::Extend { curve: short, at: [0.9, 0.0] }).unwrap();
+    let (a, b) = bench.sketch().line(short).unwrap();
+    assert_eq!((bench.xy(a), bench.xy(b)), ([0.0, 0.0], [2.0, 0.0]), "to the nearer wall");
+    assert!(has(&bench, |k| *k == GeoConstraint::PointOnCurve(b, wall)));
+    // Nothing beyond the other end.
+    assert!(bench.op(SketchOp::Extend { curve: short, at: [0.1, 0.0] }).is_err());
+}
+
+#[test]
+fn a_fillet_rounds_a_rectangle_corner_with_a_tangent_arc_and_a_radius_dimension() {
+    let mut bench = Bench::new();
+    let created = bench
+        .op(SketchOp::AddRectangle { a: [0.0, 0.0], b: [0.2, 0.1], snap_a: EndSnap::default() })
+        .unwrap();
+    let lines = Bench::curves(&created);
+    let before = bench.dof();
+    // The bottom side and the right side meet at (0.2, 0).
+    let created = bench
+        .op(SketchOp::Fillet {
+            lines: [(lines[0], [0.1, 0.0]), (lines[1], [0.2, 0.05])],
+            radius: "20 mm".into(),
+        })
+        .unwrap();
+    let arc = Bench::curves(&created)[0];
+    let CurveGeom::Arc { c, .. } = bench.sketch().curves[&arc].geom else { panic!() };
+    let centre = bench.xy(c);
+    assert!((centre[0] - 0.18).abs() < 1e-9 && (centre[1] - 0.02).abs() < 1e-9, "{centre:?}");
+    let (_, bottom_end) = bench.sketch().line(lines[0]).unwrap();
+    let (right_start, _) = bench.sketch().line(lines[1]).unwrap();
+    assert!((bench.xy(bottom_end)[0] - 0.18).abs() < 1e-9);
+    assert!((bench.xy(right_start)[1] - 0.02).abs() < 1e-9);
+    assert_eq!(
+        bench.sketch().constraints.values().filter(|k| matches!(k, GeoConstraint::Tangent { .. })).count(),
+        2
+    );
+    assert!(bench.sketch().dimensions.values().any(|d| d.kind == DimKind::Radius(arc) && d.driving));
+    // Arc (5) − its two joints (4) − two tangents (2) − radius (1) + the corner let go (2): unchanged.
+    assert_eq!(bench.dof(), before);
+    // The radius dimension drives the arc.
+    let dim = *bench.sketch().dimensions.keys().next().unwrap();
+    bench.op(SketchOp::SetDimension { id: dim, source: "30 mm".into() }).unwrap();
+    let (centre, r) = bench.sketch().round(arc).unwrap();
+    let (a, _) = bench.sketch().line(lines[0]).unwrap();
+    assert!((r - 0.03).abs() < 1e-9, "radius {r}");
+    assert!((bench.xy(centre)[1] - bench.xy(a)[1] - 0.03).abs() < 1e-9, "still touches the bottom side");
+}

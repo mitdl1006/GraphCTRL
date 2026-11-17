@@ -301,3 +301,102 @@ fn items_are_renamed_shown_hidden_and_their_dependents_listed() {
     cell(&mut doc, &mut history, CellOp::SetRollback { after: Some(point.erase()) }).unwrap();
     assert_eq!(doc.rollback_index(), Some(1));
 }
+
+fn machine() -> Assembly {
+    let identity = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+    Assembly {
+        name: "Machine".into(),
+        file: "machine.glb".into(),
+        placement: Placement::default(),
+        parts: vec![
+            AssemblyPart { name: "Frame".into(), parent: None, matrix: identity, meshes: vec![0] },
+            AssemblyPart { name: "Door".into(), parent: Some(0), matrix: identity, meshes: vec![0] },
+            AssemblyPart { name: "Table".into(), parent: None, matrix: identity, meshes: vec![0] },
+        ],
+        meshes: vec![AssemblyMesh { name: "Plate".into(), color: [0.5, 0.5, 0.5, 1.0], triangles: 12 }],
+        look: Default::default(),
+    }
+}
+
+#[test]
+fn the_first_component_is_grounded_and_component_states_switch_in_one_undo_step() {
+    use gc_doc::{ComponentFlag, Occurrence};
+    let mut doc = Document::new();
+    let mut history = History::default();
+    let Created::Assembly(first) = cell(&mut doc, &mut history, CellOp::AddAssembly(machine())).unwrap()[0]
+    else {
+        panic!()
+    };
+    let Created::Assembly(second) = cell(&mut doc, &mut history, CellOp::AddAssembly(machine())).unwrap()[0]
+    else {
+        panic!()
+    };
+    let item = |id: gc_core::Id<Assembly>| Occurrence::Item(id.erase());
+    assert!(doc.component_flag(item(first), ComponentFlag::Grounded), "the first component is grounded");
+    assert!(!doc.component_flag(item(second), ComponentFlag::Grounded), "the others are free");
+
+    // The tree: each assembly followed by its parts, the door under the frame.
+    let tree = doc.components();
+    assert_eq!(tree.len(), 8);
+    let door = Occurrence::Part { assembly: first, index: 1 };
+    let frame = Occurrence::Part { assembly: first, index: 0 };
+    let node = tree.iter().find(|n| n.occurrence == door).unwrap();
+    assert_eq!((node.name.as_str(), node.parent), ("Door", Some(frame)));
+    assert!(node.visible && node.enabled && !node.suppressed && !node.grounded);
+
+    // Each switch is one undo step.
+    for flag in
+        [ComponentFlag::Grounded, ComponentFlag::Enabled, ComponentFlag::Visible, ComponentFlag::Suppressed]
+    {
+        let before = doc.component_flag(door, flag);
+        let depth = history.undo_depth();
+        run(&mut doc, &mut history, Command::SetComponent { occurrence: door, flag, on: !before }).unwrap();
+        assert_eq!(doc.component_flag(door, flag), !before, "{flag:?}");
+        assert_eq!(history.undo_depth(), depth + 1);
+        history.undo(&mut doc).unwrap();
+        assert_eq!(doc.component_flag(door, flag), before, "{flag:?} undone");
+    }
+
+    // A hidden frame hides its door from the drawing but both stay obstacles; suppressed, neither counts.
+    run(
+        &mut doc,
+        &mut history,
+        Command::SetComponent { occurrence: frame, flag: ComponentFlag::Visible, on: false },
+    )
+    .unwrap();
+    assert_eq!(doc.parts_shown(first, false), vec![false, false, true]);
+    assert_eq!(doc.parts_shown(first, true), vec![true, true, true]);
+    run(
+        &mut doc,
+        &mut history,
+        Command::SetComponent { occurrence: frame, flag: ComponentFlag::Suppressed, on: true },
+    )
+    .unwrap();
+    assert_eq!(doc.parts_shown(first, true), vec![false, false, true]);
+
+    // Whole assemblies are shown, hidden and suppressed through their own states.
+    run(
+        &mut doc,
+        &mut history,
+        Command::SetComponent { occurrence: item(second), flag: ComponentFlag::Suppressed, on: true },
+    )
+    .unwrap();
+    assert!(doc.is_inactive(second.erase()));
+    // A part that does not exist is refused.
+    let missing = Occurrence::Part { assembly: first, index: 9 };
+    assert!(
+        run(
+            &mut doc,
+            &mut history,
+            Command::SetComponent { occurrence: missing, flag: ComponentFlag::Grounded, on: true }
+        )
+        .is_err()
+    );
+
+    // Undoing the first import takes its grounding with it.
+    let mut doc = Document::new();
+    let mut history = History::default();
+    cell(&mut doc, &mut history, CellOp::AddAssembly(machine())).unwrap();
+    history.undo(&mut doc).unwrap();
+    assert!(doc.timeline().is_none_or(|(_, t)| t.components.grounded.is_empty()));
+}

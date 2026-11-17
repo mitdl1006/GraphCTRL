@@ -20,6 +20,34 @@ pub struct EndSnap {
     pub point: Option<Id<SkPoint>>,
     /// An existing curve the end lies on.
     pub curve: Option<Id<Curve>>,
+    /// A second curve the end lies on (the end is at an intersection).
+    #[serde(default)]
+    pub also_on: Option<Id<Curve>>,
+    /// The line whose midpoint the end is.
+    #[serde(default)]
+    pub midpoint_of: Option<Id<Curve>>,
+    /// An existing point the end is level with (`true`) or plumb with (`false`), from an alignment line.
+    #[serde(default)]
+    pub aligned: Option<(Id<SkPoint>, bool)>,
+    /// A circle or arc the new curve touches there (a line end on a circle where the line is tangent to
+    /// it, or a circle's rim on another curve).
+    #[serde(default)]
+    pub tangent_to: Option<Id<Curve>>,
+}
+
+/// Which measurement of newly drawn geometry a typed value becomes (see [`SketchOp::WithDimensions`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DimSlot {
+    /// The length of the first line created.
+    Length,
+    /// The diameter of the first circle created.
+    Diameter,
+    /// The radius of the first arc created.
+    Radius,
+    /// The length of the first side of a rectangle.
+    Width,
+    /// The length of the second side of a rectangle.
+    Height,
 }
 
 /// An edit of one sketch.
@@ -50,6 +78,12 @@ pub enum SketchOp {
         centre: [f64; 3],
         /// Radius.
         radius: f64,
+        /// What the centre was snapped to.
+        #[serde(default)]
+        centre_snap: EndSnap,
+        /// What the rim point was snapped to: on another curve, the circle is made tangent to it.
+        #[serde(default)]
+        rim_snap: EndSnap,
     },
     /// Adds an arc, counter-clockwise from `start` to `end`.
     AddArc {
@@ -116,8 +150,40 @@ pub enum SketchOp {
         /// The new state.
         construction: bool,
     },
+    /// Marks several curves as construction geometry or as regular geometry, as one undo step.
+    SetConstructionOf {
+        /// The curves.
+        curves: Vec<Id<Curve>>,
+        /// The new state.
+        construction: bool,
+    },
     /// Deletes items and everything that depends on them.
     Delete(Vec<Item>),
+    /// Removes the piece of a curve around `at` up to the nearest crossing curves on either side; the
+    /// cut ends are tied to the crossing curves. A curve that nothing crosses is deleted.
+    Trim {
+        /// The curve.
+        curve: Id<Curve>,
+        /// Where it was clicked (on the piece to remove).
+        at: [f64; 2],
+    },
+    /// Lengthens a line or arc at its end nearer `at` up to the first curve it meets, and ties the end to
+    /// that curve. The end must be open.
+    Extend {
+        /// The curve.
+        curve: Id<Curve>,
+        /// Where it was clicked (near the end to lengthen).
+        at: [f64; 2],
+    },
+    /// Rounds the corner between two lines with a tangent arc of the given radius (with a radius
+    /// dimension), trimming or extending the lines to it. Each line keeps the side of the corner where it
+    /// was clicked.
+    Fillet {
+        /// The two lines and where each was clicked.
+        lines: [(Id<Curve>, [f64; 2]); 2],
+        /// The radius as typed, e.g. `"5 mm"`.
+        radius: String,
+    },
     /// Applies an edit and marks the curves it creates as construction geometry (the Format panel's
     /// Construction toggle held while drawing). One undo step.
     AsConstruction(Box<SketchOp>),
@@ -159,6 +225,14 @@ pub enum SketchOp {
         /// What the first corner was snapped to.
         snap_a: EndSnap,
     },
+    /// Applies a drawing edit and attaches values typed into the input boxes as driving dimensions of
+    /// what it created (the HUD). One undo step; a value the sketch cannot take refuses the whole edit.
+    WithDimensions {
+        /// The drawing edit.
+        op: Box<SketchOp>,
+        /// What each value measures, and the value as typed (an expression).
+        dims: Vec<(DimSlot, String)>,
+    },
     /// Makes a dimension driving (it constrains the sketch) or driven (it only shows a measurement).
     /// Making one driving is refused when the sketch does not allow it (already constrained there).
     SetDriving {
@@ -187,6 +261,16 @@ pub enum Command {
         item: gc_core::AnyId,
         /// True to show it.
         visible: bool,
+    },
+    /// Switches a state of a component of the assembly tree: grounded, visible, enabled, suppressed
+    /// (suppressing bodies and robots is not supported yet).
+    SetComponent {
+        /// The component.
+        occurrence: crate::design::Occurrence,
+        /// Which state.
+        flag: crate::design::ComponentFlag,
+        /// The new value.
+        on: bool,
     },
     /// Adds a named parameter. `angle` selects degrees instead of millimetres for bare numbers.
     AddParam {
@@ -445,14 +529,46 @@ fn snap_constraint(
 ) {
     if let Some(point) = snap.point {
         infer(sketch, ids, GeoConstraint::Coincident(point, end), created);
-    } else if let Some(curve) = snap.curve {
+        return;
+    }
+    if let Some(line) = snap.midpoint_of {
+        infer(sketch, ids, GeoConstraint::Midpoint(end, line), created);
+        return;
+    }
+    for curve in [snap.curve, snap.also_on].into_iter().flatten() {
         infer(sketch, ids, GeoConstraint::PointOnCurve(end, curve), created);
     }
+    if let Some((point, level)) = snap.aligned {
+        let aligned =
+            if level { GeoConstraint::Horizontal(point, end) } else { GeoConstraint::Vertical(point, end) };
+        infer(sketch, ids, aligned, created);
+    }
+}
+
+/// A tangency between two curves, with the side captured from how they lie now.
+fn tangency(sketch: &Sketch, a: Id<Curve>, b: Id<Curve>) -> Option<GeoConstraint> {
+    let xy = |p: Id<SkPoint>| sketch.pos(p).map(|q| [q[0], q[1]]);
+    let (first, second) = if sketch.line(b).is_some() { (b, a) } else { (a, b) };
+    let (centre, radius) = sketch.round(second)?;
+    let centre = xy(centre)?;
+    let (side, external) = match sketch.line(first) {
+        Some((p, q)) => {
+            let (p, q) = (xy(p)?, xy(q)?);
+            let cross = (q[0] - p[0]) * (centre[1] - p[1]) - (q[1] - p[1]) * (centre[0] - p[0]);
+            (if cross >= 0.0 { 1.0 } else { -1.0 }, true)
+        }
+        None => {
+            let (other, other_radius) = sketch.round(first)?;
+            let other = xy(other)?;
+            (1.0, gc_math::fm::hypot(centre[0] - other[0], centre[1] - other[1]) >= radius.max(other_radius))
+        }
+    };
+    Some(GeoConstraint::Tangent { a: first, b: second, side, external })
 }
 
 /// The unit direction in which `curve` arrives at its end `at` (for an arc, the tangent there, pointing
 /// away from the arc).
-fn leaving_direction(sketch: &Sketch, curve: Id<Curve>, at: Id<SkPoint>) -> Option<[f64; 2]> {
+pub(crate) fn leaving_direction(sketch: &Sketch, curve: Id<Curve>, at: Id<SkPoint>) -> Option<[f64; 2]> {
     let p = |id| sketch.pos(id).map(|q| [q[0], q[1]]);
     let unit = |v: [f64; 2]| {
         let n = gc_math::fm::hypot(v[0], v[1]);
@@ -486,6 +602,46 @@ fn leaving_direction(sketch: &Sketch, curve: Id<Curve>, at: Id<SkPoint>) -> Opti
     }
 }
 
+/// A tangent arc as the tools preview it and [`SketchOp::AddTangentArc`] makes it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TangentArc {
+    /// Centre.
+    pub centre: [f64; 2],
+    /// Radius.
+    pub radius: f64,
+    /// Angle of the start (the joint) about the centre.
+    pub start_angle: f64,
+    /// Signed sweep from the joint to the end (positive is counter-clockwise).
+    pub sweep: f64,
+}
+
+/// The arc that leaves `curve` at its end `from` smoothly and ends at `end`; `None` when `end` lies
+/// straight ahead (that is a line) or `from` is not an end of `curve`.
+pub fn tangent_arc(
+    sketch: &Sketch,
+    from: Id<SkPoint>,
+    curve: Id<Curve>,
+    end: [f64; 2],
+) -> Option<TangentArc> {
+    let start = sketch.pos(from)?;
+    let t = leaving_direction(sketch, curve, from)?;
+    let n = [-t[1], t[0]];
+    let d = [end[0] - start[0], end[1] - start[1]];
+    let along = d[0] * n[0] + d[1] * n[1];
+    if along.abs() < 1e-9 * gc_math::fm::hypot(d[0], d[1]).max(1e-12) {
+        return None;
+    }
+    // The centre lies on the normal at the start: c = start + n·r with r = |d|² / (2 d·n).
+    let r = (d[0] * d[0] + d[1] * d[1]) / (2.0 * along);
+    let centre = [start[0] + n[0] * r, start[1] + n[1] * r];
+    let angle = |p: [f64; 2]| gc_math::fm::atan2(p[1] - centre[1], p[0] - centre[0]);
+    let tau = std::f64::consts::TAU;
+    let (a0, a1) = (angle([start[0], start[1]]), angle(end));
+    // Turning left (r > 0) the arc runs counter-clockwise from the joint.
+    let sweep = if r > 0.0 { (a1 - a0).rem_euclid(tau) } else { -(a0 - a1).rem_euclid(tau) };
+    Some(TangentArc { centre, radius: r.abs(), start_angle: a0, sweep })
+}
+
 /// The circle through three points: centre and radius; `None` when they lie on a line.
 fn circle_through(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> Option<([f64; 2], f64)> {
     let d = 2.0 * (a[0] * (b[1] - c[1]) + b[0] * (c[1] - a[1]) + c[0] * (a[1] - b[1]));
@@ -497,6 +653,12 @@ fn circle_through(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> Option<([f64; 2], f6
     let ux = (sq(a) * (b[1] - c[1]) + sq(b) * (c[1] - a[1]) + sq(c) * (a[1] - b[1])) / d;
     let uy = (sq(a) * (c[0] - b[0]) + sq(b) * (a[0] - c[0]) + sq(c) * (b[0] - a[0])) / d;
     Some(([ux, uy], gc_math::fm::hypot(a[0] - ux, a[1] - uy)))
+}
+
+/// Records what a trim, extend or fillet created.
+fn push_cut(created: &mut Vec<Created>, cut: &gc_sketch::CutResult) {
+    created.extend(cut.curves.iter().map(|c| Created::Curve(*c)));
+    created.extend(cut.constraints.iter().map(|c| Created::Constraint(*c)));
 }
 
 /// Adds a constraint that the edit needs; refused or conflicting means the edit fails.
@@ -527,10 +689,10 @@ fn sketch_op(
             created.push(Created::Curve(line));
             if let Some((start, end)) = sketch.line(line) {
                 for (end_point, snap) in [(start, snap_a), (end, snap_b)] {
-                    if let Some(point) = snap.point {
-                        infer(sketch, ids, GeoConstraint::Coincident(point, end_point), &mut created);
-                    } else if let Some(curve) = snap.curve {
-                        infer(sketch, ids, GeoConstraint::PointOnCurve(end_point, curve), &mut created);
+                    snap_constraint(sketch, ids, end_point, snap, &mut created);
+                    if let Some(constraint) = snap.tangent_to.and_then(|round| tangency(sketch, line, round))
+                    {
+                        infer(sketch, ids, constraint, &mut created);
                     }
                 }
                 match horizontal {
@@ -541,8 +703,18 @@ fn sketch_op(
             }
             "Line"
         }
-        SketchOp::AddCircle { centre, radius } => {
-            created.push(Created::Curve(sketch.add_circle(ids, *centre, *radius)?));
+        SketchOp::AddCircle { centre, radius, centre_snap, rim_snap } => {
+            let circle = sketch.add_circle(ids, *centre, *radius)?;
+            created.push(Created::Curve(circle));
+            if let Some((c, _)) = sketch.round(circle) {
+                snap_constraint(sketch, ids, c, centre_snap, &mut created);
+            }
+            // The rim on another curve: the circle touches it there.
+            if let Some(constraint) =
+                rim_snap.tangent_to.or(rim_snap.curve).and_then(|other| tangency(sketch, other, circle))
+            {
+                infer(sketch, ids, constraint, &mut created);
+            }
             "Circle"
         }
         SketchOp::AddArc { centre, start, end } => {
@@ -724,6 +896,53 @@ fn sketch_op(
             }
             "Rectangle"
         }
+        SketchOp::WithDimensions { op, dims } => {
+            if matches!(**op, SketchOp::WithDimensions { .. }) {
+                return Err(SketchError::InvalidValue.into());
+            }
+            let (inner, label) = sketch_op(sketch, ids, op, scope)?;
+            let curves: Vec<Id<Curve>> = inner
+                .iter()
+                .filter_map(|c| if let Created::Curve(id) = c { Some(*id) } else { None })
+                .collect();
+            created.extend(inner);
+            let lines: Vec<Id<Curve>> =
+                curves.iter().copied().filter(|c| sketch.line(*c).is_some()).collect();
+            let first_of = |want: fn(&gc_sketch::CurveGeom) -> bool| {
+                curves.iter().copied().find(|c| sketch.curves.get(c).is_some_and(|k| want(&k.geom)))
+            };
+            let circle = first_of(|g| matches!(g, gc_sketch::CurveGeom::Circle { .. }));
+            let arc = first_of(|g| matches!(g, gc_sketch::CurveGeom::Arc { .. }));
+            for (slot, source) in dims {
+                let kind = match slot {
+                    DimSlot::Length | DimSlot::Width => {
+                        lines.first().and_then(|l| sketch.line(*l)).map(|(p, q)| DimKind::Distance { p, q })
+                    }
+                    DimSlot::Height => {
+                        lines.get(1).and_then(|l| sketch.line(*l)).map(|(p, q)| DimKind::Distance { p, q })
+                    }
+                    DimSlot::Diameter => circle.map(DimKind::Diameter),
+                    DimSlot::Radius => arc.map(DimKind::Radius),
+                };
+                let kind = kind.ok_or(SketchError::InvalidValue)?;
+                // The text beside what it measures.
+                let text_pos = match kind {
+                    DimKind::Distance { p, q } => {
+                        let (a, b) = (sketch.pos(p).unwrap_or_default(), sketch.pos(q).unwrap_or_default());
+                        [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0]
+                    }
+                    DimKind::Diameter(c) | DimKind::Radius(c) => sketch
+                        .round(c)
+                        .and_then(|(centre, r)| sketch.pos(centre).map(|at| [at[0] + r, at[1]]))
+                        .unwrap_or_default(),
+                    _ => [0.0; 2],
+                };
+                let value = evaluate(source, scope, field_unit(&kind))?;
+                let result = sketch.try_add_dimension(ids, kind, source, value, text_pos)?;
+                created.push(Created::Dimension(added(result)?));
+            }
+            label
+        }
         SketchOp::SetDriving { id, driving } => {
             if *driving {
                 let kind = sketch.dimensions.get(id).ok_or(SketchError::MissingItem)?.kind;
@@ -739,9 +958,37 @@ fn sketch_op(
             }
             if *driving { "Driving dimension" } else { "Driven dimension" }
         }
+        SketchOp::SetConstructionOf { curves, construction } => {
+            for curve in curves {
+                sketch.curves.get_mut(curve).ok_or(SketchError::MissingCurve)?.construction = *construction;
+            }
+            "Construction"
+        }
         SketchOp::Delete(items) => {
             sketch.delete(items);
             "Delete"
+        }
+        SketchOp::Trim { curve, at } => {
+            push_cut(&mut created, &sketch.trim(ids, *curve, *at)?);
+            "Trim"
+        }
+        SketchOp::Extend { curve, at } => {
+            push_cut(&mut created, &sketch.extend(ids, *curve, *at)?);
+            "Extend"
+        }
+        SketchOp::Fillet { lines, radius } => {
+            let value = evaluate(radius, scope, Unit::Mm)?;
+            let cut = sketch.fillet(ids, *lines, value)?;
+            push_cut(&mut created, &cut);
+            let arc = *cut.curves.first().ok_or(SketchError::InvalidValue)?;
+            let kind = DimKind::Radius(arc);
+            let text_pos = sketch
+                .round(arc)
+                .and_then(|(centre, _)| sketch.pos(centre))
+                .map_or([0.0; 2], |c| [c[0], c[1]]);
+            let result = sketch.try_add_dimension(ids, kind, radius, value, text_pos)?;
+            created.push(Created::Dimension(added(result)?));
+            "Fillet"
         }
     };
     // Whatever the edit was, the sketch must end up consistent.
@@ -841,6 +1088,9 @@ fn run(txn: &mut Txn<'_>, command: &Command) -> Result<(Vec<Created>, &'static s
         Command::Cell(op) => crate::cell::run(txn, op),
         Command::Rename { item, name } => crate::tree::rename(txn, *item, name),
         Command::SetVisible { item, visible } => crate::tree::set_visible(txn, *item, *visible),
+        Command::SetComponent { occurrence, flag, on } => {
+            crate::tree::set_component(txn, *occurrence, *flag, *on)
+        }
     }
 }
 
