@@ -50,8 +50,8 @@ pub(crate) struct AssemblyMeshes {
 
 impl AssemblyMeshes {
     /// Stores the meshes of a file.
-    pub(crate) fn insert(&mut self, file: &str, meshes: Vec<MeshData>) {
-        let refs = meshes.into_iter().map(|m| mesh_ref(Arc::new(m))).collect();
+    pub(crate) fn insert(&mut self, file: &str, meshes: Vec<Arc<MeshData>>) {
+        let refs = meshes.into_iter().map(mesh_ref).collect();
         self.by_file.insert(file.to_owned(), Ok(Arc::new(refs)));
     }
 
@@ -62,7 +62,9 @@ impl AssemblyMeshes {
             if !self.by_file.contains_key(&assembly.file) {
                 let read = reader(&assembly.file).and_then(|meshes| {
                     if meshes.len() == assembly.meshes.len() {
-                        Ok(Arc::new(meshes.into_iter().map(|m| mesh_ref(Arc::new(m))).collect()))
+                        let meshes: Vec<Arc<MeshData>> = meshes.into_iter().map(Arc::new).collect();
+                        meshes.iter().for_each(gc_collide::prepare_mesh);
+                        Ok(Arc::new(meshes.into_iter().map(mesh_ref).collect()))
                     } else {
                         Err(format!("{}: the file has changed since it was imported", assembly.file))
                     }
@@ -138,7 +140,7 @@ pub(crate) fn shown_parts(
 }
 
 /// The rigid pose of a matrix whose 3 × 3 part is a rotation (no scale, no shear); `None` otherwise.
-fn rigid(matrix: &[[f64; 4]; 4]) -> Option<DPose3> {
+pub(crate) fn rigid(matrix: &[[f64; 4]; 4]) -> Option<DPose3> {
     let axes = [0, 1, 2].map(|c| DVec3::new(matrix[c][0], matrix[c][1], matrix[c][2]));
     let unit = axes.iter().all(|a| (a.length() - 1.0).abs() < 1e-6);
     let square = axes[0].dot(axes[1]).abs() < 1e-6

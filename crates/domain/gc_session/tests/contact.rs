@@ -135,3 +135,62 @@ fn a_dragged_body_pushes_and_the_drag_is_one_undo_step() {
     session.undo();
     assert!((session.doc().get(parcel).unwrap().placement.xyz[0] - 0.4).abs() < 1e-12);
 }
+
+/// An imported assembly of one 0.2 m cube part, 0.1 m up in its own frame, standing at `x`.
+fn crate_assembly(session: &mut Session, x: f64) -> gc_core::Id<gc_doc::Assembly> {
+    let assembly = gc_doc::Assembly {
+        name: "Crate".into(),
+        file: "crate.glb".into(),
+        placement: at(x, 0.0),
+        parts: vec![gc_doc::AssemblyPart {
+            name: "Box".into(),
+            parent: None,
+            matrix: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.1, 1.0]],
+            meshes: vec![0],
+        }],
+        meshes: vec![gc_doc::AssemblyMesh { name: "Box".into(), color: [1.0; 4], triangles: 12 }],
+        look: Default::default(),
+    };
+    session.add_assembly(assembly, vec![gc_mesh::primitives::cuboid([0.2; 3]).unwrap()]).unwrap()
+}
+
+#[test]
+fn assembly_parts_take_part_pushed_when_free_and_stopping_the_drive_when_grounded() {
+    let Line { mut session, floor, pusher, slide } = line();
+    let crate_ = crate_assembly(&mut session, 0.5);
+    session.set_contact_set(&[floor.erase(), pusher.erase(), crate_.erase()], true).unwrap();
+    session.set_contact_solver(ContactSolver::ContactSet).unwrap();
+    session.drive_relationship(slide, 0.6).unwrap();
+    assert!(session.contact_stop().is_none());
+    let pushed = session.driven_placement(crate_.erase()).unwrap();
+    assert!((pushed.xyz[0] - 0.8).abs() < 1e-3, "{pushed:?}");
+    // Its parts are drawn where it was pushed to.
+    let part = &session.assembly_parts(crate_).unwrap()[0];
+    assert!((part.matrix[3][0] - 0.8).abs() < 1e-3);
+    session.end_drive_relationship();
+
+    session.set_component(Occurrence::Item(crate_.erase()), gc_doc::ComponentFlag::Grounded, true).unwrap();
+    session.drive_relationship(slide, 0.6).unwrap();
+    let stop = session.contact_stop().unwrap();
+    assert_eq!((stop.first, stop.second), (pusher.erase(), crate_.erase()));
+    assert!(stop.value.is_some_and(|v| (0.29..=0.3).contains(&v)), "{stop:?}");
+}
+
+#[test]
+fn collision_detection_reports_new_overlap_not_touching_and_needs_no_contact_set() {
+    let Line { mut session, floor, pusher, slide } = line();
+    let wall = session.add_body(Solid::Box { size: [0.1, 2.0, 1.0] }, at(0.75, 0.5)).unwrap();
+    // Resting on the floor (touching) is no collision.
+    session.drive_relationship(slide, 0.3).unwrap();
+    assert_eq!(session.drive_collision(), None);
+    // Into the wall: a collision, with the solver off and nothing in a contact set.
+    session.drive_relationship(slide, 0.65).unwrap();
+    assert_eq!(session.drive_collision(), Some((pusher.erase(), wall.erase())));
+    assert_eq!(session.component_name(wall.erase()).as_deref(), Some("Body3"));
+    // A hidden wall is left out of the analysis.
+    session.end_drive_relationship();
+    session.set_component(Occurrence::Item(wall.erase()), gc_doc::ComponentFlag::Visible, false).unwrap();
+    session.drive_relationship(slide, 0.65).unwrap();
+    assert_eq!(session.drive_collision(), None);
+    let _ = floor;
+}

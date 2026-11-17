@@ -548,6 +548,18 @@ pub enum CellOp {
     },
     /// Shows or hides the degrees-of-freedom symbol of every component (View tab, Degrees of Freedom).
     SetDofShownAll(bool),
+    /// A work frame on a component's origin plane in one step: a sketch on the plane and a frame at its
+    /// origin. The frame (and every waypoint in it) follows the component, as projected geometry does.
+    AddComponentFrame {
+        /// Name of the frame.
+        name: String,
+        /// Name of the sketch that holds its origin.
+        sketch: String,
+        /// The component (a body, robot, assembly, assembly part, robot link or tool).
+        occurrence: crate::design::Occurrence,
+        /// Which of its origin planes.
+        plane: crate::design::OriginPlane,
+    },
     /// Adds components to, or takes them out of, the contact set.
     SetContactSet {
         /// The components (bodies, robots, assemblies).
@@ -1199,7 +1211,12 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
                 let set = &mut t.components.contact_set;
                 set.retain(|o| !items.iter().any(|i| *o == Occurrence::Item(*i)));
                 if *on {
-                    set.extend(items.iter().map(|i| Occurrence::Item(*i)));
+                    // Each component once, however often it is named.
+                    for item in items {
+                        if !set.contains(&Occurrence::Item(*item)) {
+                            set.push(Occurrence::Item(*item));
+                        }
+                    }
                 }
             })?;
             Ok((Vec::new(), if *on { "Contact set" } else { "Remove from contact set" }))
@@ -1225,7 +1242,11 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
                 let shown = &mut t.components.dof_shown;
                 shown.retain(|o| !items.iter().any(|i| *o == Occurrence::Item(*i)));
                 if *on {
-                    shown.extend(items.iter().map(|i| Occurrence::Item(*i)));
+                    for item in items {
+                        if !shown.contains(&Occurrence::Item(*item)) {
+                            shown.push(Occurrence::Item(*item));
+                        }
+                    }
                 }
             })?;
             Ok((Vec::new(), "Degrees of freedom"))
@@ -1233,6 +1254,35 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
         CellOp::SetDofShownAll(on) => {
             set_timeline(txn, |t| t.components.dof_all = *on)?;
             Ok((Vec::new(), "Degrees of freedom"))
+        }
+        CellOp::AddComponentFrame { name, sketch, occurrence, plane } => {
+            let source = crate::design::PlaneSource::Component { occurrence: *occurrence, plane: *plane };
+            let (mut created, _) =
+                crate::command::run(txn, &crate::Command::CreateSketchOn { name: sketch.clone(), source })?;
+            let Some(Created::Sketch(sketch)) = created.first().copied() else {
+                return Err(EditError::BadValue);
+            };
+            // The sketch's own origin point, fixed at the plane's origin.
+            let point = txn
+                .doc()
+                .get(sketch)
+                .and_then(|s| {
+                    s.points
+                        .iter()
+                        .find(|(_, p)| {
+                            matches!(
+                                p.kind,
+                                gc_sketch::PointKind::External(gc_sketch::ExternalRef::FrameOrigin(_))
+                            )
+                        })
+                        .map(|(id, _)| *id)
+                })
+                .ok_or(EditError::BadValue)?;
+            let frame =
+                WorkFrame { name: name.clone(), sketch, point, x_point: None, xy_point: None, rpy: [0.0; 3] };
+            frame_ok(txn, &frame)?;
+            created.push(Created::Frame(txn.insert(frame)));
+            Ok((created, "Work frame on component"))
         }
         CellOp::SetContactSolver(mode) => {
             set_timeline(txn, |t| t.components.contact_solver = *mode)?;
@@ -1352,6 +1402,26 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
                 return Err(EditError::BadValue);
             }
             txn.modify(*id, |r: &mut Robot, _| r.tool = tool.clone().map(Box::new))?;
+            if tool.is_none() {
+                // The tool's relationships go with it, as a deleted component's do.
+                let on_tool = crate::design::Occurrence::Tool { robot: *id };
+                let gone: Vec<Id<crate::relate::Relationship>> = txn
+                    .doc()
+                    .relationships()
+                    .iter()
+                    .filter(|(_, r)| {
+                        r.first.occurrence == on_tool
+                            || r.second.occurrence == on_tool
+                            || r.third().is_some_and(|t| t.occurrence == on_tool)
+                    })
+                    .map(|(id, _)| id)
+                    .collect();
+                for relationship in gone {
+                    txn.remove(relationship)?;
+                }
+            }
+            // What is tied to the tool follows a new mount.
+            settle_holding(txn, &[id.erase()])?;
             Ok((Vec::new(), "Set tool"))
         }
         CellOp::SetTcpSpeed { id, speed } => {

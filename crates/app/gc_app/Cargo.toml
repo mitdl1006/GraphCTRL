@@ -32,6 +32,7 @@ gc_agent.workspace = true
 gc_math.workspace = true
 gc_robot.workspace = true
 gc_expr.workspace = true
+gc_plugin_mesh.workspace = true
 gc_mesh.workspace = true
 gc_scene.workspace = true
 eframe.workspace = true

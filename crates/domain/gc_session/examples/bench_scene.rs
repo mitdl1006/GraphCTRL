@@ -146,11 +146,15 @@ fn verdict(ms: f64, budget: f64) -> &'static str {
 
 /// The large-mesh case: `count` mesh bodies of about `triangles` triangles each.
 fn large_meshes(count: usize, triangles: usize, frames: usize) -> String {
+    // The scenario needs two bodies side by side and a third overlapping its neighbour.
+    let count = count.max(3);
     let directory = tempfile::tempdir().expect("a temporary folder");
     let file = directory.path().join("equipment.stl");
     std::fs::write(&file, sphere_stl(triangles, 0.25)).expect("the mesh file");
     let file = file.to_string_lossy().into_owned();
     let mut session = Session::new();
+    // As the application runs it: mesh files are read on job threads.
+    session.set_executor(gc_jobs::Executor::thread());
     let floor = session
         .add_body(Solid::Box { size: [20.0, 20.0, 0.1] }, Placement { xyz: [0.0, 0.0, -0.05], rpy: [0.0; 3] })
         .unwrap();
@@ -188,6 +192,13 @@ fn large_meshes(count: usize, triangles: usize, frames: usize) -> String {
         bodies
     });
     let bodies = cold_load;
+    // The window stays live meanwhile: placeholders until the meshes arrive.
+    let (_, arrive_ms) = timed(|| {
+        while session.meshes_loading() > 0 {
+            session.poll_jobs();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    });
     let mut times: Vec<f64> =
         (0..frames.max(1)).map(|_| timed(|| std::hint::black_box(frame(&session))).1).collect();
     times.sort_by(f64::total_cmp);
@@ -232,7 +243,8 @@ fn large_meshes(count: usize, triangles: usize, frames: usize) -> String {
     format!(
         "\n## Large meshes ({count} mesh bodies × {triangles} triangles, mates to the floor)\n\n\
          | step | time | budget | verdict |\n|---|---|---|---|\n\
-         | adding the bodies (file read, BVH) | {load_ms:.1} ms | — | — |\n\
+         | adding the bodies: blocking (document edits only) | {load_ms:.1} ms | — | — |\n\
+         | … then until every mesh is in (background: scale, BVH) | {arrive_ms:.1} ms | — | — |\n\
          | frame queries, p95 of {frames} | {frame_p95:.3} ms | {BUDGET_MS} ms | {} |\n\
          | drag step (move + solve + commit) | {drag_ms:.2} ms | {INTERACTIVE_MS} ms | {} |\n\
          | constraint solve alone | {solve_ms:.2} ms | {INTERACTIVE_MS} ms | {} |\n\
@@ -248,6 +260,103 @@ fn large_meshes(count: usize, triangles: usize, frames: usize) -> String {
         verdict(drive_ms, INTERACTIVE_MS),
         verdict(measure_ms, INTERACTIVE_MS),
         rows.len(),
+    )
+}
+
+/// Many relationships (lead's target: one addition within 100 ms at 1000 relationships): `count` bodies,
+/// each mated to the floor, and chained ten by ten by flush constraints (islands of ten components).
+fn many_relationships(count: usize) -> String {
+    const PER_EDIT_MS: f64 = 100.0;
+    let mut session = Session::new();
+    let floor = session
+        .add_body(Solid::Box { size: [60.0, 60.0, 0.1] }, Placement { xyz: [0.0, 0.0, -0.05], rpy: [0.0; 3] })
+        .unwrap();
+    let plane = |z: f64, n: f64| Geometry::Plane { point: [0.0, 0.0, z], normal: [0.0, 0.0, n] };
+    let on = |id: gc_core::Id<gc_doc::Body>, geometry| Selection {
+        occurrence: Occurrence::Item(id.erase()),
+        geometry,
+    };
+    let origin = |p: gc_doc::OriginPlane| Geometry::origin(gc_doc::OriginElement::Plane(p));
+    // Five robots too: opening a project reads their descriptions again.
+    let urdf =
+        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../fixtures/urdf/six_axis.urdf"))
+            .expect("the six-axis fixture");
+    for k in 0..5 {
+        session.add_robot(&format!("Robot{}", k + 1), &urdf).unwrap();
+    }
+    let mut bodies: Vec<gc_core::Id<gc_doc::Body>> = Vec::new();
+    let (_, build_ms) = timed(|| {
+        #[allow(clippy::cast_precision_loss, reason = "small counts")]
+        for i in 0..count {
+            let placement =
+                Placement { xyz: [(i % 40) as f64 * 0.5, (i / 40) as f64 * 0.5, 0.4], rpy: [0.0; 3] };
+            let body = session.add_body(Solid::Box { size: [0.2; 3] }, placement).unwrap();
+            session
+                .add_relationship(Relationship::new(
+                    format!("Mate:{i}"),
+                    RelationKind::Mate { offset: 0.0, sense: AxisSense::Opposed },
+                    on(body, plane(-0.1, -1.0)),
+                    on(floor, plane(0.05, 1.0)),
+                ))
+                .unwrap();
+            if i % 10 != 0 {
+                let previous = *bodies.last().unwrap();
+                session
+                    .add_relationship(Relationship::new(
+                        format!("Flush:{i}"),
+                        RelationKind::Flush { offset: 0.5 },
+                        on(body, origin(gc_doc::OriginPlane::Yz)),
+                        on(previous, origin(gc_doc::OriginPlane::Yz)),
+                    ))
+                    .unwrap();
+            }
+            bodies.push(body);
+        }
+    });
+    let relationships = session.relationships().len();
+    // One more relationship, an edit of its offset and its deletion, each timed (median of five).
+    let median = |mut v: Vec<f64>| {
+        v.sort_by(f64::total_cmp);
+        v[v.len() / 2]
+    };
+    let (mut adds, mut edits, mut deletes) = (Vec::new(), Vec::new(), Vec::new());
+    for k in 0..5 {
+        let (a, b) = (bodies[10 * k + 9], bodies[10 * k + 19]);
+        let relationship = Relationship::new(
+            "Flush:extra",
+            RelationKind::Flush { offset: 0.5 },
+            on(a, origin(gc_doc::OriginPlane::Xz)),
+            on(b, origin(gc_doc::OriginPlane::Xz)),
+        );
+        let (id, ms) = timed(|| session.add_relationship(relationship.clone()).unwrap());
+        adds.push(ms);
+        let edited = Relationship { kind: RelationKind::Flush { offset: 0.25 }, ..relationship };
+        edits.push(timed(|| session.set_relationship(id, edited).unwrap()).1);
+        deletes.push(timed(|| session.delete_relationship(id).unwrap()).1);
+    }
+    let (add, edit, delete) = (median(adds), median(edits), median(deletes));
+    // Saving and opening the whole cell.
+    let directory = tempfile::tempdir().expect("a temporary folder");
+    let file = directory.path().join("large.gctrl");
+    let (_, save_ms) = timed(|| session.save_as(&file).unwrap());
+    let size_kb = std::fs::metadata(&file).map_or(0, |m| m.len()) / 1024;
+    let mut reopened = Session::new();
+    let (_, open_ms) = timed(|| reopened.open(&file).unwrap());
+    assert_eq!(reopened.relationships().len(), relationships);
+    format!(
+        "\n## Many relationships ({count} components and 5 robots, {relationships} relationships, islands of ten)\n\n\
+         | step | time | budget | verdict |\n|---|---|---|---|\n\
+         | building the cell (every addition solved) | {build_ms:.0} ms | — | — |\n\
+         | one more relationship (median of 5) | {add:.2} ms | {PER_EDIT_MS} ms | {} |\n\
+         | editing its offset | {edit:.2} ms | {PER_EDIT_MS} ms | {} |\n\
+         | deleting it | {delete:.2} ms | {PER_EDIT_MS} ms | {} |\n\
+         | saving the project ({size_kb} KiB) | {save_ms:.0} ms | — | — |\n\
+         | opening it | {open_ms:.0} ms | — | — |\n\n\
+         The solver works island by island (components tied by relationships) and leaves satisfied islands\n\
+         alone, so an edit re-solves only the island it touches.\n",
+        verdict(add, PER_EDIT_MS),
+        verdict(edit, PER_EDIT_MS),
+        verdict(delete, PER_EDIT_MS),
     )
 }
 
@@ -277,12 +386,15 @@ fn main() {
          browser's constraint status for every component. The renderer's own draw list is measured separately.\n"
     );
     println!("{table}");
+    let relations = many_relationships(argument(&args, "--relationships-components", 1000));
+    println!("{relations}");
     let meshes =
         large_meshes(argument(&args, "--meshes", 20), argument(&args, "--triangles", 100_000), frames);
     println!("{meshes}");
     if let Some(file) = args.iter().position(|a| a == "--append").and_then(|i| args.get(i + 1)) {
         let mut text = std::fs::read_to_string(file).unwrap_or_default();
         text.push_str(&table);
+        text.push_str(&relations);
         text.push_str(&meshes);
         std::fs::write(file, text).expect("the report file");
     }

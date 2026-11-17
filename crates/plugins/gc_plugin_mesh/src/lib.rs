@@ -1,11 +1,15 @@
-//! Reads equipment files: glTF / GLB assemblies with their part tree, names, colours and instancing
-//! (plan 9.1, CAD import).
+//! Reads equipment files: glTF / GLB assemblies with their part tree, names, colours and instancing, and
+//! STEP files with tessellated shapes (AP242) (plan 9.1, CAD import).
 //!
 //! The result is plain data ([`Assembly`]): a tree of nodes with local transforms, and the triangle meshes
 //! they show. A mesh used by several nodes is stored once (instancing). Coordinates are converted from
 //! glTF's Y-up to the application's Z-up; units stay metres, as glTF defines them.
 
 #![forbid(unsafe_code)]
+
+mod step;
+
+pub use step::read_step;
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -76,8 +80,8 @@ impl Assembly {
 /// Why a file could not be read.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum ImportError {
-    /// Not a glTF file, or a damaged one.
-    #[error("the file is not a readable glTF/GLB file: {0}")]
+    /// Not a glTF or STEP file, or a damaged one.
+    #[error("the file cannot be read: {0}")]
     Unreadable(String),
     /// The file refers to data that is not there (an external buffer next to a .gltf file).
     #[error("the file refers to data that cannot be found: {0}")]

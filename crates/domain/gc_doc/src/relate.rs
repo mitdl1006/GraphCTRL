@@ -131,7 +131,7 @@ impl Geometry {
         (origin, z, x)
     }
 
-    fn is_finite(&self) -> bool {
+    pub(crate) fn is_finite(&self) -> bool {
         let (a, b) = match *self {
             Geometry::Plane { point, normal } => (point, normal),
             Geometry::Axis { point, direction } => (point, direction),
@@ -375,6 +375,78 @@ impl Relationship {
     }
 }
 
+/// A solution the Assemble command offers once the geometry is picked (Inventor 2026 help, Create assembly
+/// constraints using the Assemble command, GUID-C1E8D955-784D-47DE-9DD4-C9C695051320: "The geometry you
+/// select determines the available constraint type"). Joints, Symmetry, Angle-Undirected and Explicit
+/// Reference Vector are not offered by Assemble.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AssembleSolution {
+    /// Mate, faces facing (normals or axes opposed).
+    MateMate,
+    /// Flush: faces side by side.
+    MateFlush,
+    /// Mate of two axes pointing the same way.
+    MateAligned,
+    /// Angle, directed (right-hand rule).
+    AngleDirected,
+    /// Tangent, inside.
+    TangentInside,
+    /// Tangent, outside.
+    TangentOutside,
+    /// Insert, opposed.
+    InsertOpposed,
+    /// Insert, aligned.
+    InsertAligned,
+}
+
+impl AssembleSolution {
+    /// The relationship kind for this solution with an offset (metres) or angle (radians).
+    pub fn kind(self, value: f64) -> RelationKind {
+        match self {
+            AssembleSolution::MateMate => RelationKind::Mate { offset: value, sense: AxisSense::Opposed },
+            AssembleSolution::MateFlush => RelationKind::Flush { offset: value },
+            AssembleSolution::MateAligned => RelationKind::Mate { offset: value, sense: AxisSense::Aligned },
+            AssembleSolution::AngleDirected => {
+                RelationKind::Angle { angle: value, solution: AngleSolution::Directed }
+            }
+            AssembleSolution::TangentInside => RelationKind::Tangent { offset: value, inside: true },
+            AssembleSolution::TangentOutside => RelationKind::Tangent { offset: value, inside: false },
+            AssembleSolution::InsertOpposed => RelationKind::Insert { offset: value, aligned: false },
+            AssembleSolution::InsertAligned => RelationKind::Insert { offset: value, aligned: true },
+        }
+    }
+}
+
+/// The solutions Assemble offers for two picked selections, in Inventor's order; empty when nothing fits
+/// (both on one component, a joint origin picked).
+pub fn possible_relations(first: &Selection, second: &Selection) -> Vec<AssembleSolution> {
+    let round = |g: &Geometry| matches!(g, Geometry::Cylinder { .. } | Geometry::Sphere { .. });
+    let linear = |g: &Geometry| {
+        matches!(g, Geometry::Axis { .. } | Geometry::Cylinder { .. } | Geometry::Circle { .. })
+    };
+    let (g1, g2) = (&first.geometry, &second.geometry);
+    let offered = |solution: &AssembleSolution| match solution {
+        AssembleSolution::MateAligned => linear(g1) && linear(g2),
+        AssembleSolution::TangentInside | AssembleSolution::TangentOutside => round(g1) || round(g2),
+        _ => true,
+    };
+    [
+        AssembleSolution::MateMate,
+        AssembleSolution::MateFlush,
+        AssembleSolution::MateAligned,
+        AssembleSolution::AngleDirected,
+        AssembleSolution::TangentInside,
+        AssembleSolution::TangentOutside,
+        AssembleSolution::InsertOpposed,
+        AssembleSolution::InsertAligned,
+    ]
+    .into_iter()
+    .filter(|solution| {
+        offered(solution) && Relationship::new("", solution.kind(0.0), *first, *second).is_valid()
+    })
+    .collect()
+}
+
 /// Geometry in the world.
 #[derive(Clone, Copy, Debug)]
 enum World {
@@ -538,6 +610,7 @@ struct Owner {
 }
 
 /// One relationship ready to evaluate: owner indices, geometry in the owners' frames, settled sign.
+#[derive(Clone)]
 struct Term {
     id: Id<Relationship>,
     kind: RelationKind,
@@ -607,6 +680,10 @@ impl Document {
     /// offset; for other geometry a Mate at its current offset (axes: the closer sense). `None` when a
     /// component does not exist.
     pub fn predict_relationship(&self, first: &Selection, second: &Selection) -> Option<RelationKind> {
+        // Nothing to offer from geometry that is not a number (the offset would be NaN).
+        if !first.geometry.is_finite() || !second.geometry.is_finite() {
+            return None;
+        }
         let w1 = world(&self.owner_pose(first.occurrence.owner())?, &self.in_owner(first)?);
         let w2 = world(&self.owner_pose(second.occurrence.owner())?, &self.in_owner(second)?);
         if let (Some((c1, _)), Some((c2, n2))) = (w1.1, w2.1) {
@@ -650,8 +727,19 @@ impl Document {
         }
         let start: Vec<DPose3> = owners.iter().map(|o| o.pose).collect();
         let mut poses = start.clone();
-        rough_turns(&owners, &terms, &mut poses);
-        least_squares(&owners, &terms, &mut poses);
+        // Free components tied together by relationships form islands that do not affect one another:
+        // each is solved on its own, and an island already satisfied is left alone (adding a relationship
+        // re-solves only its island).
+        for (free, island) in islands(&owners, &terms) {
+            let subset: Vec<&Term> = island.iter().map(|i| &terms[*i]).collect();
+            let satisfied = subset.iter().all(|t| term_residuals(t, &poses).iter().all(|r| r.abs() <= 1e-9));
+            if satisfied {
+                continue;
+            }
+            let subset: Vec<Term> = subset.into_iter().cloned().collect();
+            rough_turns(&owners, &subset, &mut poses);
+            least_squares_on(&free, &subset, &mut poses);
+        }
         let sick: Vec<Id<Relationship>> = terms
             .iter()
             .filter(|t| term_residuals(t, &poses).iter().any(|r| r.abs() > 1e-7))
@@ -998,8 +1086,52 @@ fn stepped(pose: &DPose3, step: &[f64]) -> DPose3 {
 }
 
 /// Damped least squares over the free components' poses.
-fn least_squares(owners: &[Owner], terms: &[Term], poses: &mut [DPose3]) {
-    let free: Vec<usize> = (0..owners.len()).filter(|i| owners[*i].free).collect();
+/// Islands of free owners tied by relationships: per island, its free owners and the indices of the terms
+/// that touch it. Terms between fixed owners only belong to no island (they are only checked).
+fn islands(owners: &[Owner], terms: &[Term]) -> Vec<(Vec<usize>, Vec<usize>)> {
+    fn root(parent: &mut [usize], mut i: usize) -> usize {
+        while parent[i] != i {
+            parent[i] = parent[parent[i]];
+            i = parent[i];
+        }
+        i
+    }
+    let mut parent: Vec<usize> = (0..owners.len()).collect();
+    let touched = |t: &Term| -> Vec<usize> {
+        t.owners
+            .iter()
+            .copied()
+            .chain(t.third.as_ref().map(|(i, _)| *i))
+            .filter(|i| owners[*i].free)
+            .collect()
+    };
+    for term in terms {
+        let free = touched(term);
+        for pair in free.windows(2) {
+            let (a, b) = (root(&mut parent, pair[0]), root(&mut parent, pair[1]));
+            if a != b {
+                parent[a] = b;
+            }
+        }
+    }
+    let mut by_root: std::collections::BTreeMap<usize, (Vec<usize>, Vec<usize>)> = Default::default();
+    for (i, owner) in owners.iter().enumerate() {
+        if owner.free {
+            let r = root(&mut parent, i);
+            by_root.entry(r).or_default().0.push(i);
+        }
+    }
+    for (index, term) in terms.iter().enumerate() {
+        if let Some(first) = touched(term).first() {
+            let r = root(&mut parent, *first);
+            by_root.entry(r).or_default().1.push(index);
+        }
+    }
+    by_root.into_values().filter(|(_, terms)| !terms.is_empty()).collect()
+}
+
+/// Damped least squares over the poses of the owners `free`.
+fn least_squares_on(free: &[usize], terms: &[Term], poses: &mut [DPose3]) {
     let n = free.len() * 6;
     if n == 0 || terms.is_empty() {
         return;

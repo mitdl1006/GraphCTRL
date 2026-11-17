@@ -76,6 +76,8 @@ pub(crate) enum RibbonAction {
     StartParameters,
     /// Project the edges the sketch plane cuts into the active sketch.
     ProjectCutEdges,
+    /// Ground or free the selected component.
+    ToggleGround,
 }
 
 pub(crate) fn show(
@@ -372,6 +374,14 @@ fn assemble_tab(
             if ribbon_button(ui, Icon::Pan, label, active, has).clicked() {
                 viewport.free_tool = if active { None } else { Some(tool) };
             }
+        }
+        // Ground: the selected body, robot or imported assembly, shown pressed when it is grounded.
+        let selected = session.selected_occurrence().filter(|o| session.can_ground(*o));
+        let grounded =
+            selected.is_some_and(|o| session.doc().component_flag(o, gc_doc::ComponentFlag::Grounded));
+        if ribbon_button(ui, Icon::Text("⊥"), tr!(lang, CmdGround), grounded, selected.is_some()).clicked()
+        {
+            action = Some(RibbonAction::ToggleGround);
         }
     });
     action

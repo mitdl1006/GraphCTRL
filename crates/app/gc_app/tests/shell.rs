@@ -2295,6 +2295,12 @@ fn measure_gives_the_minimum_distance_between_two_components() {
     harness.get_by_label("중심 간 거리").click();
     harness.run();
     harness.get_by_label(&format!("중심 간 거리: {:.3} mm", expected.centre_to_centre * 1000.0));
+    // Maximum Distance: never below the minimum.
+    harness.get_by_label("최대 거리").click();
+    harness.run();
+    let farthest = expected.maximum.unwrap().distance;
+    assert!(farthest > gap);
+    harness.get_by_label(&format!("최대 거리: {:.3} mm", farthest * 1000.0));
 
     // A click on a blank area (nothing selected) restarts.
     harness.state_mut().session.select_item(None);
@@ -3378,4 +3384,73 @@ fn degrees_of_freedom_symbols_are_shown_from_the_view_tab() {
     harness.get_by_label("자유도").click();
     harness.run_steps(3);
     assert!(harness.state().session.dof_symbols().is_empty());
+}
+
+/// Assemble tab > Place with a STEP file: the fixture arrives as an assembly; a broken file is reported in
+/// the status bar. Then Grounded on a selected body toggles its grounded state (Inventor: right-click a
+/// component > Grounded; https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-2E0B9110-BBAE-482B-A9AF-953BC40E8F2A.htm
+/// says the first component placed is grounded).
+#[test]
+fn place_reads_a_step_assembly_and_ground_toggles_a_component() {
+    let directory = tempfile::tempdir().unwrap();
+    let broken = directory.path().join("broken.stp");
+    std::fs::write(&broken, b"ISO-10303-21; not really").unwrap();
+    let fixture =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/step/two_blocks_ap242.stp");
+    let chosen = std::sync::Arc::new(std::sync::Mutex::new(broken.clone()));
+    struct Chosen(std::sync::Arc<std::sync::Mutex<std::path::PathBuf>>);
+    impl gc_app::FileDialogs for Chosen {
+        fn open(&mut self) -> Option<std::path::PathBuf> {
+            None
+        }
+        fn save(&mut self, _: &str) -> Option<std::path::PathBuf> {
+            None
+        }
+        fn open_mesh(&mut self) -> Option<std::path::PathBuf> {
+            Some(self.0.lock().unwrap().clone())
+        }
+    }
+    let dialogs = Chosen(std::sync::Arc::clone(&chosen));
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(move |cc| GraphCtrlApp::new(cc, RunOptions::default()).with_dialogs(Box::new(dialogs)));
+    harness.run();
+    harness.get_by_label("조립").click();
+    harness.run();
+    harness.get_by_label("배치").click();
+    harness.run_steps(4);
+    harness.get_by_label_contains("가져오기 실패: ");
+    assert!(harness.state().session.doc().assemblies().is_empty());
+
+    *chosen.lock().unwrap() = fixture;
+    harness.get_by_label("배치").click();
+    harness.run_steps(4);
+    assert_eq!(harness.state().session.doc().assemblies().len(), 1);
+    assert!(harness.query_by_label_contains("가져오기 실패").is_none());
+
+    // A body: select it, Grounded toggles.
+    let body = harness
+        .state_mut()
+        .session
+        .add_body(
+            gc_doc::Solid::Box { size: [0.1; 3] },
+            gc_doc::Placement { xyz: [1.0, 0.0, 0.0], rpy: [0.0; 3] },
+        )
+        .unwrap();
+    harness.state_mut().session.select_item(Some(gc_session::CellItem::Body(body)));
+    harness.run();
+    let grounded = |h: &egui_kittest::Harness<'_, GraphCtrlApp>| {
+        h.state()
+            .session
+            .doc()
+            .component_flag(gc_doc::Occurrence::Item(body.erase()), gc_doc::ComponentFlag::Grounded)
+    };
+    let before = grounded(&harness);
+    harness.get_by_label("접지").click();
+    harness.run();
+    assert_ne!(grounded(&harness), before);
+    harness.get_by_label("접지").click();
+    harness.run();
+    assert_eq!(grounded(&harness), before);
 }

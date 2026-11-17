@@ -275,7 +275,6 @@ fn predicting_a_relationship_reads_the_current_pose() {
 
 /// A selection that is not a number predicts nothing (the offer would carry a NaN offset into the dialog).
 #[test]
-#[ignore = "BUG: Session::predict_relationship returns Some(..) for a non-finite selection; see docs/handoff/qa.md"]
 fn predicting_from_a_non_finite_selection_offers_nothing() {
     let (s, pedestal, robot) = robot_cell();
     let nan = Geometry::Plane { point: [f64::NAN; 3], normal: [0.0, 0.0, 1.0] };

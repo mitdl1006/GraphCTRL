@@ -58,6 +58,11 @@ pub struct SkPoint {
     pub pos: [f64; 3],
     /// Free or reference.
     pub kind: PointKind,
+    /// A centre point (drawn as a cross; holes use them) rather than a plain sketch point (a dot). Only
+    /// standalone points carry the style; curve ends and centres do not (Inventor 2026 help, To Work with
+    /// Points, GUID-D4A4288F-32F1-4E23-A382-930EBA152E87).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub center: bool,
 }
 
 impl Entity for SkPoint {

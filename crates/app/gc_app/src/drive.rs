@@ -296,35 +296,20 @@ impl Drive {
             return false;
         }
         self.index = index;
-        if self.collision {
-            let doc = session.doc();
-            let all: Vec<CellItem> = doc
-                .robots()
-                .iter()
-                .map(|(id, _)| CellItem::Robot(id))
-                .chain(doc.bodies().iter().map(|(id, _)| CellItem::Body(id)))
-                .collect();
-            let (moved, still): (Vec<CellItem>, Vec<CellItem>) = all.into_iter().partition(|item| {
-                let id = match *item {
-                    CellItem::Robot(id) => id.erase(),
-                    CellItem::Body(id) => id.erase(),
-                    CellItem::Waypoint(id) => id.erase(),
-                    CellItem::Frame(id) => id.erase(),
-                    CellItem::Path(id) => id.erase(),
-                };
-                session.driven_placement(id).is_some()
+        // The contact solver (when it is on) stops the motion itself before a component that cannot give
+        // way; Collision Detection is separate and checks every component (Inventor 2026 help, About the
+        // Contact Solver and Component Collision, GUID-0BBD4ACE-7BD1-40BF-A011-74416B229035).
+        let met = session
+            .contact_stop()
+            .map(|stop| (stop.first, stop.second, stop.value.map_or(value, |v| v * factor)))
+            .or_else(|| {
+                if self.collision { session.drive_collision().map(|(a, b)| (a, b, value)) } else { None }
             });
-            if !moved.is_empty()
-                && !still.is_empty()
-                && let Some(row) =
-                    session.interference(&moved, &still).into_iter().find(|r| r.overlap.volume > 0.0)
-            {
-                let name = |item| session.item_name(item).unwrap_or_default();
-                self.stopped_by =
-                    Some(format!("{}|{}|{value:.3}{unit_name}", name(row.first), name(row.second)));
-                self.playing = Playing::Stopped;
-                return false;
-            }
+        if let Some((first, second, at)) = met {
+            let name = |item| session.component_name(item).unwrap_or_default();
+            self.stopped_by = Some(format!("{}|{}|{at:.3}{unit_name}", name(first), name(second)));
+            self.playing = Playing::Stopped;
+            return false;
         }
         true
     }

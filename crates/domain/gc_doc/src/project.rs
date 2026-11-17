@@ -65,12 +65,16 @@ fn metres(n: i64) -> f64 {
     n as f64 * 1e-9
 }
 
+/// The part number a projected point on a robot's tool keeps.
+const TOOL: u32 = u32::MAX;
+
 /// The reference a projected point keeps: its owner, part and position in that frame.
 fn reference(occurrence: Occurrence, local: [f64; 3]) -> ExternalRef {
     let (owner, part) = match occurrence {
         Occurrence::Item(item) => (item, 0),
         Occurrence::Part { assembly, index } => (assembly.erase(), index + 1),
         Occurrence::Link { robot, index } => (robot.erase(), index + 1),
+        Occurrence::Tool { robot } => (robot.erase(), TOOL),
     };
     ExternalRef::Projected { owner, part, local_nm: local.map(nm) }
 }
@@ -89,6 +93,7 @@ impl Document {
         let occurrence = match (owner.kind, part) {
             (_, 0) => Occurrence::Item(owner),
             (Kind::Assembly, n) => Occurrence::Part { assembly: Id::from_raw(owner.raw), index: n - 1 },
+            (Kind::RobotInstance, TOOL) => Occurrence::Tool { robot: Id::from_raw(owner.raw) },
             (Kind::RobotInstance, n) => Occurrence::Link { robot: Id::from_raw(owner.raw), index: n - 1 },
             _ => return None,
         };

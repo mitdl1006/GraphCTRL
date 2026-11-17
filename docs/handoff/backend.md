@@ -1,4 +1,99 @@
-# 백엔드 인계 (2026-11-17)
+# 백엔드 인계 (최종 갱신 2026-11-18)
+
+브랜치 `claude/ur-robot-control-simulator-jsmhze-backend`. 아래 "현황"이 요약, 그 다음 "작업 기록"이 최신 순 상세(근거 링크·API·차이).
+인벤터 원문은 `https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-….htm`.
+
+## 현황 — 완료
+
+| 영역 | 무엇 | 세션/문서 API(대표) | 테스트 |
+|---|---|---|---|
+| 스케치 | Trim·Extend·Fillet, Project Geometry(연관), 치수 이름·매개변수(d0…, `NAME = 식`) | `SketchOp::{Trim, Extend, Fillet, Project, RenameDimension}`, `Command::RenameParam` | `gc_doc/tests/sketch_ops.rs`, `gc_session/tests/project_geometry.rs` |
+| 컴포넌트 트리 | 접지·가시·활성·억제, 원점 폴더, 로봇 링크·툴을 하위 컴포넌트로 | `components()`, `robot_links(robot)`(링크 + `Occurrence::Tool`), `component_origin(occ)`, `set_component` | `robot_links.rs`, `qa_origin_folder.rs` |
+| 구속·조인트 | Mate·Flush·Insert·Angle·Tangent·Symmetry, Rigid·Rotational·Slider·Cylindrical·Ball, 한계, Predict, Assemble 유형 제한 | `add_relationship`, `predict_relationship`, `automatic_joint`, `possible_relations(a, b)` | `gc_doc/tests/relate.rs` |
+| 상태·DOF | 상태 점, 남은 자유도, DOF 기호(이동 방향·회전축·큐브), 충돌 관계 진단 | `component_statuses()`, `component_dof`, `dof_symbol(s)`, `conflicting_relationships` | `relate.rs`, `dof_symbol.rs` |
+| 구동·접촉 | Drive(값 재생), 접촉 솔버(밀기·정지, 드래그 포함), Drive 충돌 감지 | `drive_relationship`, `contact_stop()`, `drive_collision()`, `set_contact_set/solver` | `contact.rs`, 앱 `shell.rs` |
+| 배치 명령 | Ground and Root, Place at Component Origin, 패턴(직사각형·원형), 미러·복사·교체(Replace All) | `ground_at_origin`, `add_pattern`, `mirror_components`, `copy_components`, `replace_component` | `pattern.rs`, `replicate.rs` |
+| 표현 | 뷰(가시·활성·투명도·카메라), 위치(Primary + 재정의) | `CellOp::{Add,Set,Activate}{View,Positional}Representation` | `relate.rs` |
+| 가져오기·성능 | 메시 로드 잡(자리표시), GLB 및 **STEP AP242 테셀레이션** 읽기, 충돌 형상 캐시, 대형 장면 벤치 | `mesh_pending`, `gc_plugin_mesh::{read_gltf, read_step}`, `bench_scene` | `mesh_jobs.rs`, `gc_plugin_mesh/tests/step.rs` |
+| 모션 | 플래너·재계획 사다리·ACM·보증(M1–M2, 아래 오래된 절) | `plan`, `planned(path)` | `gc_motion`, `gc_plan` |
+
+## 현황 — 남음
+
+| 항목 | 상태 / 다음 |
+|---|---|
+| STEP B-rep(정확 형상) | 테셀레이션 없는 솔리드는 경고 후 건너뜀. 평면·원통부터 자체 테셀레이터 필요. 앱의 가져오기 배선(확장자 → `read_step`)은 리드/FE. 실제 대형 파일(NIST CTC 등) 확인은 네트워크 허용 후 |
+| 미러의 진짜 반사 | 파일을 만들지 않아 Mirror = Reuse(프리미티브만 정확). 메시 반사는 렌더/메시 쪽 배율 음수 지원 필요 |
+| 로봇 교체, 패턴·표현의 미러/복사 | 미지원 |
+| 접촉 솔버 | 밀린 부품은 병진만(회전 없음), 배율 있는 어셈블리 부품 제외, Surface Complexity 없음 |
+| 메시 로드 | `add_mesh_body`는 mm/m 판정용 STL 파싱만 동기 |
+| DOF 기호 | 기호마다 관계를 모음(수백 개 동시 표시 시 캐시 필요) |
+| Unsolvable | 인벤터의 Recover 상태 대신 거부(원문과 차이, 아래 기록) |
+| 에이전트 도구 | `docs/handoff/backend-agent-tools.md`에 코드(gc_agent 수정은 권한상 리드) |
+| 모션(오래된 남은 일) | 맨 아래 "남은 일(백엔드)" 절 그대로 |
+
+# 작업 기록(최신 순)
+
+## 2026-11-18 — 컴포넌트(occurrence) 선택·접지 토글 · 표현 폴더 · 최대 거리(리드 ①②③)
+
+- ① `session.selected_occurrence()`, `select_occurrence(Option<Occurrence>) -> bool`(없는 것은 거부·유지). CellItem 선택과의 관계:
+  바디·로봇은 둘 다(같은 것), 로봇 링크·툴을 고르면 CellItem은 그 로봇(로봇 패널), 어셈블리·부품은 CellItem 없음; `select_item`은 바디·로봇이면
+  occurrence도 그것, 웨이포인트·좌표계·경로면 없음. 접지 토글: `can_ground(occ)`(바디·로봇·어셈블리만), `toggle_ground_selected() -> Result<bool>`
+  (Undo 1단계). 문서는 링크·툴 접지를 거부(부품 접지는 저장되지만 효과 없음 — 기존 동작 유지).
+- ② 표현 폴더: `session.representation_folder() -> RepresentationFolder{views, positions(Primary 먼저)}`, 각 `RepresentationNode{name, active}`.
+  `Representations.active_view`(마지막으로 활성화한 뷰, 삭제 시 조정) 추가. 래퍼: `add_view_representation`, `activate_view_representation`,
+  `add_positional_representation`, `activate_positional_representation(Option)`, `delete_representation`.
+- ③ 측정 최대 거리(원문 GUID-1805AB8F-F782-4B24-A332-B4F2E10A3D00 "Toggle between Minimum Distance, Center to Center, and Maximum Distance"):
+  `PairMeasure.maximum: Option<Closest>`(점 두 개 포함), gc_collide `Geometry::farthest` — 상자·구·원통은 해석적 최원점, 메시·헐은 정점,
+  여러 시작점에서 번갈아 최원점 갱신(돌린 상자 쌍에서 전수 조사와 일치 테스트).
+- 테스트 `gc_session/tests/{occurrence_selection, measure_maximum}.rs`, gc_collide `farthest_is_the_largest_distance_between_the_shapes`.
+
+## 2026-11-18 — 로봇 셀: 설비에 붙은 로봇 · 설비 기준 웨이포인트(리드 ①②)
+
+- ① end-to-end(`gc_session/tests/robot_mount.rs`): 로봇을 받침대에 Mate 또는 Rigid 조인트로 붙이고 받침대를 옮기면(크기도 바꿈) 로봇 베이스가 즉시 따라가고,
+  `robot_base_frame`·InBase 웨이포인트가 함께 이동, InWorld 웨이포인트는 그대로, 그 IK는 새 베이스에서 풀려 TCP가 정확히 도달, 이전 계획은 Stale,
+  Undo 두 번이면 베이스·계획(Ready) 모두 원상. **코드 수정 불필요**(관계 settle이 Robot.placement를 바꾸고 IK·계획이 그 값을 씀).
+- ② 설비 기준 웨이포인트: 이미 연관됨 — 컴포넌트 원점 평면/부품 면 위 스케치 → 작업 좌표계 → `InFrame` 웨이포인트가 설비 이동·회전·구속을 따라감(투영과 같은 원리, 테스트).
+  한 번에 만들 수 있게 `session.add_component_frame(occurrence, OriginPlane) -> Id<WorkFrame>`(`CellOp::AddComponentFrame`, Undo 1단계, 링크·툴·부품 occurrence도 가능).
+  새 `WaypointTarget::InComponent` 변형은 만들지 않음 — `gc_panels`·`gc_agent`가 WaypointTarget/Reference를 빠짐없이 match해서 UI·앱 수정이 필요(원하면 리드 결정).
+  테스트 `gc_session/tests/component_frames.rs`.
+- ③ 큰 셀 저장/열기: `bench_scene` "Many relationships" 표에 행 추가(1000 컴포넌트 + 로봇 5대, 관계 1900개, 2.2 MiB): 저장 ~50 ms, 열기 ~7 ms(release).
+  개선 불필요로 판단. 메시 바디가 있으면 열기 뒤 메시는 잡으로 들어온다(화면 안 막음). 로봇이 많으면 열 때 URDF 재해석 비용이 로봇 수에 비례.
+
+## 2026-11-18 — QA 버그 5건 · 관계가 많을 때의 속도
+
+- QA(eec466e) 버그 수정, `#[ignore]` 해제: read_step 중첩 256단 상한(스택 오버플로 중단 → `Unreadable`), 미러 비유한 평면 거부,
+  접촉 집합(및 DOF 표시) 중복 저장 안 함, 매 명령 후 없는 컴포넌트의 저장 상태 정리(`tree::prune_states`), predict 비유한 선택 → None.
+- KNOWN_ISSUES "관계 추가 시간 급증"(400개 9.5 s, 1000개 5분+): 풀이를 **섬**(관계로 묶인 자유 컴포넌트 묶음)으로 나누고 이미 만족된 섬은 건너뜀
+  → 관계 하나 추가 시 그 섬만 다시 푼다. `bench_scene --components 1000`으로 셀 구성 전체 ~0.15 s(release).
+  프레임 질의: 세션이 `component_statuses()`를 문서 리비전별로 캐시(문서 교체 시 비움) → 1000개 p95 3.8 ms → 1.7 ms(예산 2 ms).
+  테스트 `gc_session/tests/relation_scale.rs`(300개 메이트 디버그에서 0.05 s).
+  `bench_scene`에 "Many relationships" 표(1000 컴포넌트·1900 관계, 10개씩 섬): 관계 1개 추가 7.8 ms, 오프셋 편집 8.0 ms, 삭제 0.1 ms(목표 100 ms, release). KNOWN_ISSUES 항목은 리드가 닫아 주세요(문서 소유 아님).
+
+## 2026-11-18 — 툴 컴포넌트 · STEP AP242 · Assemble 유형(리드 ①②④)
+
+- ① `Occurrence::Tool { robot }`: 툴이 팁 링크 아래 하위 컴포넌트(`robot_links` 끝). 원점 = 플랜지 프레임 × 툴 장착 배치라 `mount_tool`·세션 운동학과 일치(조인트 값과 무관하게 테스트).
+  숨김·비활성 가능, 단독 접지 불가. 구속·조인트·스케치·투영이 툴을 참조 가능. 툴을 떼면(`SetTool None`) 그 관계도 삭제(컴포넌트 삭제와 같게), 다시 장착하면 묶인 것이 따라옴.
+- ② `gc_plugin_mesh::read_step(bytes) -> Assembly`: 자체 Part 21 파서(새 의존성 없음). TRIANGULATED_FACE/SURFACE_SET(+COMPLEX_ 스트립·팬), TESSELLATED_SOLID/SHELL,
+  제품 트리(NAUO + CDSR/ITEM_DEFINED_TRANSFORMATION, 공유 정의 인스턴스), 색(STYLED_ITEM → COLOUR_RGB), 길이 단위 → m. B-rep은 경고.
+  픽스처 `fixtures/step/two_blocks_ap242.stp`는 손으로 작성(라이선스 문제 없음). 생성한 8만 삼각형 파일 0.07 s(release).
+- ④ Assemble(원문 GUID-C1E8D955-784D-47DE-9DD4-C9C695051320 "The geometry you select determines the available constraint type"):
+  `gc_doc::possible_relations(first, second) -> Vec<AssembleSolution>`(세션 래퍼 동명), `AssembleSolution::kind(값)`. 평면 둘 → Mate-Mate·Mate-Flush·Angle-Directed(원문 예),
+  원형 모서리 → Insert 둘, 구/원통-평면 → Tangent 둘. 솔버가 받는 조합만(`Relationship::is_valid`). 조인트·Symmetry·Angle-Undirected는 원문대로 Assemble에 없음.
+
+## 2026-11-18 — 메시 로드 잡 · 어셈블리 접촉 · Drive 충돌 감지(리드 ①②③)
+
+- ① 바디·툴 메시 파일은 `gc_jobs` 잡에서 읽고(배율 적용 + 충돌 형상 BVH까지) `poll_jobs`가 받아들인다. 바디는 문서에 즉시 들어가고(undo 1단계),
+  메시가 오는 것은 편집이 아니다. 자리표시용 `session.mesh_pending(&solid)`, `meshes_loading()`. 실패는 그대로 `mesh_error(file)`.
+  기본(인라인) 실행기에서는 반환 시 이미 와 있어 기존 동작과 같다. 어셈블리 가져오기 잡도 메시 충돌 형상을 그 스레드에서 미리 만든다(열 때의 sync 경로도).
+  벤치(스레드 실행기): 20×10만 삼각형 추가가 화면을 막는 시간 1.3 s → 0.03 s, 전부 도착까지 ~0.55 s(병렬).
+  남은 것: `add_mesh_body`는 mm/m 판정 때문에 STL을 한 번 동기로 읽는다(파싱만, BVH는 잡).
+- ② 어셈블리(가져온 GLB/STEP)도 접촉 솔버 참가: 보이는 부품 중 강체 행렬인 것(배율 있는 부품은 제외). 접지·관계 없으면 밀리고(`driven_placement`, `assembly_parts`가 밀린 위치로 그림), 아니면 정지.
+- ③ Drive 대화상자(`gc_app/src/drive.rs`, 리드 허락): 원문상 Collision Detection은 접촉 솔버와 별개(접촉 세트 없이도 검사, 충돌 시 정지)라서
+  둘 다 둔다 — 먼저 `session.contact_stop()`(솔버가 켜져 있을 때 스스로 멈춘 경우), Collision Detection이 켜져 있으면 `session.drive_collision()`.
+  `drive_collision`은 프레임마다 `interference`(24³ 격자 부피 추정)를 부르던 것을 대신해, 구동으로 실제 움직인 컴포넌트만 AABB+침투로 검사하고
+  문서 위치보다 더 깊어질 때만 충돌(닿아 있는 것은 아님). 숨김·비활성·억제 제외. 이름은 `session.component_name(AnyId)`.
+  `shell.rs::drive_moves_a_mated_block_and_stops_at_a_collision` 통과.
+- 테스트: `gc_session/tests/mesh_jobs.rs`, `contact.rs`(어셈블리, 충돌 감지 추가).
 
 ## 2026-11-18 — 대형 메시 성능(리드 ③)
 

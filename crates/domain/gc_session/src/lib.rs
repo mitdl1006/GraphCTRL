@@ -85,6 +85,24 @@ pub struct Session {
     spatial: spatial::SpatialState,
 }
 
+/// The browser's Representations folder.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RepresentationFolder {
+    /// View representations.
+    pub views: Vec<RepresentationNode>,
+    /// Positional representations, [Primary] first.
+    pub positions: Vec<RepresentationNode>,
+}
+
+/// One representation in the folder.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RepresentationNode {
+    /// Its name.
+    pub name: String,
+    /// Shown checked: the active one.
+    pub active: bool,
+}
+
 impl Default for Session {
     fn default() -> Self {
         Self::new()
@@ -142,6 +160,8 @@ impl Session {
         self.set_tool(ToolKind::Select);
         self.refresh();
         self.fill_link_trees();
+        // Another document: its revisions count from its own start.
+        *self.cell.statuses.borrow_mut() = None;
     }
 
     /// Gives robots of an older project their link tree (from the loaded description), as part of opening
@@ -595,7 +615,15 @@ impl Session {
     /// The constraint status dots of every body, robot and assembly at once — use this for the browser
     /// each frame rather than one `component_status` per row.
     pub fn component_statuses(&self) -> std::collections::BTreeMap<gc_core::AnyId, gc_doc::ComponentStatus> {
-        self.doc.component_statuses()
+        let revision = self.doc.revision();
+        if let Some((at, statuses)) = self.cell.statuses.borrow().as_ref()
+            && *at == revision
+        {
+            return statuses.clone();
+        }
+        let statuses = self.doc.component_statuses();
+        *self.cell.statuses.borrow_mut() = Some((revision, statuses.clone()));
+        statuses
     }
 
     /// The status of an assembly relationship: full, under-constrained or sick.
@@ -657,6 +685,60 @@ impl Session {
     /// DeleteRepresentation}` through [`Session::execute`].
     pub fn representations(&self) -> gc_doc::Representations {
         self.doc.representations()
+    }
+
+    /// What the browser's Representations folder lists: the view representations and the positional
+    /// ones ([Primary] first), each with its name and whether it is the active one. Indices into the
+    /// lists are what the activate/delete calls take ([Primary] is `None`).
+    pub fn representation_folder(&self) -> RepresentationFolder {
+        let reps = self.doc.representations();
+        let views = reps
+            .views
+            .iter()
+            .enumerate()
+            .map(|(i, v)| RepresentationNode { name: v.name.clone(), active: reps.active_view == Some(i) })
+            .collect();
+        let positions = std::iter::once(RepresentationNode {
+            name: "Primary".to_owned(),
+            active: reps.active_position.is_none(),
+        })
+        .chain(reps.positions.iter().enumerate().map(|(i, p)| RepresentationNode {
+            name: p.name.clone(),
+            active: reps.active_position == Some(i),
+        }))
+        .collect();
+        RepresentationFolder { views, positions }
+    }
+
+    /// Saves what is shown now as a new view representation. One undo step; a taken or empty name is
+    /// refused.
+    pub fn add_view_representation(&mut self, name: &str, camera: Option<String>) -> Result<(), EditError> {
+        let op = gc_doc::CellOp::AddViewRepresentation { name: name.to_owned(), camera, section: None };
+        self.execute(&Command::Cell(op)).map(|_| ())
+    }
+
+    /// Activates a view representation (visibility, enabled state, transparency). One undo step.
+    pub fn activate_view_representation(&mut self, index: usize) -> Result<(), EditError> {
+        self.execute(&Command::Cell(gc_doc::CellOp::ActivateViewRepresentation(index))).map(|_| ())
+    }
+
+    /// Adds a positional representation (a copy of [Primary]). One undo step.
+    pub fn add_positional_representation(&mut self, name: &str) -> Result<(), EditError> {
+        self.execute(&Command::Cell(gc_doc::CellOp::AddPositionalRepresentation(name.to_owned()))).map(|_| ())
+    }
+
+    /// Activates a positional representation, or [Primary] with `None`. One undo step.
+    pub fn activate_positional_representation(&mut self, index: Option<usize>) -> Result<(), EditError> {
+        self.execute(&Command::Cell(gc_doc::CellOp::ActivatePositionalRepresentation(index))).map(|_| ())
+    }
+
+    /// Deletes a view and/or a positional representation (not [Primary]). One undo step.
+    pub fn delete_representation(
+        &mut self,
+        view: Option<usize>,
+        position: Option<usize>,
+    ) -> Result<(), EditError> {
+        self.execute(&Command::Cell(gc_doc::CellOp::DeleteRepresentation { view, position })).map(|_| ())
     }
 
     /// The component patterns (for the browser: each with its parents and occurrences).
@@ -783,6 +865,36 @@ impl Session {
     /// Shows or hides the degrees-of-freedom symbol of components. One undo step.
     pub fn set_dof_shown(&mut self, items: &[gc_core::AnyId], on: bool) -> Result<(), EditError> {
         self.execute(&Command::Cell(gc_doc::CellOp::SetDofShown { items: items.to_vec(), on })).map(|_| ())
+    }
+
+    /// What the Assemble command offers for two picked selections (geometry first, type after).
+    pub fn possible_relations(
+        &self,
+        first: &gc_doc::Selection,
+        second: &gc_doc::Selection,
+    ) -> Vec<gc_doc::AssembleSolution> {
+        gc_doc::possible_relations(first, second)
+    }
+
+    /// A work frame at the origin of a component's plane, in one undo step (a sketch on the plane holds
+    /// its origin). Waypoints in it follow the component, wherever it is moved or constrained to.
+    pub fn add_component_frame(
+        &mut self,
+        occurrence: gc_doc::Occurrence,
+        plane: gc_doc::OriginPlane,
+    ) -> Result<Id<gc_doc::WorkFrame>, EditError> {
+        let name = format!("Frame{}", self.doc.work_frames().len() + 1);
+        let sketch = format!("Sketch{}", self.doc.sketches().len() + 1);
+        let created = self.execute(&Command::Cell(gc_doc::CellOp::AddComponentFrame {
+            name,
+            sketch,
+            occurrence,
+            plane,
+        }))?;
+        created
+            .iter()
+            .find_map(|c| if let Created::Frame(id) = c { Some(*id) } else { None })
+            .ok_or(EditError::BadValue)
     }
 
     /// A component's origin folder in the world: centre point, axes and planes (assembly P1-2).
