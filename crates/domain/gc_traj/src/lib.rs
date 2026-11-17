@@ -11,6 +11,8 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(test, allow(clippy::float_cmp, reason = "tests compare exactly representable values"))]
 
+mod blend;
+
 use std::marker::PhantomData;
 
 /// Speed and acceleration limits per joint (rad/s and rad/s², or m/s and m/s²).
@@ -31,6 +33,10 @@ pub enum TimingError {
     /// The limits do not match the path, or a limit is not a positive number.
     #[error("joint {0} has no usable speed or acceleration limit")]
     BadLimit(usize),
+    /// No time law within the limits was found (a numerical failure; the caller falls back to stopping
+    /// at every waypoint).
+    #[error("the path could not be timed within the limits")]
+    Infeasible,
 }
 
 /// Why a trajectory failed validation.
@@ -145,6 +151,8 @@ pub struct Trajectory<State> {
     profiles: Vec<Trapezoid>,
     /// Start time of each segment, plus the total duration at the end.
     times: Vec<f64>,
+    /// The motion when it passes the waypoints on blends instead of stopping at them.
+    blended: Option<blend::Timed>,
     state: PhantomData<State>,
 }
 
@@ -163,7 +171,37 @@ impl Trajectory<Unvalidated> {
             times.push(times[times.len() - 1] + profile.duration);
             profiles.push(profile);
         }
-        Ok(Self { waypoints: path.to_vec(), profiles, times, state: PhantomData })
+        Ok(Self { waypoints: path.to_vec(), profiles, times, blended: None, state: PhantomData })
+    }
+
+    /// Times a motion that passes the interior waypoints without stopping: every corner is rounded by a
+    /// blend that stays within `deviation` of it (Euclidean distance in joint space), and the rounded
+    /// path is driven as fast as the limits allow. `state_valid` is asked about the states on the blends;
+    /// a corner whose blend it rejects is driven as a stop instead.
+    pub fn blended(
+        path: &[Vec<f64>],
+        limits: &Limits,
+        deviation: f64,
+        state_valid: &dyn Fn(&[f64]) -> bool,
+    ) -> Result<Self, TimingError> {
+        let dof = path.first().map_or(0, Vec::len);
+        if dof == 0 || path.iter().any(|q| q.len() != dof || q.iter().any(|v| !v.is_finite())) {
+            return Err(TimingError::BadPath);
+        }
+        let geometry = blend::BlendedPath::new(path, deviation.max(0.0), state_valid);
+        if geometry.length() <= 0.0 {
+            return Self::stopping_at_waypoints(path, limits);
+        }
+        let waypoint_s = geometry.waypoint_s.clone();
+        let timed = blend::Timed::new(geometry, limits)?;
+        let times = waypoint_s.iter().map(|s| timed.time_at(*s)).collect();
+        Ok(Self {
+            waypoints: path.to_vec(),
+            profiles: Vec::new(),
+            times,
+            blended: Some(timed),
+            state: PhantomData,
+        })
     }
 
     /// Samples the trajectory every `step` seconds (and at every waypoint) and checks speed and
@@ -203,6 +241,7 @@ impl Trajectory<Unvalidated> {
             waypoints: self.waypoints,
             profiles: self.profiles,
             times: self.times,
+            blended: self.blended,
             state: PhantomData,
         })
     }
@@ -211,7 +250,15 @@ impl Trajectory<Unvalidated> {
 impl<State> Trajectory<State> {
     /// Total time in seconds.
     pub fn duration(&self) -> f64 {
-        self.times.last().copied().unwrap_or(0.0)
+        match &self.blended {
+            Some(timed) => timed.duration(),
+            None => self.times.last().copied().unwrap_or(0.0),
+        }
+    }
+
+    /// True when the motion passes the interior waypoints on blends instead of stopping at them.
+    pub fn is_blended(&self) -> bool {
+        self.blended.is_some()
     }
 
     /// The waypoints the trajectory passes through.
@@ -226,6 +273,20 @@ impl<State> Trajectory<State> {
 
     /// Position, velocity and acceleration at time `t` (clamped to the trajectory).
     pub fn sample(&self, t: f64) -> Sample {
+        if let Some(timed) = &self.blended {
+            // The ends are the given waypoints exactly, not what the path's arithmetic arrives at.
+            let end = if t <= 0.0 {
+                self.waypoints.first()
+            } else if t >= timed.duration() {
+                self.waypoints.last()
+            } else {
+                None
+            };
+            return match end {
+                Some(q) => Sample { q: q.clone(), qd: vec![0.0; q.len()], qdd: vec![0.0; q.len()] },
+                None => timed.sample(t),
+            };
+        }
         let t = t.clamp(0.0, self.duration());
         // The segment that contains t: the last one starting at or before it.
         let segment = self

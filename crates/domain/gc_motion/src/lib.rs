@@ -25,6 +25,9 @@ use gc_traj::{Limits, TimingError, Trajectory, Validated, ValidationError};
 
 pub use scene::{Checker, Obstacle, RobotScene, StateProblem};
 
+/// How far a blend may leave the corner it rounds, as a distance in joint space (radians for an arm).
+pub const BLEND_DEVIATION: f64 = 0.1;
+
 /// Where the motion should end.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Goal {
@@ -215,8 +218,18 @@ fn attempt(
 
     // The timed motion is checked against the required padding, not the planning margin.
     let strict = scene.strict_checker();
-    let trajectory = Trajectory::stopping_at_waypoints(&path, limits)?
-        .validate(limits, 0.004, &|q| strict.state_valid(q))?;
+    // A path with corners is driven through them on blends when that passes the final check: the
+    // blends are tried with the planning margin and the whole timed motion against the required
+    // padding. Otherwise, and for a single straight move, the motion stops at every waypoint.
+    let blended = (path.len() > 2)
+        .then(|| Trajectory::blended(&path, limits, BLEND_DEVIATION, &|q| checker.state_valid(q)).ok())
+        .flatten()
+        .and_then(|timed| timed.validate(limits, 0.004, &|q| strict.state_valid(q)).ok());
+    let trajectory = match blended {
+        Some(trajectory) => trajectory,
+        None => Trajectory::stopping_at_waypoints(&path, limits)?
+            .validate(limits, 0.004, &|q| strict.state_valid(q))?,
+    };
     let mut tip_path = Vec::new();
     let mut min_clearance = f64::INFINITY;
     let samples = ((trajectory.duration() / 0.02).ceil() as usize).clamp(1, 20_000);

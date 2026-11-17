@@ -5,6 +5,7 @@
     clippy::float_cmp,
     clippy::unwrap_used,
     clippy::panic,
+    clippy::print_stdout,
     reason = "test code: exact values are compared and failures should panic"
 )]
 
@@ -102,6 +103,20 @@ fn every_planner_gets_around_the_pillar_with_a_valid_trajectory() {
             assert_eq!(scene.state_problem(&q), None, "{algorithm:?} at sample {k}");
         }
         assert!(plan.min_clearance >= PADDING, "{algorithm:?}: {}", plan.min_clearance);
+        // Through its corners the motion does not stop: it is quicker than stopping at each of them.
+        assert!(plan.trajectory.is_blended(), "{algorithm:?}");
+        let limits = gc_traj::Limits { max_vel: vec![2.0, 2.0, 2.5, 3.5, 3.5, 5.0], max_acc: vec![5.0; 6] };
+        let stopping = gc_traj::Trajectory::stopping_at_waypoints(&plan.path, &limits).unwrap().duration();
+        assert!(
+            plan.trajectory.duration() < stopping,
+            "{algorithm:?}: {} vs {stopping}",
+            plan.trajectory.duration()
+        );
+        println!(
+            "{algorithm:?}: {:.2} s blended, {stopping:.2} s stopping, {} waypoints",
+            plan.trajectory.duration(),
+            plan.path.len()
+        );
     }
 }
 

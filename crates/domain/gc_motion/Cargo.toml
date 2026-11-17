@@ -23,4 +23,5 @@ gc_robotics_api.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+gc_traj.workspace = true
 gc_collide.workspace = true
