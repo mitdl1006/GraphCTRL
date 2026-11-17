@@ -53,12 +53,16 @@ pub struct Frame {
     pub xyz: [f64; 3],
     /// Rotation in the parent frame, unit quaternion with the scalar last.
     pub quat_xyzw: [f64; 4],
+    /// For a sketch plane attached to a work plane or a part face: what it follows. Its pose is then
+    /// worked out from that, and `xyz`/`quat_xyzw` keep the pose it had when last resolved.
+    pub source: Option<crate::design::PlaneSource>,
 }
 
 impl Entity for Frame {
     const KIND: Kind = Kind::Frame;
     fn refs(&self, out: &mut Vec<AnyId>) {
         out.extend(self.parent.map(Id::erase));
+        out.extend(self.source.map(|s| s.reference()));
     }
 }
 
@@ -289,6 +293,7 @@ impl Document {
             parent,
             xyz: [0.0; 3],
             quat_xyzw,
+            source: None,
         };
         doc.frames.items.insert(world, frame("World", FrameKind::World, None, [0.0, 0.0, 0.0, 1.0]));
         for (name, quat) in
@@ -472,6 +477,10 @@ impl Document {
         for _ in 0..=self.frames.len() {
             let Some(id) = at else { return Some(pose) };
             let f = self.frames.get(id)?;
+            // A frame attached to a work plane or a part face is where that is now.
+            if let Some(attached) = f.source.and_then(|source| self.plane_source_pose(&source)) {
+                return Some(attached * pose);
+            }
             let [x, y, z, w] = f.quat_xyzw;
             let local = gc_math::DPose3::from_parts(
                 gc_math::DVec3::from_array(f.xyz),

@@ -16,6 +16,7 @@ mod cell;
 mod command;
 mod document;
 mod history;
+mod placement;
 mod tree;
 mod txn;
 
@@ -27,9 +28,10 @@ pub use cell::{
 pub use command::{Applied, Command, Created, EditError, EndSnap, SketchOp, apply};
 pub use design::{
     Assembly, AssemblyMesh, AssemblyPart, Extent, Extrude, Feature, FeatureKind, OriginPlane, PlaneRef,
-    PointRef, Timeline, WorkFeature, WorkGeometry,
+    PlaneSource, PointRef, Timeline, WorkFeature, WorkGeometry,
 };
 pub use document::{ChangeSet, Contents, DocDelta, Document, Frame, FrameKind, Param, Store, Table};
 pub use gc_sketch::Sketch;
 pub use history::History;
+pub use placement::WorkShape;
 pub use txn::{DocError, Txn};

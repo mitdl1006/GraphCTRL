@@ -169,6 +169,14 @@ pub enum Command {
         /// True for a 3D sketch.
         spatial: bool,
     },
+    /// Creates an empty 2D sketch on a work plane or a face of an imported part. The sketch follows
+    /// that plane when it changes; the plane cannot be deleted while the sketch uses it.
+    CreateSketchOn {
+        /// Name shown in the browser.
+        name: String,
+        /// What the sketch plane is attached to.
+        source: crate::design::PlaneSource,
+    },
     /// Deletes a sketch.
     DeleteSketch {
         /// The sketch.
@@ -544,8 +552,36 @@ fn run(txn: &mut Txn<'_>, command: &Command) -> Result<(Vec<Created>, &'static s
             })?;
             Ok((vec![Created::Sketch(id)], "New sketch"))
         }
+        Command::CreateSketchOn { name, source } => {
+            let doc = txn.doc();
+            let pose = doc.plane_source_pose(source).ok_or(EditError::BadValue)?;
+            let world = doc.world().ok_or(EditError::BadValue)?;
+            let frame = txn.insert(Frame {
+                name: format!("{name} plane"),
+                kind: crate::document::FrameKind::User,
+                parent: Some(world),
+                xyz: pose.translation.to_array(),
+                quat_xyzw: pose.rotation.to_array(),
+                source: Some(*source),
+            });
+            let mut sketch = Sketch::new(Space::Planar(frame.erase()));
+            sketch.name.clone_from(name);
+            let id = txn.insert(sketch);
+            txn.modify(id, |s: &mut Sketch, ids| {
+                s.add_external(ids, ExternalRef::FrameOrigin(frame.erase()), [0.0; 3]);
+            })?;
+            Ok((vec![Created::Sketch(id)], "New sketch"))
+        }
         Command::DeleteSketch { id } => {
-            txn.remove(*id)?;
+            let removed = txn.remove(*id)?;
+            // A plane made for this sketch alone (attached to a work plane or a face) goes with it.
+            let (Space::Planar(frame) | Space::Spatial(frame)) = removed.space;
+            let frame: Id<Frame> = Id::from_raw(frame.raw);
+            let attached = txn.doc().get(frame).is_some_and(|f| f.source.is_some());
+            let used = txn.doc().references().iter().any(|(_, to)| *to == frame.erase());
+            if attached && !used {
+                txn.remove(frame)?;
+            }
             Ok((Vec::new(), "Delete sketch"))
         }
         Command::Sketch { sketch, op } => {

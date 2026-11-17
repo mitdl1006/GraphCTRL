@@ -342,3 +342,34 @@ impl Entity for Timeline {
     // Not references: a deleted item simply drops out of the order.
     fn refs(&self, _: &mut Vec<AnyId>) {}
 }
+
+/// What a sketch plane is attached to, so that the sketch follows it (plan 9.1: sketches on work planes
+/// and on faces of imported parts).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum PlaneSource {
+    /// A work plane: the sketch's XY plane is the work plane.
+    Work(Id<WorkFeature>),
+    /// A flat face of an imported part, given as the plane's pose in the part's frame (worked out from
+    /// the picked triangle when the sketch was made). Follows the assembly when it is moved.
+    Face {
+        /// The assembly.
+        assembly: Id<Assembly>,
+        /// The part (index into [`Assembly::parts`]).
+        part: u32,
+        /// The picked triangle (mesh, triangle index), kept to show what the sketch is on.
+        triangle: (u32, u32),
+        /// Origin of the plane in the part's frame.
+        xyz: [f64; 3],
+        /// Rotation of the plane in the part's frame (the plane is its XY plane), scalar last.
+        quat_xyzw: [f64; 4],
+    },
+}
+
+impl PlaneSource {
+    pub(crate) fn reference(&self) -> AnyId {
+        match self {
+            Self::Work(id) => id.erase(),
+            Self::Face { assembly, .. } => assembly.erase(),
+        }
+    }
+}

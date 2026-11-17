@@ -94,6 +94,8 @@ struct FrameV1 {
     parent: Option<Id<Frame>>,
     xyz: [f64; 3],
     quat_xyzw: [f64; 4],
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source: Option<gc_doc::PlaneSource>,
 }
 
 /// Version 1 of the file.
@@ -171,6 +173,7 @@ pub fn to_text(doc: &Document) -> Result<String, PersistError> {
                         parent: f.parent,
                         xyz: f.xyz,
                         quat_xyzw: f.quat_xyzw,
+                        source: f.source,
                     },
                 )
             })
@@ -220,7 +223,17 @@ pub fn from_text(text: &str) -> Result<Loaded, PersistError> {
                 FrameKindV1::OriginPlane => FrameKind::OriginPlane,
                 FrameKindV1::User => FrameKind::User,
             };
-            (id, Frame { name: f.name, kind, parent: f.parent, xyz: f.xyz, quat_xyzw: f.quat_xyzw })
+            (
+                id,
+                Frame {
+                    name: f.name,
+                    kind,
+                    parent: f.parent,
+                    xyz: f.xyz,
+                    quat_xyzw: f.quat_xyzw,
+                    source: f.source,
+                },
+            )
         })
         .collect();
     let doc = Document::restore(Contents {

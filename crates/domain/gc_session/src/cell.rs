@@ -820,8 +820,8 @@ impl Session {
 
     /// Where a work feature is in the world; `None` when its definition no longer works out (a reference
     /// is gone, three points on one line, two equal points).
-    pub fn work_shape(&self, id: Id<gc_doc::WorkFeature>) -> Option<crate::design::WorkShape> {
-        crate::design::work_shape(&self.doc, id)
+    pub fn work_shape(&self, id: Id<gc_doc::WorkFeature>) -> Option<gc_doc::WorkShape> {
+        self.doc.work_shape(id)
     }
 
     /// The meshes of an assembly placed in the world, to draw; or why they are not available.

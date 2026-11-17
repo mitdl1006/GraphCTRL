@@ -338,6 +338,75 @@ impl Session {
         }
     }
 
+    /// Creates a 2D sketch on a work plane and starts editing it. The sketch follows the plane.
+    pub fn create_sketch_on_work_plane(
+        &mut self,
+        plane: Id<gc_doc::WorkFeature>,
+    ) -> Result<Id<Sketch>, EditError> {
+        self.create_sketch_on(gc_doc::PlaneSource::Work(plane))
+    }
+
+    /// Creates a 2D sketch on the plane of a triangle of an imported part (a picked face) and starts
+    /// editing it: origin at the triangle's centre, normal out of its front side, X along its first
+    /// edge. The sketch follows the assembly when it is moved.
+    pub fn create_sketch_on_face(
+        &mut self,
+        assembly: Id<gc_doc::Assembly>,
+        part: usize,
+        mesh: usize,
+        triangle: usize,
+    ) -> Result<Id<Sketch>, EditError> {
+        let source = self.face_source(assembly, part, mesh, triangle).ok_or(EditError::BadValue)?;
+        self.create_sketch_on(source)
+    }
+
+    fn face_source(
+        &self,
+        assembly: Id<gc_doc::Assembly>,
+        part: usize,
+        mesh: usize,
+        triangle: usize,
+    ) -> Option<gc_doc::PlaneSource> {
+        let stored = self.doc.get(assembly)?;
+        if !stored.parts.get(part)?.meshes.contains(&u32::try_from(mesh).ok()?) {
+            return None;
+        }
+        let data = &self.cell.assemblies.of(stored).ok()?.get(mesh)?.data;
+        let corners = data.indices().get(triangle * 3..triangle * 3 + 3)?;
+        let at = |i: u32| {
+            data.positions()
+                .get(i as usize)
+                .map(|p| gc_math::DVec3::new(p[0].into(), p[1].into(), p[2].into()))
+        };
+        let (a, b, c) = (at(corners[0])?, at(corners[1])?, at(corners[2])?);
+        let normal = (b - a).cross(c - a);
+        if normal.length() < 1e-12 || (b - a).length() < 1e-12 {
+            return None;
+        }
+        let x = (b - a).normalize();
+        let z = normal.normalize();
+        let rotation = gc_math::DQuat::from_mat3(&gc_math::DMat3::from_cols(x, z.cross(x), z)).normalize();
+        Some(gc_doc::PlaneSource::Face {
+            assembly,
+            part: u32::try_from(part).ok()?,
+            triangle: (u32::try_from(mesh).ok()?, u32::try_from(triangle).ok()?),
+            xyz: ((a + b + c) / 3.0).to_array(),
+            quat_xyzw: rotation.to_array(),
+        })
+    }
+
+    fn create_sketch_on(&mut self, source: gc_doc::PlaneSource) -> Result<Id<Sketch>, EditError> {
+        let name = format!("Sketch{}", self.doc.sketches().len() + 1);
+        let created = self.execute(&Command::CreateSketchOn { name, source })?;
+        match created.first() {
+            Some(Created::Sketch(id)) => {
+                self.enter_sketch(*id);
+                Ok(*id)
+            }
+            _ => Err(gc_sketch::SketchError::MissingItem.into()),
+        }
+    }
+
     /// Creates a 3D sketch in the world frame and starts editing it.
     pub fn create_sketch_3d(&mut self) -> Result<Id<Sketch>, EditError> {
         let name = format!("Sketch{}", self.doc.sketches().len() + 1);
