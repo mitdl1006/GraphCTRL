@@ -113,6 +113,17 @@ pub(crate) fn over(ui: &egui::Ui, rect: Rect, camera: &Camera, session: &Session
     cell(&view, scene, gpu);
 }
 
+/// The axes of a pose: X red, Y green, Z blue, `length` metres long.
+fn pose_axes(view: &View<'_>, pose: &gc_math::DPose3, length: f64, width: f32) {
+    for (axis, color) in [
+        (DVec3::X, Color32::from_rgb(0xD0, 0x30, 0x30)),
+        (DVec3::Y, Color32::from_rgb(0x20, 0xA0, 0x40)),
+        (DVec3::Z, Color32::from_rgb(0x30, 0x50, 0xD0)),
+    ] {
+        view.segment(pose.translation, *pose * (axis * length), Stroke::new(width, color));
+    }
+}
+
 /// Tool-tip traces of planned paths and the waypoints.
 fn cell(view: &View<'_>, scene: &Scene, gpu: bool) {
     // With a GPU the traces are part of the 3D picture; without one they are drawn here, on top.
@@ -122,29 +133,30 @@ fn cell(view: &View<'_>, scene: &Scene, gpu: bool) {
     }
     // Work frames: larger axes with the frame's name.
     for (name, frame) in &scene.frames {
-        for (axis, color) in [
-            (DVec3::X, Color32::from_rgb(0xD0, 0x30, 0x30)),
-            (DVec3::Y, Color32::from_rgb(0x20, 0xA0, 0x40)),
-            (DVec3::Z, Color32::from_rgb(0x30, 0x50, 0xD0)),
-        ] {
-            view.segment(frame.translation, *frame * (axis * 0.1), Stroke::new(2.5, color));
-        }
+        pose_axes(view, frame, 0.1, 2.5);
         if let Some(at) = view.screen(frame.translation) {
             view.text(pos2(at.x - 6.0, at.y + 6.0), Align2::RIGHT_TOP, name, 13.0, colors::DIMENSION);
         }
     }
     // The tool centre point of each robot: a small frame, X red, Y green, Z blue.
     for tool in &scene.tool_points {
-        let length = 0.05;
-        for (axis, color) in [
-            (DVec3::X, Color32::from_rgb(0xD0, 0x30, 0x30)),
-            (DVec3::Y, Color32::from_rgb(0x20, 0xA0, 0x40)),
-            (DVec3::Z, Color32::from_rgb(0x30, 0x50, 0xD0)),
-        ] {
-            view.segment(tool.translation, *tool * (axis * length), Stroke::new(2.0, color));
-        }
+        pose_axes(view, tool, 0.05, 2.0);
     }
     for waypoint in &scene.waypoints {
+        // The tool's axes at the waypoint: where it points (Z) and how it is turned about that.
+        // A constant size on screen, so that the axes stay readable whatever the zoom.
+        let length = view.camera.px_scale(view.size) * 44.0;
+        let pose = gc_math::DPose3::from_parts(waypoint.position, waypoint.rotation);
+        pose_axes(view, &pose, length, 2.0);
+        for (axis, name, color) in [
+            (DVec3::X, "X", Color32::from_rgb(0xD0, 0x30, 0x30)),
+            (DVec3::Y, "Y", Color32::from_rgb(0x20, 0xA0, 0x40)),
+            (DVec3::Z, "Z", Color32::from_rgb(0x30, 0x50, 0xD0)),
+        ] {
+            if let Some(end) = view.screen(pose * (axis * length * 1.18)) {
+                view.text(end, Align2::CENTER_CENTER, name, 10.0, color);
+            }
+        }
         let Some(at) = view.screen(waypoint.position) else { continue };
         let r = 5.0;
         let diamond =

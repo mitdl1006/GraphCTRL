@@ -140,6 +140,8 @@ pub struct Marker {
     pub name: String,
     /// Where it is.
     pub position: DVec3,
+    /// How the tool is turned there: the tool centre point's axes.
+    pub rotation: gc_math::DQuat,
 }
 
 /// Everything 3D in a session.
@@ -237,7 +239,11 @@ impl Scene {
         }
         for (id, waypoint) in doc.waypoints().iter() {
             if let Some(pose) = session.waypoint_pose(id) {
-                scene.waypoints.push(Marker { name: waypoint.name.clone(), position: pose.translation });
+                scene.waypoints.push(Marker {
+                    name: waypoint.name.clone(),
+                    position: pose.translation,
+                    rotation: pose.rotation,
+                });
             }
         }
         scene
