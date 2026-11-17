@@ -9,7 +9,9 @@
   `PlaneSource::Component{occurrence, plane}`(스케치 평면, 컴포넌트를 따라 움직임, 쓰는 동안 그 컴포넌트 삭제 거부).
 - 세션: `session.component_origin(occurrence) -> Option<gc_doc::ComponentOrigin>`,
   `session.create_sketch_on_component(occurrence, plane: gc_doc::OriginPlane) -> Result<Id<Sketch>, EditError>`.
-  원점 폴더의 표시(기본 숨김, 컴포넌트별 토글, 전체 숨기기)는 프론트엔드 상태로 둔다(문서 저장이 필요하면 알려 주세요).
+  원점 요소 표시(프론트엔드 요청): `gc_doc::OriginElement::{Plane(OriginPlane), Axis(0..=2), Point}`,
+  `session.set_origin_visible(occurrence, &[OriginElement], bool) -> Result<(), EditError>`(여러 개를 한 undo 단계, 저장됨, 기본 숨김),
+  `session.origin_visible(occurrence, element) -> bool`. 폴더 전체 토글은 7개를 한꺼번에 넘긴다.
 - 근거: 명세의 A52 About Reference Planes / A53 To Display Reference Planes(명세 표의 GUID가 잘려 원문을 열지 못함 — 전체 GUID를
   알려 주면 확인하겠다), A11 Place Components.
 - 테스트: `gc_session/tests/sketch_planes.rs::every_component_has_an_origin_and_a_sketch_on_its_plane_moves_with_it`.

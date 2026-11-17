@@ -30,7 +30,8 @@ pub use command::{
 };
 pub use design::{
     Assembly, AssemblyMesh, AssemblyPart, ComponentFlag, Components, Extent, Extrude, Feature, FeatureKind,
-    Occurrence, OriginPlane, PlaneRef, PlaneSource, PointRef, Timeline, WorkFeature, WorkGeometry,
+    Occurrence, OriginElement, OriginPlane, PlaneRef, PlaneSource, PointRef, Timeline, WorkFeature,
+    WorkGeometry,
 };
 pub use document::{ChangeSet, Contents, DocDelta, Document, Frame, FrameKind, Param, Store, Table};
 pub use gc_sketch::Sketch;

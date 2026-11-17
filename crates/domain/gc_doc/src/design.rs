@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::cell::{Look, Placement};
 
 /// One of the three origin planes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum OriginPlane {
     /// The XY plane (normal +Z).
     Xy,
@@ -401,6 +401,20 @@ pub struct Components {
     /// Suppressed assembly parts.
     #[serde(default)]
     pub suppressed: Vec<Occurrence>,
+    /// Origin elements shown in the viewport (all are hidden by default).
+    #[serde(default)]
+    pub origins_shown: Vec<(Occurrence, OriginElement)>,
+}
+
+/// An element of a component's origin folder.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum OriginElement {
+    /// An origin plane.
+    Plane(OriginPlane),
+    /// An axis: 0 = X, 1 = Y, 2 = Z.
+    Axis(u8),
+    /// The centre point.
+    Point,
 }
 
 impl Components {
@@ -410,6 +424,7 @@ impl Components {
             && self.disabled.is_empty()
             && self.hidden.is_empty()
             && self.suppressed.is_empty()
+            && self.origins_shown.is_empty()
     }
 }
 

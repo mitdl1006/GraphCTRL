@@ -198,4 +198,23 @@ fn every_component_has_an_origin_and_a_sketch_on_its_plane_moves_with_it() {
     assert!((pose.translation - DVec3::new(0.0, 0.0, 0.7)).length() < 1e-12);
     // A missing component is refused.
     assert!(session.component_origin(Occurrence::Part { assembly: id, index: 3 }).is_none());
+
+    // Origin elements are hidden by default; showing some is one undo step and is saved.
+    use gc_doc::OriginElement;
+    let xy = OriginElement::Plane(OriginPlane::Xy);
+    assert!(!session.origin_visible(table, xy));
+    session.set_origin_visible(table, &[xy, OriginElement::Axis(2), OriginElement::Point], true).unwrap();
+    assert!(session.origin_visible(table, xy) && session.origin_visible(table, OriginElement::Point));
+    session.set_origin_visible(table, &[OriginElement::Point], false).unwrap();
+    assert!(!session.origin_visible(table, OriginElement::Point));
+    session.undo();
+    assert!(session.origin_visible(table, OriginElement::Point));
+    assert!(session.set_origin_visible(table, &[OriginElement::Axis(3)], true).is_err());
+    let directory = tempfile::tempdir().unwrap();
+    let project = directory.path().join("origins.gctrl");
+    session.save_as(&project).unwrap();
+    let mut reopened = Session::new();
+    reopened.open(&project).unwrap();
+    assert!(reopened.origin_visible(table, OriginElement::Axis(2)));
+    assert!(!reopened.origin_visible(table, OriginElement::Plane(OriginPlane::Yz)));
 }
