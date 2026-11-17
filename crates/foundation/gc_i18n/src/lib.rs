@@ -455,6 +455,8 @@ messages! {
     AboutSettings => ("설정 파일: {0}", "Settings file: {0}"),
     AboutRecovery => ("자동 저장(복구) 폴더: {0}", "Autosave (recovery) folder: {0}"),
     AboutNoSettings => ("설정 폴더를 찾지 못해 설정과 자동 저장을 쓰지 않습니다.", "No settings folder was found: settings and autosave are off."),
+    ExampleNeedsRobot => ("예제에 필요한 로봇({0})이 로봇 라이브러리에 없습니다", "The example needs the {0} from the robot library"),
+    LibraryEmpty => ("로봇 라이브러리(robots 폴더)를 찾지 못했습니다", "No robot library (robots folder) was found"),
     CmdExample => ("예제 열기 (UR5e 셀)", "Open example (UR5e cell)"),
     ExampleFailed => ("예제를 열 수 없습니다: {0}", "The example could not be opened: {0}"),
     PanelTool => ("툴", "Tool"),
