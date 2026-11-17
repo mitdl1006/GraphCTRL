@@ -610,6 +610,7 @@ struct Owner {
 }
 
 /// One relationship ready to evaluate: owner indices, geometry in the owners' frames, settled sign.
+#[derive(Clone)]
 struct Term {
     id: Id<Relationship>,
     kind: RelationKind,
@@ -726,8 +727,19 @@ impl Document {
         }
         let start: Vec<DPose3> = owners.iter().map(|o| o.pose).collect();
         let mut poses = start.clone();
-        rough_turns(&owners, &terms, &mut poses);
-        least_squares(&owners, &terms, &mut poses);
+        // Free components tied together by relationships form islands that do not affect one another:
+        // each is solved on its own, and an island already satisfied is left alone (adding a relationship
+        // re-solves only its island).
+        for (free, island) in islands(&owners, &terms) {
+            let subset: Vec<&Term> = island.iter().map(|i| &terms[*i]).collect();
+            let satisfied = subset.iter().all(|t| term_residuals(t, &poses).iter().all(|r| r.abs() <= 1e-9));
+            if satisfied {
+                continue;
+            }
+            let subset: Vec<Term> = subset.into_iter().cloned().collect();
+            rough_turns(&owners, &subset, &mut poses);
+            least_squares_on(&free, &subset, &mut poses);
+        }
         let sick: Vec<Id<Relationship>> = terms
             .iter()
             .filter(|t| term_residuals(t, &poses).iter().any(|r| r.abs() > 1e-7))
@@ -1074,8 +1086,52 @@ fn stepped(pose: &DPose3, step: &[f64]) -> DPose3 {
 }
 
 /// Damped least squares over the free components' poses.
-fn least_squares(owners: &[Owner], terms: &[Term], poses: &mut [DPose3]) {
-    let free: Vec<usize> = (0..owners.len()).filter(|i| owners[*i].free).collect();
+/// Islands of free owners tied by relationships: per island, its free owners and the indices of the terms
+/// that touch it. Terms between fixed owners only belong to no island (they are only checked).
+fn islands(owners: &[Owner], terms: &[Term]) -> Vec<(Vec<usize>, Vec<usize>)> {
+    fn root(parent: &mut [usize], mut i: usize) -> usize {
+        while parent[i] != i {
+            parent[i] = parent[parent[i]];
+            i = parent[i];
+        }
+        i
+    }
+    let mut parent: Vec<usize> = (0..owners.len()).collect();
+    let touched = |t: &Term| -> Vec<usize> {
+        t.owners
+            .iter()
+            .copied()
+            .chain(t.third.as_ref().map(|(i, _)| *i))
+            .filter(|i| owners[*i].free)
+            .collect()
+    };
+    for term in terms {
+        let free = touched(term);
+        for pair in free.windows(2) {
+            let (a, b) = (root(&mut parent, pair[0]), root(&mut parent, pair[1]));
+            if a != b {
+                parent[a] = b;
+            }
+        }
+    }
+    let mut by_root: std::collections::BTreeMap<usize, (Vec<usize>, Vec<usize>)> = Default::default();
+    for (i, owner) in owners.iter().enumerate() {
+        if owner.free {
+            let r = root(&mut parent, i);
+            by_root.entry(r).or_default().0.push(i);
+        }
+    }
+    for (index, term) in terms.iter().enumerate() {
+        if let Some(first) = touched(term).first() {
+            let r = root(&mut parent, *first);
+            by_root.entry(r).or_default().1.push(index);
+        }
+    }
+    by_root.into_values().filter(|(_, terms)| !terms.is_empty()).collect()
+}
+
+/// Damped least squares over the poses of the owners `free`.
+fn least_squares_on(free: &[usize], terms: &[Term], poses: &mut [DPose3]) {
     let n = free.len() * 6;
     if n == 0 || terms.is_empty() {
         return;

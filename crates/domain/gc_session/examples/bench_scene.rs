@@ -146,6 +146,8 @@ fn verdict(ms: f64, budget: f64) -> &'static str {
 
 /// The large-mesh case: `count` mesh bodies of about `triangles` triangles each.
 fn large_meshes(count: usize, triangles: usize, frames: usize) -> String {
+    // The scenario needs two bodies side by side and a third overlapping its neighbour.
+    let count = count.max(3);
     let directory = tempfile::tempdir().expect("a temporary folder");
     let file = directory.path().join("equipment.stl");
     std::fs::write(&file, sphere_stl(triangles, 0.25)).expect("the mesh file");

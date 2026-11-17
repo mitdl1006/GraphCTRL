@@ -33,6 +33,15 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — QA 버그 5건 · 관계가 많을 때의 속도
+
+- QA(eec466e) 버그 수정, `#[ignore]` 해제: read_step 중첩 256단 상한(스택 오버플로 중단 → `Unreadable`), 미러 비유한 평면 거부,
+  접촉 집합(및 DOF 표시) 중복 저장 안 함, 매 명령 후 없는 컴포넌트의 저장 상태 정리(`tree::prune_states`), predict 비유한 선택 → None.
+- KNOWN_ISSUES "관계 추가 시간 급증"(400개 9.5 s, 1000개 5분+): 풀이를 **섬**(관계로 묶인 자유 컴포넌트 묶음)으로 나누고 이미 만족된 섬은 건너뜀
+  → 관계 하나 추가 시 그 섬만 다시 푼다. `bench_scene --components 1000`으로 셀 구성 전체 ~0.15 s(release).
+  프레임 질의: 세션이 `component_statuses()`를 문서 리비전별로 캐시(문서 교체 시 비움) → 1000개 p95 3.8 ms → 1.7 ms(예산 2 ms).
+  테스트 `gc_session/tests/relation_scale.rs`(300개 메이트 디버그에서 0.05 s). KNOWN_ISSUES 항목은 리드가 닫아 주세요(문서 소유 아님).
+
 ## 2026-11-18 — 툴 컴포넌트 · STEP AP242 · Assemble 유형(리드 ①②④)
 
 - ① `Occurrence::Tool { robot }`: 툴이 팁 링크 아래 하위 컴포넌트(`robot_links` 끝). 원점 = 플랜지 프레임 × 툴 장착 배치라 `mount_tool`·세션 운동학과 일치(조인트 값과 무관하게 테스트).

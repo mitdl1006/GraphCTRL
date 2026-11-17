@@ -398,6 +398,10 @@ pub struct ContactStop {
 /// An assembly file read in the background, its meshes shared and their collision shapes built.
 type ImportLoad = Result<(gc_doc::Assembly, Vec<Arc<MeshData>>), String>;
 
+/// Component statuses and the revision they belong to.
+pub(crate) type StatusCache =
+    (gc_core::Revision, std::collections::BTreeMap<gc_core::AnyId, gc_doc::ComponentStatus>);
+
 /// A mesh file read in the background: the file as read and the mesh at its scale.
 type MeshLoad = Result<(Arc<MeshData>, MeshRef), String>;
 
@@ -452,6 +456,9 @@ pub(crate) struct CellState {
     asked: std::cell::RefCell<Option<(String, Option<StateProblem>)>>,
     /// The last ghost worked out, with what it was worked out from.
     ghost: std::cell::RefCell<Option<(String, Ghost)>>,
+    /// The constraint status of every component, for the document revision it was worked out for (the
+    /// browser asks every frame).
+    pub(crate) statuses: std::cell::RefCell<Option<StatusCache>>,
     /// Mesh files of bodies by path: the triangles as stored, or why the file could not be read.
     files: BTreeMap<String, Result<Arc<MeshData>, String>>,
     /// Mesh files being read (and their collision shapes built) in the background, by mesh key.
@@ -500,6 +507,7 @@ impl Default for CellState {
             scene: std::cell::RefCell::new(None),
             asked: std::cell::RefCell::new(None),
             ghost: std::cell::RefCell::new(None),
+            statuses: std::cell::RefCell::new(None),
         }
     }
 }

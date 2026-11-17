@@ -142,6 +142,8 @@ impl Session {
         self.set_tool(ToolKind::Select);
         self.refresh();
         self.fill_link_trees();
+        // Another document: its revisions count from its own start.
+        *self.cell.statuses.borrow_mut() = None;
     }
 
     /// Gives robots of an older project their link tree (from the loaded description), as part of opening
@@ -595,7 +597,15 @@ impl Session {
     /// The constraint status dots of every body, robot and assembly at once — use this for the browser
     /// each frame rather than one `component_status` per row.
     pub fn component_statuses(&self) -> std::collections::BTreeMap<gc_core::AnyId, gc_doc::ComponentStatus> {
-        self.doc.component_statuses()
+        let revision = self.doc.revision();
+        if let Some((at, statuses)) = self.cell.statuses.borrow().as_ref()
+            && *at == revision
+        {
+            return statuses.clone();
+        }
+        let statuses = self.doc.component_statuses();
+        *self.cell.statuses.borrow_mut() = Some((revision, statuses.clone()));
+        statuses
     }
 
     /// The status of an assembly relationship: full, under-constrained or sick.
