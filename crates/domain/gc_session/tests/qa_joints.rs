@@ -48,7 +48,7 @@ fn ring(z: f64, down: bool) -> Geometry {
 }
 
 fn relation(kind: RelationKind, first: Selection, second: Selection) -> Relationship {
-    Relationship { name: "R".into(), kind, first, second }
+    Relationship::new("R", kind, first, second)
 }
 
 fn table_and_block() -> (Session, Id<Body>, Id<Body>) {

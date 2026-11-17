@@ -224,6 +224,16 @@ impl Drive {
             let now = if rotational { 0.0 } else { relation_offset(session, id) };
             self.start = (now * factor * 1000.0).round() / 1000.0;
             self.end = self.start + 10.0;
+            // With limits, Start and End default to them (Drive is clipped to them anyway).
+            if let Some(limits) = session.doc().get(id).and_then(|r| r.limits) {
+                let round = |v: f64| (v * factor * 1000.0).round() / 1000.0;
+                if let Some(min) = limits.min {
+                    self.start = round(min);
+                }
+                if let Some(max) = limits.max {
+                    self.end = round(max);
+                }
+            }
             self.index = 0;
             self.playing = Playing::Stopped;
             self.collided = None;
