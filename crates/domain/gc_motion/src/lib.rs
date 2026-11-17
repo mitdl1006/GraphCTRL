@@ -292,14 +292,16 @@ fn attempt(
     if goals.is_empty() || !checker.state_valid(&request.start) {
         return Err(no_path(stats, f64::INFINITY));
     }
-    let mut straight = false;
-    let mut best: Option<Vec<Vec<f64>>> = None;
-    if let Some(goal) = goals.iter().find(|goal| checker.motion_valid(&request.start, goal)) {
-        straight = true;
-        best = Some(vec![request.start.clone(), goal.clone()]);
-    }
+    // The straight move to the nearest goal is the shortest motion there is: taken at once. A straight
+    // move to a goal further away only competes with the planned paths on length (it may swing the arm
+    // round the back where going over an obstacle to the nearest goal is much shorter).
+    let mut best: Option<Vec<Vec<f64>>> = goals
+        .iter()
+        .find(|goal| checker.motion_valid(&request.start, goal))
+        .map(|goal| vec![request.start.clone(), goal.clone()]);
+    let nearest_is_straight = best.as_ref().is_some_and(|b| b[1] == goals[0]);
     let mut nearest = f64::INFINITY;
-    if best.is_none() {
+    if !nearest_is_straight {
         for run in 0..request.runs {
             let seed = request.seed.wrapping_add(run as u64);
             let planned = Request {
@@ -333,7 +335,7 @@ fn attempt(
     let Some(path) = best else {
         return Err(no_path(stats, nearest));
     };
-
+    let straight = path.len() == 2;
     finish(scene, space, limits, path, &checker, BLEND_DEVIATION, straight, stats)
 }
 

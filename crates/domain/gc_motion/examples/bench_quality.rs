@@ -236,7 +236,8 @@ fn run_once(
         Options { max_state_checks: budget, max_iterations: budget.saturating_mul(10), ..Options::default() };
     let request = Request { space, start, goals, algorithm, options, seed };
     let clock = Instant::now();
-    // As in the motion pipeline: the straight move to a goal first, the planner only when it is blocked.
+    // As in the motion pipeline: the straight move to the nearest goal is taken at once; a straight move
+    // to a goal further away only competes on length with the planner.
     let mut straight_checks = 0;
     let mut straight = None;
     for goal in goals {
@@ -246,16 +247,28 @@ fn run_once(
             break;
         }
     }
-    let planned = match straight {
-        Some(path) => Ok((path, straight_checks)),
-        None => {
-            plan(&request, &checker, &NeverCancel).map(|s| (s.path, s.stats.state_checks + straight_checks))
-        }
+    let planned = match &straight {
+        Some(line) if line[1] == goals[0] => Ok((line.clone(), straight_checks)),
+        _ => match plan(&request, &checker, &NeverCancel) {
+            Ok(solution) => {
+                let checks = solution.stats.state_checks + straight_checks;
+                let mut path = solution.path;
+                shortcut(space, &mut path, &checker, &mut Rng::new(seed), SHORTCUTS);
+                match &straight {
+                    Some(line) if path_cost(space, line) <= path_cost(space, &path) => {
+                        Ok((line.clone(), checks))
+                    }
+                    _ => Ok((path, checks)),
+                }
+            }
+            Err(gc_plan::Failure::NoPath { stats, .. }) if straight.is_some() => {
+                Ok((straight.clone().unwrap_or_default(), stats.state_checks + straight_checks))
+            }
+            Err(error) => Err(error),
+        },
     };
     match planned {
         Ok((path, checks)) => {
-            let mut path = path;
-            shortcut(space, &mut path, &checker, &mut Rng::new(seed), SHORTCUTS);
             let millis = clock.elapsed().as_secs_f64() * 1e3;
             // Independent re-validation: the required padding, every state and every motion, and the ends.
             let ends = path.first().is_some_and(|q| q.as_slice() == start)
