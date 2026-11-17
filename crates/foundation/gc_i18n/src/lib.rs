@@ -1046,6 +1046,11 @@ messages! {
     SkOffsetTitle => ("간격띄우기 옵션", "Offset options"),
     /// Dialog buttons.
     DialogApply => ("적용", "Apply"),
+    /// Pattern dialog opened on an existing pattern: OK rebuilds it, Delete Pattern removes it.
+    DialogOk => ("확인", "OK"),
+    DeletePattern => ("패턴 삭제", "Delete Pattern"),
+    /// The Suppress selector: `{0}` how many elements are suppressed.
+    SuppressElements => ("억제: 요소 {0}개", "Suppress: {0} elements"),
     DialogDone => ("완료", "Done"),
     /// Dialog: the edit was refused. `{0}` why.
     DialogRefused => ("만들 수 없습니다: {0}", "Cannot create: {0}"),

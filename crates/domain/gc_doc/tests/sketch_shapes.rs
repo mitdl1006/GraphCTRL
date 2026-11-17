@@ -675,3 +675,96 @@ fn arc_slots_keep_centre_radius_angles_and_width_with_six_degrees_of_freedom() {
     assert!(bench.op(bad([0.0; 3], [0.1, 0.0, 0.0], [0.0, 0.1, 0.0], 0.2)).is_err(), "wider than the arc");
     assert!(bench.op(bad([0.0; 3], [0.0; 3], [0.0, 0.1, 0.0], 0.01)).is_err(), "no radius");
 }
+
+/// Inventor 2026 help, To Create and Edit Sketch Patterns (GUID-AAD3A699-FED8-4614-A31D-0A2316328CEE),
+/// Edit Rectangular and Circular Patterns: Edit Pattern (change the values), Delete Pattern (the entire
+/// pattern), Suppress Element(s) (dashed, relationships kept).
+#[test]
+fn sketch_patterns_can_be_edited_suppressed_and_deleted_as_a_whole() {
+    use gc_sketch::PatternDefinition;
+    let mut bench = Bench::new();
+    let hole = Bench::curves(
+        &bench
+            .op(SketchOp::AddCircle {
+                centre: [0.05, 0.0, 0.0],
+                radius: 0.01,
+                centre_snap: Default::default(),
+                rim_snap: Default::default(),
+            })
+            .unwrap(),
+    )[0];
+    let axis =
+        bench.sketch().points.keys().copied().find(|p| bench.sketch().pos(*p) == Some([0.0; 3])).unwrap();
+    let before = bench.sketch().clone();
+    let drawn = |bench: &Bench| bench.sketch().curves.values().filter(|c| !c.construction).count();
+    bench
+        .op(SketchOp::CircularPattern {
+            curves: vec![hole],
+            axis,
+            count: 4,
+            angle: "360 deg".into(),
+            flip: false,
+            fitted: true,
+        })
+        .unwrap();
+    assert_eq!(drawn(&bench), 4);
+    let record = &bench.sketch().patterns[0];
+    assert_eq!(record.elements.len(), 3);
+    let copy = record.elements[1][0];
+    assert_eq!(bench.sketch().pattern_of(hole), Some(0));
+    assert_eq!(bench.sketch().pattern_element_of(copy), Some((0, 1)));
+
+    // Suppress: the element turns dashed (construction), the others stay; and back.
+    bench.op(SketchOp::SuppressPatternElements { curves: vec![copy], suppress: true }).unwrap();
+    assert!(bench.sketch().curves[&copy].construction);
+    assert_eq!(drawn(&bench), 3);
+    assert_eq!(bench.sketch().patterns[0].suppressed, vec![1]);
+    bench.op(SketchOp::SuppressPatternElements { curves: vec![copy], suppress: false }).unwrap();
+    assert!(!bench.sketch().curves[&copy].construction);
+
+    // Edit: six around, the second element suppressed; through a copy or the original alike.
+    let definition = PatternDefinition::Circular {
+        curves: vec![hole],
+        axis,
+        count: 6,
+        angle: "360 deg".into(),
+        flip: false,
+        fitted: true,
+    };
+    bench.op(SketchOp::EditSketchPattern { element: copy, definition, suppressed: vec![1] }).unwrap();
+    assert_eq!(bench.sketch().patterns.len(), 1);
+    assert_eq!(bench.sketch().patterns[0].elements.len(), 5);
+    assert_eq!(drawn(&bench), 5, "six less the suppressed one");
+    assert!(!bench.sketch().curves.contains_key(&copy), "the old copies are gone");
+
+    // Delete Pattern: back to the original alone, nothing left over.
+    let element = bench.sketch().patterns[0].elements[0][0];
+    bench.op(SketchOp::DeleteSketchPattern { element }).unwrap();
+    let after = bench.sketch();
+    assert!(after.patterns.is_empty());
+    assert_eq!(after.curves.len(), before.curves.len());
+    assert_eq!(after.points.len(), before.points.len());
+    assert_eq!(after.constraints.len(), before.constraints.len());
+    assert_eq!(after.dimensions.len(), before.dimensions.len());
+
+    // Deleting the original forgets the pattern.
+    bench
+        .op(SketchOp::CircularPattern {
+            curves: vec![hole],
+            axis,
+            count: 3,
+            angle: "360 deg".into(),
+            flip: false,
+            fitted: true,
+        })
+        .unwrap();
+    // Delete leaves pattern copies alone ("removes nonpattern geometry"); an original takes its pattern.
+    let copy = bench.sketch().patterns[0].elements[0][0];
+    bench.op(SketchOp::Delete(vec![gc_sketch::Item::Curve(copy)])).unwrap();
+    assert!(bench.sketch().curves.contains_key(&copy));
+    bench.op(SketchOp::Delete(vec![gc_sketch::Item::Curve(hole)])).unwrap();
+    assert!(bench.sketch().patterns.is_empty());
+    assert!(!bench.sketch().curves.contains_key(&copy));
+    assert_eq!(bench.sketch().curves.len(), before.curves.len() - 1);
+    assert!(bench.op(SketchOp::DeleteSketchPattern { element: hole }).is_err());
+}

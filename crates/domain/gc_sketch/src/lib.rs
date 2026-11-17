@@ -17,6 +17,7 @@ mod cut;
 mod drag;
 mod edit;
 mod model;
+mod pattern;
 
 pub use cut::{CutResult, Piece};
 pub use drag::{SketchDrag, SketchGrab};
@@ -25,3 +26,4 @@ pub use gc_solver::{DepKind, DragRefused, FrameOutcome, Status};
 pub use model::{
     Curve, CurveGeom, DimKind, Dimension, ExternalRef, GeoConstraint, PointKind, SkPoint, Sketch, Space,
 };
+pub use pattern::{PatternDefinition, PatternDirection, SketchPattern};

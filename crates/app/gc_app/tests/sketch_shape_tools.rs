@@ -229,3 +229,52 @@ fn the_arc_slot_buttons_draw_arc_slots() {
     harness.run();
     assert_eq!(harness.state().session.tool(), ToolKind::ArcSlot(gc_doc::ArcSlotKind::ThreePoint));
 }
+
+/// Edit Rectangular and Circular Patterns (GUID-AAD3A699-FED8-4614-A31D-0A2316328CEE): the dialog opened
+/// on a pattern edits it, suppresses elements and deletes it.
+#[test]
+fn a_selected_pattern_opens_its_dialog_to_edit_suppress_and_delete() {
+    let mut harness = sketching();
+    harness.state_mut().session.set_tool(ToolKind::Point);
+    click(harness.state_mut(), mm(50.0, 50.0), false);
+    harness.state_mut().session.set_tool(ToolKind::Circle);
+    click(harness.state_mut(), mm(70.0, 50.0), false);
+    click(harness.state_mut(), mm(75.0, 50.0), false);
+    harness.state_mut().session.set_tool(ToolKind::Select);
+    click(harness.state_mut(), mm(75.0, 50.0), false);
+    harness.get_by_label("원형").click();
+    harness.run();
+    harness.get_by_label("축: 선택 안 됨").click();
+    harness.run();
+    click(harness.state_mut(), mm(50.0, 50.0), false);
+    harness.run();
+    harness.get_by_label("적용").click();
+    harness.run();
+    harness.get_by_label("완료").click();
+    harness.run();
+    assert_eq!(curves(&harness), 6);
+
+    // The copy opposite the original, then the Circular button: the dialog edits the pattern.
+    click(harness.state_mut(), mm(25.0, 50.0), false);
+    harness.get_by_label("원형").click();
+    harness.run();
+    harness.get_by_label("억제: 요소 0개");
+    harness.get_by_label("축: 선택됨");
+    click(harness.state_mut(), mm(25.0, 50.0), false);
+    harness.run();
+    harness.get_by_label("억제: 요소 1개");
+    harness.get_by_label("확인").click();
+    harness.run();
+    assert_eq!(curves(&harness), 5, "one element suppressed (dashed)");
+    assert!(harness.query_by_label("원형 패턴").is_none(), "OK closes the dialog");
+
+    click(harness.state_mut(), mm(75.0, 50.0), false);
+    harness.get_by_label("원형").click();
+    harness.run();
+    harness.get_by_label("억제: 요소 1개");
+    harness.get_by_label("패턴 삭제").click();
+    harness.run();
+    assert_eq!(curves(&harness), 1, "the original alone");
+    let (_, sketch) = harness.state().session.active_sketch().unwrap();
+    assert!(sketch.patterns.is_empty());
+}

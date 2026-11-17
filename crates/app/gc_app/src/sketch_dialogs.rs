@@ -13,12 +13,16 @@
 //! As in Inventor the dialog stays open while geometry is picked in the graphics window: the pressed
 //! selector (Geometry, Mirror Line, Direction 1/2, Axis) takes the clicks (`Session::set_sketch_pick`).
 //! Geometry starts as the selection the dialog was opened with.
+//!
+//! Opened on an existing pattern (a selected original or copy) the dialog edits it: the values are the
+//! pattern's, a Suppress selector picks elements to suppress, OK rebuilds the pattern and Delete Pattern
+//! removes it (Edit Rectangular and Circular Patterns in the same help page).
 
 use gc_core::Id;
 use gc_doc::{SketchOp, SketchPatternDirection};
 use gc_i18n::{Lang, tr};
 use gc_session::{Session, SketchPick};
-use gc_sketch::{Curve, Item, SkPoint};
+use gc_sketch::{Curve, Item, PatternDefinition, SkPoint, SketchPattern};
 use gc_tools::ToolKind;
 
 /// Which dialog.
@@ -36,17 +40,21 @@ enum Field {
     Line,
     Line2,
     Axis,
+    Suppress,
 }
 
 impl Field {
     fn pick(self) -> SketchPick {
         match self {
-            Field::Geometry => SketchPick::Curves,
+            Field::Geometry | Field::Suppress => SketchPick::Curves,
             Field::Line | Field::Line2 => SketchPick::Line,
             Field::Axis => SketchPick::Point,
         }
     }
 }
+
+/// A pattern's elements: the curves of each copy.
+type Elements = Vec<Vec<Id<Curve>>>;
 
 /// A sketch Mirror or Pattern dialog.
 pub(crate) struct SketchDialog {
@@ -65,6 +73,8 @@ pub(crate) struct SketchDialog {
     flip2: bool,
     fitted: bool,
     error: Option<String>,
+    /// The pattern being edited: its elements and which are suppressed.
+    editing: Option<(Elements, Vec<usize>)>,
 }
 
 impl SketchDialog {
@@ -86,8 +96,44 @@ impl SketchDialog {
             flip2: false,
             fitted: kind == Kind::Circular,
             error: None,
+            editing: None,
         };
         dialog.activate(Field::Geometry, session);
+        dialog
+    }
+
+    /// A dialog on an existing pattern (Edit Pattern), holding its values.
+    pub(crate) fn edit(pattern: &SketchPattern, session: &mut Session) -> Self {
+        let kind = match pattern.definition {
+            PatternDefinition::Rectangular { .. } => Kind::Rectangular,
+            PatternDefinition::Circular { .. } => Kind::Circular,
+        };
+        let mut dialog = Self::new(kind, session);
+        dialog.geometry = pattern.definition.curves().to_vec();
+        match &pattern.definition {
+            PatternDefinition::Rectangular { first, second, fitted, .. } => {
+                dialog.line = Some(first.line);
+                dialog.count = first.count;
+                dialog.spacing.clone_from(&first.spacing);
+                dialog.flip = first.flip;
+                if let Some(second) = second {
+                    dialog.line2 = Some(second.line);
+                    dialog.count2 = second.count;
+                    dialog.spacing2.clone_from(&second.spacing);
+                    dialog.flip2 = second.flip;
+                }
+                dialog.fitted = *fitted;
+            }
+            PatternDefinition::Circular { axis, count, angle, flip, fitted, .. } => {
+                dialog.axis = Some(*axis);
+                dialog.count = *count;
+                dialog.angle.clone_from(angle);
+                dialog.flip = *flip;
+                dialog.fitted = *fitted;
+            }
+        }
+        dialog.editing = Some((pattern.elements.clone(), pattern.suppressed.clone()));
+        dialog.activate(Field::Suppress, session);
         dialog
     }
 
@@ -98,6 +144,14 @@ impl SketchDialog {
             Field::Line => self.line.map(Item::Curve).into_iter().collect(),
             Field::Line2 => self.line2.map(Item::Curve).into_iter().collect(),
             Field::Axis => self.axis.map(Item::Point).into_iter().collect(),
+            Field::Suppress => match &self.editing {
+                Some((elements, suppressed)) => suppressed
+                    .iter()
+                    .filter_map(|e| elements.get(*e))
+                    .flat_map(|e| e.iter().map(|c| Item::Curve(*c)))
+                    .collect(),
+                None => Vec::new(),
+            },
         }
     }
 
@@ -119,6 +173,28 @@ impl SketchDialog {
                 }
             }
             Field::Axis => self.axis = session.selected_points().first().copied(),
+            Field::Suppress => {
+                let picked = session.selected_curves();
+                if let Some((elements, suppressed)) = &mut self.editing {
+                    // An element is suppressed when any of its curves is picked.
+                    *suppressed = (0..elements.len())
+                        .filter(|e| elements[*e].iter().any(|c| picked.contains(c)))
+                        .collect();
+                }
+            }
+        }
+    }
+
+    /// The pattern's values (rectangular and circular).
+    fn definition(&self) -> Option<PatternDefinition> {
+        match self.op()? {
+            SketchOp::RectangularPattern { curves, first, second, fitted } => {
+                Some(PatternDefinition::Rectangular { curves, first, second, fitted })
+            }
+            SketchOp::CircularPattern { curves, axis, count, angle, flip, fitted } => {
+                Some(PatternDefinition::Circular { curves, axis, count, angle, flip, fitted })
+            }
+            _ => None,
         }
     }
 
@@ -150,6 +226,34 @@ impl SketchDialog {
                 fitted: self.fitted,
             },
         })
+    }
+
+    /// OK (rebuild with these values) and Delete Pattern for a pattern being edited. True when done.
+    fn edit_buttons(&mut self, ui: &mut egui::Ui, session: &mut Session, lang: Lang) -> bool {
+        let Some(element) = self.geometry.first().copied() else { return false };
+        let mut done = false;
+        ui.horizontal(|ui| {
+            let ok = ui.add_enabled(self.definition().is_some(), egui::Button::new(tr!(lang, DialogOk)));
+            let op = if ok.clicked() {
+                let suppressed = self.editing.as_ref().map(|(_, s)| s.clone()).unwrap_or_default();
+                self.definition().map(|definition| SketchOp::EditSketchPattern {
+                    element,
+                    definition,
+                    suppressed,
+                })
+            } else if ui.button(tr!(lang, DeletePattern)).clicked() {
+                Some(SketchOp::DeleteSketchPattern { element })
+            } else {
+                None
+            };
+            if let Some(op) = op {
+                match session.edit_active_sketch(op) {
+                    Ok(_) => done = true,
+                    Err(error) => self.error = Some(error.to_string()),
+                }
+            }
+        });
+        done
     }
 
     /// A selector button: pressed while it takes the clicks.
@@ -223,8 +327,16 @@ impl SketchDialog {
                     ui.checkbox(&mut self.fitted, tr!(lang, PatternFitted));
                 }
             }
+            if let Some((_, suppressed)) = &self.editing {
+                let text = tr!(lang, SuppressElements, suppressed.len());
+                self.selector(ui, session, Field::Suppress, text);
+            }
             if let Some(error) = &self.error {
                 ui.colored_label(ui.visuals().error_fg_color, tr!(lang, DialogRefused, error));
+            }
+            if self.editing.is_some() {
+                done = self.edit_buttons(ui, session, lang);
+                return;
             }
             ui.horizontal(|ui| {
                 let ready = self.op().is_some() && !self.geometry.is_empty();

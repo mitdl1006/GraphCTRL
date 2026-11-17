@@ -25,7 +25,7 @@
 | STEP B-rep(정확 형상) | 테셀레이션 없는 솔리드는 경고 후 건너뜀. 평면·원통부터 자체 테셀레이터 필요. 앱의 가져오기 배선(확장자 → `read_step`)은 리드/FE. 실제 대형 파일(NIST CTC 등) 확인은 네트워크 허용 후 |
 | 미러의 진짜 반사 | 파일을 만들지 않아 Mirror = Reuse(프리미티브만 정확). 메시 반사는 렌더/메시 쪽 배율 음수 지원 필요 |
 | 로봇 교체, 패턴·표현의 미러/복사 | 미지원 |
-| 스케치 패턴 개체 | 스케치 패턴 편집(개수·Delete Pattern·Suppress)은 없음 — 다시 만들어야 함 |
+| 스케치 패턴 | Associative 해제·Boundary 없음. 패턴 치수 직접 편집 값이 편집 창에 안 보임 |
 | 접촉 솔버 | 밀린 부품은 병진만(회전 없음), 배율 있는 어셈블리 부품 제외, Surface Complexity 없음 |
 | 메시 로드 | `add_mesh_body`는 mm/m 판정용 STL 파싱만 동기 |
 | DOF 기호 | 기호마다 관계를 모음(수백 개 동시 표시 시 캐시 필요) |
@@ -34,6 +34,33 @@
 | 모션(오래된 남은 일) | 맨 아래 "남은 일(백엔드)" 절 그대로 |
 
 # 작업 기록(최신 순)
+
+## 2026-11-18 — 스케치 패턴 개체: 편집·삭제·요소 억제(리드 ②)
+
+원문: To Create and Edit Sketch Patterns `GUID-AAD3A699-FED8-4614-A31D-0A2316328CEE.htm`, Edit Rectangular and Circular Patterns.
+
+- **모델(gc_sketch `pattern.rs`)**:
+  - `Sketch::patterns: Vec<SketchPattern{definition: PatternDefinition, elements, items, suppressed}>`. serde 기본값이라 예전 파일도 열린다.
+  - `PatternDirection`을 gc_sketch로 옮겼다. `gc_doc::SketchPatternDirection`은 같은 타입의 재노출이라 API 변화 없음.
+  - `pattern_of(curve)`, `pattern_element_of(curve)`, `suppress_pattern_elements`, `remove_exactly(items)`, `prune_patterns()`.
+  - `remove_exactly`가 따로 있는 이유: `Sketch::delete`는 곡선의 점까지 지워서, 원본 점을 공유하는 구성선을 지우면 원본이 망가진다.
+- **명령(gc_doc)**:
+  - 직사각형·원형 패턴이 기록을 남긴다.
+  - `EditSketchPattern{element, definition, suppressed}`: 지우고 다시 만든다.
+  - `DeleteSketchPattern{element}`: 원본은 남는다.
+  - `SuppressPatternElements{curves, suppress}`: 그 요소의 곡선이 구성선이 되고 구속은 유지. 되돌리면 원본이 구성선일 때만 구성선으로.
+  - `Delete`: 패턴이 만든 항목은 건너뛴다(원문 "Delete removes nonpattern geometry"). 원본을 지우면 그 패턴도 통째로 지운다.
+    전에는 원본을 지우면 구성선이 끊겨 풀이 오류가 났다.
+- **세션**: `selected_pattern()`(선택된 곡선이 속한 패턴).
+- **UI**: 패턴의 곡선을 선택한 채 리본 직사각형/원형을 누르면 그 패턴을 편집하는 창이 열린다.
+  - 값이 채워져 있고 '억제: 요소 n개' 선택기가 켜져 있다. 클릭한 요소가 억제 대상이 된다.
+  - 확인 = 다시 만들기, 패턴 삭제 = 패턴만 지우기.
+- **원문과 다른 점**:
+  - 우클릭 메뉴(Edit Pattern·Delete Pattern·Suppress Element(s)) 대신 리본 버튼으로 연다(뷰포트에 컨텍스트 메뉴가 없음).
+  - 편집은 복사본을 새로 만든다(복사본에 손으로 단 구속은 사라짐).
+  - 패턴 치수를 직접 바꾼 값은 기록의 식에 반영되지 않는다.
+  - Associative 해제와 Boundary는 없다.
+- **테스트**: `gc_doc/tests/sketch_shapes.rs` sketch_patterns_can_be_edited…, 앱 kittest a_selected_pattern….
 
 ## 2026-11-18 — 스케치 창의 뷰포트 선택 · 호 슬롯 2종(리드 ③①)
 

@@ -72,18 +72,8 @@ pub enum ArcSlotKind {
     CenterPoint,
 }
 
-/// One direction of a sketch rectangular pattern.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct SketchPatternDirection {
-    /// A line giving the direction (from its start to its end).
-    pub line: Id<Curve>,
-    /// Number of elements along it, the originals included, 2 to 500.
-    pub count: u32,
-    /// Spacing between neighbours (or overall, fitted), an expression in millimetres by default.
-    pub spacing: String,
-    /// The other way along the line.
-    pub flip: bool,
-}
+/// One direction of a sketch rectangular pattern (kept in the sketch's pattern record).
+pub use gc_sketch::PatternDirection as SketchPatternDirection;
 
 /// An edit of one sketch.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -191,6 +181,30 @@ pub enum SketchOp {
         flip: bool,
         /// Fitted: `angle` is the overall angle.
         fitted: bool,
+    },
+    /// Edit Pattern: rebuilds the rectangular or circular pattern `element` belongs to (an original or a
+    /// copy) from new values, `suppressed` naming its suppressed elements. The copies are made anew, so
+    /// relationships added to them by hand go with the old ones.
+    EditSketchPattern {
+        /// Any curve of the pattern.
+        element: Id<Curve>,
+        /// The new values.
+        definition: gc_sketch::PatternDefinition,
+        /// Elements to suppress (indices, in the order they were made).
+        suppressed: Vec<usize>,
+    },
+    /// Delete Pattern: removes the copies and everything the pattern added; the originals stay.
+    DeleteSketchPattern {
+        /// Any curve of the pattern.
+        element: Id<Curve>,
+    },
+    /// Suppress Element(s): the elements the copies belong to turn construction (dashed, out of profiles)
+    /// while their relationships stay; `suppress: false` brings them back.
+    SuppressPatternElements {
+        /// Copies in the elements.
+        curves: Vec<Id<Curve>>,
+        /// Suppress or bring back.
+        suppress: bool,
     },
     /// The sketch Offset command: copies of curves at a distance — whole loops by default (Loop Select),
     /// held equidistant (Constrain Offset). Positive distances go outside a closed loop (circles grow),
@@ -906,8 +920,9 @@ fn copy_curves(
     sources: &PatternSources,
     map: &std::collections::BTreeMap<Id<SkPoint>, Id<SkPoint>>,
     created: &mut Vec<Created>,
-) -> Result<(), EditError> {
+) -> Result<Vec<Id<Curve>>, EditError> {
     let at = |p: Id<SkPoint>| map.get(&p).copied().ok_or(EditError::Sketch(SketchError::MissingItem));
+    let mut copies = Vec::new();
     for (original, curve) in &sources.curves {
         let geom = match curve.geom {
             gc_sketch::CurveGeom::Line { a, b } => gc_sketch::CurveGeom::Line { a: at(a)?, b: at(b)? },
@@ -919,11 +934,38 @@ fn copy_curves(
         let id: Id<Curve> = ids.alloc();
         sketch.curves.insert(id, Curve { geom, construction: curve.construction });
         created.push(Created::Curve(id));
+        copies.push(id);
         if matches!(curve.geom, gc_sketch::CurveGeom::Circle { .. }) {
             require(sketch, ids, GeoConstraint::Equal(*original, id), created)?;
         }
     }
-    Ok(())
+    Ok(copies)
+}
+
+/// What a pattern added, as sketch items.
+fn pattern_items(created: &[Created]) -> Vec<gc_sketch::Item> {
+    created
+        .iter()
+        .filter_map(|c| match c {
+            Created::Point(p) => Some(gc_sketch::Item::Point(*p)),
+            Created::Curve(c) => Some(gc_sketch::Item::Curve(*c)),
+            Created::Constraint(c) => Some(gc_sketch::Item::Constraint(*c)),
+            Created::Dimension(d) => Some(gc_sketch::Item::Dimension(*d)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The edit that makes a pattern from its values.
+fn pattern_op(definition: &gc_sketch::PatternDefinition) -> SketchOp {
+    match definition.clone() {
+        gc_sketch::PatternDefinition::Rectangular { curves, first, second, fitted } => {
+            SketchOp::RectangularPattern { curves, first, second, fitted }
+        }
+        gc_sketch::PatternDefinition::Circular { curves, axis, count, angle, flip, fitted } => {
+            SketchOp::CircularPattern { curves, axis, count, angle, flip, fitted }
+        }
+    }
 }
 
 /// A tangency between two curves, with the side captured from how they lie now.
@@ -1457,6 +1499,7 @@ fn sketch_op(
             > = std::collections::BTreeMap::new();
             grid.insert((0, 0), originals.points.iter().map(|p| (*p, *p)).collect());
             let mut spacing_lines: Vec<Option<Id<Curve>>> = vec![None; steps.len()];
+            let mut elements = Vec::new();
             for j in 0..counts.1 {
                 for i in 0..counts.0 {
                     if (i, j) == (0, 0) {
@@ -1496,10 +1539,21 @@ fn sketch_op(
                         }
                         map.insert(*point, copy);
                     }
-                    copy_curves(sketch, ids, &originals, &map, &mut created)?;
+                    elements.push(copy_curves(sketch, ids, &originals, &map, &mut created)?);
                     grid.insert((i, j), map);
                 }
             }
+            sketch.patterns.push(gc_sketch::SketchPattern {
+                definition: gc_sketch::PatternDefinition::Rectangular {
+                    curves: curves.clone(),
+                    first: first.clone(),
+                    second: second.clone(),
+                    fitted: *fitted,
+                },
+                elements,
+                items: pattern_items(&created),
+                suppressed: Vec::new(),
+            });
             "Rectangular pattern"
         }
         SketchOp::CircularPattern { curves, axis, count, angle, flip, fitted } => {
@@ -1532,6 +1586,7 @@ fn sketch_op(
                 }
             }
             let mut previous_spokes = spokes.clone();
+            let mut elements = Vec::new();
             for k in 1..*count {
                 let (sin, cos) =
                     (gc_math::fm::sin(step * f64::from(k)), gc_math::fm::cos(step * f64::from(k)));
@@ -1561,10 +1616,55 @@ fn sketch_op(
                     map.insert(*point, copy);
                     these_spokes.insert(*point, radius);
                 }
-                copy_curves(sketch, ids, &originals, &map, &mut created)?;
+                elements.push(copy_curves(sketch, ids, &originals, &map, &mut created)?);
                 previous_spokes = these_spokes;
             }
+            sketch.patterns.push(gc_sketch::SketchPattern {
+                definition: gc_sketch::PatternDefinition::Circular {
+                    curves: curves.clone(),
+                    axis: *axis,
+                    count: *count,
+                    angle: angle.clone(),
+                    flip: *flip,
+                    fitted: *fitted,
+                },
+                elements,
+                items: pattern_items(&created),
+                suppressed: Vec::new(),
+            });
             "Circular pattern"
+        }
+        SketchOp::EditSketchPattern { element, definition, suppressed } => {
+            let index = sketch.pattern_of(*element).ok_or(SketchError::InvalidValue)?;
+            let old = sketch.patterns.remove(index);
+            sketch.remove_exactly(&old.items);
+            let (rebuilt, _) = sketch_op(sketch, ids, &pattern_op(definition), scope)?;
+            created.extend(rebuilt);
+            let last = sketch.patterns.len().saturating_sub(1);
+            sketch.suppress_pattern_elements(last, suppressed, true);
+            "Edit pattern"
+        }
+        SketchOp::DeleteSketchPattern { element } => {
+            let index = sketch.pattern_of(*element).ok_or(SketchError::InvalidValue)?;
+            let old = sketch.patterns.remove(index);
+            sketch.remove_exactly(&old.items);
+            "Delete pattern"
+        }
+        SketchOp::SuppressPatternElements { curves, suppress } => {
+            let mut by_pattern: std::collections::BTreeMap<usize, Vec<usize>> =
+                std::collections::BTreeMap::new();
+            for curve in curves {
+                let (pattern, element) =
+                    sketch.pattern_element_of(*curve).ok_or(SketchError::InvalidValue)?;
+                by_pattern.entry(pattern).or_default().push(element);
+            }
+            if by_pattern.is_empty() {
+                return Err(SketchError::InvalidValue.into());
+            }
+            for (pattern, elements) in by_pattern {
+                sketch.suppress_pattern_elements(pattern, &elements, *suppress);
+            }
+            if *suppress { "Suppress elements" } else { "Unsuppress elements" }
         }
         SketchOp::Offset { curves, distance, loop_select, constrain } => crate::sketch_offset::offset(
             sketch,
@@ -1887,7 +1987,26 @@ fn sketch_op(
             "Construction"
         }
         SketchOp::Delete(items) => {
-            sketch.delete(items);
+            // Delete removes nonpattern geometry (Inventor 2026 help, To Create and Edit Sketch Patterns,
+            // GUID-AAD3A699-FED8-4614-A31D-0A2316328CEE): what a pattern made is left to Delete Pattern and
+            // Suppress; an original takes its pattern with it.
+            let made: std::collections::BTreeSet<gc_sketch::Item> =
+                sketch.patterns.iter().flat_map(|p| p.items.iter().copied()).collect();
+            let items: Vec<gc_sketch::Item> = items.iter().copied().filter(|i| !made.contains(i)).collect();
+            let doomed: Vec<usize> = sketch
+                .patterns
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| {
+                    p.definition.curves().iter().any(|c| items.contains(&gc_sketch::Item::Curve(*c)))
+                })
+                .map(|(i, _)| i)
+                .collect();
+            for index in doomed.into_iter().rev() {
+                let old = sketch.patterns.remove(index);
+                sketch.remove_exactly(&old.items);
+            }
+            sketch.delete(&items);
             "Delete"
         }
         // Resolved against the document in `run`; inside a wrapper it is not supported.
@@ -1916,6 +2035,7 @@ fn sketch_op(
             "Fillet"
         }
     };
+    sketch.prune_patterns();
     // Whatever the edit was, the sketch must end up consistent.
     let report = sketch.solve()?;
     if report.status != Status::Solved {

@@ -1084,6 +1084,16 @@ impl Session {
             .collect()
     }
 
+    /// The rectangular or circular pattern a selected curve belongs to (an original or a copy), for Edit
+    /// Pattern, Delete Pattern and Suppress.
+    pub fn selected_pattern(&self) -> Option<gc_sketch::SketchPattern> {
+        let (_, sketch) = self.active_sketch()?;
+        self.selected_curves()
+            .into_iter()
+            .find_map(|c| sketch.pattern_of(c))
+            .and_then(|i| sketch.patterns.get(i).cloned())
+    }
+
     /// The curves selected in the sketch being edited.
     pub fn selected_curves(&self) -> Vec<Id<Curve>> {
         self.selection

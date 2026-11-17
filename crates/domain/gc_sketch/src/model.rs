@@ -295,6 +295,9 @@ pub struct Sketch {
     pub constraints: BTreeMap<Id<GeoConstraint>, GeoConstraint>,
     /// Dimensions by id.
     pub dimensions: BTreeMap<Id<Dimension>, Dimension>,
+    /// Rectangular and circular patterns, kept so they can be edited as a whole.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub patterns: Vec<crate::SketchPattern>,
 }
 
 impl Entity for Sketch {
@@ -325,6 +328,7 @@ impl Sketch {
             curves: BTreeMap::new(),
             constraints: BTreeMap::new(),
             dimensions: BTreeMap::new(),
+            patterns: Vec::new(),
         }
     }
 

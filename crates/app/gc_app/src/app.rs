@@ -1037,17 +1037,19 @@ impl eframe::App for GraphCtrlApp {
                     &mut self.session,
                 ));
             }
-            Some(ribbon::RibbonAction::StartSketchRectPattern) => {
-                self.sketch_dialog = Some(crate::sketch_dialogs::SketchDialog::new(
-                    crate::sketch_dialogs::Kind::Rectangular,
-                    &mut self.session,
-                ));
-            }
-            Some(ribbon::RibbonAction::StartSketchCircPattern) => {
-                self.sketch_dialog = Some(crate::sketch_dialogs::SketchDialog::new(
-                    crate::sketch_dialogs::Kind::Circular,
-                    &mut self.session,
-                ));
+            Some(
+                start @ (ribbon::RibbonAction::StartSketchRectPattern
+                | ribbon::RibbonAction::StartSketchCircPattern),
+            ) => {
+                use crate::sketch_dialogs::{Kind, SketchDialog};
+                // With a pattern's curve selected the dialog edits that pattern (Edit Pattern).
+                self.sketch_dialog = Some(match self.session.selected_pattern() {
+                    Some(pattern) => SketchDialog::edit(&pattern, &mut self.session),
+                    None if start == ribbon::RibbonAction::StartSketchRectPattern => {
+                        SketchDialog::new(Kind::Rectangular, &mut self.session)
+                    }
+                    None => SketchDialog::new(Kind::Circular, &mut self.session),
+                });
             }
             Some(ribbon::RibbonAction::ToggleGround) => {
                 let name = self
