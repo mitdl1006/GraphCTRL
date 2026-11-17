@@ -7,6 +7,7 @@
 #![allow(clippy::unwrap_used, clippy::panic, clippy::float_cmp, reason = "test code")]
 
 use gc_doc::{ComponentFlag, Occurrence, Placement, Solid};
+use gc_math::DVec3;
 use gc_session::{CellItem, Feature, Session, measure_features};
 
 fn cube() -> Solid {
@@ -236,5 +237,108 @@ fn a_component_listed_twice_does_not_interfere_with_itself() {
     let b = CellItem::Body(body(&mut s, 0.5));
     for row in s.interference(&[a, a, b], &[]) {
         assert_ne!(row.first, row.second, "an item paired with itself");
+    }
+}
+
+// ---- measure: cylindrical faces (Inventor: diameter, radius, centre to centre) ----
+
+fn shaft(centre: [f64; 3], axis: [f64; 3], radius: f64) -> Feature {
+    Feature::Cylinder { centre, axis, radius, length: 1.0 }
+}
+
+/// Cylinder against a point, an edge, a flat face and another cylinder: the surface gap is the centre
+/// distance less the radii, never negative; the centre-to-centre value is the distance to the axis.
+#[test]
+fn cylinder_measures_give_the_surface_gap_and_the_axis_distance() {
+    let up = [0.0, 0.0, 1.0];
+    let a = shaft([0.0; 3], up, 0.05);
+    // Another shaft 0.3 m away, radius 0.02: gap 0.3 - 0.05 - 0.02, axis distance 0.3, parallel.
+    let b = shaft([0.3, 0.0, 0.0], up, 0.02);
+    let pair = measure_features(&a, &b);
+    assert!((pair.distance.unwrap() - 0.23).abs() < 1e-12, "{pair:?}");
+    assert!((pair.centre_distance.unwrap() - 0.3).abs() < 1e-12);
+    assert!(pair.angle.unwrap().abs() < 1e-9, "parallel axes");
+    // Swapped: the same numbers, the nearest points swapped.
+    let swapped = measure_features(&b, &a);
+    assert!((swapped.distance.unwrap() - pair.distance.unwrap()).abs() < 1e-12);
+    let (p, q) = pair.closest.unwrap();
+    let (sq, sp) = swapped.closest.unwrap();
+    assert!((v3(p) - v3(sp)).length() < 1e-12 && (v3(q) - v3(sq)).length() < 1e-12, "nearest points swap");
+    // Touching and overlapping shafts: the gap is 0, never negative.
+    for x in [0.07, 0.05, 0.0] {
+        let near = measure_features(&a, &shaft([x, 0.0, 0.0], up, 0.02));
+        assert!(near.distance.unwrap().abs() < 1e-12, "x = {x}");
+    }
+    // Crossing axes at right angles: angle 90 degrees.
+    let cross = measure_features(&a, &shaft([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], 0.01));
+    assert!((cross.angle.unwrap() - std::f64::consts::FRAC_PI_2).abs() < 1e-9);
+    // A point on the axis: radius away from the surface; a point on the surface: 0.
+    let on_axis = measure_features(&a, &Feature::Point([0.0, 0.0, 0.2]));
+    assert!(
+        (on_axis.distance.unwrap() - 0.05).abs() < 1e-12 && on_axis.centre_distance.unwrap().abs() < 1e-12
+    );
+    let on_surface = measure_features(&a, &Feature::Point([0.05, 0.0, 0.2]));
+    assert!(on_surface.distance.unwrap().abs() < 1e-12);
+    // Beyond the end of the shaft the nearest point is on the end of the axis.
+    let beyond = measure_features(&a, &Feature::Point([0.0, 0.0, 2.0]));
+    assert!((beyond.centre_distance.unwrap() - 1.5).abs() < 1e-12, "{beyond:?}");
+}
+
+/// The nearest points reported must be as far apart as the distance (the overlay draws a line between them).
+#[test]
+fn cylinder_closest_points_agree_with_the_distance() {
+    let up = [0.0, 0.0, 1.0];
+    let a = shaft([0.0; 3], up, 0.05);
+    let others = [
+        shaft([0.3, 0.0, 0.0], up, 0.02),
+        Feature::Edge([0.3, -1.0, 0.0], [0.3, 1.0, 0.0]),
+        Feature::Face { point: [0.3, 0.0, 0.0], normal: [1.0, 0.0, 0.0], area: 1.0 },
+        Feature::Point([0.3, 0.0, 0.0]),
+    ];
+    for other in &others {
+        let pair = measure_features(&a, other);
+        let (p, q) = pair.closest.unwrap();
+        let apart = (v3(p) - v3(q)).length();
+        assert!(
+            (apart - pair.distance.unwrap()).abs() < 1e-9,
+            "{other:?}: points {apart} vs distance {pair:?}"
+        );
+    }
+}
+
+fn v3(p: [f64; 3]) -> DVec3 {
+    DVec3::from_array(p)
+}
+
+/// Zero radius, zero length, no axis direction and NaN: no panic, and finite numbers for finite input.
+#[test]
+fn degenerate_cylinders_do_not_break_measuring() {
+    let others = [
+        Feature::Point([0.1, 0.2, 0.3]),
+        Feature::Edge([0.0; 3], [1.0, 0.0, 0.0]),
+        Feature::Face { point: [0.0; 3], normal: [0.0, 0.0, 1.0], area: 1.0 },
+        shaft([0.5; 3], [0.0, 0.0, 1.0], 0.1),
+    ];
+    let cylinders = [
+        Feature::Cylinder { centre: [0.0; 3], axis: [0.0, 0.0, 1.0], radius: 0.0, length: 1.0 },
+        Feature::Cylinder { centre: [0.0; 3], axis: [0.0, 0.0, 1.0], radius: 0.05, length: 0.0 },
+        Feature::Cylinder { centre: [0.0; 3], axis: [0.0; 3], radius: 0.05, length: 1.0 },
+        Feature::Cylinder { centre: [0.0; 3], axis: [0.0, 0.0, 1.0], radius: f64::NAN, length: 1.0 },
+        Feature::Cylinder {
+            centre: [f64::NAN; 3],
+            axis: [0.0, 0.0, 1.0],
+            radius: 0.05,
+            length: f64::INFINITY,
+        },
+    ];
+    for (k, c) in cylinders.iter().enumerate() {
+        for o in &others {
+            let (a, b) = (measure_features(c, o), measure_features(o, c));
+            if k < 3 {
+                for value in [a.distance, a.centre_distance, a.angle, b.distance].into_iter().flatten() {
+                    assert!(value.is_finite(), "{c:?} vs {o:?}: {a:?}");
+                }
+            }
+        }
     }
 }

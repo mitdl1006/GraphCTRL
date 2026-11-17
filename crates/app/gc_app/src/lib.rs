@@ -8,6 +8,7 @@ mod drive;
 mod example;
 mod interference;
 mod measure;
+mod parameters;
 mod ribbon;
 
 pub use app::{FileDialogs, GraphCtrlApp, RunOptions, run};

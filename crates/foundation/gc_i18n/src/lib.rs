@@ -626,6 +626,10 @@ messages! {
     BrowserAssemblies => ("설비", "Equipment"),
     /// Ribbon tab for measuring and analysing the cell.
     TabInspect => ("검사", "Inspect"),
+    /// Ribbon tab: Inventor's Manage tab.
+    TabManage => ("관리", "Manage"),
+    /// Manage tab group of the parameters.
+    GroupParameters => ("매개변수", "Parameters"),
     /// Inspect tab group: measuring.
     GroupMeasure => ("측정", "Measure"),
     /// Inspect tab group: analyses.
@@ -811,6 +815,32 @@ messages! {
     DriveValue => ("현재 값 {0}", "Value {0}"),
     /// Drive: collision detection stopped the motion. `{0}` what collided, `{1}` the value.
     DriveCollided => ("충돌 감지: {0} ({1}에서 멈춤)", "Collision detected: {0} (stopped at {1})"),
+    // --- Parameters (Inventor: Manage tab > Parameters panel > Parameters) ---
+    /// Tools menu and the dialog title.
+    MenuParameters => ("매개변수", "Parameters"),
+    ParamSearch => ("검색", "Search"),
+    ParamModel => ("모델 매개변수", "Model Parameters"),
+    ParamUser => ("사용자 매개변수", "User Parameters"),
+    ParamColName => ("매개변수 이름", "Parameter Name"),
+    ParamColUnit => ("단위", "Unit"),
+    ParamColEquation => ("수식", "Equation"),
+    ParamColValue => ("공칭 값", "Nominal Value"),
+    /// Parameters: add a numeric user parameter.
+    ParamAddNumeric => ("숫자 추가", "Add Numeric"),
+    /// Parameters: the unit of a new parameter.
+    ParamUnitLength => ("mm", "mm"),
+    ParamUnitAngle => ("deg", "deg"),
+    ParamDelete => ("매개변수 삭제", "Delete Parameter"),
+    ParamCopyToUser => ("사용자 매개변수에 복사", "Copy to User Parameter"),
+    ParamDone => ("완료", "Done"),
+    /// Parameters: a model parameter's name: the sketch and what the dimension measures. `{0}` sketch, `{1}` kind, `{2}` number.
+    ParamDimension => ("{0} · {1} {2}", "{0} · {1} {2}"),
+    ParamKindLength => ("거리", "distance"),
+    ParamKindAngle => ("각도", "angle"),
+    ParamKindRadius => ("반지름", "radius"),
+    ParamKindDiameter => ("지름", "diameter"),
+    /// Parameters: a reference (driven) dimension's equation cannot be edited.
+    ParamDriven => ("(참조)", "(reference)"),
     // --- AI agent API ---
     /// Tools menu: the window that connects AI agents (MCP).
     MenuAgent => ("AI 에이전트 연결", "AI agent connection"),

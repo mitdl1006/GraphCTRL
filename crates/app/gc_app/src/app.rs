@@ -255,6 +255,8 @@ pub struct GraphCtrlApp {
     drive: crate::drive::Drive,
     /// The Constrain dialog.
     constrain: crate::constrain::Constrain,
+    /// The Parameters dialog.
+    parameters: crate::parameters::Parameters,
     expression: String,
     ime: ImeTest,
     /// Whether the licence notices window is open.
@@ -340,6 +342,7 @@ impl GraphCtrlApp {
             interference: crate::interference::Interference::default(),
             drive: crate::drive::Drive::default(),
             constrain: crate::constrain::Constrain::default(),
+            parameters: crate::parameters::Parameters::default(),
             expression: String::new(),
             ime: ImeTest { dimension: "25 mm".to_owned(), ..ImeTest::default() },
             notices: false,
@@ -958,6 +961,7 @@ impl eframe::App for GraphCtrlApp {
             Some(ribbon::RibbonAction::StartInterference) => self.interference.start(&self.session),
             Some(ribbon::RibbonAction::StartDrive) => self.drive.start(&mut self.session),
             Some(ribbon::RibbonAction::StartConstrain) => self.constrain.start(),
+            Some(ribbon::RibbonAction::StartParameters) => self.parameters.open = true,
             _ => {}
         }
         if ribbon_action == Some(ribbon::RibbonAction::ImportRobot)
@@ -1021,6 +1025,9 @@ impl eframe::App for GraphCtrlApp {
         });
         if self.interference.open {
             self.interference.window(&ctx, &self.session, lang);
+        }
+        if self.parameters.open {
+            self.parameters.window(&ctx, &mut self.session, lang);
         }
         if self.drive.open {
             self.drive.tick(&ctx, &mut self.session);
