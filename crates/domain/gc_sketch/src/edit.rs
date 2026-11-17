@@ -148,14 +148,14 @@ impl Sketch {
     /// Adds a free point.
     pub fn add_point(&mut self, alloc: &mut IdAlloc, pos: [f64; 3]) -> Id<SkPoint> {
         let id = alloc.alloc();
-        self.points.insert(id, SkPoint { pos, kind: PointKind::Free });
+        self.points.insert(id, SkPoint { pos, kind: PointKind::Free, center: false });
         id
     }
 
     /// Adds a reference point that follows outside geometry. The caller keeps its position up to date.
     pub fn add_external(&mut self, alloc: &mut IdAlloc, source: ExternalRef, pos: [f64; 3]) -> Id<SkPoint> {
         let id = alloc.alloc();
-        self.points.insert(id, SkPoint { pos, kind: PointKind::External(source) });
+        self.points.insert(id, SkPoint { pos, kind: PointKind::External(source), center: false });
         id
     }
 
