@@ -335,6 +335,65 @@ pub struct Timeline {
     /// frames, work features, features).
     #[serde(default)]
     pub hidden: Vec<AnyId>,
+    /// Component states that are not kept elsewhere (assembly P1-1).
+    #[serde(default, skip_serializing_if = "Components::is_empty")]
+    pub components: Components,
+}
+
+/// An occurrence in the assembly tree (docs/ux/inventor-assembly-parity.md, P1-1): a component placed
+/// in the cell, or a part inside an imported assembly.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum Occurrence {
+    /// A body, robot or imported assembly.
+    Item(AnyId),
+    /// A part of an imported assembly.
+    Part {
+        /// The assembly.
+        assembly: Id<Assembly>,
+        /// Index into [`Assembly::parts`].
+        index: u32,
+    },
+}
+
+/// A state of a component that can be switched on and off.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ComponentFlag {
+    /// Fixed in space: all its degrees of freedom are removed (assembly constraints move only the others).
+    Grounded,
+    /// Drawn.
+    Visible,
+    /// Selectable; a disabled component is drawn in the background style.
+    Enabled,
+    /// Kept but not computed: not drawn, not an obstacle.
+    Suppressed,
+}
+
+/// Component states kept in the model tree's state. Visibility of bodies, robots and assemblies stays in
+/// their looks and suppression of assemblies in [`Timeline::suppressed`].
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Components {
+    /// Grounded components.
+    #[serde(default)]
+    pub grounded: Vec<Occurrence>,
+    /// Disabled components.
+    #[serde(default)]
+    pub disabled: Vec<Occurrence>,
+    /// Hidden assembly parts.
+    #[serde(default)]
+    pub hidden: Vec<Occurrence>,
+    /// Suppressed assembly parts.
+    #[serde(default)]
+    pub suppressed: Vec<Occurrence>,
+}
+
+impl Components {
+    /// True when nothing is stored.
+    pub fn is_empty(&self) -> bool {
+        self.grounded.is_empty()
+            && self.disabled.is_empty()
+            && self.hidden.is_empty()
+            && self.suppressed.is_empty()
+    }
 }
 
 impl Entity for Timeline {

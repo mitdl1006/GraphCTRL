@@ -262,6 +262,16 @@ pub enum Command {
         /// True to show it.
         visible: bool,
     },
+    /// Switches a state of a component of the assembly tree: grounded, visible, enabled, suppressed
+    /// (suppressing bodies and robots is not supported yet).
+    SetComponent {
+        /// The component.
+        occurrence: crate::design::Occurrence,
+        /// Which state.
+        flag: crate::design::ComponentFlag,
+        /// The new value.
+        on: bool,
+    },
     /// Adds a named parameter. `angle` selects degrees instead of millimetres for bare numbers.
     AddParam {
         /// The name.
@@ -1078,6 +1088,9 @@ fn run(txn: &mut Txn<'_>, command: &Command) -> Result<(Vec<Created>, &'static s
         Command::Cell(op) => crate::cell::run(txn, op),
         Command::Rename { item, name } => crate::tree::rename(txn, *item, name),
         Command::SetVisible { item, visible } => crate::tree::set_visible(txn, *item, *visible),
+        Command::SetComponent { occurrence, flag, on } => {
+            crate::tree::set_component(txn, *occurrence, *flag, *on)
+        }
     }
 }
 

@@ -1,5 +1,27 @@
 # 백엔드 인계 (2026-11-17)
 
+## 2026-11-17 밤 — 어셈블리 P1-1 컴포넌트 계층·상태
+
+리드 브랜치(93a1a73) 병합 후 진행. 근거: Inventor 2026 도움말 A11 Place Components(첫 컴포넌트 자동 고정),
+A17 Restore DOF to grounded components, A56/A57 Visibility·Enabled, A60 Suppress
+(`https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/` + docs/ux/inventor-assembly-parity.md 출처 표의 파일명).
+
+- 모델: `gc_doc::Occurrence::{Item(AnyId) /* Body·Robot·Assembly */, Part{assembly, index}}`,
+  `ComponentFlag::{Grounded, Visible, Enabled, Suppressed}`. 상태는 `Timeline.components`(grounded·disabled·부품 hidden·부품 suppressed)에
+  저장. 바디·로봇·어셈블리의 가시성은 기존 `Look.hidden`, 어셈블리 억제는 기존 `Timeline.suppressed` 그대로(같은 API로 보임).
+- 첫 컴포넌트(바디·로봇·어셈블리 중 처음 추가된 것)는 자동 고정. 같은 명령 안이라 실행 취소하면 고정도 사라진다.
+- 명령: `Command::SetComponent{occurrence, flag, on}` — 실행 취소 1단계. 바디·로봇 억제는 아직 거부(BadValue: 장면·계획의 바디/로봇 반복이
+  여러 곳이라 별도 작업). 툴 occurrence는 조인트(P1-11)와 함께.
+- 질의: `Document::{components() -> Vec<ComponentNode>, component_flag, has_occurrence, parts_shown(assembly, for_obstacles)}`.
+  `ComponentNode{occurrence, parent, name, grounded, visible, enabled, suppressed}` — 평평한 목록, 부모가 먼저(프론트엔드가 트리로).
+- 효과: 숨긴 부품은 그리지 않지만 장애물로 남음, 억제한 부품은 둘 다 빠짐, 부모가 숨김/억제면 자식도. 고정은 어셈블리 구속(P1-9)이
+  쓸 상태(지금 기즈모 이동은 막지 않음). Enabled=false는 표시 쪽이 배경 스타일·선택 불가로 처리.
+- 세션 API(에이전트 도구로도 노출 가능, PLAN 9.8):
+  `session.components() -> Vec<gc_doc::ComponentNode>`,
+  `session.set_component(occurrence: gc_doc::Occurrence, flag: gc_doc::ComponentFlag, on: bool) -> Result<(), EditError>`.
+- 테스트: `gc_doc/tests/design.rs`(첫 고정·플래그별 undo·부모 상속·없는 부품 거부), `gc_persist/tests/components.rs`(저장→열기 동일).
+- 다음: 원점 폴더(P1-2) `component_origin(occurrence) -> {planes, axes, point}`, 스케치 P1 잔여, Mate/Flush/Insert·조인트.
+
 ## 2026-11-17 저녁 — 인벤터 스케치 P1 (BE 몫): 도구 API 합의와 Trim·Extend·Fillet
 
 프론트엔드와 합의한 도구 API(메시지로 합의, 여기 기록). UI가 `Prompt`·`SnapKind`·`GeoConstraint`·`Solid`를 빠짐없이 match하므로

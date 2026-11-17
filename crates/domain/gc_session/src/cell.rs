@@ -831,7 +831,8 @@ impl Session {
     ) -> Result<Vec<crate::assembly::ShownAssemblyPart>, String> {
         let assembly = self.doc.get(id).ok_or("the assembly no longer exists")?;
         let meshes = self.cell.assemblies.of(assembly)?;
-        Ok(crate::assembly::shown_parts(assembly, &pose_of(&assembly.placement), meshes))
+        let keep = self.doc.parts_shown(id, false);
+        Ok(crate::assembly::shown_parts(assembly, &pose_of(&assembly.placement), meshes, &keep))
     }
 
     /// Sets where the files robot descriptions refer to come from, and reloads the robots.

@@ -388,6 +388,24 @@ impl Session {
         self.doc.is_visible(item)
     }
 
+    /// The assembly tree: bodies, robots and imported assemblies, each followed by its parts, with their
+    /// grounded, visible, enabled and suppressed states (assembly P1-1).
+    pub fn components(&self) -> Vec<gc_doc::ComponentNode> {
+        self.doc.components()
+    }
+
+    /// Switches a state of a component (one undo step). Hidden parts are not drawn but stay obstacles;
+    /// suppressed parts are neither. Grounding takes effect with assembly constraints; disabled
+    /// components are for the display to draw in the background style and not pick.
+    pub fn set_component(
+        &mut self,
+        occurrence: gc_doc::Occurrence,
+        flag: gc_doc::ComponentFlag,
+        on: bool,
+    ) -> Result<(), EditError> {
+        self.execute(&Command::SetComponent { occurrence, flag, on }).map(|_| ())
+    }
+
     /// Suppresses a design item, waypoint or path, or brings it back (one undo step).
     pub fn set_suppressed(&mut self, item: gc_core::AnyId, suppressed: bool) -> Result<(), EditError> {
         self.execute(&Command::Cell(gc_doc::CellOp::SetSuppressed { item, suppressed })).map(|_| ())

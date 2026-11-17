@@ -640,7 +640,10 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
             if !body.solid.is_valid() {
                 return Err(EditError::BadValue);
             }
-            Ok((vec![Created::Body(txn.insert(body.clone()))], "Add body"))
+            let first = txn.doc().has_no_components();
+            let id = txn.insert(body.clone());
+            crate::tree::ground_if_first(txn, first, id.erase())?;
+            Ok((vec![Created::Body(id)], "Add body"))
         }
         CellOp::SetBody { id, body } => {
             placed(&body.placement)?;
@@ -659,7 +662,10 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
             if !finite(&robot.joints) || !(robot.max_acc.is_finite() && robot.max_acc > 0.0) {
                 return Err(EditError::BadValue);
             }
-            Ok((vec![Created::Robot(txn.insert(robot.clone()))], "Add robot"))
+            let first = txn.doc().has_no_components();
+            let id = txn.insert(robot.clone());
+            crate::tree::ground_if_first(txn, first, id.erase())?;
+            Ok((vec![Created::Robot(id)], "Add robot"))
         }
         CellOp::PlaceRobot { id, placement } => {
             placed(placement)?;
@@ -822,8 +828,10 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
             if !assembly.is_valid() {
                 return Err(EditError::BadValue);
             }
+            let first = txn.doc().has_no_components();
             let id = txn.insert(assembly.clone());
             place_new(txn, id.erase())?;
+            crate::tree::ground_if_first(txn, first, id.erase())?;
             Ok((vec![Created::Assembly(id)], "Import assembly"))
         }
         CellOp::PlaceAssembly { id, placement } => {
