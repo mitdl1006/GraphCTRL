@@ -99,3 +99,38 @@ fn a_sketch_on_a_part_face_follows_the_assembly() {
     assert!(session.create_sketch_on_face(id, 0, 0, 5).is_err());
     assert!(session.create_sketch_on_face(id, 3, 0, 0).is_err());
 }
+
+#[test]
+fn the_tree_wrappers_rename_hide_suppress_reorder_and_roll_back() {
+    let mut session = Session::new();
+    let sketch = session.create_sketch("XY").unwrap();
+    session.finish_sketch();
+    let Created::WorkFeature(plane) =
+        session.execute(&Command::Cell(CellOp::AddWorkFeature(offset_plane(0.2)))).unwrap()[0]
+    else {
+        panic!()
+    };
+    let (s, p) = (sketch.erase(), plane.erase());
+    session.rename(s, "Base").unwrap();
+    assert_eq!(session.doc().get(sketch).unwrap().name, "Base");
+    // Names are unique within a kind: another sketch cannot be "Base", a work plane can.
+    let other = session.create_sketch("XZ").unwrap();
+    session.finish_sketch();
+    assert!(matches!(session.rename(other.erase(), "Base"), Err(gc_doc::EditError::NameTaken)));
+    session.rename(p, "Base").unwrap();
+    session.execute(&Command::DeleteSketch { id: other }).unwrap();
+    session.set_visible(s, false).unwrap();
+    assert!(!session.is_visible(s));
+    session.set_suppressed(p, true).unwrap();
+    assert!(session.is_suppressed(p));
+    session.set_suppressed(p, false).unwrap();
+    assert_eq!(session.model_order(), vec![s, p]);
+    session.move_item(p, Some(s)).unwrap();
+    assert_eq!(session.model_order(), vec![p, s]);
+    session.set_rollback(Some(0)).unwrap();
+    assert_eq!(session.rollback_index(), Some(0));
+    assert!(session.is_suppressed(s), "after the marker");
+    session.set_rollback(None).unwrap();
+    assert!(session.set_rollback(Some(9)).is_err());
+    assert!(session.dependents_of(p).is_empty());
+}
