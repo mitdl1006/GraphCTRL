@@ -277,6 +277,13 @@ fn many_relationships(count: usize) -> String {
         geometry,
     };
     let origin = |p: gc_doc::OriginPlane| Geometry::origin(gc_doc::OriginElement::Plane(p));
+    // Five robots too: opening a project reads their descriptions again.
+    let urdf =
+        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../fixtures/urdf/six_axis.urdf"))
+            .expect("the six-axis fixture");
+    for k in 0..5 {
+        session.add_robot(&format!("Robot{}", k + 1), &urdf).unwrap();
+    }
     let mut bodies: Vec<gc_core::Id<gc_doc::Body>> = Vec::new();
     let (_, build_ms) = timed(|| {
         #[allow(clippy::cast_precision_loss, reason = "small counts")]
@@ -328,13 +335,23 @@ fn many_relationships(count: usize) -> String {
         deletes.push(timed(|| session.delete_relationship(id).unwrap()).1);
     }
     let (add, edit, delete) = (median(adds), median(edits), median(deletes));
+    // Saving and opening the whole cell.
+    let directory = tempfile::tempdir().expect("a temporary folder");
+    let file = directory.path().join("large.gctrl");
+    let (_, save_ms) = timed(|| session.save_as(&file).unwrap());
+    let size_kb = std::fs::metadata(&file).map_or(0, |m| m.len()) / 1024;
+    let mut reopened = Session::new();
+    let (_, open_ms) = timed(|| reopened.open(&file).unwrap());
+    assert_eq!(reopened.relationships().len(), relationships);
     format!(
-        "\n## Many relationships ({count} components, {relationships} relationships, islands of ten)\n\n\
+        "\n## Many relationships ({count} components and 5 robots, {relationships} relationships, islands of ten)\n\n\
          | step | time | budget | verdict |\n|---|---|---|---|\n\
          | building the cell (every addition solved) | {build_ms:.0} ms | — | — |\n\
          | one more relationship (median of 5) | {add:.2} ms | {PER_EDIT_MS} ms | {} |\n\
          | editing its offset | {edit:.2} ms | {PER_EDIT_MS} ms | {} |\n\
-         | deleting it | {delete:.2} ms | {PER_EDIT_MS} ms | {} |\n\n\
+         | deleting it | {delete:.2} ms | {PER_EDIT_MS} ms | {} |\n\
+         | saving the project ({size_kb} KiB) | {save_ms:.0} ms | — | — |\n\
+         | opening it | {open_ms:.0} ms | — | — |\n\n\
          The solver works island by island (components tied by relationships) and leaves satisfied islands\n\
          alone, so an edit re-solves only the island it touches.\n",
         verdict(add, PER_EDIT_MS),

@@ -1178,7 +1178,7 @@ fn sketch_op(
     Ok((created, label))
 }
 
-fn run(txn: &mut Txn<'_>, command: &Command) -> Result<(Vec<Created>, &'static str), EditError> {
+pub(crate) fn run(txn: &mut Txn<'_>, command: &Command) -> Result<(Vec<Created>, &'static str), EditError> {
     match command {
         Command::AddParam { name, source, angle } => {
             let taken = !name_free(txn.doc(), name, None);

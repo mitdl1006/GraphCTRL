@@ -548,6 +548,18 @@ pub enum CellOp {
     },
     /// Shows or hides the degrees-of-freedom symbol of every component (View tab, Degrees of Freedom).
     SetDofShownAll(bool),
+    /// A work frame on a component's origin plane in one step: a sketch on the plane and a frame at its
+    /// origin. The frame (and every waypoint in it) follows the component, as projected geometry does.
+    AddComponentFrame {
+        /// Name of the frame.
+        name: String,
+        /// Name of the sketch that holds its origin.
+        sketch: String,
+        /// The component (a body, robot, assembly, assembly part, robot link or tool).
+        occurrence: crate::design::Occurrence,
+        /// Which of its origin planes.
+        plane: crate::design::OriginPlane,
+    },
     /// Adds components to, or takes them out of, the contact set.
     SetContactSet {
         /// The components (bodies, robots, assemblies).
@@ -1242,6 +1254,35 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
         CellOp::SetDofShownAll(on) => {
             set_timeline(txn, |t| t.components.dof_all = *on)?;
             Ok((Vec::new(), "Degrees of freedom"))
+        }
+        CellOp::AddComponentFrame { name, sketch, occurrence, plane } => {
+            let source = crate::design::PlaneSource::Component { occurrence: *occurrence, plane: *plane };
+            let (mut created, _) =
+                crate::command::run(txn, &crate::Command::CreateSketchOn { name: sketch.clone(), source })?;
+            let Some(Created::Sketch(sketch)) = created.first().copied() else {
+                return Err(EditError::BadValue);
+            };
+            // The sketch's own origin point, fixed at the plane's origin.
+            let point = txn
+                .doc()
+                .get(sketch)
+                .and_then(|s| {
+                    s.points
+                        .iter()
+                        .find(|(_, p)| {
+                            matches!(
+                                p.kind,
+                                gc_sketch::PointKind::External(gc_sketch::ExternalRef::FrameOrigin(_))
+                            )
+                        })
+                        .map(|(id, _)| *id)
+                })
+                .ok_or(EditError::BadValue)?;
+            let frame =
+                WorkFrame { name: name.clone(), sketch, point, x_point: None, xy_point: None, rpy: [0.0; 3] };
+            frame_ok(txn, &frame)?;
+            created.push(Created::Frame(txn.insert(frame)));
+            Ok((created, "Work frame on component"))
         }
         CellOp::SetContactSolver(mode) => {
             set_timeline(txn, |t| t.components.contact_solver = *mode)?;

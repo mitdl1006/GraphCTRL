@@ -33,6 +33,18 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 로봇 셀: 설비에 붙은 로봇 · 설비 기준 웨이포인트(리드 ①②)
+
+- ① end-to-end(`gc_session/tests/robot_mount.rs`): 로봇을 받침대에 Mate 또는 Rigid 조인트로 붙이고 받침대를 옮기면(크기도 바꿈) 로봇 베이스가 즉시 따라가고,
+  `robot_base_frame`·InBase 웨이포인트가 함께 이동, InWorld 웨이포인트는 그대로, 그 IK는 새 베이스에서 풀려 TCP가 정확히 도달, 이전 계획은 Stale,
+  Undo 두 번이면 베이스·계획(Ready) 모두 원상. **코드 수정 불필요**(관계 settle이 Robot.placement를 바꾸고 IK·계획이 그 값을 씀).
+- ② 설비 기준 웨이포인트: 이미 연관됨 — 컴포넌트 원점 평면/부품 면 위 스케치 → 작업 좌표계 → `InFrame` 웨이포인트가 설비 이동·회전·구속을 따라감(투영과 같은 원리, 테스트).
+  한 번에 만들 수 있게 `session.add_component_frame(occurrence, OriginPlane) -> Id<WorkFrame>`(`CellOp::AddComponentFrame`, Undo 1단계, 링크·툴·부품 occurrence도 가능).
+  새 `WaypointTarget::InComponent` 변형은 만들지 않음 — `gc_panels`·`gc_agent`가 WaypointTarget/Reference를 빠짐없이 match해서 UI·앱 수정이 필요(원하면 리드 결정).
+  테스트 `gc_session/tests/component_frames.rs`.
+- ③ 큰 셀 저장/열기: `bench_scene` "Many relationships" 표에 행 추가(1000 컴포넌트 + 로봇 5대, 관계 1900개, 2.2 MiB): 저장 ~50 ms, 열기 ~7 ms(release).
+  개선 불필요로 판단. 메시 바디가 있으면 열기 뒤 메시는 잡으로 들어온다(화면 안 막음). 로봇이 많으면 열 때 URDF 재해석 비용이 로봇 수에 비례.
+
 ## 2026-11-18 — QA 버그 5건 · 관계가 많을 때의 속도
 
 - QA(eec466e) 버그 수정, `#[ignore]` 해제: read_step 중첩 256단 상한(스택 오버플로 중단 → `Unreadable`), 미러 비유한 평면 거부,
