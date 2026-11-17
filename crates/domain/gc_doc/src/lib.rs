@@ -22,6 +22,7 @@ mod project;
 mod relate;
 mod replicate;
 mod representation;
+mod sketch_offset;
 mod tree;
 mod txn;
 

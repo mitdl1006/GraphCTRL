@@ -166,6 +166,19 @@ pub enum SketchOp {
         /// Fitted: `angle` is the overall angle.
         fitted: bool,
     },
+    /// The sketch Offset command: copies of curves at a distance — whole loops by default (Loop Select),
+    /// held equidistant (Constrain Offset). Positive distances go outside a closed loop (circles grow),
+    /// or to the left of an open chain.
+    Offset {
+        /// The curves picked.
+        curves: Vec<Id<Curve>>,
+        /// Distance, metres (signed).
+        distance: f64,
+        /// Take the whole loops the picked curves belong to.
+        loop_select: bool,
+        /// Keep the offset at one distance from the original everywhere.
+        constrain: bool,
+    },
     /// The Center Point toggle on selected standalone points (curve ends and centres are refused).
     SetCenterPoint {
         /// The points.
@@ -1004,6 +1017,30 @@ fn push_cut(created: &mut Vec<Created>, cut: &gc_sketch::CutResult) {
 }
 
 /// Adds a constraint that the edit needs; refused or conflicting means the edit fails.
+/// Adds a constraint unless it is redundant or conflicting (then silently left out).
+pub(crate) fn try_constraint(
+    sketch: &mut Sketch,
+    ids: &mut IdAlloc,
+    constraint: GeoConstraint,
+    created: &mut Vec<Created>,
+) {
+    infer(sketch, ids, constraint, created);
+}
+
+/// A tangency between two curves as they lie now.
+pub(crate) fn tangency_of(sketch: &Sketch, a: Id<Curve>, b: Id<Curve>) -> Option<GeoConstraint> {
+    tangency(sketch, a, b)
+}
+
+pub(crate) fn require_constraint(
+    sketch: &mut Sketch,
+    ids: &mut IdAlloc,
+    constraint: GeoConstraint,
+    created: &mut Vec<Created>,
+) -> Result<(), EditError> {
+    require(sketch, ids, constraint, created)
+}
+
 fn require(
     sketch: &mut Sketch,
     ids: &mut IdAlloc,
@@ -1403,6 +1440,15 @@ fn sketch_op(
             }
             "Circular pattern"
         }
+        SketchOp::Offset { curves, distance, loop_select, constrain } => crate::sketch_offset::offset(
+            sketch,
+            ids,
+            curves,
+            *distance,
+            *loop_select,
+            *constrain,
+            &mut created,
+        )?,
         SketchOp::SetCenterPoint { points, center } => {
             let owned: std::collections::BTreeSet<Id<SkPoint>> =
                 sketch.curves.values().flat_map(gc_sketch::Curve::points).collect();
