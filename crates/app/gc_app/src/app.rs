@@ -255,6 +255,8 @@ pub struct GraphCtrlApp {
     drive: crate::drive::Drive,
     /// The Constrain dialog.
     constrain: crate::constrain::Constrain,
+    /// The Joint dialog.
+    joint: crate::constrain::Joint,
     /// The Parameters dialog.
     parameters: crate::parameters::Parameters,
     expression: String,
@@ -342,6 +344,7 @@ impl GraphCtrlApp {
             interference: crate::interference::Interference::default(),
             drive: crate::drive::Drive::default(),
             constrain: crate::constrain::Constrain::default(),
+            joint: crate::constrain::Joint::default(),
             parameters: crate::parameters::Parameters::default(),
             expression: String::new(),
             ime: ImeTest { dimension: "25 mm".to_owned(), ..ImeTest::default() },
@@ -373,6 +376,12 @@ impl GraphCtrlApp {
     #[doc(hidden)]
     pub fn drive_end_for_test(&mut self, end: f64) {
         self.drive.set_end(end);
+    }
+
+    /// Opens the Drive dialog for an assembly relationship (Inventor: right-click it in the browser >
+    /// Drive). The browser's relationship menu calls this.
+    pub fn drive_relationship(&mut self, id: gc_core::Id<gc_doc::Relationship>) {
+        self.drive.start_relationship(&mut self.session, id);
     }
 
     /// Closes the Drive dialog as its close button does, for tests.
@@ -647,6 +656,8 @@ impl GraphCtrlApp {
                     self.session.redo();
                 }
                 egui::Key::F6 => self.viewport.look(StandardView::Iso),
+                // J starts the Joint command, as in Inventor (outside sketches, where J is free).
+                egui::Key::J if !command && !sketching => self.joint.start(),
                 egui::Key::L | egui::Key::C | egui::Key::A | egui::Key::R | egui::Key::D if !command => {
                     let (tool, name) = match key {
                         egui::Key::L => (ToolKind::Line, "L"),
@@ -961,6 +972,7 @@ impl eframe::App for GraphCtrlApp {
             Some(ribbon::RibbonAction::StartInterference) => self.interference.start(&self.session),
             Some(ribbon::RibbonAction::StartDrive) => self.drive.start(&mut self.session),
             Some(ribbon::RibbonAction::StartConstrain) => self.constrain.start(),
+            Some(ribbon::RibbonAction::StartJoint) => self.joint.start(),
             Some(ribbon::RibbonAction::StartParameters) => self.parameters.open = true,
             Some(ribbon::RibbonAction::ProjectCutEdges) => {
                 self.notice = Some(match crate::cut_edges::project_cut_edges(&mut self.session) {
@@ -1143,9 +1155,16 @@ impl eframe::App for GraphCtrlApp {
             None => {}
         }
         // The Constrain dialog picks origin planes, axes and points in the view.
-        self.viewport.constrain_mode = self.constrain.picking();
+        self.viewport.constrain_mode = self.constrain.picking() || self.joint.open;
         if let Some((occurrence, element)) = self.viewport.take_constrain_pick() {
-            self.constrain.pick(&self.session, occurrence, element);
+            if self.joint.open {
+                self.joint.pick(occurrence, element);
+            } else {
+                self.constrain.pick(&self.session, occurrence, element);
+            }
+        }
+        if self.joint.open {
+            self.joint.window(&ctx, &mut self.session, lang);
         }
         if self.constrain.open {
             self.constrain.window(&ctx, &mut self.session, lang);

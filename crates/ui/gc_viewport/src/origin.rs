@@ -23,7 +23,18 @@ pub(crate) fn visible(
     all: bool,
 ) -> Vec<(Occurrence, ComponentOrigin, Vec<OriginElement>)> {
     let mut found = Vec::new();
-    for node in session.components() {
+    // The links of robots are components of their own, below the robot.
+    let mut nodes = session.components();
+    let links: Vec<gc_doc::ComponentNode> = nodes
+        .iter()
+        .filter_map(|node| match node.occurrence {
+            Occurrence::Item(any) => any.downcast::<gc_doc::Robot>(),
+            _ => None,
+        })
+        .flat_map(|robot| session.robot_links(robot))
+        .collect();
+    nodes.extend(links);
+    for node in nodes {
         let shown: Vec<OriginElement> = ALL
             .iter()
             .copied()

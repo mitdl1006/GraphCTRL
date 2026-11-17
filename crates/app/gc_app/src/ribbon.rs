@@ -66,6 +66,8 @@ pub(crate) enum RibbonAction {
     StartDrive,
     /// Open the Constrain dialog.
     StartConstrain,
+    /// Open the Joint dialog.
+    StartJoint,
     /// Open the parameters dialog.
     StartParameters,
     /// Project the edges the sketch plane cuts into the active sketch.
@@ -312,6 +314,9 @@ fn robot_tab(
     ribbon_group(ui, tr!(lang, GroupRelationships), |ui| {
         if ribbon_button(ui, Icon::Frame, tr!(lang, ConstrainTitle), false, true).clicked() {
             action = Some(RibbonAction::StartConstrain);
+        }
+        if ribbon_button(ui, Icon::Orbit, tr!(lang, JointTitle), false, true).clicked() {
+            action = Some(RibbonAction::StartJoint);
         }
         if ribbon_button(ui, Icon::Play, tr!(lang, MenuDrive), false, robot.is_some()).clicked() {
             action = Some(RibbonAction::StartDrive);
