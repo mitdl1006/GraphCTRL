@@ -191,9 +191,7 @@ fn goals_of(scene: &RobotScene, fixture: &Fixture, space: &Space) -> Vec<Vec<f64
         (None, None) => Vec::new(),
     };
     goals.retain(|q| scene.state_problem(q).is_none());
-    goals.sort_by(|a, b| space.distance(&fixture.start, a).total_cmp(&space.distance(&fixture.start, b)));
-    goals.truncate(8);
-    goals
+    gc_motion::rank_goals(space, &fixture.start, goals)
 }
 
 /// The outcome of one planner run.
@@ -235,7 +233,40 @@ fn run_once(
     let goals = goals.as_slice();
     let options =
         Options { max_state_checks: budget, max_iterations: budget.saturating_mul(10), ..Options::default() };
-    let request = Request { space, start, goals, algorithm, options, seed };
+    // As in the motion pipeline: the goals about as near as the nearest first, all of them if that fails.
+    let near = gc_motion::near_goals(space, start, goals);
+    let plan_tiered = || {
+        // With two tiers each gets half of the budget.
+        let options = if near.len() < goals.len() {
+            Options {
+                max_state_checks: budget / 2,
+                max_iterations: budget.saturating_mul(5),
+                ..Options::default()
+            }
+        } else {
+            options
+        };
+        let first =
+            plan(&Request { space, start, goals: &near, algorithm, options, seed }, &checker, &NeverCancel);
+        match first {
+            Err(gc_plan::Failure::NoPath { stats, .. }) if near.len() < goals.len() => {
+                match plan(&Request { space, start, goals, algorithm, options, seed }, &checker, &NeverCancel)
+                {
+                    Ok(mut s) => {
+                        s.stats.state_checks += stats.state_checks;
+                        Ok(s)
+                    }
+                    Err(gc_plan::Failure::NoPath { stats: more, nearest_goal_distance }) => {
+                        let mut total = stats;
+                        total.state_checks += more.state_checks;
+                        Err(gc_plan::Failure::NoPath { stats: total, nearest_goal_distance })
+                    }
+                    Err(other) => Err(other),
+                }
+            }
+            other => other,
+        }
+    };
     let clock = Instant::now();
     // As in the motion pipeline: the straight move to the nearest goal is taken at once; a straight move
     // to a goal further away only competes on length with the planner.
@@ -250,7 +281,7 @@ fn run_once(
     }
     let planned = match &straight {
         Some(line) if line[1] == goals[0] => Ok((line.clone(), straight_checks)),
-        _ => match plan(&request, &checker, &NeverCancel) {
+        _ => match plan_tiered() {
             Ok(solution) => {
                 let checks = solution.stats.state_checks + straight_checks;
                 let mut path = solution.path;

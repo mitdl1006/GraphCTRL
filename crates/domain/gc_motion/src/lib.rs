@@ -402,15 +402,48 @@ fn attempt(
     if !nearest_is_straight {
         for run in 0..request.runs {
             let seed = request.seed.wrapping_add(run as u64);
-            let planned = Request {
-                space,
-                start: &request.start,
-                goals: &goals,
-                algorithm: request.algorithm,
-                options: request.options,
-                seed,
+            // The goals about as near as the nearest first; all of them only when none of those is
+            // reached (a multi-goal planner otherwise ends at whichever goal it meets first, often a
+            // far configuration).
+            let near = near_goals(space, &request.start, &goals);
+            let mut outcome =
+                Err(Failure::NoPath { stats: Stats::default(), nearest_goal_distance: f64::INFINITY });
+            let tiers: Vec<&[Vec<f64>]> =
+                if near.len() < goals.len() { vec![&near, &goals] } else { vec![&goals] };
+            // With two tiers each gets half of the budget, so a run never exceeds it.
+            let options = if tiers.len() > 1 {
+                Options {
+                    max_iterations: request.options.max_iterations / 2,
+                    max_state_checks: request.options.max_state_checks / 2,
+                    ..request.options
+                }
+            } else {
+                request.options
             };
-            match run_planner(&planned, planner, &checker, control) {
+            for tier in tiers {
+                let planned = Request {
+                    space,
+                    start: &request.start,
+                    goals: tier,
+                    algorithm: request.algorithm,
+                    options,
+                    seed,
+                };
+                let previous = match &outcome {
+                    Err(Failure::NoPath { stats, .. }) => *stats,
+                    _ => Stats::default(),
+                };
+                outcome = run_planner(&planned, planner, &checker, control);
+                match &mut outcome {
+                    Ok(solution) => {
+                        add(&mut solution.stats, &previous);
+                        break;
+                    }
+                    Err(Failure::NoPath { stats, .. }) => add(stats, &previous),
+                    Err(_) => break,
+                }
+            }
+            match outcome {
                 Ok(solution) => {
                     add(&mut stats, &solution.stats);
                     let mut path = solution.path;
@@ -750,7 +783,47 @@ fn add(total: &mut Stats, run: &Stats) {
     total.nodes += run.nodes;
 }
 
-/// The valid goal configurations, nearest to the start first. With `prefer`, the configuration in the
+/// Orders goal configurations as plan 5.8 asks: per IK branch (configurations that differ only by whole
+/// turns of joints) the variant nearest to the start, by distance plus a small penalty for joints beyond
+/// half a turn (so that goals do not drift towards ±2π); then the other turn variants in the same order;
+/// at most eight. Ties keep the given order. Used by the motion pipeline and the quality bench.
+pub fn rank_goals(space: &Space, start: &[f64], candidates: Vec<Vec<f64>>) -> Vec<Vec<f64>> {
+    let score = |q: &[f64]| {
+        space.distance(start, q)
+            + 0.1 * q.iter().map(|v| (v.abs() - std::f64::consts::PI).max(0.0)).sum::<f64>()
+    };
+    let mut ordered: Vec<(f64, Vec<f64>)> = candidates.into_iter().map(|q| (score(&q), q)).collect();
+    ordered.sort_by(|a, b| a.0.total_cmp(&b.0));
+    // The branch of a configuration: every joint brought into (-π, π], to the milliradian.
+    let branch = |q: &[f64]| -> Vec<i64> {
+        q.iter()
+            .map(|v| {
+                let wrapped = v - std::f64::consts::TAU * (v / std::f64::consts::TAU).round();
+                #[allow(clippy::cast_possible_truncation, reason = "a joint angle in milliradians")]
+                let key = (wrapped * 1e3).round() as i64;
+                // -π and π are the same angle.
+                if key == -3142 { 3142 } else { key }
+            })
+            .collect()
+    };
+    let mut seen = std::collections::BTreeSet::new();
+    let (mut first, mut rest) = (Vec::new(), Vec::new());
+    for (_, q) in ordered {
+        if seen.insert(branch(&q)) { first.push(q) } else { rest.push(q) }
+    }
+    first.extend(rest);
+    first.truncate(8);
+    first
+}
+
+/// The goals worth planning to first: those at most twice as far from the start as the nearest one (in
+/// the given order). Used by the motion pipeline and the quality bench.
+pub fn near_goals(space: &Space, start: &[f64], goals: &[Vec<f64>]) -> Vec<Vec<f64>> {
+    let nearest = goals.iter().map(|g| space.distance(start, g)).fold(f64::INFINITY, f64::min);
+    goals.iter().filter(|g| space.distance(start, g) <= 2.0 * nearest + 1e-9).cloned().collect()
+}
+
+/// The valid goal configurations, ranked by [`rank_goals`]. With `prefer`, the configuration in the
 /// same IK branch and turn as `prefer` (nearest to it, every joint within half a radian) comes first.
 fn resolve_goals(
     scene: &RobotScene,
@@ -796,7 +869,7 @@ fn resolve_goals(
     if valid.is_empty() {
         return Err(MotionError::GoalInvalid(problem.unwrap_or(StateProblem::Unknown)));
     }
-    valid.sort_by(|a, b| space.distance(&request.start, a).total_cmp(&space.distance(&request.start, b)));
+    let mut valid = rank_goals(space, &request.start, valid);
     if let Some(prefer) = prefer.filter(|p| p.len() == chain.dof()) {
         let apart = |q: &[f64]| q.iter().zip(prefer).fold(0.0_f64, |acc, (a, b)| acc.max((a - b).abs()));
         let same_branch = (0..valid.len())
