@@ -165,3 +165,25 @@ fn drive_plays_a_relationship_through_values_without_changing_the_document() {
     session.set_relationship(hinge, rigid).unwrap();
     assert!(session.drive_relationship(hinge, 1.0).is_err());
 }
+
+#[test]
+fn suppressed_bodies_and_robots_are_kept_but_not_drawn_checked_or_planned() {
+    use gc_doc::ComponentFlag;
+    let mut session = Session::new();
+    let robot = session.add_robot("Robot1", &six_axis()).unwrap();
+    let body = session
+        .add_body(Solid::Box { size: [0.2; 3] }, Placement { xyz: [0.5, 0.0, 0.2], rpy: [0.0; 3] })
+        .unwrap();
+    let as_item = |id: gc_core::AnyId| Occurrence::Item(id);
+    session.set_component(as_item(body.erase()), ComponentFlag::Suppressed, true).unwrap();
+    assert!(session.shown_body(body).is_none(), "not drawn");
+    assert!(session.doc().get(body).is_some(), "kept");
+    session.set_component(as_item(robot.erase()), ComponentFlag::Suppressed, true).unwrap();
+    assert!(session.link_poses(robot).is_none(), "not drawn");
+    assert!(session.components().iter().all(|n| n.occurrence != as_item(robot.erase()) || n.suppressed));
+    // One undo step each.
+    session.undo();
+    assert!(session.link_poses(robot).is_some());
+    session.undo();
+    assert!(session.shown_body(body).is_some());
+}

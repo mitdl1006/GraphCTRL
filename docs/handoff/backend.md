@@ -1,5 +1,13 @@
 # 백엔드 인계 (2026-11-17)
 
+## 2026-11-18 — 바디·로봇 억제(리드 순서 ⑤)
+
+- `session.set_component(Occurrence::Item(body|robot), ComponentFlag::Suppressed, on)` 이제 허용(한 undo 단계, 저장). 억제된 바디:
+  `shown_body` = None(그리지 않음·선택 안 됨), 장애물·계획·지문에서 빠짐. 억제된 로봇: `link_poses`/`tcp_pose` = None(그리지 않음),
+  `plan`은 NotPlanned. 문서에는 그대로 남는다. `Document::is_component_suppressed(item)`.
+- 근거: 원문 A60(억제 요소는 그래픽에 없고 갱신 때 계산되지 않음) — 명세 표 인용.
+- 테스트 `gc_session/tests/robot_links.rs::suppressed_bodies_and_robots_are_kept_but_not_drawn_checked_or_planned`.
+
 ## 2026-11-18 — 어셈블리 P1-6 Project Cut Edges(원문대로 스냅샷)
 
 - `session.project_cut_edges(occurrence, shift) -> Result<usize, EditError>`: 편집 중인 2D 스케치의 평면이 바디(상자·원통·구·메시)·
