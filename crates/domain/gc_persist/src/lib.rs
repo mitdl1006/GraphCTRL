@@ -317,6 +317,7 @@ mod tests {
             max_acc: 5.0,
             look: Default::default(),
             tool: None,
+            acm_overrides: Vec::new(),
         };
         let Created::Robot(robot) = cell(&mut doc, CellOp::AddRobot(robot))[0] else { panic!("no robot") };
         let target = WaypointTarget::SketchPoint { sketch, point: a };
@@ -332,6 +333,7 @@ mod tests {
             planner: "rrt_connect".into(),
             seed: 7,
             tcp_speed: None,
+            contacts: Vec::new(),
         };
         cell(&mut doc, CellOp::AddPath(path));
         doc

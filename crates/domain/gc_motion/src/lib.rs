@@ -24,7 +24,9 @@ use gc_robot::{IkOptions, NumericIk};
 use gc_robotics_api::IkFailureReason;
 use gc_traj::{Limits, TimingError, Trajectory, Validated, ValidationError};
 
-pub use scene::{Checker, ContactAllowance, ContactScope, Obstacle, RobotScene, StateProblem};
+pub use scene::{
+    Checker, ContactAllowance, ContactScope, LinkPair, Obstacle, PairReason, RobotScene, StateProblem,
+};
 pub use sphere::{SpherePlan, SphereRequest, plan_sphere};
 
 /// How far a blend may leave the corner it rounds, as a distance in joint space (radians for an arm).

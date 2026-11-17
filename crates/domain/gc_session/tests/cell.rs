@@ -1007,3 +1007,49 @@ fn robots_come_from_the_library_and_projects_refer_to_it() {
     reopened.open(&file).unwrap();
     assert!(reopened.robot_model(robot).is_some());
 }
+
+#[test]
+fn link_pairs_can_be_listed_and_switched_and_plans_carry_a_guarantee() {
+    use gc_motion::PairReason;
+    let mut session = Session::new();
+    let robot = session.add_robot("Robot1", &six_axis()).unwrap();
+    let pairs = session.link_pairs(robot).unwrap();
+    assert!(pairs.iter().any(|p| p.reason == PairReason::Adjacent && !p.checked));
+    let checked = pairs.iter().find(|p| p.reason == PairReason::Checked).unwrap().clone();
+    assert!(checked.checked);
+
+    // Switching a pair off is a document edit (undoable) that shows in the list.
+    session.set_pair_checked(robot, &checked.b, &checked.a, false).unwrap();
+    let now = session.link_pairs(robot).unwrap();
+    assert!(!now.iter().find(|p| p.a == checked.a && p.b == checked.b).unwrap().checked);
+    assert_eq!(session.doc().get(robot).unwrap().acm_overrides.len(), 1);
+    // Back to what the description implies: the override goes.
+    session.set_pair_checked(robot, &checked.a, &checked.b, true).unwrap();
+    assert!(session.doc().get(robot).unwrap().acm_overrides.is_empty());
+    assert!(session.set_pair_checked(robot, "no_such_link", &checked.b, true).is_err());
+
+    // A plan carries its guarantee; a pair choice makes it stale.
+    session.jog(robot, &RIGHT);
+    session.end_jog();
+    let there = session.add_waypoint_here(robot).unwrap();
+    session.jog(robot, &LEFT);
+    session.end_jog();
+    let path = session.add_path(robot, vec![there]).unwrap();
+    assert_eq!(session.plan(path), PlanStatus::Ready, "{:?}", session.plan_error(path));
+    let guarantee = session.planned(path).unwrap().guarantee().unwrap();
+    assert_eq!(guarantee.padding_nominal, gc_session::PADDING);
+    assert!(guarantee.holds_between_states());
+    session.set_pair_checked(robot, &checked.a, &checked.b, false).unwrap();
+    assert_eq!(session.plan_status(path), PlanStatus::Stale);
+
+    // A contact allowance is stored with the path and makes the plan stale too.
+    session.plan(path);
+    let body = session
+        .add_body(Solid::Box { size: [0.05, 0.05, 0.05] }, Placement { xyz: [0.0, 0.9, 0.0], rpy: [0.0; 3] })
+        .unwrap();
+    session.plan(path);
+    session.allow_contact(path, 0, "tool0", body).unwrap();
+    assert_eq!(session.doc().get(path).unwrap().contacts.len(), 1);
+    assert_eq!(session.plan_status(path), PlanStatus::Stale);
+    assert!(session.allow_contact(path, 5, "tool0", body).is_err(), "no waypoint at position 5");
+}

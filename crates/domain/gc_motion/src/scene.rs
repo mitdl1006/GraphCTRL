@@ -127,6 +127,32 @@ pub struct RobotScene {
     movers: Vec<(usize, bool, Vec<usize>)>,
     /// Contact allowances in force.
     contacts: Vec<Contact>,
+    /// Link pairs excluded from checking by default, and why.
+    exclusions: Vec<(BodyId, BodyId, PairReason)>,
+}
+
+/// Why a pair of robot links is or is not checked by default.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PairReason {
+    /// Joined by a joint: not checked.
+    Adjacent,
+    /// Touching in the zero configuration, so designed to: not checked.
+    TouchingAtZero,
+    /// Checked.
+    Checked,
+}
+
+/// A pair of robot links and how it is checked ([`RobotScene::link_pairs`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LinkPair {
+    /// One link.
+    pub a: String,
+    /// The other link (`a < b`).
+    pub b: String,
+    /// What the description implies.
+    pub reason: PairReason,
+    /// Whether the pair is checked now, after the user's choices.
+    pub checked: bool,
 }
 
 impl RobotScene {
@@ -205,9 +231,11 @@ impl RobotScene {
                 Some(world.add_body(&link.name, true, padding, &shapes)?)
             });
         }
+        let mut exclusions = Vec::new();
         for joint in &model.joints {
             if let (Some(a), Some(b)) = (link_bodies[joint.parent], link_bodies[joint.child]) {
                 world.allow(a, b);
+                exclusions.push((a, b, PairReason::Adjacent));
             }
         }
         // Links that no chain joint moves (the base, typically) keep their distance to every obstacle
@@ -272,6 +300,7 @@ impl RobotScene {
             link_radius,
             movers,
             contacts: Vec::new(),
+            exclusions,
         };
         // Links that touch in the zero configuration are designed to: they are not checked either.
         scene.place(&vec![0.0; scene.chain.dof()]);
@@ -280,6 +309,7 @@ impl RobotScene {
             for b in &bodies[i + 1..] {
                 if !scene.world.is_allowed(*a, *b) && scene.world.proximity(*a, *b)? == Proximity::Colliding {
                     scene.world.allow(*a, *b);
+                    scene.exclusions.push((*a, *b, PairReason::TouchingAtZero));
                 }
             }
         }
@@ -439,6 +469,48 @@ impl RobotScene {
             });
         }
         (self, unknown)
+    }
+
+    /// Every pair of robot links with collision geometry: why it is or is not checked by default, and
+    /// whether it is checked now. Sorted by name.
+    pub fn link_pairs(&self) -> Vec<LinkPair> {
+        let bodies: Vec<BodyId> = self.link_bodies.iter().flatten().copied().collect();
+        let mut pairs = Vec::new();
+        for (i, a) in bodies.iter().enumerate() {
+            for b in &bodies[i + 1..] {
+                let reason = self
+                    .exclusions
+                    .iter()
+                    .find(|(x, y, _)| (x == a && y == b) || (x == b && y == a))
+                    .map_or(PairReason::Checked, |(_, _, reason)| *reason);
+                let (na, nb) = (self.world.name(*a).to_owned(), self.world.name(*b).to_owned());
+                let (na, nb) = if na <= nb { (na, nb) } else { (nb, na) };
+                pairs.push(LinkPair { a: na, b: nb, reason, checked: !self.world.is_allowed(*a, *b) });
+            }
+        }
+        pairs.sort_by(|x, y| (&x.a, &x.b).cmp(&(&y.a, &y.b)));
+        pairs
+    }
+
+    /// The scene with the user's choices for link pairs: `(a, b, true)` checks a pair excluded by default,
+    /// `(a, b, false)` stops checking one. Names that are not links with geometry are ignored.
+    #[must_use]
+    pub fn with_pair_choices(mut self, choices: &[(String, String, bool)]) -> Self {
+        let link = |scene: &Self, name: &str| {
+            scene.world.find(name).filter(|body| scene.link_bodies.contains(&Some(*body)))
+        };
+        for (a, b, check) in choices {
+            if let (Some(x), Some(y)) = (link(&self, a), link(&self, b))
+                && x != y
+            {
+                if *check {
+                    self.world.disallow(x, y);
+                } else {
+                    self.world.allow(x, y);
+                }
+            }
+        }
+        self
     }
 
     /// True when contact allowances are in force: some pairs are then checked without padding somewhere.
