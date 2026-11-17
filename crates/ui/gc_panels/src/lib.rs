@@ -36,6 +36,8 @@ pub enum BrowserAction {
     OriginSelect(Option<(gc_doc::Occurrence, gc_doc::OriginElement)>),
     /// Start a sketch on an origin plane of a component.
     SketchOnComponent(gc_doc::Occurrence, gc_doc::OriginPlane),
+    /// Drive an assembly relationship (the Drive dialog).
+    DriveRelationship(gc_core::Id<gc_doc::Relationship>),
 }
 
 /// What is typed into the parameter editor of the browser.
@@ -186,6 +188,20 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
                             status == RelationStatus::Sick,
                         );
                     }
+                    // A rigid joint has nothing to drive.
+                    let drivable = !matches!(relationship.kind, gc_doc::RelationKind::Rigid { .. });
+                    result.row.context_menu(|ui| {
+                        if ui.add_enabled(drivable, egui::Button::new(tr!(lang, MenuDrive))).clicked() {
+                            action = Some(BrowserAction::DriveRelationship(id));
+                            ui.close();
+                        }
+                        if ui.button(delete.as_str()).clicked() {
+                            action = Some(BrowserAction::Edit(Box::new(gc_doc::Command::Cell(
+                                gc_doc::CellOp::DeleteRelationship(id),
+                            ))));
+                            ui.close();
+                        }
+                    });
                     if result.deleted {
                         action = Some(BrowserAction::Edit(Box::new(gc_doc::Command::Cell(
                             gc_doc::CellOp::DeleteRelationship(id),

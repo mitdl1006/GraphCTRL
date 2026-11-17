@@ -46,6 +46,8 @@
 
 - Free Move / Free Rotate(어셈블리 #13): 마킹 메뉴의 "컴포넌트 이동"·"컴포넌트 회전"이 도구를 켜고(`Viewport::free_tool`), 왼쪽 드래그가 바디·로봇을 뷰 평면에서 옮기거나(광선과 컴포넌트를 지나는 뷰 평면의 교점 차이) 자기 원점 기준으로 돌림(화면 가로·세로 드래그 = 카메라 up·right 축 회전, 픽셀당 0.01 rad), 드래그 한 번이 실행 취소 한 단계, Esc로 종료(`gc_viewport/src/freemove.rs`). 근거: `docs/ux/inventor-assembly-parity.md`의 A12/A13 요약만(도움말 원문 확인 못 함). 원문과 다른 점·미구현: 3D 회전 기호(내부/상하/좌우/테두리), 구속된 컴포넌트의 Update 복귀(드래그 후 구속 위치로 돌아가기), 접지 컴포넌트 이동 막기, 설비·부품 occurrence 드래그, 리본 버튼. 테스트 `free_move_and_free_rotate_drag_a_component`.
 
+- 관계 구동 연결(리드 요청): 브라우저 "관계" 폴더의 구속/조인트 노드 우클릭 메뉴에 "구동"(강체 조인트는 비활성)과 삭제, 선택하면 `drive.start_relationship`. 리본 관계 그룹의 구동 버튼은 로봇이 없어도 관계가 있으면 활성이고, 로봇이 없으면 첫 번째 구동 가능한 관계를 엶. 마킹 메뉴 overflow에는 넣지 않음. 테스트 `a_relationship_is_driven_from_the_browser`(메뉴 항목이 눌리는 것까지만 확인, 구동 동작 자체는 리드의 구동 테스트).
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹
