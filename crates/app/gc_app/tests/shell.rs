@@ -206,7 +206,46 @@ fn a_robot_path_is_planned_through_the_ribbon() {
     assert_eq!(session.plan_status(path), gc_session::PlanStatus::Ready, "{:?}", session.plan_error(path));
     assert!(!session.planned(path).unwrap().segments[0].straight, "the box is in the way");
     harness.get_by_label("Path1 (계획됨)");
+    harness.get_by_label("Path1 (계획됨)");
     assert!(harness.query_all_by_label("joint_1").count() >= 1, "the jog sliders are shown");
+    // The result card states what the checks guarantee, and the ACM list can be edited.
+    assert!(
+        harness.query_by_label_contains("검사 간격").is_some()
+            || harness.query_by_label_contains("검사한 상태에서만").is_some()
+    );
+    harness.get_by_label("제외: 검사하지 않는 쌍(ACM), 닫힌 메시 안에서 시작한 바디, 컨트롤러 추종 오차");
+    harness.get_by_label("충돌 검사 쌍(ACM)").click();
+    harness.run();
+    let pair = harness
+        .state()
+        .session
+        .link_pairs(harness.state().session.doc().robots().iter().next().unwrap().0)
+        .unwrap();
+    let checked = pair.iter().find(|p| p.checked).unwrap();
+    harness.get_by_label(&format!("{} - {}", checked.a, checked.b)).click();
+    harness.run();
+    harness.get_by_label("Path1 (오래됨(다시 계획 필요))");
+    harness.get_by_label(&format!("{} - {}", checked.a, checked.b)).click();
+    harness.run();
+    harness.get_by_label("Path1 (계획됨)");
+    harness.get_by_label("접촉 허용 추가").scroll_to_me();
+    harness.run();
+    harness.get_by_label("접촉 허용 추가").click();
+    harness.run();
+    let path_id = harness.state().session.doc().paths().iter().next().unwrap().0;
+    assert_eq!(
+        harness.state().session.doc().get(path_id).unwrap().contacts.len(),
+        1,
+        "{:?}",
+        harness.state().session.last_error()
+    );
+    harness.get_by_label("Path1 (오래됨(다시 계획 필요))");
+    harness.get_by_label(&format!("{} 삭제", "1번째 이동: base_link - Body1")).click();
+    harness.run();
+    assert!(harness.state().session.doc().get(path_id).unwrap().contacts.is_empty());
+    harness.get_by_label("계획").click();
+    harness.run();
+    harness.get_by_label("Path1 (계획됨)");
 
     // Jogged into the box, the panel says what collides; back out, the message is gone.
     let app = harness.state_mut();
@@ -1735,4 +1774,21 @@ fn the_performance_overlay_is_switched_in_the_tools_menu() {
         std::fs::create_dir_all(&out).unwrap();
         harness.render().unwrap().save(out.join("review-28-perf-overlay.png")).unwrap();
     }
+}
+
+/// Help > Log shows what was logged.
+#[test]
+fn the_log_window_shows_the_log() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    gc_app::install_diagnostics(None);
+    log::info!("a line for the log window");
+    harness.get_by_label("도움말").click();
+    harness.run();
+    harness.get_by_label("로그").click();
+    harness.run();
+    assert!(harness.query_by_label_contains("a line for the log window").is_some());
 }

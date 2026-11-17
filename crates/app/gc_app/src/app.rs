@@ -247,6 +247,8 @@ pub struct GraphCtrlApp {
     ime: ImeTest,
     /// Whether the licence notices window is open.
     notices: bool,
+    /// Whether the log window is open.
+    log_open: bool,
     /// Whether the about window is open.
     about: bool,
     /// The pose calculator, when its window is open.
@@ -305,6 +307,7 @@ impl GraphCtrlApp {
             expression: String::new(),
             ime: ImeTest { dimension: "25 mm".to_owned(), ..ImeTest::default() },
             notices: false,
+            log_open: false,
             about: false,
             pose_calc: None,
             dialogs: Box::new(NativeDialogs),
@@ -647,6 +650,9 @@ impl GraphCtrlApp {
                 if ui.button(tr!(lang, MenuAbout)).clicked() {
                     self.about = true;
                 }
+                if ui.button(tr!(lang, MenuLog)).clicked() {
+                    self.log_open = true;
+                }
                 if ui.button(tr!(lang, MenuLicences)).clicked() {
                     self.notices = true;
                 }
@@ -733,6 +739,22 @@ impl GraphCtrlApp {
 
     /// The licences of what ships with the application: its own, the bundled font's and the UR robot
     /// descriptions'.
+    /// Help > Log: the last lines of the log, newest at the bottom.
+    fn log_window(&mut self, ctx: &egui::Context) {
+        let mut open = self.log_open;
+        egui::Window::new(tr!(self.lang, MenuLog)).open(&mut open).default_size([640.0, 360.0]).show(
+            ctx,
+            |ui| {
+                egui::ScrollArea::both().stick_to_bottom(true).auto_shrink([false, false]).show(ui, |ui| {
+                    for line in crate::diagnostics::recent_log() {
+                        ui.label(egui::RichText::new(line).monospace().size(11.5));
+                    }
+                });
+            },
+        );
+        self.log_open = open;
+    }
+
     fn notices_window(&mut self, ctx: &egui::Context) {
         let mut open = self.notices;
         egui::Window::new(tr!(self.lang, MenuLicences)).open(&mut open).default_size([560.0, 480.0]).show(
@@ -909,6 +931,9 @@ impl eframe::App for GraphCtrlApp {
         if self.notices {
             self.notices_window(&ctx);
         }
+        if self.log_open {
+            self.log_window(&ctx);
+        }
         if self.about {
             self.about_window(&ctx);
         }
@@ -938,13 +963,16 @@ impl eframe::App for GraphCtrlApp {
 
 /// Runs the desktop application until the window closes.
 pub fn run(options: RunOptions) -> anyhow::Result<()> {
-    let native = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("GraphCTRL")
-            .with_inner_size([1440.0, 900.0])
-            .with_min_inner_size([960.0, 600.0]),
-        ..Default::default()
-    };
+    crate::diagnostics::install_diagnostics(options.settings_dir.as_deref());
+    log::info!("GraphCTRL {} starts", env!("CARGO_PKG_VERSION"));
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_title("GraphCTRL")
+        .with_inner_size([1440.0, 900.0])
+        .with_min_inner_size([960.0, 600.0]);
+    if let Some(icon) = crate::diagnostics::window_icon() {
+        viewport = viewport.with_icon(icon);
+    }
+    let native = eframe::NativeOptions { viewport, ..Default::default() };
     eframe::run_native("graphctrl", native, Box::new(move |cc| Ok(Box::new(GraphCtrlApp::new(cc, options)))))
         .map_err(|err| anyhow::anyhow!("the application window could not be started: {err}"))
 }

@@ -81,6 +81,7 @@ pub fn cell(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) 
     if let Some(robot) = robot {
         jog(ui, session, lang, robot);
         base(ui, session, lang, robot);
+        acm(ui, session, lang, robot);
         tool(ui, session, lang, robot, state);
     }
     match focus {
@@ -640,12 +641,17 @@ fn paths(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) {
         if clearance.is_finite() {
             ui.label(tr!(lang, PlanClearance, format!("{:.1}", clearance * 1000.0)));
         }
+        if let Some(g) = planned.guarantee() {
+            let numbers = [g.padding_nominal, g.padding_min, g.step_mm, g.step_deg, g.clearance];
+            guarantee_note(ui, lang, g.holds_between_states(), numbers);
+        }
         if planned.segments.iter().all(|s| s.straight) {
             gc_ui::panel::note(ui, tr!(lang, PlanStraight));
         } else {
             gc_ui::panel::note(ui, &tr!(lang, PlanChecks, planned.state_checks()));
         }
     });
+    contacts(ui, session, lang, path_id, &path);
     let mut time = session.playback().filter(|(id, _)| *id == path_id).map_or(0.0, |(_, t)| t);
     let before = time;
     let slider = egui::Slider::new(&mut time, 0.0..=duration)
@@ -835,4 +841,152 @@ fn comparison(ui: &mut Ui, session: &mut Session, lang: Lang, path: gc_core::Id<
             ui.end_row();
         }
     });
+}
+
+/// What the final checks of a path establish, in words.
+///
+/// `numbers`: nominal padding (m), smallest padding (m), step (mm), step (degrees), clearance (m).
+fn guarantee_note(ui: &mut Ui, lang: Lang, holds: bool, numbers: [f64; 5]) {
+    let [padding, padding_min, step_mm, step_deg, clearance] = numbers;
+    if holds {
+        gc_ui::panel::note(
+            ui,
+            &tr!(
+                lang,
+                PlanGuarantee,
+                format!("{:.1}", padding * 1000.0),
+                format!("{step_mm:.1}"),
+                format!("{step_deg:.1}"),
+                format!("{:.1}", clearance * 1000.0)
+            ),
+        );
+    } else {
+        gc_ui::panel::note(ui, tr!(lang, PlanGuaranteeSampled));
+    }
+    if padding_min < padding {
+        gc_ui::panel::note(ui, tr!(lang, PlanGuaranteeContact));
+    }
+    gc_ui::panel::note(ui, tr!(lang, PlanGuaranteeExcluded));
+}
+
+/// The pairs of links of a robot and whether each is checked for collisions; switching one changes the
+/// plan's guarantee, so a plan made before becomes out of date.
+fn acm(ui: &mut Ui, session: &mut Session, lang: Lang, robot: gc_core::Id<gc_doc::Robot>) {
+    let Some(pairs) = session.link_pairs(robot) else { return };
+    let mut toggled = None;
+    egui::CollapsingHeader::new(tr!(lang, PanelAcm)).id_salt("gc_robot_acm").show(ui, |ui| {
+        ui.spacing_mut().item_spacing.y = 1.0;
+        for pair in &pairs {
+            let name = tr!(lang, AcmPair, pair.a, pair.b);
+            // The reason is matched by its name: gc_session does not re-export `PairReason` yet.
+            let reason = match format!("{:?}", pair.reason).as_str() {
+                "Adjacent" => tr!(lang, AcmAdjacent),
+                "TouchingAtZero" => tr!(lang, AcmTouching),
+                _ => tr!(lang, AcmChecked),
+            };
+            ui.horizontal(|ui| {
+                let mut checked = pair.checked;
+                let check = ui.checkbox(&mut checked, &name);
+                if check.changed() {
+                    toggled = Some((pair.a.clone(), pair.b.clone(), checked));
+                }
+                ui.label(RichText::new(reason).size(11.0).color(colors::MUTED));
+            });
+        }
+    });
+    if let Some((a, b, checked)) = toggled {
+        // A refusal is shown in the status bar.
+        drop(session.set_pair_checked(robot, &a, &b, checked));
+    }
+}
+
+/// The contact allowances of a path: where a link may touch an obstacle that is otherwise kept apart.
+fn contacts(
+    ui: &mut Ui,
+    session: &mut Session,
+    lang: Lang,
+    path_id: gc_core::Id<gc_doc::MotionPath>,
+    path: &gc_doc::MotionPath,
+) {
+    let bodies: Vec<_> = session.doc().bodies().iter().map(|(id, b)| (id, b.name.clone())).collect();
+    let links: Vec<String> = {
+        let mut names: Vec<String> =
+            session.link_pairs(path.robot).unwrap_or_default().into_iter().flat_map(|p| [p.a, p.b]).collect();
+        names.sort();
+        names.dedup();
+        names
+    };
+    if bodies.is_empty() || links.is_empty() {
+        return;
+    }
+    gc_ui::panel::section(ui, tr!(lang, PanelContacts));
+    let mut edited = path.contacts.clone();
+    let mut remove = None;
+    for (i, contact) in edited.iter_mut().enumerate() {
+        let body = bodies.iter().find(|(id, _)| *id == contact.obstacle).map_or("?", |(_, n)| n.as_str());
+        let text = tr!(lang, ContactRow, contact.index + 1, contact.link, body);
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(&text).size(12.0));
+            let delete = tr!(lang, CmdDeleteItem, text);
+            let cross = ui.add(egui::Button::new("×").frame(false)).on_hover_text(&delete);
+            cross.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &delete));
+            if cross.clicked() {
+                remove = Some(i);
+            }
+        });
+        ui.checkbox(&mut contact.whole_motion, tr!(lang, ContactWhole));
+        ui.checkbox(&mut contact.allow_touch, tr!(lang, ContactTouch));
+    }
+    if let Some(i) = remove {
+        edited.remove(i);
+    }
+    if edited != path.contacts {
+        drop(session.execute(&Command::Cell(CellOp::SetContacts { id: path_id, contacts: edited })));
+        return;
+    }
+    // The form that adds one: which move, which link, which obstacle.
+    let key = egui::Id::unique(("gc_contact_form", path_id.raw()));
+    let (mut step, mut link, mut body): (usize, usize, usize) =
+        ui.data(|d| d.get_temp(key)).unwrap_or_default();
+    step = step.min(path.waypoints.len().saturating_sub(1));
+    link = link.min(links.len() - 1);
+    body = body.min(bodies.len() - 1);
+    gc_ui::panel::combo_row(
+        ui,
+        ("gc_contact_move", path_id.raw()),
+        tr!(lang, ContactMove),
+        &(step + 1).to_string(),
+        |ui| {
+            for i in 0..path.waypoints.len() {
+                ui.selectable_value(&mut step, i, (i + 1).to_string());
+            }
+        },
+    );
+    gc_ui::panel::combo_row(
+        ui,
+        ("gc_contact_link", path_id.raw()),
+        tr!(lang, ContactLink),
+        &links[link],
+        |ui| {
+            for (i, name) in links.iter().enumerate() {
+                ui.selectable_value(&mut link, i, name);
+            }
+        },
+    );
+    gc_ui::panel::combo_row(
+        ui,
+        ("gc_contact_body", path_id.raw()),
+        tr!(lang, ContactObstacle),
+        &bodies[body].1,
+        |ui| {
+            for (i, (_, name)) in bodies.iter().enumerate() {
+                ui.selectable_value(&mut body, i, name);
+            }
+        },
+    );
+    ui.data_mut(|d| d.insert_temp(key, (step, link, body)));
+    if ui.button(tr!(lang, ContactAdd)).clicked() && !path.waypoints.is_empty() {
+        // A refusal is shown in the status bar.
+        drop(session.allow_contact(path_id, step, &links[link], bodies[body].0));
+    }
 }

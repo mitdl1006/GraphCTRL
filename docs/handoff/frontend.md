@@ -10,6 +10,9 @@
 
 - M2-1 첫 조각: 스케치 행에 우클릭 메뉴(스케치 편집·삭제)·삭제 ×·더블클릭 편집. 스케치 리본 끝의 "예정" 그룹에 점·다각형·슬롯 자리(비활성).
 
+- 경로 결과 카드: 보증 문구(패딩·검사 간격·여유, 상태 사이 보증 없음일 때 표본 문구, 접촉 허용 구간 패딩 0, 제외 항목). 로봇 속성: "충돌 검사 쌍(ACM)" 체크 목록(바꾸면 계획이 오래됨). 경로 속성: "접촉 허용" 목록(이동 전체·겹침 허용·삭제)과 추가 폼(이동·링크·장애물). 테스트: `a_robot_path_is_planned_through_the_ribbon`
+- 5.11: `gc_app::install_diagnostics`(로그 stderr+`logs/graphctrl.log`+링 버퍼 500줄, 패닉 훅: 로그에 백트레이스·마지막 자동 저장을 `recovery/crash-<초>.gctrl`로 보존·rfd 네이티브 메시지), 도움말 > 로그 창, 창 아이콘(내장 `assets/icon.png`)
+
 ## 남은 일
 - 사각형 3종(2점·3점·중심): 자리 버튼을 "생성" 그룹에 넣으면 "스케치 마무리"가 밀려 kittest가 실패해 "예정" 그룹을 맨 끝에 둠. 사각형은 드롭다운 한 버튼으로 묶을 것
 - M2-1 모델 트리 나머지(그룹 확장, 소비된 스케치 접힘, 롤백 마커, 끌어서 순서 바꾸기, 오류 배지), 마킹 메뉴(우클릭 드래그는 내비게이션 프리셋과 겹치는지 먼저 확인), 값 입력 미니 툴바, 기본 도형 버튼 제거(필드 도입 시)
@@ -18,4 +21,6 @@
 - 3D 스케치 점 드래그(아래 요청 필요)
 
 ## 요청 사항 (리드/백엔드)
+- `gc_session`이 `gc_motion::{PairReason, LinkPair, Guarantee}`를 re-export해 주세요. gc_panels에 gc_motion 의존을 추가하면 Cargo.lock이 바뀌어 지금은 `PairReason`을 Debug 이름으로 구분하고 있습니다(`cell.rs` acm).
+- 패닉 메시지 문구는 아직 영어 고정(언어 설정 접근 불가) — 필요하면 설정 파일의 언어를 읽도록.
 - `gc_sketch::Sketch::begin_drag`가 공간 스케치를 `DragRefused::NothingMobile`로 거부하고 `SketchDrag::update`/`ToolOutput::DragTo`가 `[f64; 2]`만 받음. 3D 점 드래그에는 `begin_drag_3d(point, cursor: [f64; 3])`/`update_3d`(솔버 3D 드래그는 이미 있음)와 세션의 `spatial_drag_start/move/end`(광선과 화면 평면 또는 축 잠금으로 얻은 3D 위치를 받음)가 필요. 생기면 뷰포트 쪽 입력은 바로 연결한다.
