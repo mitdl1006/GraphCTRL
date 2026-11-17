@@ -520,6 +520,14 @@ messages! {
     /// Plan metric: the move was possible in a straight joint-space line.
     PlanStraight => ("직선 이동(플래너 불필요)", "Straight move (no planner needed)"),
     // --- frontend ---
+    /// Sketch tools that are planned and shown disabled until the document supports them.
+    /// Ribbon group of sketch tools that are not available yet.
+    GroupPlanned => ("예정", "Planned"),
+    ToolPoint => ("점", "Point"),
+    ToolPolygon => ("다각형", "Polygon"),
+    ToolSlot => ("슬롯", "Slot"),
+    /// Context menu of a sketch in the browser.
+    CmdEditSketch => ("스케치 편집", "Edit sketch"),
     /// Tools menu: the performance overlay of the viewport.
     MenuPerfOverlay => ("성능 오버레이", "Performance overlay"),
     /// The overlay's text. `{0}` frame time in ms, `{1}` frames per second, `{2}` draw calls, `{3}` triangles.

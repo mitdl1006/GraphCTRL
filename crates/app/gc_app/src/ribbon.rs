@@ -149,6 +149,18 @@ pub(crate) fn show(
                         *tab = Tab::Model;
                     }
                 });
+                // Planned tools, after the rest so that nothing else moves when they arrive.
+                if !spatial {
+                    ribbon_group(ui, tr!(lang, GroupPlanned), |ui| {
+                        for (icon, label) in [
+                            (Icon::Text("+"), Msg::ToolPoint),
+                            (Icon::Path, Msg::ToolPolygon),
+                            (Icon::Line, Msg::ToolSlot),
+                        ] {
+                            ribbon_button(ui, icon, label.text(lang), false, false);
+                        }
+                    });
+                }
             }
             Tab::Robot => action = robot_tab(ui, session, viewport, cell, library, lang),
             Tab::View => {

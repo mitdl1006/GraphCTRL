@@ -123,11 +123,30 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
         ui.spacing_mut().item_spacing.y = 1.0;
         for (id, sketch) in session.doc().sketches().iter() {
             let selected = active == Some(id);
-            let row =
-                TreeRow { icon: Icon::Sketch, text: &sketch.name, selected, visible: None, delete: None };
-            let label = gc_ui::panel::tree_row(ui, row).row;
-            if label.double_clicked() {
+            let delete = tr!(lang, CmdDeleteItem, sketch.name);
+            let row = TreeRow {
+                icon: Icon::Sketch,
+                text: &sketch.name,
+                selected,
+                visible: None,
+                delete: Some(&delete),
+            };
+            let result = gc_ui::panel::tree_row(ui, row);
+            if result.row.double_clicked() {
                 action = Some(BrowserAction::EditSketch(id));
+            }
+            result.row.context_menu(|ui| {
+                if ui.button(tr!(lang, CmdEditSketch)).clicked() {
+                    action = Some(BrowserAction::EditSketch(id));
+                    ui.close();
+                }
+                if ui.button(delete.as_str()).clicked() {
+                    action = Some(BrowserAction::Edit(Box::new(gc_doc::Command::DeleteSketch { id })));
+                    ui.close();
+                }
+            });
+            if result.deleted {
+                action = Some(BrowserAction::Edit(Box::new(gc_doc::Command::DeleteSketch { id })));
             }
         }
     });
