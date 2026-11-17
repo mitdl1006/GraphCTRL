@@ -193,3 +193,35 @@ fn equipment_from_a_mesh_file_is_an_obstacle() {
     assert!(error.contains("nothing.stl"), "{error}");
     assert_eq!(session.doc().bodies().len(), 1);
 }
+
+#[test]
+fn planners_are_compared_over_several_seeds() {
+    let mut session = Session::new();
+    let robot = session.add_robot("Robot1", &six_axis()).unwrap();
+    session.jog(robot, &RIGHT);
+    session.end_jog();
+    let right = session.add_waypoint_here(robot).unwrap();
+    session.jog(robot, &LEFT);
+    session.end_jog();
+    let pillar = Solid::Box { size: [0.1, 0.1, 1.4] };
+    session.add_body(pillar, Placement { xyz: [0.55, 0.0, 0.7], rpy: [0.0; 3] }).unwrap();
+    let path = session.add_path(robot, vec![right]).unwrap();
+    assert!(session.comparison(path).is_none());
+
+    session.compare(path, 2);
+    let (rows, current) = session.comparison(path).unwrap();
+    assert!(current);
+    assert_eq!(rows.iter().map(|r| r.planner).collect::<Vec<_>>(), gc_session::PLANNERS.map(|(id, _)| id));
+    let connect = &rows[0];
+    assert_eq!((connect.runs, connect.successes), (2, 2), "RRT-Connect gets around the pillar every time");
+    assert!(connect.duration.unwrap() > 1.4 && connect.cost.unwrap() > 0.0 && connect.state_checks > 0);
+    // The same comparison again gives the same numbers.
+    let first = rows.to_vec();
+    session.compare(path, 2);
+    assert_eq!(session.comparison(path).unwrap().0, first.as_slice());
+
+    // It goes out of date with the document, like a plan.
+    session.jog(robot, &[-0.8, 0.2, 0.3, 0.0, 0.5, 0.0]);
+    session.end_jog();
+    assert!(!session.comparison(path).unwrap().1);
+}

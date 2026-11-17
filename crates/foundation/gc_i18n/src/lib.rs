@@ -326,6 +326,16 @@ messages! {
     ViewLeft => ("좌측", "Left"),
     /// View cube face: bottom.
     ViewBottom => ("저면", "Bottom"),
+    /// Command: run every planner on the path and tabulate the results.
+    CmdCompare => ("알고리즘 비교", "Compare Planners"),
+    /// Comparison table column: successful runs out of all runs.
+    ColSuccess => ("성공", "Success"),
+    /// Comparison table column: median estimated duration.
+    ColDuration => ("시간 s", "Time s"),
+    /// Comparison table column: median state checks.
+    ColChecks => ("검사 수", "Checks"),
+    /// Comparison note: computed for an earlier state of the cell.
+    CompareStale => ("이전 상태 기준 결과", "Computed for an earlier state"),
     /// Plan status: being computed.
     PlanPlanning => ("계획 중...", "Planning..."),
     /// Plan status: up to date.

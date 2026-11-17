@@ -182,6 +182,7 @@ fn paths(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) {
     if let Some(error) = session.plan_error(path_id) {
         ui.colored_label(colors::ERROR, error);
     }
+    comparison(ui, session, lang, path_id);
     let Some(planned) = session.planned(path_id) else {
         state.playing = false;
         return;
@@ -217,4 +218,47 @@ fn paths(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) {
     if state.playing || (time - before).abs() > 1e-9 || session.playback().is_some() {
         session.set_playback(Some((path_id, time)));
     }
+}
+
+/// The planner comparison of a path: a button to run it, its progress, and the table.
+fn comparison(ui: &mut Ui, session: &mut Session, lang: Lang, path: gc_core::Id<gc_doc::MotionPath>) {
+    match session.comparison_progress() {
+        Some(progress) => {
+            ui.horizontal(|ui| {
+                ui.add(egui::ProgressBar::new(progress).desired_width(120.0));
+                if ui.button(tr!(lang, Cancel)).clicked() {
+                    session.cancel_comparison();
+                }
+            });
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+        }
+        None => {
+            if ui.button(tr!(lang, CmdCompare)).clicked() {
+                session.compare(path, 5);
+            }
+        }
+    }
+    let Some((rows, current)) = session.comparison(path) else { return };
+    if !current {
+        ui.weak(tr!(lang, CompareStale));
+    }
+    egui::Grid::new(("gc_comparison", path.raw())).striped(true).show(ui, |ui| {
+        for title in
+            [tr!(lang, PropPlanner), tr!(lang, ColSuccess), tr!(lang, ColDuration), tr!(lang, ColChecks)]
+        {
+            ui.label(RichText::new(title).strong());
+        }
+        ui.end_row();
+        for row in rows {
+            let name = PLANNERS
+                .iter()
+                .position(|(id, _)| *id == row.planner)
+                .map_or(row.planner, |i| PLANNER_NAMES[i]);
+            ui.label(name);
+            ui.label(format!("{}/{}", row.successes, row.runs));
+            ui.label(row.duration.map_or_else(|| "-".to_owned(), |d| format!("{d:.2}")));
+            ui.label(row.state_checks.to_string());
+            ui.end_row();
+        }
+    });
 }

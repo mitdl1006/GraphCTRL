@@ -206,6 +206,13 @@ fn a_robot_path_is_planned_through_the_ribbon() {
     harness.get_by_label("Path1 (계획됨)");
     assert!(harness.query_all_by_label("joint_1").count() >= 1, "the jog sliders are shown");
 
+    // The comparison runs every planner and lists them.
+    harness.get_by_label("알고리즘 비교").click();
+    harness.run();
+    let (rows, current) = harness.state().session.comparison(path).unwrap();
+    assert!(current && rows.len() == 5 && rows[0].successes == rows[0].runs);
+    harness.get_by_label("Informed RRT*");
+
     // Playing advances the shown robot along the motion without touching the document.
     let revision = harness.state().session.doc().revision();
     harness.get_by_label("재생").click();
@@ -261,7 +268,9 @@ fn robot_cell_renders_with_gpu() {
     }
     assert!(dark > 500 && orange > 500, "dark {dark}, orange {orange}");
 
-    // Half-way through the motion, in perspective.
+    // Half-way through the motion, with the planner comparison in the side panel.
+    harness.get_by_label("알고리즘 비교").click();
+    harness.run();
     let app = harness.state_mut();
     let path = app.session.doc().paths().iter().next().unwrap().0;
     let duration = app.session.planned(path).unwrap().duration();

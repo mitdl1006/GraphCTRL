@@ -163,6 +163,31 @@ impl PlannedPath {
     }
 }
 
+/// How one planner did on a path over several seeds.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CompareRow {
+    /// Planner id (see [`PLANNERS`]).
+    pub planner: &'static str,
+    /// Seeds tried.
+    pub runs: usize,
+    /// Seeds for which a valid motion was found.
+    pub successes: usize,
+    /// Median estimated duration of the successful runs, seconds.
+    pub duration: Option<f64>,
+    /// Median joint-space cost of the successful runs.
+    pub cost: Option<f64>,
+    /// Median number of state checks per run.
+    pub state_checks: u64,
+}
+
+fn median(values: &mut [f64]) -> Option<f64> {
+    values.sort_by(f64::total_cmp);
+    values.get(values.len() / 2).copied()
+}
+
+/// A comparison being computed: the path, the fingerprint of its inputs and the job.
+type CompareJob = (Id<MotionPath>, String, JobHandle<Option<Vec<CompareRow>>>);
+
 /// How a path's plan relates to the document.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PlanStatus {
@@ -200,6 +225,8 @@ type PlanJob = (Id<MotionPath>, String, JobHandle<Option<Result<PlannedPath, Str
 pub(crate) struct CellState {
     executor: Executor,
     job: Option<PlanJob>,
+    compare_job: Option<CompareJob>,
+    comparisons: BTreeMap<Id<MotionPath>, (String, Vec<CompareRow>)>,
     robots: BTreeMap<Id<Robot>, Arc<LoadedRobot>>,
     jog: Option<(Id<Robot>, Vec<f64>)>,
     body: Option<(Id<Body>, Body)>,
@@ -218,6 +245,8 @@ impl Default for CellState {
             // Jobs run to completion where they are started unless the application supplies threads.
             executor: Executor::inline(),
             job: None,
+            compare_job: None,
+            comparisons: BTreeMap::new(),
             robots: BTreeMap::new(),
             jog: None,
             body: None,
@@ -246,6 +275,7 @@ impl CellState {
             self.read_body_mesh(&body.solid);
         }
         self.plans.retain(|id, _| doc.get(*id).is_some());
+        self.comparisons.retain(|id, _| doc.get(*id).is_some());
         if self.jog.as_ref().is_some_and(|(id, _)| doc.get(*id).is_none()) {
             self.jog = None;
         }
@@ -623,7 +653,7 @@ impl Session {
         let job = self.cell.executor.spawn("plan", move |ctx| {
             let control = JobControl(ctx.cancel.clone());
             let result = match &loaded {
-                Some(loaded) => plan_path(&doc, loaded, &meshes, path, &control),
+                Some(loaded) => plan_path(&doc, loaded, &meshes, path, None, &control),
                 None => Err("the robot description could not be read".to_owned()),
             };
             (!ctx.cancel.is_cancelled()).then_some(result)
@@ -645,8 +675,86 @@ impl Session {
         }
     }
 
+    /// Runs every planner on a path with `seeds` different seeds each (one run per seed, no best-of) and
+    /// stores how they did. Like planning, this is a job; see [`Session::comparison`].
+    pub fn compare(&mut self, path: Id<MotionPath>, seeds: usize) {
+        self.end_jog();
+        self.cancel_comparison();
+        let Some(inputs) = self.plan_inputs(path) else { return };
+        let loaded = self.doc.get(path).and_then(|p| self.robot_model(p.robot)).cloned();
+        let doc = self.doc.clone();
+        let meshes = self.cell.meshes.clone();
+        let job = self.cell.executor.spawn("compare", move |ctx| {
+            let control = JobControl(ctx.cancel.clone());
+            let loaded = loaded?;
+            let mut rows = Vec::with_capacity(PLANNERS.len());
+            let total = (PLANNERS.len() * seeds.max(1)) as f32;
+            for (index, (planner, algorithm)) in PLANNERS.iter().enumerate() {
+                let (mut durations, mut costs, mut checks) = (Vec::new(), Vec::new(), Vec::new());
+                for seed in 0..seeds.max(1) {
+                    let strategy = Some((*algorithm, seed as u64, 1));
+                    if let Ok(planned) = plan_path(&doc, &loaded, &meshes, path, strategy, &control) {
+                        durations.push(planned.duration());
+                        costs.push(planned.segments.iter().map(|s| s.cost).sum());
+                        checks.push(planned.state_checks() as f64);
+                    }
+                    if ctx.cancel.is_cancelled() {
+                        return None;
+                    }
+                    ctx.progress.set((index * seeds.max(1) + seed + 1) as f32 / total);
+                }
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "a count")]
+                let state_checks = median(&mut checks).unwrap_or(0.0) as u64;
+                rows.push(CompareRow {
+                    planner,
+                    runs: seeds.max(1),
+                    successes: durations.len(),
+                    duration: median(&mut durations),
+                    cost: median(&mut costs),
+                    state_checks,
+                });
+            }
+            Some(rows)
+        });
+        self.cell.compare_job = Some((path, inputs, job));
+        self.poll_jobs();
+    }
+
+    /// How far the running comparison is, from 0 to 1; `None` when none is running.
+    pub fn comparison_progress(&self) -> Option<f32> {
+        self.cell.compare_job.as_ref().map(|(_, _, job)| job.progress())
+    }
+
+    /// Stops the running comparison.
+    pub fn cancel_comparison(&mut self) {
+        if let Some((_, _, job)) = self.cell.compare_job.take() {
+            job.cancel();
+        }
+    }
+
+    /// The last comparison of a path and whether it still matches the document.
+    pub fn comparison(&self, path: Id<MotionPath>) -> Option<(&[CompareRow], bool)> {
+        let (inputs, rows) = self.cell.comparisons.get(&path)?;
+        Some((rows, self.plan_inputs(path).as_ref() == Some(inputs)))
+    }
+
     /// Collects finished background work. Returns true when something arrived. Call once per frame.
     pub fn poll_jobs(&mut self) -> bool {
+        let mut arrived = false;
+        if let Some((path, inputs, mut job)) = self.cell.compare_job.take() {
+            match job.poll() {
+                None => self.cell.compare_job = Some((path, inputs, job)),
+                Some(JobOutcome::Done(Some(rows))) => {
+                    self.cell.comparisons.insert(path, (inputs, rows));
+                    arrived = true;
+                }
+                Some(JobOutcome::Done(None) | JobOutcome::Failed(_)) => arrived = true,
+            }
+        }
+        arrived | self.poll_plan()
+    }
+
+    fn poll_plan(&mut self) -> bool {
         let Some((path, inputs, mut job)) = self.cell.job.take() else { return false };
         let outcome = match job.poll() {
             None => {
@@ -674,21 +782,29 @@ impl Session {
     }
 }
 
-/// Plans a path of `doc` from its robot's current joint values through its waypoints.
+/// Plans a path of `doc` from its robot's current joint values through its waypoints, with the path's own
+/// planner and seed or with the given algorithm, seed and number of runs.
 fn plan_path(
     doc: &Document,
     loaded: &LoadedRobot,
     meshes: &BTreeMap<String, MeshRef>,
     path_id: Id<MotionPath>,
+    strategy: Option<(Algorithm, u64, usize)>,
     control: &dyn Control,
 ) -> Result<PlannedPath, String> {
     let path = doc.get(path_id).ok_or("the path no longer exists")?;
     let robot = doc.get(path.robot).ok_or("the robot no longer exists")?;
-    let algorithm = PLANNERS
-        .iter()
-        .find(|(id, _)| *id == path.planner)
-        .map(|(_, algorithm)| *algorithm)
-        .ok_or_else(|| format!("unknown planner `{}`", path.planner))?;
+    let (algorithm, seed, runs) = match strategy {
+        Some(strategy) => strategy,
+        None => {
+            let algorithm = PLANNERS
+                .iter()
+                .find(|(id, _)| *id == path.planner)
+                .map(|(_, algorithm)| *algorithm)
+                .ok_or_else(|| format!("unknown planner `{}`", path.planner))?;
+            (algorithm, path.seed, 4)
+        }
+    };
     let mut obstacles = Vec::new();
     for (_, body) in doc.bodies().iter() {
         // An obstacle that cannot be checked must not be planned through as if it were not there.
@@ -722,8 +838,8 @@ fn plan_path(
             goal,
             algorithm,
             options: Options::default(),
-            seed: path.seed,
-            runs: 4,
+            seed,
+            runs,
             max_acc: vec![robot.max_acc; start.len()],
         };
         let plan = plan_motion(&scene, &request, control).map_err(|e| format!("{}: {e}", waypoint.name))?;
