@@ -1128,3 +1128,85 @@ fn a_planner_from_a_plugin_is_found_by_its_id() {
     assert_eq!(session.plan(path), PlanStatus::Failed);
     assert!(session.plan_error(path).unwrap().contains("nobody"));
 }
+
+#[test]
+fn imported_equipment_is_an_obstacle_that_can_be_suppressed_and_reloaded() {
+    use std::sync::Arc;
+
+    /// A closed box mesh, `size` edge lengths, centred on its origin.
+    fn box_mesh(size: [f32; 3]) -> gc_mesh::MeshData {
+        let h = size.map(|s| s / 2.0);
+        let positions = (0..8)
+            .map(|i| {
+                [
+                    if i & 1 == 0 { -h[0] } else { h[0] },
+                    if i & 2 == 0 { -h[1] } else { h[1] },
+                    if i & 4 == 0 { -h[2] } else { h[2] },
+                ]
+            })
+            .collect();
+        #[rustfmt::skip]
+        let indices = vec![0,2,1, 1,2,3, 4,5,6, 5,7,6, 0,1,4, 1,5,4, 2,6,3, 3,6,7, 0,4,2, 2,4,6, 1,3,5, 3,7,5];
+        gc_mesh::MeshData::new(positions, indices).unwrap()
+    }
+    let assembly = |file: &str| gc_doc::Assembly {
+        name: "Machine".into(),
+        file: file.into(),
+        placement: Placement { xyz: [0.55, 0.0, 0.0], rpy: [0.0; 3] },
+        parts: vec![gc_doc::AssemblyPart {
+            name: "Column".into(),
+            parent: None,
+            // Stands 0.7 m up, like the pillar of the other tests.
+            matrix: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.7, 1.0]],
+            meshes: vec![0],
+        }],
+        meshes: vec![gc_doc::AssemblyMesh {
+            name: "Column".into(),
+            color: [0.3, 0.3, 0.3, 1.0],
+            triangles: 12,
+        }],
+        look: Default::default(),
+    };
+    let mut session = Session::new();
+    let robot = session.add_robot("Robot1", &six_axis()).unwrap();
+    session.jog(robot, &RIGHT);
+    session.end_jog();
+    let there = session.add_waypoint_here(robot).unwrap();
+    session.jog(robot, &LEFT);
+    session.end_jog();
+    let path = session.add_path(robot, vec![there]).unwrap();
+    assert_eq!(session.plan(path), PlanStatus::Ready);
+    assert!(session.planned(path).unwrap().segments[0].straight);
+
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join("machine.glb").to_string_lossy().into_owned();
+    let id = session.add_assembly(assembly(&file), vec![box_mesh([0.1, 0.1, 1.4])]).unwrap();
+    let shown = session.assembly_parts(id).unwrap();
+    assert_eq!(shown.len(), 1);
+    assert_eq!([shown[0].matrix[3][0], shown[0].matrix[3][2]], [0.55, 0.7]);
+    // The equipment makes the plan stale and stands in the way.
+    assert_eq!(session.plan_status(path), PlanStatus::Stale);
+    assert_eq!(session.plan(path), PlanStatus::Ready, "{:?}", session.plan_error(path));
+    assert!(!session.planned(path).unwrap().segments[0].straight, "around the column");
+    // Suppressed, it is ignored again.
+    session.execute(&Command::Cell(CellOp::SetSuppressed { item: id.erase(), suppressed: true })).unwrap();
+    assert_eq!(session.plan(path), PlanStatus::Ready);
+    assert!(session.planned(path).unwrap().segments[0].straight);
+    session.execute(&Command::Cell(CellOp::SetSuppressed { item: id.erase(), suppressed: false })).unwrap();
+
+    // Reopened without a reader, planning refuses to ignore the equipment; with one, it plans around it.
+    let project = directory.path().join("cell.gctrl");
+    session.save_as(&project).unwrap();
+    let mut reopened = Session::new();
+    reopened.open(&project).unwrap();
+    assert_eq!(reopened.plan(path), PlanStatus::Failed);
+    assert!(reopened.plan_error(path).unwrap().contains("machine.glb"), "{:?}", reopened.plan_error(path));
+    reopened.set_assembly_reader(Arc::new(|_file: &str| Ok(vec![box_mesh([0.1, 0.1, 1.4])])));
+    assert_eq!(reopened.plan(path), PlanStatus::Ready, "{:?}", reopened.plan_error(path));
+    assert!(!reopened.planned(path).unwrap().segments[0].straight);
+    // A file that changed (another number of meshes) is reported, not guessed at.
+    let mut changed = Session::new();
+    changed.set_assembly_reader(Arc::new(|_file: &str| Ok(Vec::new())));
+    changed.open(&project).unwrap();
+    assert!(changed.assembly_parts(id).unwrap_err().contains("changed"));
+}

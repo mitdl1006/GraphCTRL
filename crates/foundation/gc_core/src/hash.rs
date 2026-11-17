@@ -187,6 +187,10 @@ impl StableHash for Kind {
             Self::Waypoint => 11,
             Self::Path => 12,
             Self::WorkFrame => 13,
+            Self::WorkFeature => 14,
+            Self::Feature => 15,
+            Self::Assembly => 16,
+            Self::Timeline => 17,
         };
         tag.stable_hash(hasher);
     }

@@ -11,6 +11,7 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(test, allow(clippy::float_cmp, reason = "tests compare exactly representable values"))]
 
+mod assembly;
 mod cell;
 pub mod library;
 mod project;
@@ -19,6 +20,7 @@ mod spatial;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+pub use assembly::{AssemblyReader, ShownAssemblyPart};
 pub use cell::{
     CellItem, CompareRow, Ghost, LoadedRobot, MeshRef, PADDING, PLANNERS, PlanStatus, PlannedPath, Reference,
     Resources, Shown, ShownPart,

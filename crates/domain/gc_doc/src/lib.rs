@@ -18,11 +18,16 @@ mod document;
 mod history;
 mod txn;
 
+mod design;
 pub use cell::{
     AcmOverride, Body, CellOp, ContactAllowance, Look, MotionPath, Placement, Robot, Solid, Tool, Waypoint,
     WaypointTarget, WorkFrame,
 };
 pub use command::{Applied, Command, Created, EditError, EndSnap, SketchOp, apply};
+pub use design::{
+    Assembly, AssemblyMesh, AssemblyPart, Extent, Extrude, Feature, FeatureKind, OriginPlane, PlaneRef,
+    PointRef, Timeline, WorkFeature, WorkGeometry,
+};
 pub use document::{ChangeSet, Contents, DocDelta, Document, Frame, FrameKind, Param, Store, Table};
 pub use gc_sketch::Sketch;
 pub use history::History;

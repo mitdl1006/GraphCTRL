@@ -194,6 +194,12 @@ pub enum Created {
     Path(Id<crate::cell::MotionPath>),
     /// A work frame.
     Frame(Id<crate::cell::WorkFrame>),
+    /// A work plane, axis or point.
+    WorkFeature(Id<crate::design::WorkFeature>),
+    /// A modelling feature.
+    Feature(Id<crate::design::Feature>),
+    /// An imported assembly.
+    Assembly(Id<crate::design::Assembly>),
 }
 
 /// The result of a command that was applied.

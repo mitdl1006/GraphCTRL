@@ -216,6 +216,10 @@ tables! {
     waypoints: Waypoint,
     paths: MotionPath,
     work_frames: WorkFrame,
+    work_features: crate::design::WorkFeature,
+    features: crate::design::Feature,
+    assemblies: crate::design::Assembly,
+    timelines: crate::design::Timeline,
 }
 
 /// Everything a stored document consists of, as [`Document::restore`] takes it.
@@ -239,6 +243,14 @@ pub struct Contents {
     pub paths: BTreeMap<Id<MotionPath>, MotionPath>,
     /// Work frames.
     pub work_frames: BTreeMap<Id<WorkFrame>, WorkFrame>,
+    /// Work planes, axes and points.
+    pub work_features: BTreeMap<Id<crate::design::WorkFeature>, crate::design::WorkFeature>,
+    /// Modelling features.
+    pub features: BTreeMap<Id<crate::design::Feature>, crate::design::Feature>,
+    /// Imported assemblies.
+    pub assemblies: BTreeMap<Id<crate::design::Assembly>, crate::design::Assembly>,
+    /// The model tree's order (at most one).
+    pub timelines: BTreeMap<Id<crate::design::Timeline>, crate::design::Timeline>,
 }
 
 impl Default for Document {
@@ -262,6 +274,10 @@ impl Document {
             waypoints: Store::default(),
             paths: Store::default(),
             work_frames: Store::default(),
+            work_features: Store::default(),
+            features: Store::default(),
+            assemblies: Store::default(),
+            timelines: Store::default(),
             ids: IdAlloc::new(),
             revision: Revision::default(),
         };
@@ -300,6 +316,10 @@ impl Document {
             waypoints: Store { items: contents.waypoints },
             paths: Store { items: contents.paths },
             work_frames: Store { items: contents.work_frames },
+            work_features: Store { items: contents.work_features },
+            features: Store { items: contents.features },
+            assemblies: Store { items: contents.assemblies },
+            timelines: Store { items: contents.timelines },
             ids: IdAlloc::new(),
             revision: Revision::default(),
         };
@@ -313,6 +333,10 @@ impl Document {
         doc.waypoints.items.keys().for_each(|id| raise(id.raw()));
         doc.paths.items.keys().for_each(|id| raise(id.raw()));
         doc.work_frames.items.keys().for_each(|id| raise(id.raw()));
+        doc.work_features.items.keys().for_each(|id| raise(id.raw()));
+        doc.features.items.keys().for_each(|id| raise(id.raw()));
+        doc.assemblies.items.keys().for_each(|id| raise(id.raw()));
+        doc.timelines.items.keys().for_each(|id| raise(id.raw()));
         for (id, sketch) in &doc.sketches.items {
             raise(id.raw());
             sketch.points.keys().for_each(|p| raise(p.raw()));
@@ -380,6 +404,64 @@ impl Document {
     /// All work frames.
     pub fn work_frames(&self) -> &Store<WorkFrame> {
         &self.work_frames
+    }
+
+    /// Work planes, axes and points.
+    pub fn work_features(&self) -> &Store<crate::design::WorkFeature> {
+        &self.work_features
+    }
+
+    /// Modelling features.
+    pub fn features(&self) -> &Store<crate::design::Feature> {
+        &self.features
+    }
+
+    /// Imported assemblies.
+    pub fn assemblies(&self) -> &Store<crate::design::Assembly> {
+        &self.assemblies
+    }
+
+    /// The stored model-tree order, if any was set (see [`Document::model_order`]).
+    pub fn timeline(&self) -> Option<(Id<crate::design::Timeline>, &crate::design::Timeline)> {
+        self.timelines.iter().next()
+    }
+
+    /// The design items of the model tree (sketches, work features, features, assemblies) in order: the
+    /// stored order without ids that no longer exist, then the items it does not list, oldest first.
+    pub fn model_order(&self) -> Vec<AnyId> {
+        let mut order: Vec<AnyId> = self
+            .timeline()
+            .map(|(_, t)| t.items.iter().copied().filter(|id| self.contains(*id)).collect())
+            .unwrap_or_default();
+        let mut rest: Vec<AnyId> = self
+            .sketches
+            .items
+            .keys()
+            .map(|id| id.erase())
+            .chain(self.work_features.items.keys().map(|id| id.erase()))
+            .chain(self.features.items.keys().map(|id| id.erase()))
+            .chain(self.assemblies.items.keys().map(|id| id.erase()))
+            .filter(|id| !order.contains(id))
+            .collect();
+        rest.sort_by_key(|id| id.raw);
+        order.extend(rest);
+        order
+    }
+
+    /// True when the item is suppressed, or stands after the rollback marker: kept, but not computed.
+    pub fn is_inactive(&self, item: AnyId) -> bool {
+        let Some((_, timeline)) = self.timeline() else { return false };
+        if timeline.suppressed.contains(&item) {
+            return true;
+        }
+        match timeline.rollback_after.filter(|marker| self.contains(*marker)) {
+            None => false,
+            Some(marker) => {
+                let order = self.model_order();
+                let at = |id: AnyId| order.iter().position(|o| *o == id);
+                matches!((at(marker), at(item)), (Some(m), Some(i)) if i > m)
+            }
+        }
     }
 
     /// The pose of a frame in the world: its own pose composed with those of its ancestors.

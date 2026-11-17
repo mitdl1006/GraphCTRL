@@ -401,6 +401,8 @@ pub(crate) struct CellState {
     plans: BTreeMap<Id<MotionPath>, Planned>,
     playback: Option<(Id<MotionPath>, f64)>,
     resources: Option<Resources>,
+    /// Meshes of imported assemblies, and how to read their files again.
+    pub(crate) assemblies: crate::assembly::AssemblyMeshes,
     /// Plugins that offer closed-form inverse kinematics.
     kinematics: Vec<Arc<dyn gc_robotics_api::KinematicsFactory>>,
     /// Planners from plugins (`MOTION_PLANNERS`), used for ids the built-in table does not have.
@@ -441,6 +443,7 @@ impl Default for CellState {
             plans: BTreeMap::new(),
             playback: None,
             resources: None,
+            assemblies: Default::default(),
             kinematics: Vec::new(),
             planners: Vec::new(),
             library: None,
@@ -480,6 +483,7 @@ impl CellState {
         for (_, body) in doc.bodies().iter() {
             self.read_body_mesh(&body.solid);
         }
+        self.assemblies.sync(doc);
         for (_, robot) in doc.robots().iter() {
             if let Some(tool) = &robot.tool {
                 self.read_body_mesh(&tool.solid);
@@ -759,6 +763,47 @@ impl Session {
         self.cell.kinematics = factories;
         self.cell.robots.clear();
         self.cell.sync(&self.doc);
+    }
+
+    /// Gives the session a way to read assembly files again, for projects that contain imported
+    /// assemblies (the readers live in plugins). Files that failed to read are tried again.
+    pub fn set_assembly_reader(&mut self, reader: crate::assembly::AssemblyReader) {
+        self.cell.assemblies.reader = Some(reader);
+        self.cell.assemblies.by_file.retain(|_, read| read.is_ok());
+        self.cell.assemblies.sync(&self.doc);
+    }
+
+    /// Adds an assembly imported from a file, with its meshes in the order of `assembly.meshes` (one
+    /// undo step). Its parts are obstacles for planning from now on.
+    pub fn add_assembly(
+        &mut self,
+        assembly: gc_doc::Assembly,
+        meshes: Vec<MeshData>,
+    ) -> Result<Id<gc_doc::Assembly>, String> {
+        if meshes.len() != assembly.meshes.len() {
+            return Err(format!(
+                "{}: {} meshes for {} entries",
+                assembly.file,
+                meshes.len(),
+                assembly.meshes.len()
+            ));
+        }
+        let file = assembly.file.clone();
+        self.cell.assemblies.insert(&file, meshes);
+        match self.cell_op(CellOp::AddAssembly(assembly)).map_err(|e| e.to_string())?.first() {
+            Some(Created::Assembly(id)) => Ok(*id),
+            _ => Err("the assembly was not added".to_owned()),
+        }
+    }
+
+    /// The meshes of an assembly placed in the world, to draw; or why they are not available.
+    pub fn assembly_parts(
+        &self,
+        id: Id<gc_doc::Assembly>,
+    ) -> Result<Vec<crate::assembly::ShownAssemblyPart>, String> {
+        let assembly = self.doc.get(id).ok_or("the assembly no longer exists")?;
+        let meshes = self.cell.assemblies.of(assembly)?;
+        Ok(crate::assembly::shown_parts(assembly, &pose_of(&assembly.placement), meshes))
     }
 
     /// Sets where the files robot descriptions refer to come from, and reloads the robots.
@@ -1073,6 +1118,14 @@ impl Session {
             let Some(shape) = shape_of(&body.solid, &self.cell.meshes) else { continue };
             built_from.push_str(&format!(" {:?} {:?}", body.placement, body.solid));
             obstacles.push(Obstacle { name: body.name.clone(), pose: pose_of(&body.placement), shape });
+        }
+        // Imported equipment that is computed (and loaded) is in the way too.
+        if let Ok(equipment) = crate::assembly::obstacles(&self.doc, &self.cell.assemblies, &pose_of) {
+            built_from.push_str(&format!(
+                " {:?}",
+                crate::assembly::active(&self.doc).map(|(id, a)| (id, &a.placement)).collect::<Vec<_>>()
+            ));
+            obstacles.extend(equipment);
         }
         let question = format!("{built_from} {joints:?}");
         if let Some((asked, answer)) = self.cell.asked.borrow().as_ref()
@@ -1686,7 +1739,14 @@ impl Session {
                 path.planner,
                 path.seed,
                 path.tcp_speed,
-            ) + &format!(" {:?} {:?}", robot.acm_overrides, path.contacts),
+            ) + &format!(
+                " {:?} {:?} {:?}",
+                robot.acm_overrides,
+                path.contacts,
+                crate::assembly::active(doc)
+                    .map(|(id, a)| (id, &a.file, &a.placement, &a.parts))
+                    .collect::<Vec<_>>()
+            ),
         )
     }
 
@@ -1743,12 +1803,21 @@ impl Session {
         let strategy = self.doc.get(path).map(|p| (p.planner.clone(), p.seed));
         let previous = self.planned(path).filter(|old| Some(&old.strategy) == strategy.as_ref()).cloned();
         let planners = self.cell.planners.clone();
+        let equipment = crate::assembly::obstacles(&self.doc, &self.cell.assemblies, &pose_of);
         let job = self.cell.executor.spawn("plan", move |ctx| {
             let control = JobControl(ctx.cancel.clone());
             let result = match &loaded {
-                Some(loaded) => {
-                    plan_path(&doc, loaded, &meshes, path, None, previous.as_ref(), &planners, &control)
-                }
+                Some(loaded) => plan_path(
+                    &doc,
+                    loaded,
+                    &meshes,
+                    path,
+                    None,
+                    previous.as_ref(),
+                    &planners,
+                    &equipment,
+                    &control,
+                ),
                 None => Err("the robot description could not be read".to_owned()),
             };
             (!ctx.cancel.is_cancelled()).then_some(result)
@@ -1779,6 +1848,7 @@ impl Session {
         let loaded = self.doc.get(path).and_then(|p| self.robot_model(p.robot)).cloned();
         let doc = self.doc.clone();
         let meshes = self.cell.meshes.clone();
+        let equipment = crate::assembly::obstacles(&self.doc, &self.cell.assemblies, &pose_of);
         let job = self.cell.executor.spawn("compare", move |ctx| {
             let control = JobControl(ctx.cancel.clone());
             let loaded = loaded?;
@@ -1789,7 +1859,7 @@ impl Session {
                 for seed in 0..seeds.max(1) {
                     let strategy = Some((*algorithm, seed as u64, 1));
                     if let Ok(planned) =
-                        plan_path(&doc, &loaded, &meshes, path, strategy, None, &[], &control)
+                        plan_path(&doc, &loaded, &meshes, path, strategy, None, &[], &equipment, &control)
                     {
                         durations.push(planned.duration());
                         costs.push(planned.segments.iter().map(|s| s.cost).sum());
@@ -1932,6 +2002,7 @@ fn plan_path(
     strategy: Option<(Algorithm, u64, usize)>,
     previous: Option<&PlannedPath>,
     registered: &[Arc<dyn gc_robotics_api::MotionPlanner>],
+    assembly_obstacles: &Result<Vec<Obstacle>, String>,
     control: &dyn Control,
 ) -> Result<PlannedPath, String> {
     let path = doc.get(path_id).ok_or("the path no longer exists")?;
@@ -1958,6 +2029,7 @@ fn plan_path(
             .ok_or_else(|| format!("the mesh of `{}` is not available", body.name))?;
         obstacles.push(Obstacle { name: body.name.clone(), pose: pose_of(&body.placement), shape });
     }
+    obstacles.extend(assembly_obstacles.clone()?);
     let tool = tool_shapes(robot.tool.as_deref(), meshes)
         .ok_or_else(|| format!("the mesh of the tool of `{}` is not available", robot.name))?;
     let (scene, _) = RobotScene::new(

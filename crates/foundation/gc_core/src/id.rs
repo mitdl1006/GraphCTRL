@@ -37,6 +37,14 @@ pub enum Kind {
     Path,
     /// A work coordinate frame whose origin is a sketch point.
     WorkFrame,
+    /// A work plane, axis or point (design feature without volume).
+    WorkFeature,
+    /// A modelling feature (extrusion of a sketch profile).
+    Feature,
+    /// An assembly imported from a CAD file (fixed reference).
+    Assembly,
+    /// The order of the model tree, with suppression and the rollback marker.
+    Timeline,
 }
 
 /// A value stored in a document under an [`Id`].

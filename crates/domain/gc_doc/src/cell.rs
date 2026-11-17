@@ -305,6 +305,66 @@ impl Entity for MotionPath {
 /// An edit of the robot cell.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum CellOp {
+    /// Adds a work plane, axis or point at the rollback marker of the model tree.
+    AddWorkFeature(crate::design::WorkFeature),
+    /// Replaces a work feature.
+    SetWorkFeature {
+        /// The work feature.
+        id: Id<crate::design::WorkFeature>,
+        /// Its new definition.
+        feature: crate::design::WorkFeature,
+    },
+    /// Deletes a work feature nothing depends on.
+    DeleteWorkFeature(Id<crate::design::WorkFeature>),
+    /// Adds a modelling feature at the rollback marker.
+    AddFeature(crate::design::Feature),
+    /// Replaces a modelling feature.
+    SetFeature {
+        /// The feature.
+        id: Id<crate::design::Feature>,
+        /// Its new definition.
+        feature: crate::design::Feature,
+    },
+    /// Deletes a modelling feature (its sketch stays).
+    DeleteFeature(Id<crate::design::Feature>),
+    /// Adds an imported assembly.
+    AddAssembly(crate::design::Assembly),
+    /// Moves an imported assembly.
+    PlaceAssembly {
+        /// The assembly.
+        id: Id<crate::design::Assembly>,
+        /// Where its origin stands.
+        placement: Placement,
+    },
+    /// Changes how an imported assembly is shown.
+    SetAssemblyLook {
+        /// The assembly.
+        id: Id<crate::design::Assembly>,
+        /// How it is shown.
+        look: Look,
+    },
+    /// Deletes an imported assembly.
+    DeleteAssembly(Id<crate::design::Assembly>),
+    /// Moves a design item in the model tree to just before another (`None`: to the end). Refused when
+    /// it would come before something it depends on, or after something that depends on it.
+    MoveInTree {
+        /// The item to move.
+        item: AnyId,
+        /// The item it goes before.
+        before: Option<AnyId>,
+    },
+    /// Suppresses a design item (kept, not computed) or brings it back.
+    SetSuppressed {
+        /// The item.
+        item: AnyId,
+        /// True to suppress.
+        suppressed: bool,
+    },
+    /// Puts the rollback marker after an item (`None`: at the end).
+    SetRollback {
+        /// The last item that is computed.
+        after: Option<AnyId>,
+    },
     /// Adds a body.
     AddBody(Body),
     /// Replaces a body's data.
@@ -447,6 +507,86 @@ pub enum CellOp {
 
 fn finite(values: &[f64]) -> bool {
     values.iter().all(|v| v.is_finite())
+}
+
+/// Changes the model tree's order, creating it on first use (with the current order written out).
+fn set_timeline(txn: &mut Txn<'_>, edit: impl FnOnce(&mut crate::design::Timeline)) -> Result<(), EditError> {
+    let existing = txn.doc().timeline().map(|(id, _)| id);
+    let order = txn.doc().model_order();
+    match existing {
+        Some(id) => {
+            txn.modify(id, |t: &mut crate::design::Timeline, _| {
+                t.items = order;
+                edit(t);
+            })?;
+        }
+        None => {
+            let mut timeline = crate::design::Timeline { items: order, ..Default::default() };
+            edit(&mut timeline);
+            txn.insert(timeline);
+        }
+    }
+    Ok(())
+}
+
+/// Puts a newly added design item right after the rollback marker, when the marker is not at the end
+/// (otherwise it is at the end already).
+fn place_new(txn: &mut Txn<'_>, item: AnyId) -> Result<(), EditError> {
+    let Some(marker) = txn.doc().timeline().and_then(|(_, t)| t.rollback_after) else { return Ok(()) };
+    if !txn.doc().contains(marker) {
+        return Ok(());
+    }
+    set_timeline(txn, |t| {
+        t.items.retain(|i| *i != item);
+        let at = t.items.iter().position(|i| *i == marker).map_or(t.items.len(), |m| m + 1);
+        t.items.insert(at, item);
+        // The new item is where the user works: the marker moves past it.
+        t.rollback_after = Some(item);
+    })
+}
+
+/// Checks a work feature: finite numbers, references of the right kind, no reference to itself.
+fn work_feature_ok(
+    txn: &Txn<'_>,
+    feature: &crate::design::WorkFeature,
+    itself: Option<Id<crate::design::WorkFeature>>,
+) -> Result<(), EditError> {
+    use crate::design::{PlaneRef, PointRef, WorkGeometry};
+    let doc = txn.doc();
+    if !feature.geometry.is_finite() {
+        return Err(EditError::BadValue);
+    }
+    let plane_ok = |plane: &PlaneRef| match plane {
+        PlaneRef::Origin(_) => true,
+        PlaneRef::Work(id) => Some(*id) != itself && doc.get(*id).is_some_and(|w| w.geometry.is_plane()),
+    };
+    let point_ok = |point: &PointRef| match point {
+        PointRef::Origin | PointRef::Fixed(_) => true,
+        PointRef::SketchPoint { sketch, point } => {
+            doc.get(*sketch).is_some_and(|s| s.points.contains_key(point))
+        }
+        PointRef::Work(id) => Some(*id) != itself && doc.get(*id).is_some_and(|w| w.geometry.is_point()),
+    };
+    let ok = match &feature.geometry {
+        WorkGeometry::PlaneOffset { base, .. } => plane_ok(base),
+        WorkGeometry::PlaneThroughPoints { points } => points.iter().all(point_ok),
+        WorkGeometry::AxisThroughPoints { points } => points.iter().all(point_ok) && points[0] != points[1],
+        WorkGeometry::AxisNormalToPlane { plane, through } => plane_ok(plane) && point_ok(through),
+        WorkGeometry::Point { at } => point_ok(at),
+    };
+    if ok { Ok(()) } else { Err(EditError::BadValue) }
+}
+
+/// Checks a modelling feature: its sketch exists, the profile's curves are in it, the extent is usable.
+fn feature_ok(txn: &Txn<'_>, feature: &crate::design::Feature) -> Result<(), EditError> {
+    let crate::design::FeatureKind::Extrude(extrude) = &feature.kind;
+    let sketch = txn.doc().get(extrude.sketch).ok_or(EditError::BadValue)?;
+    if extrude.extent.range(extrude.reversed).is_none()
+        || !extrude.profile.iter().all(|c| sketch.curves.contains_key(c))
+    {
+        return Err(EditError::BadValue);
+    }
+    Ok(())
 }
 
 fn placed(placement: &Placement) -> Result<(), EditError> {
@@ -643,6 +783,98 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
                 p.contacts.retain(|c| c.index < waypoints.len());
             })?;
             Ok((Vec::new(), "Edit path"))
+        }
+        CellOp::AddWorkFeature(feature) => {
+            work_feature_ok(txn, feature, None)?;
+            let id = txn.insert(feature.clone());
+            place_new(txn, id.erase())?;
+            Ok((vec![Created::WorkFeature(id)], "Add work feature"))
+        }
+        CellOp::SetWorkFeature { id, feature } => {
+            work_feature_ok(txn, feature, Some(*id))?;
+            txn.modify(*id, |f: &mut crate::design::WorkFeature, _| f.clone_from(feature))?;
+            Ok((Vec::new(), "Edit work feature"))
+        }
+        CellOp::DeleteWorkFeature(id) => {
+            txn.remove(*id)?;
+            Ok((Vec::new(), "Delete work feature"))
+        }
+        CellOp::AddFeature(feature) => {
+            feature_ok(txn, feature)?;
+            let id = txn.insert(feature.clone());
+            place_new(txn, id.erase())?;
+            Ok((vec![Created::Feature(id)], "Add feature"))
+        }
+        CellOp::SetFeature { id, feature } => {
+            feature_ok(txn, feature)?;
+            txn.modify(*id, |f: &mut crate::design::Feature, _| f.clone_from(feature))?;
+            Ok((Vec::new(), "Edit feature"))
+        }
+        CellOp::DeleteFeature(id) => {
+            txn.remove(*id)?;
+            Ok((Vec::new(), "Delete feature"))
+        }
+        CellOp::AddAssembly(assembly) => {
+            placed(&assembly.placement)?;
+            if !assembly.is_valid() {
+                return Err(EditError::BadValue);
+            }
+            let id = txn.insert(assembly.clone());
+            place_new(txn, id.erase())?;
+            Ok((vec![Created::Assembly(id)], "Import assembly"))
+        }
+        CellOp::PlaceAssembly { id, placement } => {
+            placed(placement)?;
+            txn.modify(*id, |a: &mut crate::design::Assembly, _| a.placement = *placement)?;
+            Ok((Vec::new(), "Move assembly"))
+        }
+        CellOp::SetAssemblyLook { id, look } => {
+            txn.modify(*id, |a: &mut crate::design::Assembly, _| a.look = *look)?;
+            Ok((Vec::new(), "Change look"))
+        }
+        CellOp::DeleteAssembly(id) => {
+            txn.remove(*id)?;
+            Ok((Vec::new(), "Delete assembly"))
+        }
+        CellOp::MoveInTree { item, before } => {
+            let doc = txn.doc();
+            let mut order = doc.model_order();
+            let Some(from) = order.iter().position(|o| o == item) else { return Err(EditError::BadValue) };
+            if before.is_some_and(|b| !order.contains(&b) || b == *item) {
+                return Err(EditError::BadValue);
+            }
+            order.remove(from);
+            let to = before.and_then(|b| order.iter().position(|o| *o == b)).unwrap_or(order.len());
+            order.insert(to, *item);
+            // Every item must come after what it depends on.
+            let position = |id: AnyId| order.iter().position(|o| *o == id);
+            let broken = doc.references().iter().any(
+                |(user, used)| matches!((position(*user), position(*used)), (Some(u), Some(d)) if u < d),
+            );
+            if broken {
+                return Err(EditError::InUse);
+            }
+            set_timeline(txn, |t| t.items = order)?;
+            Ok((Vec::new(), "Reorder"))
+        }
+        CellOp::SetSuppressed { item, suppressed } => {
+            if !txn.doc().model_order().contains(item) {
+                return Err(EditError::BadValue);
+            }
+            set_timeline(txn, |t| {
+                t.suppressed.retain(|s| s != item);
+                if *suppressed {
+                    t.suppressed.push(*item);
+                }
+            })?;
+            Ok((Vec::new(), if *suppressed { "Suppress" } else { "Unsuppress" }))
+        }
+        CellOp::SetRollback { after } => {
+            if after.is_some_and(|a| !txn.doc().model_order().contains(&a)) {
+                return Err(EditError::BadValue);
+            }
+            set_timeline(txn, |t| t.rollback_after = *after)?;
+            Ok((Vec::new(), "Move end of part"))
         }
         CellOp::SetContacts { id, contacts } => {
             let count = txn.doc().get(*id).ok_or(DocError::Missing(id.erase()))?.waypoints.len();
