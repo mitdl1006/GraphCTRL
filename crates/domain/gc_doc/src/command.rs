@@ -58,6 +58,22 @@ pub enum SketchOp {
         /// Position.
         pos: [f64; 3],
     },
+    /// The Point command: places a standalone point without constraints, a centre point (Inventor's
+    /// default, a cross) or a sketch point (a dot) (Inventor 2026 help, To Work with Points,
+    /// GUID-D4A4288F-32F1-4E23-A382-930EBA152E87).
+    PlacePoint {
+        /// Position.
+        pos: [f64; 3],
+        /// A centre point rather than a sketch point.
+        center: bool,
+    },
+    /// The Center Point toggle on selected standalone points (curve ends and centres are refused).
+    SetCenterPoint {
+        /// The points.
+        points: Vec<Id<SkPoint>>,
+        /// Centre points, or sketch points.
+        center: bool,
+    },
     /// Adds a line. Snaps and the inferred direction become constraints where they are consistent and
     /// are silently left out where they are not.
     AddLine {
@@ -845,6 +861,34 @@ fn sketch_op(
         SketchOp::AddPoint { pos } => {
             created.push(Created::Point(sketch.add_point(ids, *pos)));
             "Point"
+        }
+        SketchOp::PlacePoint { pos, center } => {
+            if !pos.iter().all(|v| v.is_finite()) {
+                return Err(SketchError::InvalidValue.into());
+            }
+            let point = sketch.add_point(ids, *pos);
+            if let Some(p) = sketch.points.get_mut(&point) {
+                p.center = *center;
+            }
+            created.push(Created::Point(point));
+            if *center { "Center point" } else { "Point" }
+        }
+        SketchOp::SetCenterPoint { points, center } => {
+            let owned: std::collections::BTreeSet<Id<SkPoint>> =
+                sketch.curves.values().flat_map(gc_sketch::Curve::points).collect();
+            let standalone = |p: &Id<SkPoint>| {
+                sketch.points.get(p).is_some_and(|q| matches!(q.kind, gc_sketch::PointKind::Free))
+                    && !owned.contains(p)
+            };
+            if points.is_empty() || !points.iter().all(standalone) {
+                return Err(SketchError::InvalidValue.into());
+            }
+            for p in points {
+                if let Some(q) = sketch.points.get_mut(p) {
+                    q.center = *center;
+                }
+            }
+            "Center point"
         }
         SketchOp::AddLine { a, b, snap_a, snap_b, horizontal } => {
             let line = sketch.add_line(ids, *a, *b);
