@@ -875,7 +875,7 @@ fn items_are_highlighted_selected_and_offer_their_commands() {
     assert_eq!(harness.query_all_by_label("joint_1").count(), 0, "the robot's sliders are not shown");
     assert!(harness.query_all_by_label("투명도").count() >= 1, "the body's own settings are shown");
     // Clicking the robot in the browser selects it there and in the view.
-    harness.get_by_label("UR5e_1").click();
+    harness.get_by_label("UR5e_1:1").click();
     harness.run();
     assert_eq!(harness.state().session.selected_item(), Some(CellItem::Robot(robot)));
     assert!(harness.query_all_by_label("shoulder_pan_joint").count() >= 1, "the robot's sliders are shown");
@@ -1484,7 +1484,8 @@ fn a_mesh_file_is_imported_through_the_ribbon() {
     assert_eq!(body.name, "fixture");
     assert_eq!(session.body_mesh(&body.solid).unwrap().data.triangle_count(), 96);
     // Listed in the browser and in the placement panel.
-    assert_eq!(harness.query_all_by_label("fixture").count(), 2);
+    assert_eq!(harness.query_all_by_label("fixture:1").count(), 1);
+    assert_eq!(harness.query_all_by_label("fixture").count(), 1);
 }
 
 /// Save, start a new document, open the file again: the sketch is back and the window is not "dirty".
@@ -2649,4 +2650,143 @@ fn the_parameters_dialog_lists_and_edits_parameters() {
     assert_eq!(harness.state().session.doc().params().len(), 1);
     harness.get_by_label("완료").click();
     harness.run();
+}
+
+/// A component's origin folder: shown in the browser with a check box each, drawn in the view, picked
+/// there (the browser follows), and a sketch is started from its right-click menu.
+#[test]
+fn a_component_origin_plane_is_shown_picked_and_sketched_on() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.05, 0.05, 0.05] };
+    let body = harness.state_mut().session.add_body(solid, gc_doc::Placement::default()).unwrap();
+    harness.run();
+    let occurrence = gc_doc::Occurrence::Item(body.erase());
+    let plane = gc_doc::OriginElement::Plane(gc_doc::OriginPlane::Xy);
+    assert!(!harness.state().session.origin_visible(occurrence, plane), "hidden at first");
+
+    // The folder is listed under the body; its check boxes show the elements.
+    harness.query_all_by_label("원점").last().unwrap().click();
+    harness.run();
+    harness.query_all_by_label("XY 평면 보이기").next().unwrap().click();
+    harness.run();
+    assert!(harness.state().session.origin_visible(occurrence, plane));
+
+    // A click on the drawn plane selects it, the browser row follows; Escape lets go.
+    let on_plane = gc_math::DVec3::new(0.09, 0.09, 0.0);
+    // Out from under the floating properties panel.
+    harness.state_mut().viewport_mut().camera.pan([0.0, 0.0], [-250.0, 0.0], [1280.0, 700.0]);
+    harness.run();
+    let at = harness.state().viewport().screen_of(on_plane).unwrap();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run();
+    }
+    assert_eq!(harness.state().viewport().origin_selected, Some((occurrence, plane)));
+    if gpu {
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        harness.render().unwrap().save(out.join("review-32-origin-plane.png")).unwrap();
+    }
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert!(harness.state().viewport().origin_selected.is_none());
+
+    // The right-click menu of the plane starts a sketch on it.
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+    harness.run();
+    harness.get_by_label("스케치 만들기").click();
+    harness.run();
+    assert!(harness.state().session.active_sketch().is_some());
+    assert_eq!(harness.state().session.doc().sketches().len(), 1);
+}
+
+/// The navigation bar: a pan tool that stays on, zoom all, and the home button at the view cube; the
+/// browser is an assembly tree with the document at its top and the components as "name:1".
+#[test]
+fn the_navigation_bar_and_the_assembly_tree() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("파일").click();
+    harness.run();
+    harness.get_by_label("예제 열기 (UR5e 셀)").click();
+    harness.run();
+    // The tree: the document, its folders, the components.
+    harness.get_by_label("Cell1");
+    harness.get_by_label("관계");
+    harness.get_by_label("표현");
+    harness.get_by_label("UR5e_1:1");
+    harness.get_by_label("Body1:1");
+    // The status bar counts occurrences.
+    harness.get_by_label_contains("구성요소 2");
+
+    let pivot = harness.state().viewport().camera.pivot;
+    // The bar's buttons are drawn in the view and answer to the mouse.
+    let press = |harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, label: &str| {
+        let at = harness.get_by_label(label).rect().center();
+        harness.event(egui::Event::PointerMoved(at));
+        harness.run();
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.run();
+        }
+    };
+    press(&mut harness, "초점 이동");
+    let from = egui::pos2(520.0, 450.0);
+    harness.event(egui::Event::PointerMoved(from));
+    harness.run();
+    harness.event(egui::Event::PointerButton {
+        pos: from,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run();
+    for step in 1..=4 {
+        harness.event(egui::Event::PointerMoved(from + egui::vec2(15.0 * step as f32, 0.0)));
+        harness.run_steps(2);
+    }
+    harness.event(egui::Event::PointerButton {
+        pos: from + egui::vec2(60.0, 0.0),
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run();
+    assert!((harness.state().viewport().camera.pivot - pivot).length() > 1e-3, "the view was panned");
+    if gpu {
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        harness.render().unwrap().save(out.join("review-33-nav-bar-tree.png")).unwrap();
+    }
+    // Esc ends the tool; the home button turns the view to the isometric one.
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    press(&mut harness, "홈 뷰");
+    press(&mut harness, "모두 확대");
 }

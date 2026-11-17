@@ -1048,6 +1048,7 @@ impl eframe::App for GraphCtrlApp {
             },
             |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
+                    self.params.origin_selected = self.viewport.origin_selected;
                     match gc_panels::browser(ui, &self.session, lang, &mut self.params) {
                         Some(BrowserAction::EditSketch(id)) => {
                             self.session.enter_sketch(id);
@@ -1062,7 +1063,21 @@ impl eframe::App for GraphCtrlApp {
                                 self.params = gc_panels::ParamsUi::default();
                             }
                         }
-                        Some(BrowserAction::Select(item)) => self.session.select_item(item),
+                        Some(BrowserAction::Select(item)) => {
+                            self.viewport.origin_selected = None;
+                            self.session.select_item(item);
+                        }
+                        Some(BrowserAction::OriginVisible(occurrence, elements, visible)) => {
+                            // A refusal is shown in the status bar.
+                            drop(self.session.set_origin_visible(occurrence, &elements, visible));
+                        }
+                        Some(BrowserAction::OriginSelect(chosen)) => {
+                            self.session.select_item(None);
+                            self.viewport.origin_selected = chosen;
+                        }
+                        Some(BrowserAction::SketchOnComponent(occurrence, plane)) => {
+                            drop(self.session.create_sketch_on_component(occurrence, plane));
+                        }
                         Some(BrowserAction::Plan(path)) => {
                             self.cell.playing = false;
                             self.session.plan(path);

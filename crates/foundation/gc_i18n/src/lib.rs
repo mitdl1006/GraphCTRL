@@ -520,6 +520,50 @@ messages! {
     /// Plan metric: the move was possible in a straight joint-space line.
     PlanStraight => ("직선 이동(플래너 불필요)", "Straight move (no planner needed)"),
     // --- frontend ---
+    /// Status bar: the number of occurrences (components) in the document.
+    StatusOccurrences => ("구성요소 {0}", "Occurrences {0}"),
+    /// Status bar: the number of documents open.
+    StatusDocuments => ("문서 {0}", "Documents {0}"),
+    /// Navigation bar tool names.
+    NavZoomAll => ("모두 확대", "Zoom All"),
+    /// Navigation bar tool.
+    NavPan => ("초점 이동", "Pan"),
+    /// Navigation bar tool.
+    NavZoom => ("확대/축소", "Zoom"),
+    /// Navigation bar tool.
+    NavOrbit => ("궤도", "Orbit"),
+    /// Navigation bar tool.
+    NavLookAt => ("면 보기", "Look At"),
+    /// The ViewCube's home button.
+    NavHome => ("홈 뷰", "Home view"),
+    /// Browser: the root node's name when the document has no file yet.
+    BrowserDocument => ("Cell1", "Cell1"),
+    /// Browser: the folder of relationships (constraints and joints).
+    BrowserRelationships => ("관계", "Relationships"),
+    /// Browser: the folder of representations (views, positions).
+    BrowserRepresentations => ("표현", "Representations"),
+    /// Context menu of an origin plane: start a sketch on it.
+    CmdSketchHere => ("스케치 만들기", "Create sketch"),
+    /// Origin folder items of a component.
+    OriginYz => ("YZ 평면", "YZ plane"),
+    /// Origin folder item.
+    OriginXz => ("XZ 평면", "XZ plane"),
+    /// Origin folder item.
+    OriginXy => ("XY 평면", "XY plane"),
+    /// Origin folder item.
+    OriginAxisX => ("X축", "X axis"),
+    /// Origin folder item.
+    OriginAxisY => ("Y축", "Y axis"),
+    /// Origin folder item.
+    OriginAxisZ => ("Z축", "Z axis"),
+    /// Origin folder item.
+    OriginPoint => ("중심점", "Center point"),
+    /// Origin folder menu: show all seven elements.
+    CmdShowOrigin => ("원점 표시", "Show origin"),
+    /// Origin folder menu: hide all seven elements.
+    CmdHideOrigin => ("원점 숨기기", "Hide origin"),
+    /// Browser group of imported equipment.
+    BrowserAssemblies => ("설비", "Equipment"),
     /// Ribbon tab for measuring and analysing the cell.
     TabInspect => ("검사", "Inspect"),
     /// Ribbon tab: Inventor's Manage tab.

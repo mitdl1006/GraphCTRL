@@ -30,6 +30,12 @@ pub enum BrowserAction {
     Select(Option<gc_session::CellItem>),
     /// Plan a path.
     Plan(gc_core::Id<gc_doc::MotionPath>),
+    /// Show or hide elements of a component's origin folder.
+    OriginVisible(gc_doc::Occurrence, Vec<gc_doc::OriginElement>, bool),
+    /// Select an origin element in the browser (the view follows), or nothing.
+    OriginSelect(Option<(gc_doc::Occurrence, gc_doc::OriginElement)>),
+    /// Start a sketch on an origin plane of a component.
+    SketchOnComponent(gc_doc::Occurrence, gc_doc::OriginPlane),
 }
 
 /// What is typed into the parameter editor of the browser.
@@ -43,6 +49,8 @@ pub struct ParamsUi {
     pub rename: Option<(gc_core::AnyId, String)>,
     /// The rename has just begun: the field takes the keyboard focus.
     pub rename_fresh: bool,
+    /// The origin element selected in the view or here.
+    pub origin_selected: Option<(gc_doc::Occurrence, gc_doc::OriginElement)>,
 }
 
 /// The named parameters: a list, and one editor that adds a parameter or, when the name exists, changes
@@ -112,22 +120,6 @@ fn params(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi) -> O
 pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi) -> Option<BrowserAction> {
     let mut action = None;
     gc_ui::panel::header(ui, tr!(lang, PanelBrowser));
-    egui::CollapsingHeader::new(tr!(lang, BrowserOrigin)).default_open(true).show(ui, |ui| {
-        ui.spacing_mut().item_spacing.y = 1.0;
-        for (_, frame) in session.doc().frames().iter().filter(|(_, f)| f.kind == FrameKind::OriginPlane) {
-            let row = TreeRow {
-                icon: Icon::Frame,
-                text: &frame.name,
-                selected: false,
-                visible: None,
-                delete: None,
-                edit: None,
-                focus: false,
-                dim: false,
-            };
-            gc_ui::panel::tree_row(ui, row);
-        }
-    });
     // F2 renames the selected node when the mouse is over the browser (over the 3D view, F2 pans).
     let hovering = ui.rect_contains_pointer(ui.max_rect());
     if hovering && ui.input(|i| i.key_pressed(egui::Key::F2)) {
@@ -142,6 +134,67 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
             state.rename_fresh = true;
         }
     }
+    // The document's tree, as in an assembly browser: the document, its relationships and
+    // representations, the origin, and the components (bodies and robots, "name:1" each) with an origin
+    // folder of their own. What is specific to the robot cell follows in folders of its own.
+    let doc = session.doc();
+    let selected = session.selected_item();
+    use gc_session::CellItem;
+    type Row = (String, String, CellItem);
+
+    let components: Vec<Row> = session
+        .components()
+        .iter()
+        .filter(|node| node.parent.is_none())
+        .filter_map(|node| {
+            let gc_doc::Occurrence::Item(any) = node.occurrence else { return None };
+            let item = match any.kind {
+                gc_core::Kind::Body => CellItem::Body(any.downcast()?),
+                gc_core::Kind::RobotInstance => CellItem::Robot(any.downcast()?),
+                _ => return None,
+            };
+            Some((node.name.clone(), format!("{}:1", node.name), item))
+        })
+        .collect();
+    let document = session.file_path().and_then(|p| p.file_stem().map(|n| n.to_string_lossy().into_owned()));
+    let document = document.unwrap_or_else(|| tr!(lang, BrowserDocument).to_owned());
+    egui::CollapsingHeader::new(RichText::new(document).strong())
+        .id_salt("gc_browser_document")
+        .default_open(true)
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 1.0;
+            for title in [tr!(lang, BrowserRelationships), tr!(lang, BrowserRepresentations)] {
+                let row = TreeRow {
+                    icon: Icon::Path,
+                    text: title,
+                    selected: false,
+                    visible: None,
+                    delete: None,
+                    edit: None,
+                    focus: false,
+                    dim: false,
+                };
+                gc_ui::panel::tree_row(ui, row);
+            }
+            egui::CollapsingHeader::new(tr!(lang, BrowserOrigin)).default_open(false).show(ui, |ui| {
+                for (_, frame) in
+                    session.doc().frames().iter().filter(|(_, f)| f.kind == FrameKind::OriginPlane)
+                {
+                    let row = TreeRow {
+                        icon: Icon::Frame,
+                        text: &frame.name,
+                        selected: false,
+                        visible: None,
+                        delete: None,
+                        edit: None,
+                        focus: false,
+                        dim: false,
+                    };
+                    gc_ui::panel::tree_row(ui, row);
+                }
+            });
+            browser_section(ui, session, lang, state, selected, &mut action, None, components);
+        });
     egui::CollapsingHeader::new(tr!(lang, BrowserSketches)).default_open(true).show(ui, |ui| {
         let active = session.active_sketch().map(|(id, _)| id);
         ui.spacing_mut().item_spacing.y = 1.0;
@@ -169,67 +222,25 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
     if let Some(command) = params(ui, session, lang, state) {
         action = Some(BrowserAction::Edit(Box::new(command)));
     }
-    // Cell items: a selectable name with a context menu, and a small button that deletes the item.
-    let doc = session.doc();
-    let selected = session.selected_item();
-    use gc_session::CellItem;
-    type Row = (String, String, CellItem);
-    let mut section = |ui: &mut Ui, title: &str, items: Vec<Row>| {
-        if items.is_empty() {
-            return;
-        }
-        egui::CollapsingHeader::new(title).default_open(true).show(ui, |ui| {
-            ui.spacing_mut().item_spacing.y = 1.0;
-            for (name, shown, item) in items {
-                let icon = match item {
-                    CellItem::Body(_) => Icon::Cuboid,
-                    CellItem::Robot(_) => Icon::Robot,
-                    CellItem::Frame(_) => Icon::Frame,
-                    CellItem::Waypoint(_) => Icon::Waypoint,
-                    CellItem::Path(_) => Icon::Path,
-                };
-                let node = Node {
-                    icon,
-                    name: &name,
-                    text: &shown,
-                    any: cell_any(item),
-                    selected: selected == Some(item),
-                    delete: gc_doc::Command::Cell(item.delete_op()),
-                    suppressible: matches!(item, CellItem::Waypoint(_) | CellItem::Path(_)),
-                };
-                let result = node_row(ui, session, lang, state, &node, &mut action, |ui, action| {
-                    if let CellItem::Path(path) = item
-                        && ui.button(tr!(lang, CmdPlan)).clicked()
-                    {
-                        *action = Some(BrowserAction::Plan(path));
-                        ui.close();
-                    }
-                });
-                if result.clicked() || result.secondary_clicked() {
-                    action = Some(BrowserAction::Select(Some(item)));
-                }
-            }
-        });
-    };
     let row = |name: &str, item| (name.to_owned(), name.to_owned(), item);
-    section(
+    browser_section(
         ui,
-        tr!(lang, BrowserBodies),
-        doc.bodies().iter().map(|(id, b)| row(&b.name, CellItem::Body(id))).collect(),
-    );
-    section(
-        ui,
-        tr!(lang, BrowserRobots),
-        doc.robots().iter().map(|(id, r)| row(&r.name, CellItem::Robot(id))).collect(),
-    );
-    section(
-        ui,
-        tr!(lang, BrowserFrames),
+        session,
+        lang,
+        state,
+        selected,
+        &mut action,
+        Some(tr!(lang, BrowserFrames)),
         doc.work_frames().iter().map(|(id, f)| row(&f.name, CellItem::Frame(id))).collect(),
     );
-    section(
+    browser_section(
         ui,
-        tr!(lang, BrowserWaypoints),
+        session,
+        lang,
+        state,
+        selected,
+        &mut action,
+        Some(tr!(lang, BrowserWaypoints)),
         doc.waypoints().iter().map(|(id, w)| row(&w.name, CellItem::Waypoint(id))).collect(),
     );
     let paths = doc
@@ -240,8 +251,167 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
             (p.name.clone(), shown, CellItem::Path(id))
         })
         .collect();
-    section(ui, tr!(lang, BrowserPaths), paths);
+    browser_section(ui, session, lang, state, selected, &mut action, Some(tr!(lang, BrowserPaths)), paths);
     action
+}
+
+/// A group of rows of the browser tree (components, frames, waypoints, paths): a folder with `title`, or
+/// the rows alone.
+#[allow(clippy::too_many_arguments, reason = "the browser's shared state")]
+fn browser_section(
+    ui: &mut Ui,
+    session: &Session,
+    lang: Lang,
+    state: &mut ParamsUi,
+    selected: Option<gc_session::CellItem>,
+    action: &mut Option<BrowserAction>,
+    title: Option<&str>,
+    items: Vec<(String, String, gc_session::CellItem)>,
+) {
+    use gc_session::CellItem;
+    if items.is_empty() {
+        return;
+    }
+    let rows = |ui: &mut Ui| {
+        ui.spacing_mut().item_spacing.y = 1.0;
+        for (name, shown, item) in items {
+            let icon = match item {
+                CellItem::Body(_) => Icon::Cuboid,
+                CellItem::Robot(_) => Icon::Robot,
+                CellItem::Frame(_) => Icon::Frame,
+                CellItem::Waypoint(_) => Icon::Waypoint,
+                CellItem::Path(_) => Icon::Path,
+            };
+            let node = Node {
+                icon,
+                name: &name,
+                text: &shown,
+                any: cell_any(item),
+                selected: selected == Some(item),
+                delete: gc_doc::Command::Cell(item.delete_op()),
+                suppressible: matches!(item, CellItem::Waypoint(_) | CellItem::Path(_)),
+            };
+            let result = node_row(ui, session, lang, state, &node, action, |ui, action| {
+                if let CellItem::Path(path) = item
+                    && ui.button(tr!(lang, CmdPlan)).clicked()
+                {
+                    *action = Some(BrowserAction::Plan(path));
+                    ui.close();
+                }
+            });
+            if result.clicked() || result.secondary_clicked() {
+                *action = Some(BrowserAction::Select(Some(item)));
+            }
+            // Components have an origin folder of their own.
+            if let CellItem::Body(_) | CellItem::Robot(_) = item {
+                origin_folder(ui, session, lang, state, gc_doc::Occurrence::Item(cell_any(item)), action);
+            }
+        }
+    };
+    match title {
+        Some(title) => {
+            egui::CollapsingHeader::new(title).default_open(true).show(ui, rows);
+        }
+        None => rows(ui),
+    }
+}
+
+/// The name of an origin element.
+fn origin_name(lang: Lang, element: gc_doc::OriginElement) -> &'static str {
+    use gc_doc::{OriginElement, OriginPlane};
+    match element {
+        OriginElement::Plane(OriginPlane::Yz) => tr!(lang, OriginYz),
+        OriginElement::Plane(OriginPlane::Xz) => tr!(lang, OriginXz),
+        OriginElement::Plane(OriginPlane::Xy) => tr!(lang, OriginXy),
+        OriginElement::Axis(0) => tr!(lang, OriginAxisX),
+        OriginElement::Axis(1) => tr!(lang, OriginAxisY),
+        OriginElement::Axis(_) => tr!(lang, OriginAxisZ),
+        OriginElement::Point => tr!(lang, OriginPoint),
+    }
+}
+
+/// The "origin" folder of a component: three planes, three axes and the centre point, hidden until the
+/// user shows them (a check box each; the folder's menu shows or hides all seven).
+fn origin_folder(
+    ui: &mut Ui,
+    session: &Session,
+    lang: Lang,
+    state: &ParamsUi,
+    occurrence: gc_doc::Occurrence,
+    action: &mut Option<BrowserAction>,
+) {
+    use gc_doc::OriginElement;
+    let elements = gc_viewport_elements();
+    let all_shown = elements.iter().all(|e| session.origin_visible(occurrence, *e));
+    ui.indent(("gc_origin_indent", occurrence), |ui| {
+        let header = egui::CollapsingHeader::new(tr!(lang, BrowserOrigin))
+            .id_salt(("gc_origin_folder", occurrence))
+            .default_open(false)
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 1.0;
+                for element in elements {
+                    let name = origin_name(lang, element);
+                    let mut visible = session.origin_visible(occurrence, element);
+                    let show_label = tr!(lang, ShowItem, name);
+                    let icon = match element {
+                        OriginElement::Plane(_) => Icon::Sketch,
+                        OriginElement::Axis(_) => Icon::Line,
+                        OriginElement::Point => Icon::Waypoint,
+                    };
+                    let row = TreeRow {
+                        icon,
+                        text: name,
+                        selected: state.origin_selected == Some((occurrence, element)),
+                        visible: Some((&mut visible, show_label.as_str())),
+                        delete: None,
+                        edit: None,
+                        focus: false,
+                        dim: false,
+                    };
+                    let result = gc_ui::panel::tree_row(ui, row);
+                    if result.toggled {
+                        *action = Some(BrowserAction::OriginVisible(occurrence, vec![element], visible));
+                    }
+                    if result.row.clicked() || result.row.secondary_clicked() {
+                        *action = Some(BrowserAction::OriginSelect(Some((occurrence, element))));
+                    }
+                    result.row.context_menu(|ui| {
+                        if let OriginElement::Plane(plane) = element
+                            && ui.button(tr!(lang, CmdSketchHere)).clicked()
+                        {
+                            *action = Some(BrowserAction::SketchOnComponent(occurrence, plane));
+                            ui.close();
+                        }
+                        let text = if visible { tr!(lang, CmdHide) } else { tr!(lang, CmdShow) };
+                        if ui.button(text).clicked() {
+                            *action = Some(BrowserAction::OriginVisible(occurrence, vec![element], !visible));
+                            ui.close();
+                        }
+                    });
+                }
+            });
+        header.header_response.context_menu(|ui| {
+            let text = if all_shown { tr!(lang, CmdHideOrigin) } else { tr!(lang, CmdShowOrigin) };
+            if ui.button(text).clicked() {
+                *action = Some(BrowserAction::OriginVisible(occurrence, elements.to_vec(), !all_shown));
+                ui.close();
+            }
+        });
+    });
+}
+
+/// The seven origin elements in the order of the folder.
+fn gc_viewport_elements() -> [gc_doc::OriginElement; 7] {
+    use gc_doc::{OriginElement, OriginPlane};
+    [
+        OriginElement::Plane(OriginPlane::Yz),
+        OriginElement::Plane(OriginPlane::Xz),
+        OriginElement::Plane(OriginPlane::Xy),
+        OriginElement::Axis(0),
+        OriginElement::Axis(1),
+        OriginElement::Axis(2),
+        OriginElement::Point,
+    ]
 }
 
 /// The id of a cell item, whatever its kind.
@@ -504,6 +674,11 @@ pub fn status_bar(
             ui.label(notice);
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // At the far right, as in Inventor: the number of occurrences, and of open documents.
+            ui.weak(tr!(lang, StatusDocuments, 1));
+            ui.separator();
+            ui.weak(tr!(lang, StatusOccurrences, session.components().len()));
+            ui.separator();
             ui.weak(if gpu { tr!(lang, GpuOn) } else { tr!(lang, GpuOff) });
             if let Some(report) = session.report() {
                 ui.separator();
