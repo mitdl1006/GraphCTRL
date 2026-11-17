@@ -648,6 +648,9 @@ impl GraphCtrlApp {
                 if ui.button(tr!(lang, MenuPoseCalc)).clicked() {
                     self.pose_calc.get_or_insert_with(gc_panels::PoseCalc::default);
                 }
+                if ui.checkbox(&mut self.viewport.perf_overlay, tr!(lang, MenuPerfOverlay)).clicked() {
+                    ui.close();
+                }
                 if ui.button(tr!(lang, MenuImeTest)).clicked() {
                     self.ime.open = true;
                 }
