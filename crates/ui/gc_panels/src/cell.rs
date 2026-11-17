@@ -14,6 +14,16 @@ const PLANNER_NAMES: [&str; 5] = ["RRT-Connect", "RRT", "RRT*", "Informed RRT*",
 pub struct CellUi {
     /// True while the planned motion is being played.
     pub playing: bool,
+    /// The path the panel and the ribbon work on; the newest one when unset or deleted.
+    pub path: Option<gc_core::Id<gc_doc::MotionPath>>,
+}
+
+impl CellUi {
+    /// The path the panel and the ribbon work on.
+    pub fn active_path(&self, session: &Session) -> Option<gc_core::Id<gc_doc::MotionPath>> {
+        let paths = session.doc().paths();
+        self.path.filter(|id| paths.get(*id).is_some()).or_else(|| paths.iter().last().map(|(id, _)| id))
+    }
 }
 
 /// The text of a plan status.
@@ -31,10 +41,12 @@ pub fn status_text(lang: Lang, status: PlanStatus) -> &'static str {
 pub fn cell(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) {
     let pointer_down = ui.input(|i| i.pointer.any_down());
     jog(ui, session, lang);
+    base(ui, session, lang);
     bodies(ui, session, lang);
     if !pointer_down && !ui.memory(|m| m.focused().is_some()) {
         // The previews become one undo step each when the mouse is released.
         session.end_jog();
+        session.end_base_preview();
         session.end_body_preview();
     }
     paths(ui, session, lang, state);
@@ -71,6 +83,47 @@ fn jog(ui: &mut Ui, session: &mut Session, lang: Lang) {
     }
 }
 
+/// An angle shown and edited in degrees. Returns true when the user changed it.
+fn degrees(ui: &mut Ui, value: &mut f64, name: &str) -> bool {
+    let mut shown = value.to_degrees();
+    let changed = ui.add(egui::DragValue::new(&mut shown).speed(1.0).prefix(format!("{name} "))).changed();
+    if changed {
+        *value = shown.to_radians();
+    }
+    changed
+}
+
+/// Position and rotation of a placement. Returns true when the user changed something.
+fn placement(ui: &mut Ui, lang: Lang, placement: &mut gc_doc::Placement) -> bool {
+    let mut changed = false;
+    ui.label(tr!(lang, PropPosition));
+    ui.horizontal(|ui| {
+        for (value, name) in placement.xyz.iter_mut().zip(["X", "Y", "Z"]) {
+            changed |= millimetres(ui, value, name, -100_000.0);
+        }
+    });
+    ui.label(tr!(lang, PropRotation));
+    ui.horizontal(|ui| {
+        for (value, name) in placement.rpy.iter_mut().zip(["R", "P", "Y"]) {
+            changed |= degrees(ui, value, name);
+        }
+    });
+    changed
+}
+
+/// Where the robot's base stands: on the floor, on a table, on a piece of equipment.
+fn base(ui: &mut Ui, session: &mut Session, lang: Lang) {
+    let Some((robot, _)) = session.doc().robots().iter().next() else { return };
+    let Some(mut shown) = session.shown_base(robot) else { return };
+    let mut changed = false;
+    egui::CollapsingHeader::new(tr!(lang, PanelBase)).id_salt("gc_robot_base").show(ui, |ui| {
+        changed = placement(ui, lang, &mut shown);
+    });
+    if changed {
+        session.preview_base(robot, shown);
+    }
+}
+
 /// A length shown and edited in millimetres. Returns true when the user changed it.
 fn millimetres(ui: &mut Ui, value: &mut f64, name: &str, least: f64) -> bool {
     let mut mm = *value * 1000.0;
@@ -93,23 +146,7 @@ fn bodies(ui: &mut Ui, session: &mut Session, lang: Lang) {
         let Some(mut body) = session.shown_body(id).cloned() else { continue };
         let mut changed = false;
         egui::CollapsingHeader::new(&body.name).id_salt(("gc_body", id.raw())).show(ui, |ui| {
-            ui.label(tr!(lang, PropPosition));
-            ui.horizontal(|ui| {
-                for (value, name) in body.placement.xyz.iter_mut().zip(["X", "Y", "Z"]) {
-                    changed |= millimetres(ui, value, name, -100_000.0);
-                }
-            });
-            ui.label(tr!(lang, PropRotation));
-            ui.horizontal(|ui| {
-                for (value, name) in body.placement.rpy.iter_mut().zip(["R", "P", "Y"]) {
-                    let mut degrees = value.to_degrees();
-                    let drag = egui::DragValue::new(&mut degrees).speed(1.0).prefix(format!("{name} "));
-                    if ui.add(drag).changed() {
-                        *value = degrees.to_radians();
-                        changed = true;
-                    }
-                }
-            });
+            changed |= placement(ui, lang, &mut body.placement);
             match &mut body.solid {
                 Solid::Mesh { file, scale } => {
                     ui.horizontal(|ui| {
@@ -149,12 +186,31 @@ fn bodies(ui: &mut Ui, session: &mut Session, lang: Lang) {
 }
 
 fn paths(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) {
-    let Some((path_id, path)) = session.doc().paths().iter().last().map(|(id, p)| (id, p.clone())) else {
+    let Some(path_id) = state.active_path(session) else {
         state.playing = false;
         return;
     };
+    let Some(path) = session.doc().get(path_id).cloned() else { return };
     ui.add_space(8.0);
-    ui.label(RichText::new(format!("{}: {}", tr!(lang, PanelPath), path.name)).strong());
+    ui.label(RichText::new(tr!(lang, PanelPath)).strong());
+    // With several paths, this chooses the one the panel and the ribbon work on.
+    let names: Vec<_> = session.doc().paths().iter().map(|(id, p)| (id, p.name.clone())).collect();
+    if names.len() > 1 {
+        let mut chosen = path_id;
+        egui::ComboBox::from_id_salt("gc_active_path").selected_text(&path.name).show_ui(ui, |ui| {
+            for (id, name) in names {
+                ui.selectable_value(&mut chosen, id, name);
+            }
+        });
+        if chosen != path_id {
+            state.path = Some(chosen);
+            state.playing = false;
+            session.set_playback(None);
+            return;
+        }
+    } else {
+        ui.label(&path.name);
+    }
     let mut planner = path.planner.clone();
     let mut seed = path.seed;
     let shown =

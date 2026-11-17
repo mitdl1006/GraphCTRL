@@ -167,7 +167,7 @@ fn robot_tab(
 ) -> Option<RibbonAction> {
     let mut action = None;
     let robot = session.doc().robots().iter().next().map(|(id, _)| id);
-    let path = session.doc().paths().iter().last().map(|(id, _)| id);
+    let path = cell.active_path(session);
     // Failures of these commands are shown in the status bar.
     ribbon_group(ui, tr!(lang, GroupAdd), |ui| {
         // One robot per cell for now: the panels show the first one.
@@ -231,7 +231,8 @@ fn robot_tab(
         if ribbon_button(ui, Icon::Line, tr!(lang, CmdMakePath), false, !waypoints.is_empty()).clicked()
             && let Some(robot) = robot
         {
-            drop(session.add_path(robot, waypoints));
+            // The new path becomes the one the panel works on.
+            cell.path = session.add_path(robot, waypoints).ok();
         }
         // While a plan is being computed the same button cancels it.
         let planning = session.is_planning();

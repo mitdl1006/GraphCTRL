@@ -302,6 +302,8 @@ messages! {
     BrowserPaths => ("경로", "Paths"),
     /// Panel section: jog the robot's joints.
     PanelJog => ("조그", "Jog"),
+    /// Panel section: where the robot's base stands.
+    PanelBase => ("로봇 베이스", "Robot Base"),
     /// Panel section: placement and size of bodies.
     PanelBodies => ("바디 배치", "Body Placement"),
     /// Panel section: path planning.

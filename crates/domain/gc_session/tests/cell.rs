@@ -225,3 +225,31 @@ fn planners_are_compared_over_several_seeds() {
     session.end_jog();
     assert!(!session.comparison(path).unwrap().1);
 }
+
+#[test]
+fn placing_the_base_previews_live_and_commits_once() {
+    let mut session = Session::new();
+    let robot = session.add_robot("Robot1", &six_axis()).unwrap();
+    let waypoint = session.add_waypoint_here(robot).unwrap();
+    let before = session.link_poses(robot).unwrap();
+    let tip = session.waypoint_pose(waypoint).unwrap().translation;
+    let (revision, depth) = (session.doc().revision(), session.history().undo_depth());
+    for step in 1..=4 {
+        let placement = Placement { xyz: [0.0, 0.0, 0.2 * f64::from(step)], rpy: [0.0; 3] };
+        session.preview_base(robot, placement);
+        assert_eq!(session.doc().revision(), revision, "the preview does not touch the document");
+    }
+    // Every link is shown 0.8 m higher.
+    let shown = session.link_poses(robot).unwrap();
+    for (was, now) in before.iter().zip(&shown) {
+        assert!((now.translation - was.translation - gc_math::DVec3::new(0.0, 0.0, 0.8)).length() < 1e-12);
+    }
+    session.end_base_preview();
+    assert_eq!(session.history().undo_depth(), depth + 1);
+    assert_eq!(session.doc().get(robot).unwrap().placement.xyz, [0.0, 0.0, 0.8]);
+    // A joint waypoint moves with the robot it belongs to.
+    let moved = session.waypoint_pose(waypoint).unwrap().translation;
+    assert!((moved - tip - gc_math::DVec3::new(0.0, 0.0, 0.8)).length() < 1e-12);
+    assert!(session.undo());
+    assert_eq!(session.doc().get(robot).unwrap().placement.xyz, [0.0; 3]);
+}

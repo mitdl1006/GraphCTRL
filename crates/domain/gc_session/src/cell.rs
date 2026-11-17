@@ -238,6 +238,7 @@ pub(crate) struct CellState {
     robots: BTreeMap<Id<Robot>, Arc<LoadedRobot>>,
     jog: Option<(Id<Robot>, Vec<f64>)>,
     body: Option<(Id<Body>, Body)>,
+    base: Option<(Id<Robot>, Placement)>,
     plans: BTreeMap<Id<MotionPath>, Planned>,
     playback: Option<(Id<MotionPath>, f64)>,
     resources: Option<Resources>,
@@ -258,6 +259,7 @@ impl Default for CellState {
             robots: BTreeMap::new(),
             jog: None,
             body: None,
+            base: None,
             plans: BTreeMap::new(),
             playback: None,
             resources: None,
@@ -286,6 +288,9 @@ impl CellState {
         self.comparisons.retain(|id, _| doc.get(*id).is_some());
         if self.jog.as_ref().is_some_and(|(id, _)| doc.get(*id).is_none()) {
             self.jog = None;
+        }
+        if self.base.as_ref().is_some_and(|(id, _)| doc.get(*id).is_none()) {
+            self.base = None;
         }
         if self.body.as_ref().is_some_and(|(id, _)| doc.get(*id).is_none()) {
             self.body = None;
@@ -506,10 +511,35 @@ impl Session {
         }
     }
 
+    /// Where a robot's base is shown: the preview while it is being placed, else the document's.
+    pub fn shown_base(&self, robot: Id<Robot>) -> Option<Placement> {
+        match &self.cell.base {
+            Some((id, preview)) if *id == robot => Some(*preview),
+            _ => self.doc.get(robot).map(|r| r.placement),
+        }
+    }
+
+    /// Previews a placement of a robot's base without touching the document.
+    pub fn preview_base(&mut self, robot: Id<Robot>, placement: Placement) {
+        if self.doc.get(robot).is_some() {
+            self.cell.playback = None;
+            self.cell.base = Some((robot, placement));
+        }
+    }
+
+    /// Commits the base preview as one undo step.
+    pub fn end_base_preview(&mut self) {
+        if let Some((id, placement)) = self.cell.base.take()
+            && self.doc.get(id).is_some_and(|r| r.placement != placement)
+        {
+            self.last_error = self.cell_op(CellOp::PlaceRobot { id, placement }).err();
+        }
+    }
+
     /// World poses of all links of a robot as it is shown.
     pub fn link_poses(&self, robot: Id<Robot>) -> Option<Vec<DPose3>> {
         let loaded = self.robot_model(robot)?;
-        let base = pose_of(&self.doc.get(robot)?.placement);
+        let base = pose_of(&self.shown_base(robot)?);
         let mut poses = Vec::new();
         loaded.model.link_poses(&loaded.chain.expand(&self.robot_joints(robot)?), &mut poses);
         Some(poses.iter().map(|pose| base * *pose).collect())
@@ -651,6 +681,8 @@ impl Session {
     /// computed is cancelled.
     pub fn plan(&mut self, path: Id<MotionPath>) -> PlanStatus {
         self.end_jog();
+        self.end_base_preview();
+        self.end_body_preview();
         self.cell.playback = None;
         self.cancel_planning();
         let Some(inputs) = self.plan_inputs(path) else { return PlanStatus::NotPlanned };
