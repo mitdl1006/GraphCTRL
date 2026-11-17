@@ -269,3 +269,115 @@ fn p1_13_construction_toggle_before_and_after_drawing() {
     assert!(session.undo());
     assert!(session.active_sketch().unwrap().1.curves[&first].construction);
 }
+
+/// Adds a line directly (no inference), in millimetres.
+fn add_line(session: &mut Session, a: [f64; 2], b: [f64; 2]) -> Id<Curve> {
+    let sketch = session.active_sketch().unwrap().0;
+    let op = gc_doc::SketchOp::AddLine {
+        a: [a[0] * 1e-3, a[1] * 1e-3, 0.0],
+        b: [b[0] * 1e-3, b[1] * 1e-3, 0.0],
+        snap_a: gc_doc::EndSnap::default(),
+        snap_b: gc_doc::EndSnap::default(),
+        horizontal: None,
+    };
+    let created = session.execute(&gc_doc::Command::Sketch { sketch, op }).unwrap();
+    created.iter().find_map(|c| if let gc_doc::Created::Curve(id) = c { Some(*id) } else { None }).unwrap()
+}
+
+fn close(a: [f64; 3], b: [f64; 2]) -> bool {
+    (a[0] - b[0]).hypot(a[1] - b[1]) < 1e-9
+}
+
+#[test]
+fn p1_8_trim_previews_on_hover_cuts_on_click_and_ties_the_end_to_the_cutter() {
+    let mut session = new_session();
+    let long = add_line(&mut session, [0.0, 0.0], [30.0, 0.0]);
+    let cutter = add_line(&mut session, [10.0, -10.0], [10.0, 10.0]);
+    add_line(&mut session, [20.0, -10.0], [20.0, 10.0]);
+    session.set_tool(ToolKind::Trim);
+    move_to(&mut session, mm(5.0, 0.0));
+    let preview = session.preview();
+    let [gc_tools::Piece::Segment(from, to)] = preview.cut[..] else { panic!("{:?}", preview.cut) };
+    assert!(
+        close([from[0], from[1], 0.0], mm(0.0, 0.0)) && close([to[0], to[1], 0.0], mm(10.0, 0.0)),
+        "the piece to go"
+    );
+    click(&mut session, mm(5.0, 0.0));
+    let (a, b) = line_ends(&session, long);
+    assert!(close(a, mm(10.0, 0.0)) && close(b, mm(30.0, 0.0)), "{a:?} {b:?}");
+    let sketch = session.active_sketch().unwrap().1;
+    let (start, _) = sketch.line(long).unwrap();
+    assert!(constraints(&session).contains(&GeoConstraint::PointOnCurve(start, cutter)));
+    // Between the cutters now: the piece from the first cutter (the line's new end) to the second goes.
+    click(&mut session, mm(15.0, 0.0));
+    let (a, b) = line_ends(&session, long);
+    assert!(close(a, mm(20.0, 0.0)) && close(b, mm(30.0, 0.0)), "{a:?} {b:?}");
+    assert_eq!(curves(&session).len(), 3);
+    assert_eq!(session.tool(), ToolKind::Trim, "the tool stays on");
+}
+
+#[test]
+fn p1_8_dragging_trims_every_curve_crossed_and_shift_switches_to_extend() {
+    let mut session = new_session();
+    // Three horizontal lines sticking out past a vertical wall at x = 10.
+    let wall = add_line(&mut session, [10.0, -20.0], [10.0, 20.0]);
+    let lines: Vec<Id<Curve>> =
+        [-10.0, 0.0, 10.0].iter().map(|y| add_line(&mut session, [0.0, *y], [20.0, *y])).collect();
+    session.set_tool(ToolKind::Trim);
+    session.tool_event(ToolEvent::DragStart { pos: mm(15.0, -15.0), px: PX });
+    session.tool_event(ToolEvent::Drag { pos: mm(15.0, 0.0) });
+    session.tool_event(ToolEvent::Drag { pos: mm(15.0, 15.0) });
+    session.tool_event(ToolEvent::DragEnd);
+    for line in &lines {
+        let (a, b) = line_ends(&session, *line);
+        assert!(close(b, [10e-3, a[1]]), "each overhang is gone: {a:?} {b:?}");
+    }
+    // Shift held: a click extends instead. A short line below reaches the wall.
+    let short = add_line(&mut session, [0.0, -15.0], [5.0, -15.0]);
+    session.tool_event(ToolEvent::Command(ToolCommand::Alternate(true)));
+    move_to(&mut session, mm(4.0, -15.0));
+    assert_eq!(session.preview().lines, vec![(mm(5.0, -15.0), mm(10.0, -15.0))], "the piece to add");
+    click(&mut session, mm(4.0, -15.0));
+    session.tool_event(ToolEvent::Command(ToolCommand::Alternate(false)));
+    let (_, b) = line_ends(&session, short);
+    assert!(close(b, mm(10.0, -15.0)), "{b:?}");
+    let sketch = session.active_sketch().unwrap().1;
+    let (_, end) = sketch.line(short).unwrap();
+    assert!(constraints(&session).contains(&GeoConstraint::PointOnCurve(end, wall)));
+}
+
+#[test]
+fn p1_8_fillet_takes_the_typed_radius_keeps_it_and_trims_the_corner() {
+    let mut session = new_session();
+    session.set_tool(ToolKind::Rectangle);
+    click(&mut session, mm(0.0, 0.0));
+    click(&mut session, mm(40.0, 20.0));
+    let before = dof(&session);
+    let sides = curves(&session);
+    session.set_tool(ToolKind::Fillet);
+    assert_eq!(session.tool_hud()[0].field, HudField::Radius);
+    session.tool_event(ToolEvent::Hud { field: HudField::Radius, value: Some("5".into()) });
+    // Bottom side, then the right side: preview, then the arc.
+    click(&mut session, mm(20.0, 0.0));
+    move_to(&mut session, mm(40.0, 10.0));
+    assert_eq!(session.preview().arcs.len(), 1, "the arc to come");
+    click(&mut session, mm(40.0, 10.0));
+    let sketch = session.active_sketch().unwrap().1;
+    let arc = *sketch.curves.keys().find(|c| !sides.contains(c)).unwrap();
+    let (centre, r) = sketch.round(arc).unwrap();
+    assert!((r - 5e-3).abs() < 1e-9);
+    assert!(close(sketch.pos(centre).unwrap(), mm(35.0, 5.0)));
+    assert!(sketch.dimensions.values().any(|d| d.kind == DimKind::Radius(arc) && d.source == "5"));
+    assert_eq!(dof(&session), before, "the radius dimension holds the arc");
+    // The radius stays for the next fillet: click the top-left corner point.
+    click(&mut session, mm(0.0, 20.0));
+    let sketch = session.active_sketch().unwrap().1;
+    let radii: Vec<f64> = sketch
+        .curves
+        .iter()
+        .filter(|(_, c)| matches!(c.geom, CurveGeom::Arc { .. }))
+        .map(|(id, _)| sketch.round(*id).unwrap().1)
+        .collect();
+    assert_eq!(radii.len(), 2);
+    assert!(radii.iter().all(|r| (r - 5e-3).abs() < 1e-9), "{radii:?}");
+}

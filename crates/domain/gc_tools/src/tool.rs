@@ -3,9 +3,9 @@
 use gc_core::Id;
 use gc_doc::{DimSlot, EndSnap, SketchOp, tangent_arc};
 use gc_math::fm;
-use gc_sketch::{Curve, CurveGeom, DimKind, GeoConstraint, Item, SkPoint, Sketch, SketchGrab};
+use gc_sketch::{Curve, CurveGeom, DimKind, GeoConstraint, Item, Piece, SkPoint, Sketch, SketchGrab};
 
-use crate::pick::{Snap, pick, snap};
+use crate::pick::{Shape, Snap, crossings, curve_shape, nearest_curve, pick, snap};
 
 /// Keys tools react to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -27,6 +27,8 @@ pub enum ToolCommand {
     Close,
     /// End the current input (like Esc) without leaving the tool.
     Done,
+    /// Shift went down (`true`) or up: Trim works as Extend and Extend as Trim while it is held.
+    Alternate(bool),
 }
 
 /// An input box of the heads-up display next to the cursor.
@@ -173,6 +175,14 @@ pub enum ToolKind {
     ArcTangent,
     /// Draw a rectangle at any angle: two corners along one side, then the width.
     Rectangle3,
+    /// Cut a curve back to the nearest crossing curves: hover to see the piece, click to remove it, or
+    /// drag across curves to trim each one where the drag crosses it.
+    Trim,
+    /// Lengthen a line or arc to the next curve: click near the end (or drag across ends).
+    Extend,
+    /// Round the corner between two lines: click both lines (or the corner point) with the radius typed
+    /// into the [`HudField::Radius`] box; the radius stays for the next fillet.
+    Fillet,
     /// Place a dimension.
     Dimension,
     /// Add a geometric constraint.
@@ -257,6 +267,8 @@ pub struct Preview {
     pub picks: Vec<Item>,
     /// Dotted alignment lines: from an existing point to where the cursor snapped level or plumb with it.
     pub alignments: Vec<([f64; 2], [f64; 2])>,
+    /// What a click would remove (Trim): to be drawn highlighted over the sketch.
+    pub cut: Vec<Piece>,
 }
 
 /// A tool with its state.
@@ -289,6 +301,16 @@ pub struct Tool {
     construction: bool,
     /// Values typed into the input boxes, locked.
     hud: Vec<(HudField, String)>,
+    /// Trim, Extend, Fillet: the curve under the cursor and the closest position on it.
+    hover: Option<(Id<Curve>, [f64; 2])>,
+    /// Shift is held: Trim and Extend swap.
+    alternate: bool,
+    /// Trim and Extend: dragging across curves, from here.
+    sweep_from: Option<[f64; 2]>,
+    /// Fillet: the first line and where it was clicked.
+    fillet_first: Option<(Id<Curve>, [f64; 2])>,
+    /// Fillet: the radius, kept from one fillet to the next.
+    fillet_radius: String,
 }
 
 fn angle_about(centre: [f64; 2], point: [f64; 2]) -> f64 {
@@ -498,6 +520,11 @@ impl Tool {
             tangent_from: None,
             construction: false,
             hud: Vec::new(),
+            hover: None,
+            alternate: false,
+            sweep_from: None,
+            fillet_first: None,
+            fillet_radius: DEFAULT_FILLET_RADIUS.to_owned(),
         }
     }
 
@@ -537,13 +564,21 @@ impl Tool {
             (ToolKind::Dimension, _) if self.pending.is_some() => Prompt::DimensionValue,
             (ToolKind::Dimension, _) if self.picks.is_empty() => Prompt::DimensionPick,
             (ToolKind::Dimension, _) => Prompt::DimensionPlace,
-            (ToolKind::Constraint(_), _) => Prompt::ConstraintPick,
+            (ToolKind::Constraint(_) | ToolKind::Trim | ToolKind::Extend | ToolKind::Fillet, _) => {
+                Prompt::ConstraintPick
+            }
         }
     }
 
     /// The input boxes the display should show now (none when the tool takes no typed values at this
     /// step).
     pub fn hud(&self) -> Vec<HudSlot> {
+        if self.kind == ToolKind::Fillet {
+            let locked = self.locked(HudField::Radius).map(str::to_owned);
+            let text = locked.as_deref().unwrap_or(&self.fillet_radius);
+            let measured = plain_value(text, false).unwrap_or(0.0);
+            return vec![HudSlot { field: HudField::Radius, measured, locked }];
+        }
         let Some(anchor) = self.anchor.or(self.tangent_from.and(self.cursor.map(|c| c.pos))) else {
             return Vec::new();
         };
@@ -648,6 +683,29 @@ impl Tool {
         if let Some((_, _, from)) = self.cursor.and_then(|c| c.aligned) {
             preview.alignments.push((from, self.cursor.map_or(from, |c| c.pos)));
         }
+        let draw = |preview: &mut Preview, piece: Piece| match piece {
+            Piece::Segment(a, b) => preview.lines.push((a, b)),
+            Piece::Arc { centre, radius, start, sweep } => preview.arcs.push((centre, radius, start, sweep)),
+            Piece::Circle { centre, radius } => preview.circles.push((centre, radius)),
+        };
+        if let Some((curve, at)) = self.hover {
+            match (self.cutting(), self.fillet_first) {
+                (Some(ToolKind::Trim), _) => preview.cut.extend(sketch.trim_preview(curve, at)),
+                (Some(_), _) => {
+                    if let Some(piece) = sketch.extend_preview(curve, at) {
+                        draw(&mut preview, piece);
+                    }
+                }
+                (None, Some(first)) if self.kind == ToolKind::Fillet => {
+                    let radius = plain_value(&self.radius_text(), false);
+                    if let Some(piece) = radius.and_then(|r| sketch.fillet_preview([first, (curve, at)], r)) {
+                        draw(&mut preview, piece);
+                    }
+                }
+                _ => {}
+            }
+            return preview;
+        }
         let cursor = self.cursor.map(|s| s.pos);
         if let (Some((from, curve)), Some(cursor)) =
             (self.tangent_from.or(self.chain_end(sketch).filter(|_| self.arc_drag)), cursor)
@@ -733,7 +791,66 @@ impl Tool {
         self.chain.clear();
         self.arc_drag = false;
         self.tangent_from = None;
-        self.hud.clear();
+        self.fillet_first = None;
+        self.sweep_from = None;
+        if self.kind != ToolKind::Fillet {
+            self.hud.clear(); // the fillet radius stays
+        }
+    }
+
+    /// Trim or Extend, after Shift.
+    fn cutting(&self) -> Option<ToolKind> {
+        match (self.kind, self.alternate) {
+            (ToolKind::Trim, false) | (ToolKind::Extend, true) => Some(ToolKind::Trim),
+            (ToolKind::Extend, false) | (ToolKind::Trim, true) => Some(ToolKind::Extend),
+            _ => None,
+        }
+    }
+
+    /// The fillet radius to use: the typed one, else the last one.
+    fn radius_text(&self) -> String {
+        self.locked(HudField::Radius).map_or_else(|| self.fillet_radius.clone(), str::to_owned)
+    }
+
+    /// The edit that trims or extends `curve` at `at`.
+    fn cut_op(&self, curve: Id<Curve>, at: [f64; 2]) -> Option<SketchOp> {
+        match self.cutting()? {
+            ToolKind::Trim => Some(SketchOp::Trim { curve, at }),
+            _ => Some(SketchOp::Extend { curve, at }),
+        }
+    }
+
+    /// Trim or extend every curve the drag crosses from `from` to `to`.
+    fn sweep(&self, sketch: &Sketch, from: [f64; 2], to: [f64; 2]) -> Vec<ToolOutput> {
+        let path = Shape::Segment(from, to);
+        sketch
+            .curves
+            .iter()
+            .filter_map(|(id, curve)| {
+                let at = *crossings(&path, &curve_shape(sketch, curve)?).first()?;
+                // Extend works on the end nearer the crossing, so the crossing must be on the curve.
+                self.cut_op(*id, at).map(ToolOutput::Edit)
+            })
+            .collect()
+    }
+
+    /// Fillet: the two lines that meet at `point` (end points there), each with its middle.
+    fn corner_lines(sketch: &Sketch, point: Id<SkPoint>) -> Option<[(Id<Curve>, [f64; 2]); 2]> {
+        let at = xy(sketch, point)?;
+        let lines: Vec<(Id<Curve>, [f64; 2])> = sketch
+            .curves
+            .keys()
+            .filter_map(|id| {
+                let (a, b) = sketch.line(*id)?;
+                let (pa, pb) = (xy(sketch, a)?, xy(sketch, b)?);
+                (distance(pa, at) < 1e-9 || distance(pb, at) < 1e-9)
+                    .then(|| (*id, [(pa[0] + pb[0]) / 2.0, (pa[1] + pb[1]) / 2.0]))
+            })
+            .collect();
+        match lines.as_slice() {
+            [first, second] => Some([*first, *second]),
+            _ => None,
+        }
     }
 
     /// An edit as drawn: wrapped as construction geometry when the toggle is on, and with the locked
@@ -763,6 +880,9 @@ impl Tool {
                         | ToolKind::Rectangle
                         | ToolKind::Rectangle3
                 );
+                self.hover = matches!(self.kind, ToolKind::Trim | ToolKind::Extend | ToolKind::Fillet)
+                    .then(|| nearest_curve(sketch, pos, px, &[]))
+                    .flatten();
                 let previous = if self.kind == ToolKind::Line { self.anchor } else { None };
                 let before = self.cursor.map(|s| s.pos);
                 self.cursor =
@@ -839,6 +959,19 @@ impl Tool {
                     &[],
                 )]
             }
+            ToolEvent::DragStart { pos, .. } if self.cutting().is_some() => {
+                self.sweep_from = Some(pos);
+                Vec::new()
+            }
+            ToolEvent::Drag { pos } if self.sweep_from.is_some() => {
+                let from = self.sweep_from.replace(pos).unwrap_or(pos);
+                self.hover = None;
+                self.sweep(sketch, from, pos)
+            }
+            ToolEvent::DragEnd if self.sweep_from.is_some() => {
+                self.sweep_from = None;
+                Vec::new()
+            }
             ToolEvent::Drag { pos } if self.dragging => vec![ToolOutput::DragTo(pos)],
             ToolEvent::DragEnd if self.dragging => {
                 self.dragging = false;
@@ -898,6 +1031,10 @@ impl Tool {
                 )]
             }
             ToolEvent::Command(ToolCommand::Close) => Vec::new(),
+            ToolEvent::Command(ToolCommand::Alternate(on)) => {
+                self.alternate = on;
+                Vec::new()
+            }
             ToolEvent::Command(ToolCommand::Done) => {
                 if self.dragging {
                     self.dragging = false;
@@ -924,6 +1061,7 @@ impl Tool {
                     || !self.picks.is_empty()
                     || self.pending.is_some()
                     || self.tangent_from.is_some()
+                    || self.fillet_first.is_some()
                 {
                     self.reset();
                     Vec::new()
@@ -1203,6 +1341,47 @@ impl Tool {
                 self.pending = Some((kind, pos));
                 vec![ToolOutput::RequestValue { kind, measured, text_pos: pos }]
             }
+            ToolKind::Trim | ToolKind::Extend => {
+                let hit = match picked {
+                    Some(Some(Item::Curve(curve))) => Some((curve, pos)),
+                    Some(_) => None,
+                    None => nearest_curve(sketch, pos, px, &[]),
+                };
+                let Some((curve, at)) = hit else { return Vec::new() };
+                self.hover = None;
+                self.cut_op(curve, at).map(ToolOutput::Edit).into_iter().collect()
+            }
+            ToolKind::Fillet => {
+                let radius = self.radius_text();
+                if self.fillet_first.is_none()
+                    && let Some(Item::Point(point)) = pick(sketch, pos, px)
+                    && let Some(lines) = Self::corner_lines(sketch, point)
+                {
+                    self.fillet_radius.clone_from(&radius);
+                    return vec![ToolOutput::Edit(SketchOp::Fillet { lines, radius })];
+                }
+                let hit = match picked {
+                    Some(Some(Item::Curve(curve))) => Some((curve, pos)),
+                    Some(_) => None,
+                    None => nearest_curve(sketch, pos, px, &[]),
+                };
+                let Some((curve, at)) = hit.filter(|(c, _)| sketch.line(*c).is_some()) else {
+                    return Vec::new();
+                };
+                match self.fillet_first.take() {
+                    Some(first) if first.0 != curve => {
+                        self.picks.clear();
+                        self.hover = None;
+                        self.fillet_radius.clone_from(&radius);
+                        vec![ToolOutput::Edit(SketchOp::Fillet { lines: [first, (curve, at)], radius })]
+                    }
+                    _ => {
+                        self.fillet_first = Some((curve, at));
+                        self.picks = vec![Item::Curve(curve)];
+                        Vec::new()
+                    }
+                }
+            }
             ToolKind::Constraint(kind) => {
                 let Some(item @ (Item::Point(_) | Item::Curve(_))) = pick(sketch, pos, px) else {
                     return Vec::new();
@@ -1220,6 +1399,9 @@ impl Tool {
         }
     }
 }
+
+/// The fillet radius until one is typed.
+const DEFAULT_FILLET_RADIUS: &str = "2 mm";
 
 /// The cursor position as it is, with nothing snapped.
 fn snap_free(pos: [f64; 2]) -> Snap {

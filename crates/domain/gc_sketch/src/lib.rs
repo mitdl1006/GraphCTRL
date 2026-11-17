@@ -13,10 +13,12 @@
 #![cfg_attr(test, allow(clippy::float_cmp, reason = "tests compare exactly representable values"))]
 
 mod bind;
+mod cut;
 mod drag;
 mod edit;
 mod model;
 
+pub use cut::{CutResult, Piece};
 pub use drag::{SketchDrag, SketchGrab};
 pub use edit::{AddResult, Item, SketchError, SketchReport};
 pub use gc_solver::{DepKind, DragRefused, FrameOutcome, Status};

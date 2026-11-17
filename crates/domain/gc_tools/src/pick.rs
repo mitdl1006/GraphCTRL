@@ -135,7 +135,7 @@ fn nearest_point(
 }
 
 /// The nearest curve within the curve tolerance, with the closest position on it.
-fn nearest_curve(
+pub(crate) fn nearest_curve(
     sketch: &Sketch,
     at: [f64; 2],
     px: f64,
@@ -173,18 +173,22 @@ pub fn pick(sketch: &Sketch, at: [f64; 2], px: f64) -> Option<Item> {
 
 /// Where two curves (lines, circles, arcs) cross, within the curves' extents.
 fn intersections(sketch: &Sketch, a: &Curve, b: &Curve) -> Vec<[f64; 2]> {
-    let shape = |c: &Curve| -> Option<Shape> {
-        Some(match c.geom {
-            CurveGeom::Line { a, b } => Shape::Segment(xy(sketch, a)?, xy(sketch, b)?),
-            CurveGeom::Circle { c, r } => Shape::Round(xy(sketch, c)?, r, None),
-            CurveGeom::Arc { c, s, e } => {
-                let (c, s, e) = (xy(sketch, c)?, xy(sketch, s)?, xy(sketch, e)?);
-                Shape::Round(c, distance(c, s), Some((s, e)))
-            }
-        })
+    let (Some(first), Some(second)) = (curve_shape(sketch, a), curve_shape(sketch, b)) else {
+        return Vec::new();
     };
-    let (Some(first), Some(second)) = (shape(a), shape(b)) else { return Vec::new() };
     crossings(&first, &second)
+}
+
+/// A curve as a shape to intersect.
+pub(crate) fn curve_shape(sketch: &Sketch, c: &Curve) -> Option<Shape> {
+    Some(match c.geom {
+        CurveGeom::Line { a, b } => Shape::Segment(xy(sketch, a)?, xy(sketch, b)?),
+        CurveGeom::Circle { c, r } => Shape::Round(xy(sketch, c)?, r, None),
+        CurveGeom::Arc { c, s, e } => {
+            let (c, s, e) = (xy(sketch, c)?, xy(sketch, s)?, xy(sketch, e)?);
+            Shape::Round(c, distance(c, s), Some((s, e)))
+        }
+    })
 }
 
 /// A curve for intersecting: a segment, or a circle (with the arc's ends when it is an arc).

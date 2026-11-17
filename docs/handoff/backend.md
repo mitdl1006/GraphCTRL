@@ -1,5 +1,35 @@
 # 백엔드 인계 (2026-11-17)
 
+## 2026-11-17 저녁 — 인벤터 스케치 P1 (BE 몫): 도구 API 합의와 Trim·Extend·Fillet
+
+프론트엔드와 합의한 도구 API(메시지로 합의, 여기 기록). UI가 `Prompt`·`SnapKind`·`GeoConstraint`·`Solid`를 빠짐없이 match하므로
+이 enum들에는 변형을 추가하지 않았다. 새 정보는 필드로 준다. 프론트엔드 요청: 앞으로 `Prompt`에 변형을 더할 수 있게 UI 쪽 match에
+`_ =>` 갈래를 넣어 달라(그 전까지 새 도구는 기존 Prompt를 쓴다: Trim·Extend·Fillet → `ConstraintPick`).
+
+| 항목 | API |
+|---|---|
+| 새 도구 | `ToolKind::{Arc3, ArcTangent, Rectangle3, Trim, Extend, Fillet}` |
+| 이벤트 | `ToolEvent::{DoubleClick, Command(ToolCommand), Hud{field, value}}`, `Key::{Backspace, Enter}` |
+| 명령 | `ToolCommand::{Close, Done, Alternate(bool)}` — `Alternate`는 Shift 누름/뗌: Trim↔Extend 임시 전환 |
+| HUD | `session.tool_hud() -> Vec<HudSlot{field, measured, locked}>`, 값 입력은 `ToolEvent::Hud`. 잠근 값은 치수가 된다(P1-6) |
+| 추론 | `Snap::inference: Option<Inference>`, `Preview::alignments`(점선) |
+| 구성선 | `session.tool_construction()`, `set_tool_construction(bool)`; 이미 그린 곡선은 `SketchOp::SetConstructionOf` |
+| 트림 미리보기 | `Preview::cut: Vec<Piece>` — 클릭하면 사라질 조각(강조 표시). Extend가 더할 조각과 Fillet 호는 `Preview::lines/arcs` |
+| Fillet 반지름 | `HudField::Radius` 한 칸이 항상 보인다(기본 "2 mm", 쓴 값은 다음 모깎기까지 유지) |
+
+**Trim**: 호버 시 미리보기, 클릭 = 양쪽 가장 가까운 교차 곡선 사이 조각 제거. 잘린 끝은 자른 곡선에 묶인다(그 곡선의 점에 닿으면
+`Coincident`, 아니면 `PointOnCurve`). 가운데를 자르면 선은 두 조각 + `Collinear`, 호는 두 조각 + 중심 `Coincident` + `Equal`.
+원은 교차 2개 이상이면 호가 된다(곡선 id·치수 유지). 교차가 없으면 곡선 삭제. 누른 채 드래그하면 지나간 곡선을 각각 그 자리에서 트림.
+선의 수평/수직 구속은 남고, 잘린 끝에 걸린 구속·치수와 길이에 기대는 `Equal`·`Midpoint`는 지워진다.
+**Extend**: 커서에 가까운 끝을 선/원의 연장선이 처음 만나는 곡선까지. 다른 곡선과 이어진 끝은 거부.
+**Fillet**: 선 두 개 클릭(또는 두 선이 만나는 모서리 점 클릭) → 접하는 호 + 접선 2 + 끝점 일치 2 + 반지름 치수(입력한 글자 그대로).
+두 선은 교차점에서 클릭한 쪽을 남기고 호까지 트림·연장. 지금은 선-선만(호·원 모깎기는 아직).
+SketchOp: `Trim{curve, at}`, `Extend{curve, at}`, `Fillet{lines: [(curve, at); 2], radius: String}`. 기하는 `gc_sketch::cut`
+(`Sketch::{trim, extend, fillet, trim_preview, extend_preview, fillet_preview}`).
+시나리오 테스트: `gc_doc/tests/sketch_ops.rs`(자유도 포함 6개), `gc_session/tests/inventor_sketch.rs`(p1_8 3개).
+
+남은 P1(BE): P1-12 과구속 시 Accept 흐름(지금은 기존 참조 치수 제안 경로, `SetDriving`은 있음), Arc3·ArcTangent의 HUD, Ctrl 경계 지정.
+
 ## 2026-11-17 오후 — QA 버그·트리 API·작업 평면 스케치·S2 품질
 
 **QA 버그 3건(수정, 테스트의 `#[ignore]` 제거)**: ① UR IK가 팔을 곧게 위로 세운 자세(손목 중심이 d4 원기둥 위)를 반올림 때문에

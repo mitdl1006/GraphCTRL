@@ -159,6 +159,31 @@ pub enum SketchOp {
     },
     /// Deletes items and everything that depends on them.
     Delete(Vec<Item>),
+    /// Removes the piece of a curve around `at` up to the nearest crossing curves on either side; the
+    /// cut ends are tied to the crossing curves. A curve that nothing crosses is deleted.
+    Trim {
+        /// The curve.
+        curve: Id<Curve>,
+        /// Where it was clicked (on the piece to remove).
+        at: [f64; 2],
+    },
+    /// Lengthens a line or arc at its end nearer `at` up to the first curve it meets, and ties the end to
+    /// that curve. The end must be open.
+    Extend {
+        /// The curve.
+        curve: Id<Curve>,
+        /// Where it was clicked (near the end to lengthen).
+        at: [f64; 2],
+    },
+    /// Rounds the corner between two lines with a tangent arc of the given radius (with a radius
+    /// dimension), trimming or extending the lines to it. Each line keeps the side of the corner where it
+    /// was clicked.
+    Fillet {
+        /// The two lines and where each was clicked.
+        lines: [(Id<Curve>, [f64; 2]); 2],
+        /// The radius as typed, e.g. `"5 mm"`.
+        radius: String,
+    },
     /// Applies an edit and marks the curves it creates as construction geometry (the Format panel's
     /// Construction toggle held while drawing). One undo step.
     AsConstruction(Box<SketchOp>),
@@ -620,6 +645,12 @@ fn circle_through(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> Option<([f64; 2], f6
     Some(([ux, uy], gc_math::fm::hypot(a[0] - ux, a[1] - uy)))
 }
 
+/// Records what a trim, extend or fillet created.
+fn push_cut(created: &mut Vec<Created>, cut: &gc_sketch::CutResult) {
+    created.extend(cut.curves.iter().map(|c| Created::Curve(*c)));
+    created.extend(cut.constraints.iter().map(|c| Created::Constraint(*c)));
+}
+
 /// Adds a constraint that the edit needs; refused or conflicting means the edit fails.
 fn require(
     sketch: &mut Sketch,
@@ -926,6 +957,28 @@ fn sketch_op(
         SketchOp::Delete(items) => {
             sketch.delete(items);
             "Delete"
+        }
+        SketchOp::Trim { curve, at } => {
+            push_cut(&mut created, &sketch.trim(ids, *curve, *at)?);
+            "Trim"
+        }
+        SketchOp::Extend { curve, at } => {
+            push_cut(&mut created, &sketch.extend(ids, *curve, *at)?);
+            "Extend"
+        }
+        SketchOp::Fillet { lines, radius } => {
+            let value = evaluate(radius, scope, Unit::Mm)?;
+            let cut = sketch.fillet(ids, *lines, value)?;
+            push_cut(&mut created, &cut);
+            let arc = *cut.curves.first().ok_or(SketchError::InvalidValue)?;
+            let kind = DimKind::Radius(arc);
+            let text_pos = sketch
+                .round(arc)
+                .and_then(|(centre, _)| sketch.pos(centre))
+                .map_or([0.0; 2], |c| [c[0], c[1]]);
+            let result = sketch.try_add_dimension(ids, kind, radius, value, text_pos)?;
+            created.push(Created::Dimension(added(result)?));
+            "Fillet"
         }
     };
     // Whatever the edit was, the sketch must end up consistent.
