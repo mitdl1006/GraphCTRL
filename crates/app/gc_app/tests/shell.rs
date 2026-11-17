@@ -100,3 +100,53 @@ fn shell_renders_with_gpu() {
     let px = image.get_pixel(1000, 700);
     assert!(px[0] > 150 && px[1] > 150 && px[2] > 150, "viewport pixel was {px:?}");
 }
+
+/// Renders the main states of the window to PNG files for review.
+#[test]
+fn screenshots_for_review() {
+    if gc_test_support::gpu_or_skip("screenshots_for_review").is_none() {
+        return;
+    }
+    let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+    std::fs::create_dir_all(&out).unwrap();
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .wgpu()
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    let mut shot = |harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, name: &str| {
+        harness.run();
+        harness.render().unwrap().save(out.join(name)).unwrap();
+    };
+    shot(&mut harness, "review-1-start.png");
+
+    harness.get_by_label("XY 스케치").click();
+    harness.run();
+    draw_sample(harness.state_mut());
+    // A dimension being placed: the value box is open on the circle's diameter.
+    let app = harness.state_mut();
+    app.session.set_tool(ToolKind::Dimension);
+    click(app, mm(107.0, 20.0));
+    click(app, mm(112.0, 42.0));
+    shot(&mut harness, "review-2-value-box.png");
+
+    // The same width a second time: the reference-dimension question.
+    let app = harness.state_mut();
+    app.session.submit_value("24 mm");
+    click(app, mm(30.0, 0.0));
+    click(app, mm(30.0, -20.0));
+    app.session.submit_value("60 mm");
+    shot(&mut harness, "review-3-reference-question.png");
+
+    // The finished sketch seen from the home view.
+    let app = harness.state_mut();
+    app.session.answer_reference_offer(true);
+    app.session.set_tool(ToolKind::Select);
+    harness.run();
+    harness.get_by_label("스케치 마무리").click();
+    harness.run();
+    harness.get_by_label("뷰").click();
+    harness.run();
+    harness.get_by_label("홈").click();
+    shot(&mut harness, "review-4-home-view.png");
+}
