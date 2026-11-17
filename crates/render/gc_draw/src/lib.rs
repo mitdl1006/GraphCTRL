@@ -9,6 +9,7 @@
 
 mod camera;
 mod nav;
+pub mod viewcube;
 
 pub use camera::{Camera, StandardView};
 pub use nav::{NavAction, NavInput, NavPreset, nav_action};

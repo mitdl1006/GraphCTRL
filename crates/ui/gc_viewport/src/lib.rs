@@ -10,13 +10,14 @@ mod target;
 use egui::{Key, PointerButton, Sense};
 use gc_core::Id;
 use gc_doc::Sketch;
-use gc_draw::{Camera, NavAction, NavInput, NavPreset, StandardView, nav_action};
-use gc_i18n::Lang;
+use gc_draw::{Camera, NavAction, NavInput, NavPreset, StandardView, nav_action, viewcube};
+use gc_i18n::{Lang, tr};
 use gc_math::{Aabb, DPose3, DVec3, Plane};
 use gc_scene::Scene;
 use gc_session::Session;
 use gc_sketch::Space;
 use gc_tools::{Key as ToolKey, ToolEvent};
+use gc_ui::colors;
 
 pub use paint::{format_angle, format_length};
 pub use target::Background;
@@ -74,6 +75,7 @@ pub struct Viewport {
     viewed_sketch: Option<Id<Sketch>>,
     value_text: String,
     value_open: bool,
+    cube_centre: Option<egui::Pos2>,
 }
 
 impl Viewport {
@@ -87,7 +89,14 @@ impl Viewport {
             viewed_sketch: None,
             value_text: String::new(),
             value_open: false,
+            cube_centre: None,
         }
+    }
+
+    /// Where the view cube is on screen and how many pixels its half-size is; `None` when the viewport is
+    /// too small to show it.
+    pub fn view_cube_placement(&self) -> Option<(egui::Pos2, f32)> {
+        self.cube_centre.map(|centre| (centre, 27.0))
     }
 
     /// The background renderer, for screenshots and status display.
@@ -181,7 +190,78 @@ impl Viewport {
         paint::under(ui, rect, &self.camera, session);
         self.background.paint(ui, rect, &self.camera, &scene);
         paint::over(ui, rect, &self.camera, session, &scene, lang);
+        self.view_cube(ui, rect, lang);
         self.value_box(ui, rect, session, size);
+    }
+
+    /// The view cube in the top-right corner: shows how the view is turned; clicking a face, an edge or a
+    /// corner looks at the model from there.
+    fn view_cube(&mut self, ui: &mut egui::Ui, rect: egui::Rect, lang: Lang) {
+        /// Pixels per cube unit (the cube's half-size).
+        const HALF: f32 = 27.0;
+        let centre = rect.right_top() + egui::vec2(-74.0, 74.0);
+        let area = egui::Rect::from_center_size(centre, egui::Vec2::splat(124.0));
+        self.cube_centre = rect.contains_rect(area).then_some(centre);
+        if self.cube_centre.is_none() {
+            return;
+        }
+        let response = ui.interact(area, egui::Id::unique("gc_view_cube"), Sense::click());
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "ViewCube"));
+        let to_cube =
+            |p: egui::Pos2| [f64::from((p.x - centre.x) / HALF), f64::from((centre.y - p.y) / HALF)];
+        #[allow(clippy::cast_possible_truncation, reason = "screen coordinates fit f32")]
+        let to_screen =
+            |c: [f64; 2]| egui::pos2(centre.x + c[0] as f32 * HALF, centre.y - c[1] as f32 * HALF);
+        let hovered = response.hover_pos().and_then(|p| viewcube::pick(&self.camera, to_cube(p)));
+        let painter = ui.painter_at(rect);
+        let stroke = egui::Stroke::new(1.0, colors::CUBE_EDGE);
+        for face in viewcube::visible_faces(&self.camera) {
+            let fill = if hovered == Some(face.normal) { colors::CUBE_HOVER } else { colors::CUBE_FACE };
+            let corners = face.corners;
+            painter.add(egui::Shape::convex_polygon(corners.map(to_screen).to_vec(), fill, stroke));
+            // A face seen nearly edge-on is too thin for its name.
+            let area: f64 = (0..4)
+                .map(|i| {
+                    let (a, b) = (corners[i], corners[(i + 1) % 4]);
+                    a[0] * b[1] - b[0] * a[1]
+                })
+                .sum::<f64>()
+                .abs()
+                * 0.5;
+            if area > 1.3 {
+                let name = match face.normal {
+                    [0, -1, 0] => tr!(lang, ViewFront),
+                    [0, 1, 0] => tr!(lang, ViewBack),
+                    [1, 0, 0] => tr!(lang, ViewRight),
+                    [-1, 0, 0] => tr!(lang, ViewLeft),
+                    [0, 0, 1] => tr!(lang, ViewTop),
+                    _ => tr!(lang, ViewBottom),
+                };
+                let font = egui::FontId::proportional(11.0);
+                painter.text(
+                    to_screen(face.centre),
+                    egui::Align2::CENTER_CENTER,
+                    name,
+                    font,
+                    colors::CUBE_EDGE,
+                );
+            }
+        }
+        // Edges and corners light up as a dot where the click would look from.
+        if let Some(target) = hovered.filter(|t| t.iter().filter(|c| **c != 0).count() > 1) {
+            painter.circle_filled(
+                to_screen(viewcube::screen_of(&self.camera, target)),
+                6.0,
+                colors::CUBE_HOVER,
+            );
+            painter.circle_stroke(to_screen(viewcube::screen_of(&self.camera, target)), 6.0, stroke);
+        }
+        if response.clicked()
+            && let Some(target) =
+                response.interact_pointer_pos().and_then(|p| viewcube::pick(&self.camera, to_cube(p)))
+        {
+            viewcube::look(&mut self.camera, target);
+        }
     }
 
     /// Wheel zoom and the drag bindings of the navigation preset.

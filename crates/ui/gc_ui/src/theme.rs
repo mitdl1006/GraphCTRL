@@ -15,6 +15,12 @@ pub mod colors {
     pub const TRACE: Color32 = Color32::from_rgb(0x00, 0x8A, 0x4B);
     /// Waypoint markers and their names.
     pub const WAYPOINT: Color32 = Color32::from_rgb(0xB0, 0x1E, 0x8C);
+    /// A face of the view cube.
+    pub const CUBE_FACE: Color32 = Color32::from_rgb(0xF4, 0xF5, 0xF7);
+    /// The part of the view cube under the cursor.
+    pub const CUBE_HOVER: Color32 = Color32::from_rgb(0xB5, 0xD8, 0xFF);
+    /// Edges and labels of the view cube.
+    pub const CUBE_EDGE: Color32 = Color32::from_rgb(0x5E, 0x66, 0x72);
     /// Construction geometry.
     pub const CONSTRUCTION: Color32 = Color32::from_rgb(0xB0, 0x70, 0x20);
     /// Selected items.

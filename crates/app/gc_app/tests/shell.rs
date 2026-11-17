@@ -332,6 +332,40 @@ fn planning_on_a_worker_thread_reports_back() {
     assert!(!session.is_planning());
 }
 
+/// The view cube turns the view: its right edge, seen from the front, looks from between front and right.
+#[test]
+fn clicking_the_view_cube_turns_the_view() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("뷰").click();
+    harness.run();
+    harness.get_by_label("정면").click();
+    harness.run();
+    let forward = harness.state().viewport().camera.forward();
+    assert!((forward - gc_math::DVec3::Y).length() < 1e-9);
+
+    let (centre, half) = harness.state().viewport().view_cube_placement().unwrap();
+    let at = centre + egui::vec2(0.9 * half, 0.0);
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run();
+    }
+    let forward = harness.state().viewport().camera.forward();
+    let expected = gc_math::DVec3::new(-1.0, 1.0, 0.0).normalize();
+    assert!((forward - expected).length() < 1e-9, "{forward:?}");
+}
+
+/// File dialogs that always answer with one path.
 struct Scripted(std::path::PathBuf);
 
 impl gc_app::FileDialogs for Scripted {

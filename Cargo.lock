@@ -1333,6 +1333,7 @@ dependencies = [
  "gc_draw",
  "gc_i18n",
  "gc_jobs",
+ "gc_math",
  "gc_panels",
  "gc_plugin_api",
  "gc_plugin_ur",

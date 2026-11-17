@@ -314,6 +314,12 @@ messages! {
     PropTime => ("시간 (s)", "Time (s)"),
     /// Plan status: never planned.
     PlanNotPlanned => ("계획 안 됨", "Not planned"),
+    /// View cube face: back.
+    ViewBack => ("배면", "Back"),
+    /// View cube face: left.
+    ViewLeft => ("좌측", "Left"),
+    /// View cube face: bottom.
+    ViewBottom => ("저면", "Bottom"),
     /// Plan status: being computed.
     PlanPlanning => ("계획 중...", "Planning..."),
     /// Plan status: up to date.
