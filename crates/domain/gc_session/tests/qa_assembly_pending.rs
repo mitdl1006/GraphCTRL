@@ -22,25 +22,28 @@ pending!(
     a1_components_form_a_hierarchy_with_grounded_visible_enabled_suppressed_flags,
     "FEATURE assembly P1-1: no component hierarchy in the document (A1, A2, A5)",
     "Import two parts and a sub-assembly; set flags; save and reopen -> hierarchy and flags identical; the \
-     first component is grounded automatically (the help pages disagree, A11 vs A18: pin the behaviour the \
-     lead decides); Undo restores in one step; a cycle (component inside itself) is refused; deleting a \
+     first component is grounded automatically and later ones are not (LEAD DECISION 2026-11-17; covered \
+     by gc_session/tests/qa_assembly_edges.rs::only_the_first_component_is_grounded); Undo restores in one step; a cycle (component inside itself) is refused; deleting a \
      parent asks about its children"
 );
 
 pending!(
     a2_every_component_has_an_origin_folder_with_planes_axes_and_a_centre_point,
     "FEATURE assembly P1-2: no per-component origin folder (A52, A53, A55)",
-    "Two components, each with 3 planes + 3 axes + centre point, hidden by default; showing one origin \
-     draws it at the component's pose and it follows when the component moves; `Hide Work Features` hides all; \
-     the folder names match the lead's decision (the 2026 help does not name the axes: A52/A55)"
+    "LEAD DECISION 2026-11-17: under a folder `원점` (en `Origin`) the children, in this order, are `YZ 평면`, \
+     `XZ 평면`, `XY 평면`, `X축`, `Y축`, `Z축`, `중심점` (en YZ Plane, XZ Plane, XY Plane, X Axis, Y Axis, Z Axis, \
+     Center Point), the same spelling as the document origin. Two components each have one; hidden by default; \
+     showing one draws it at the component's pose and it follows when the component moves; `Hide Work Features` \
+     hides all"
 );
 
 pending!(
     a3_origin_planes_axes_and_points_can_be_picked_in_the_viewport,
     "FEATURE assembly P1-3: no picking of origin features (A52, A53)",
-    "Click a shown origin plane -> highlighted, browser synced, properties show the owner and coordinates; \
-     Esc clears; a hidden plane is not pickable in the graphics window (decide and pin); right-click offers \
-     create sketch"
+    "LEAD DECISION 2026-11-17: hidden origin planes, axes and points are NOT selectable in the viewport but ARE \
+     selectable in the browser; once shown they are selectable in the viewport. Click a shown plane -> \
+     highlighted, browser synced, properties show the owner and coordinates; Esc clears; right-click offers \
+     create sketch; a click on a hidden plane's place selects whatever is behind it"
 );
 
 pending!(
