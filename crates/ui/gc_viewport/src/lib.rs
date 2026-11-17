@@ -4,6 +4,7 @@
 //! is painted under that image and sketches, dimensions, traces and tool previews over it with egui's
 //! painter, through the same camera. Without a GPU everything still works; only the solids are missing.
 
+mod freemove;
 mod gizmo;
 mod hud;
 mod origin;
@@ -25,6 +26,7 @@ use gc_sketch::Space;
 use gc_tools::{Key as ToolKey, ToolEvent, ToolKind};
 use gc_ui::colors;
 
+pub use freemove::FreeTool;
 pub use origin::ALL as ORIGIN_ELEMENTS;
 pub use paint::{format_angle, format_length};
 pub use radial::ViewportRequest;
@@ -97,6 +99,10 @@ pub struct Viewport {
     hud: hud::Hud,
     /// Whether the heads-up display (dynamic input) is on.
     pub hud_on: bool,
+    /// Free Move or Free Rotate, while on.
+    pub free_tool: Option<FreeTool>,
+    /// A component being dragged with it.
+    free_drag: Option<freemove::FreeDrag>,
     /// The marking menu of the graphics window and the commands it offers.
     marking: gc_ui::marking::MarkingMenu,
     marking_set: radial::Set,
@@ -156,6 +162,8 @@ impl Viewport {
             origin_selected: None,
             hud: hud::Hud::default(),
             hud_on: true,
+            free_tool: None,
+            free_drag: None,
             marking: gc_ui::marking::MarkingMenu::default(),
             marking_set: radial::Set::default(),
             request: None,
@@ -390,6 +398,7 @@ impl Viewport {
                     radial::Effect::Request(request) => self.request = Some(request),
                     radial::Effect::Home => self.camera.look(StandardView::Iso),
                     radial::Effect::Fit => self.fit(session, [1000.0, 700.0]),
+                    radial::Effect::Free(tool) => self.free_tool = Some(tool),
                 }
             }
         }
@@ -1063,6 +1072,31 @@ impl Viewport {
         if session.hover_item(hovered) {
             ui.ctx().request_repaint();
         }
+        // Free Move / Free Rotate: drag a component.
+        if let Some(tool) = self.free_tool.filter(|_| !on_handles) {
+            if response.drag_started_by(PointerButton::Primary)
+                && let Some(press) = ui.input(|i| i.pointer.press_origin()).map(to_view)
+                && let Some(item) = self.pick_item(session, press, size)
+            {
+                session.select_item(Some(item));
+                self.free_drag = freemove::begin(&self.camera, size, session, item, press);
+            }
+            if let Some(drag) = self.free_drag {
+                if response.dragged_by(PointerButton::Primary)
+                    && let Some(at) = response.hover_pos().or_else(|| ui.input(|i| i.pointer.latest_pos()))
+                {
+                    freemove::update(&drag, tool, &self.camera, size, session, to_view(at));
+                    ui.ctx().request_repaint();
+                }
+                if response.drag_stopped_by(PointerButton::Primary) {
+                    freemove::end(&drag, session);
+                    self.free_drag = None;
+                }
+            }
+            if self.free_drag.is_some() {
+                return;
+            }
+        }
         if self.constrain_mode && response.clicked_by(PointerButton::Primary) {
             let at = response.interact_pointer_pos().map(to_view);
             self.constrain_pick = at.and_then(|at| origin::pick(&self.camera, size, session, at, true));
@@ -1147,6 +1181,7 @@ impl Viewport {
         }
         if ctx.input(|i| i.key_pressed(Key::Escape)) {
             self.nav_tool = None;
+            self.free_tool = None;
         }
         if ctx.input(|i| i.key_pressed(Key::F8)) {
             self.show_constraints = true;

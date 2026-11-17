@@ -155,6 +155,9 @@ fn relation_unit(session: &Session, id: gc_core::Id<gc_doc::Relationship>) -> Op
         | gc_doc::RelationKind::Insert { .. } => Some((1000.0, "mm")),
         gc_doc::RelationKind::Rotational { .. } => Some((180.0 / std::f64::consts::PI, "°")),
         gc_doc::RelationKind::Rigid { .. } => None,
+        // Kinds still to come are not driven until this dialog learns them.
+        #[allow(unreachable_patterns, reason = "room for relationship kinds still to come")]
+        _ => None,
     }
 }
 
