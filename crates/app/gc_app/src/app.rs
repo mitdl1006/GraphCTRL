@@ -282,11 +282,13 @@ impl GraphCtrlApp {
     /// Creates the app: installs fonts and theme and captures the wgpu render state when there is one.
     pub fn new(cc: &eframe::CreationContext<'_>, options: RunOptions) -> Self {
         gc_ui::fonts::install(&cc.egui_ctx);
+        // The application starts dark unless the user chose light; without a settings folder (tests) it is
+        // light, so that pictures and pixel counts do not depend on the scheme.
         let dark = options
             .settings_dir
             .as_deref()
             .map(gc_persist::places::load_settings)
-            .is_some_and(|settings| settings.dark);
+            .is_some_and(|settings| !settings.light_theme);
         gc_ui::install_theme(&cc.egui_ctx, dark);
         let robot_dir = library_dir(options.robot_dir.as_deref());
         let packages = robot_dir.as_deref().map(gc_session::library::scan).unwrap_or_default();
@@ -747,7 +749,7 @@ impl GraphCtrlApp {
         let settings = gc_persist::places::Settings {
             language: self.lang.code().to_owned(),
             opaque_panels: !self.translucent,
-            dark: self.dark,
+            light_theme: !self.dark,
             ..Default::default()
         };
         if let Err(error) = gc_persist::places::save_settings(dir, &settings) {
