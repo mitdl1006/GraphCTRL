@@ -2235,7 +2235,7 @@ fn measure_gives_the_minimum_distance_between_two_components() {
     harness.run();
     harness.get_by_label("예제 열기 (UR5e 셀)").click();
     harness.run();
-    harness.get_by_label("도구").click();
+    harness.get_by_label("검사").click();
     harness.run();
     harness.get_by_label("측정").click();
     harness.run();
@@ -2346,7 +2346,7 @@ fn measure_picks_faces_with_the_edges_and_faces_priority() {
     harness.run();
     harness.get_by_label("예제 열기 (UR5e 셀)").click();
     harness.run();
-    harness.get_by_label("도구").click();
+    harness.get_by_label("검사").click();
     harness.run();
     harness.get_by_label("측정").click();
     harness.run();
@@ -2422,7 +2422,7 @@ fn interference_lists_overlaps_and_ignores_them() {
         )
         .unwrap();
     harness.run();
-    harness.get_by_label("도구").click();
+    harness.get_by_label("검사").click();
     harness.run();
     harness.get_by_label("간섭 분석").click();
     harness.run();
@@ -2478,7 +2478,7 @@ fn drive_moves_a_joint_and_stops_at_a_collision() {
     harness.run();
     let robot = harness.state().session.doc().robots().iter().next().unwrap().0;
     let stored = harness.state().session.robot_joints(robot).unwrap();
-    harness.get_by_label("도구").click();
+    harness.query_all_by_label("로봇").next().unwrap().click();
     harness.run();
     harness.get_by_label("구동").click();
     harness.run();

@@ -730,15 +730,6 @@ impl GraphCtrlApp {
                 if ui.button(tr!(lang, MenuImeTest)).clicked() {
                     self.ime.open = true;
                 }
-                if ui.button(tr!(lang, MenuMeasure)).clicked() {
-                    self.measure.start(&self.session);
-                }
-                if ui.button(tr!(lang, MenuDrive)).clicked() {
-                    self.drive.start(&mut self.session);
-                }
-                if ui.button(tr!(lang, MenuInterference)).clicked() {
-                    self.interference.start(&self.session);
-                }
                 if ui.button(tr!(lang, MenuAgent)).clicked() {
                     self.agent.open = true;
                 }
@@ -958,6 +949,12 @@ impl eframe::App for GraphCtrlApp {
                 gc_ui::install_theme(&ctx, self.dark);
             }
             self.save_settings();
+        }
+        match ribbon_action {
+            Some(ribbon::RibbonAction::StartMeasure) => self.measure.start(&self.session),
+            Some(ribbon::RibbonAction::StartInterference) => self.interference.start(&self.session),
+            Some(ribbon::RibbonAction::StartDrive) => self.drive.start(&mut self.session),
+            _ => {}
         }
         if ribbon_action == Some(ribbon::RibbonAction::ImportRobot)
             && let Some(path) = self.dialogs.open_urdf()
