@@ -34,6 +34,8 @@ pub(crate) struct Parameters {
     search: String,
     /// Equations being typed, by row name.
     editing: std::collections::BTreeMap<String, String>,
+    /// User parameter names being typed, by parameter.
+    naming: std::collections::BTreeMap<Id<Param>, String>,
     /// Whether a new numeric parameter is an angle.
     angle: bool,
     error: Option<String>,
@@ -144,7 +146,35 @@ impl Parameters {
             ui.end_row();
             let shown: Vec<&Row> = rows.iter().filter(|r| self.matches(r)).collect();
             for row in shown {
-                let name = ui.label(&row.name);
+                let name = ui
+                    .horizontal(|ui| {
+                        let name = ui.label(&row.name);
+                        // A user parameter's name is edited in place, as in Inventor (Enter renames it, and every
+                        // equation that uses it follows).
+                        if let Some(Target::User(id)) = row.target {
+                            let text = self.naming.entry(id).or_insert_with(|| row.name.clone());
+                            let field = ui
+                                .add(egui::TextEdit::singleline(text).desired_width(90.0))
+                                .on_hover_text(tr!(lang, ParamColName));
+                            field.widget_info(|| {
+                                egui::WidgetInfo::labeled(
+                                    egui::Role::TextInput,
+                                    true,
+                                    format!("{} name", row.name),
+                                )
+                            });
+                            if field.lost_focus()
+                                && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                && *text != row.name
+                            {
+                                command = Some(Command::RenameParam { id, name: text.clone() });
+                            } else if !field.has_focus() && *text != row.name {
+                                text.clone_from(&row.name);
+                            }
+                        }
+                        name
+                    })
+                    .inner;
                 ui.label(row.unit);
                 match row.target {
                     Some(target) => {

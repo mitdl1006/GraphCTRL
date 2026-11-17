@@ -2675,6 +2675,14 @@ fn the_parameters_dialog_lists_and_edits_parameters() {
     harness.get_by_label("매개변수 삭제").click();
     harness.run();
     assert_eq!(harness.state().session.doc().params().len(), 1);
+    // Renaming the parameter renames it in the dimension's equation too.
+    harness.get_by_label("Param name").focus();
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.get_by_label("Param name").type_text("Gap");
+    harness.key_press(egui::Key::Enter);
+    harness.run();
+    let renamed = harness.state().session.doc().sketches().iter().next().unwrap().1.clone();
+    assert_eq!(renamed.dimensions.iter().next().unwrap().1.source, "Gap * 4");
     harness.get_by_label("완료").click();
     harness.run();
 }
