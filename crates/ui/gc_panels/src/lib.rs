@@ -18,12 +18,77 @@ pub use cell::{CellUi, cell, status_text};
 pub enum BrowserAction {
     /// Edit this sketch.
     EditSketch(Id<Sketch>),
-    /// Delete this item of the robot cell.
-    Delete(gc_doc::CellOp),
+    /// Apply this edit (delete a cell item, add or change a parameter).
+    Edit(gc_doc::Command),
+}
+
+/// What is typed into the parameter editor of the browser.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ParamsUi {
+    /// The name being typed.
+    pub name: String,
+    /// The expression being typed.
+    pub source: String,
+}
+
+/// The named parameters: a list, and one editor that adds a parameter or, when the name exists, changes
+/// it. Clicking a parameter loads it into the editor.
+fn params(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi) -> Option<gc_doc::Command> {
+    let mut command = None;
+    egui::CollapsingHeader::new(tr!(lang, BrowserParams)).default_open(true).show(ui, |ui| {
+        let doc = session.doc();
+        for (id, param) in doc.params().iter() {
+            ui.horizontal(|ui| {
+                let text = format!("{} = {}", param.name, param.source);
+                if ui.selectable_label(state.name == param.name, text).clicked() {
+                    state.name.clone_from(&param.name);
+                    state.source.clone_from(&param.source);
+                }
+                let delete = ui.small_button("x").on_hover_text(tr!(lang, CmdDeleteItem, param.name));
+                delete.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::Role::Button, true, tr!(lang, CmdDeleteItem, param.name))
+                });
+                if delete.clicked() {
+                    command = Some(gc_doc::Command::DeleteParam { id });
+                }
+            });
+        }
+        let existing = doc.params().iter().find(|(_, p)| p.name == state.name).map(|(id, _)| id);
+        ui.horizontal(|ui| {
+            let name = egui::TextEdit::singleline(&mut state.name)
+                .hint_text(tr!(lang, ParamName))
+                .desired_width(52.0);
+            ui.add(name)
+                .widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, "parameter name"));
+            let source = egui::TextEdit::singleline(&mut state.source)
+                .hint_text(tr!(lang, ParamValue))
+                .desired_width(78.0);
+            let field = ui.add(source);
+            field.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, "parameter value"));
+            let entered = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            let label = if existing.is_some() { tr!(lang, ParamApply) } else { tr!(lang, ParamAdd) };
+            let ready = !state.name.is_empty() && !state.source.is_empty();
+            if (ui.add_enabled(ready, egui::Button::new(label)).clicked() || entered) && ready {
+                command = Some(match existing {
+                    Some(id) => gc_doc::Command::SetParam { id, source: state.source.clone() },
+                    None => {
+                        // A bare number is millimetres unless the expression speaks of angles.
+                        let angle = ["deg", "rad", "°"].iter().any(|unit| state.source.contains(unit));
+                        gc_doc::Command::AddParam {
+                            name: state.name.clone(),
+                            source: state.source.clone(),
+                            angle,
+                        }
+                    }
+                });
+            }
+        });
+    });
+    command
 }
 
 /// The model browser: origin geometry and sketches. Double-click a sketch to edit it.
-pub fn browser(ui: &mut Ui, session: &Session, lang: Lang) -> Option<BrowserAction> {
+pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi) -> Option<BrowserAction> {
     let mut action = None;
     ui.heading(tr!(lang, PanelBrowser));
     ui.separator();
@@ -41,6 +106,9 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang) -> Option<BrowserActi
             }
         }
     });
+    if let Some(command) = params(ui, session, lang, state) {
+        action = Some(BrowserAction::Edit(command));
+    }
     // Cell items: name and a small button that deletes the item.
     let doc = session.doc();
     let mut section = |ui: &mut Ui, title: &str, items: Vec<(String, String, gc_doc::CellOp)>| {
@@ -56,7 +124,7 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang) -> Option<BrowserActi
                         egui::WidgetInfo::labeled(egui::Role::Button, true, tr!(lang, CmdDeleteItem, name))
                     });
                     if button.clicked() {
-                        action = Some(BrowserAction::Delete(delete));
+                        action = Some(BrowserAction::Edit(gc_doc::Command::Cell(delete)));
                     }
                 });
             }

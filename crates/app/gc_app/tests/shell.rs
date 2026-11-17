@@ -396,6 +396,100 @@ fn planning_on_a_worker_thread_reports_back() {
     assert!(!session.is_planning());
 }
 
+/// A dimension is edited where it stands: the box opens with its expression, Enter applies a new one, an
+/// expression that cannot be applied keeps the box open.
+#[test]
+fn a_dimension_is_edited_in_place() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("XY 스케치").click();
+    harness.run();
+    draw_sample(harness.state_mut());
+    let app = harness.state_mut();
+    app.session.set_tool(ToolKind::Select);
+    let (_, sketch) = app.session.active_sketch().unwrap();
+    let width = *sketch.dimensions.iter().find(|(_, d)| d.source == "60 mm").unwrap().0;
+    app.edit_dimension(width);
+    harness.run();
+
+    let source = |harness: &egui_kittest::Harness<'_, GraphCtrlApp>| {
+        harness.state().session.active_sketch().unwrap().1.dimensions[&width].source.clone()
+    };
+    let retype = |harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, text: &str| {
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        harness.run();
+        harness.get_by_label("dimension expression").type_text(text);
+        harness.run();
+        harness.key_press(egui::Key::Enter);
+        harness.run();
+    };
+    // Nonsense is refused: the dimension keeps its value and the box stays for another try.
+    retype(&mut harness, "60 mm +");
+    assert_eq!(source(&harness), "60 mm");
+    harness.get_by_label("dimension expression");
+    retype(&mut harness, "80 mm");
+    assert_eq!(source(&harness), "80 mm");
+    assert_eq!(harness.query_all_by_label("dimension expression").count(), 0, "the box closed");
+}
+
+/// A named parameter is added in the browser, drives a dimension, and changing it changes the sketch.
+#[test]
+fn a_parameter_drives_a_dimension() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("XY 스케치").click();
+    harness.run();
+    draw_sample(harness.state_mut());
+    harness.state_mut().session.set_tool(ToolKind::Select);
+    harness.run();
+    let fill = |harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, field: &str, text: &str| {
+        harness.get_by_label(field).click();
+        harness.run();
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        harness.run();
+        harness.get_by_label(field).type_text(text);
+        harness.run();
+    };
+    fill(&mut harness, "parameter name", "w");
+    fill(&mut harness, "parameter value", "80 mm");
+    harness.get_by_label("추가").click();
+    harness.run();
+    harness.get_by_label("w = 80 mm");
+
+    // The width dimension now reads the parameter.
+    let app = harness.state_mut();
+    let (_, sketch) = app.session.active_sketch().unwrap();
+    let width = *sketch.dimensions.iter().find(|(_, d)| d.source == "60 mm").unwrap().0;
+    app.session.edit_dimension(width, "w").unwrap();
+    let measured = |harness: &egui_kittest::Harness<'_, GraphCtrlApp>| {
+        let (_, sketch) = harness.state().session.active_sketch().unwrap();
+        sketch.measure(&sketch.dimensions[&width].kind).unwrap()
+    };
+    harness.run();
+    assert!((measured(&harness) - 0.080).abs() < 1e-9);
+
+    // Clicking the parameter loads it into the editor; a new value is applied to it and to the sketch.
+    harness.get_by_label("w = 80 mm").click();
+    harness.run();
+    fill(&mut harness, "parameter value", "100 mm");
+    harness.get_by_label("적용").click();
+    harness.run();
+    harness.get_by_label("w = 100 mm");
+    assert!((measured(&harness) - 0.100).abs() < 1e-9);
+
+    // In use, it cannot be deleted.
+    harness.get_by_label("w 삭제").click();
+    harness.run();
+    assert_eq!(harness.state().session.doc().params().len(), 1);
+    harness.get_by_label("아직 사용 중이라 삭제할 수 없습니다");
+}
+
 /// The view cube turns the view: its right edge, seen from the front, looks from between front and right.
 #[test]
 fn clicking_the_view_cube_turns_the_view() {

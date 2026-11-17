@@ -76,6 +76,9 @@ pub struct Viewport {
     value_text: String,
     value_open: bool,
     cube_centre: Option<egui::Pos2>,
+    /// A dimension whose expression is being edited in place: which, the text, and whether the box
+    /// still has to take the keyboard.
+    dimension_edit: Option<(Id<gc_sketch::Dimension>, String, bool)>,
 }
 
 impl Viewport {
@@ -90,6 +93,7 @@ impl Viewport {
             value_text: String::new(),
             value_open: false,
             cube_centre: None,
+            dimension_edit: None,
         }
     }
 
@@ -180,6 +184,25 @@ impl Viewport {
                 {
                     session.tool_event(ToolEvent::Click { pos, px, modifier: ctrl });
                 }
+                // A double click on a dimension's text edits its expression in place.
+                if response.double_clicked_by(PointerButton::Primary)
+                    && let Some(pos) = response.interact_pointer_pos().and_then(on_sketch)
+                    && let Some((_, sketch)) = session.active_sketch()
+                {
+                    let hit = sketch
+                        .dimensions
+                        .iter()
+                        .filter(|(_, dimension)| dimension.driving)
+                        .map(|(id, d)| {
+                            let (dx, dy) = (d.text_pos[0] - pos[0], d.text_pos[1] - pos[1]);
+                            (dx * dx + dy * dy, *id)
+                        })
+                        .filter(|(squared, _)| *squared <= (18.0 * px) * (18.0 * px))
+                        .min_by(|a, b| a.0.total_cmp(&b.0));
+                    if let Some((_, id)) = hit {
+                        self.edit_dimension(session, id);
+                    }
+                }
             }
             if session.is_dragging() {
                 ui.ctx().request_repaint();
@@ -192,6 +215,7 @@ impl Viewport {
         paint::over(ui, rect, &self.camera, session, &scene, lang);
         self.view_cube(ui, rect, lang);
         self.value_box(ui, rect, session, size);
+        self.dimension_box(ui, rect, session, size);
     }
 
     /// The view cube in the top-right corner: shows how the view is turned; clicking a face, an edge or a
@@ -352,6 +376,57 @@ impl Viewport {
         } else if cancel {
             session.cancel_value();
             self.value_open = false;
+        }
+    }
+
+    /// Opens the in-place editor of a driving dimension of the sketch being edited.
+    pub fn edit_dimension(&mut self, session: &Session, id: Id<gc_sketch::Dimension>) {
+        let source = session
+            .active_sketch()
+            .and_then(|(_, sketch)| sketch.dimensions.get(&id))
+            .filter(|dimension| dimension.driving)
+            .map(|dimension| dimension.source.clone());
+        if let Some(source) = source {
+            self.dimension_edit = Some((id, source, true));
+        }
+    }
+
+    /// The box in which the expression of an existing dimension is edited. Enter applies it; a refused
+    /// expression keeps the box open (the status bar says why); Escape closes it.
+    fn dimension_box(&mut self, ui: &mut egui::Ui, rect: egui::Rect, session: &mut Session, size: [f64; 2]) {
+        let Some((id, mut text, fresh)) = self.dimension_edit.take() else { return };
+        let Some((_, sketch)) = session.active_sketch() else { return };
+        let Some(dimension) = sketch.dimensions.get(&id) else { return };
+        let plane = plane_of(session, sketch);
+        let at = self
+            .camera
+            .project(plane.world([dimension.text_pos[0], dimension.text_pos[1], 0.0]), size)
+            .map_or(rect.center(), |p| egui::pos2(rect.left() + p[0] as f32, rect.top() + p[1] as f32));
+        let (mut submit, mut close) = (false, false);
+        egui::Area::new(egui::Id::unique("gc_dimension_edit"))
+            .fixed_pos(at)
+            .order(egui::Order::Foreground)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    let response = ui.add(egui::TextEdit::singleline(&mut text).desired_width(130.0));
+                    response.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::Role::TextInput, true, "dimension expression")
+                    });
+                    if fresh {
+                        response.request_focus();
+                    } else if response.lost_focus() {
+                        if ui.input(|i| i.key_pressed(Key::Enter)) {
+                            submit = true;
+                        } else {
+                            close = true;
+                        }
+                    }
+                });
+            });
+        // A refused expression keeps the box and gives it the keyboard back for another try.
+        let refused = submit && session.edit_dimension(id, &text).is_err();
+        if !(close || submit && !refused) {
+            self.dimension_edit = Some((id, text, refused));
         }
     }
 

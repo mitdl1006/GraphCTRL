@@ -127,6 +127,7 @@ pub struct GraphCtrlApp {
     lang: Lang,
     tab: Tab,
     cell: gc_panels::CellUi,
+    params: gc_panels::ParamsUi,
     /// The robots that can be added: name and description.
     library: Vec<(String, String)>,
     expression: String,
@@ -159,6 +160,7 @@ impl GraphCtrlApp {
             lang: Lang::default(),
             tab: Tab::Model,
             cell: gc_panels::CellUi::default(),
+            params: gc_panels::ParamsUi::default(),
             library,
             expression: String::new(),
             ime: ImeTest { dimension: "25 mm".to_owned(), ..ImeTest::default() },
@@ -173,6 +175,11 @@ impl GraphCtrlApp {
     /// The viewport, for inspecting what it drew.
     pub fn viewport(&self) -> &Viewport {
         &self.viewport
+    }
+
+    /// Opens the in-place editor of a dimension, as a double click on its text does.
+    pub fn edit_dimension(&mut self, id: gc_core::Id<gc_sketch::Dimension>) {
+        self.viewport.edit_dimension(&self.session, id);
     }
 
     /// Replaces the file dialogs, so that tests can answer them.
@@ -506,18 +513,24 @@ impl eframe::App for GraphCtrlApp {
         });
         egui::Panel::left("browser").show(ui, |ui| {
             ui.set_min_width(190.0);
-            match gc_panels::browser(ui, &self.session, lang) {
-                Some(BrowserAction::EditSketch(id)) => {
-                    self.session.enter_sketch(id);
-                    self.tab = Tab::Sketch;
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                match gc_panels::browser(ui, &self.session, lang, &mut self.params) {
+                    Some(BrowserAction::EditSketch(id)) => {
+                        self.session.enter_sketch(id);
+                        self.tab = Tab::Sketch;
+                    }
+                    // A refused edit (still in use, bad expression) is explained in the status bar.
+                    Some(BrowserAction::Edit(command)) => {
+                        self.cell.playing = false;
+                        if self.session.execute(&command).is_ok()
+                            && matches!(command, gc_doc::Command::AddParam { .. })
+                        {
+                            self.params = gc_panels::ParamsUi::default();
+                        }
+                    }
+                    None => {}
                 }
-                // What is still in use cannot be deleted; the status bar says so.
-                Some(BrowserAction::Delete(op)) => {
-                    self.cell.playing = false;
-                    drop(self.session.execute(&gc_doc::Command::Cell(op)));
-                }
-                None => {}
-            }
+            });
         });
         egui::Panel::right("properties").show(ui, |ui| {
             ui.set_min_width(250.0);

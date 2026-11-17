@@ -352,6 +352,16 @@ messages! {
     CompareStale => ("이전 상태 기준 결과", "Computed for an earlier state"),
     /// Button beside a browser item: delete it. `{0}` is the item's name.
     CmdDeleteItem => ("{0} 삭제", "Delete {0}"),
+    /// Browser node: named parameters.
+    BrowserParams => ("파라미터", "Parameters"),
+    /// Parameter editor: name field hint.
+    ParamName => ("이름", "name"),
+    /// Parameter editor: expression field hint.
+    ParamValue => ("값 (예: 20 mm)", "value (e.g. 20 mm)"),
+    /// Parameter editor: add a new parameter.
+    ParamAdd => ("추가", "Add"),
+    /// Parameter editor: change the parameter with this name.
+    ParamApply => ("적용", "Apply"),
     /// Plan status: being computed.
     PlanPlanning => ("계획 중...", "Planning..."),
     /// Plan status: up to date.
