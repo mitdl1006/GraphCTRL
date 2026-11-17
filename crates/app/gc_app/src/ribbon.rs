@@ -220,11 +220,18 @@ fn robot_tab(
         {
             drop(session.add_path(robot, waypoints));
         }
-        if ribbon_button(ui, Icon::Finish, tr!(lang, CmdPlan), false, path.is_some()).clicked()
+        // While a plan is being computed the same button cancels it.
+        let planning = session.is_planning();
+        let label = if planning { tr!(lang, Cancel) } else { tr!(lang, CmdPlan) };
+        if ribbon_button(ui, Icon::Finish, label, planning, path.is_some()).clicked()
             && let Some(path) = path
         {
             cell.playing = false;
-            session.plan(path);
+            if planning {
+                session.cancel_planning();
+            } else {
+                session.plan(path);
+            }
         }
         let planned = path.is_some_and(|p| session.planned(p).is_some());
         let label = if cell.playing { tr!(lang, CmdStop) } else { tr!(lang, CmdPlay) };

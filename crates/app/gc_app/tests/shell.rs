@@ -307,7 +307,31 @@ fn ur5e_cell_renders_with_gpu() {
     harness.render().unwrap().save(out.join("review-8-ur5e-playback.png")).unwrap();
 }
 
-/// File dialogs that always answer with one path.
+/// With worker threads, planning does not finish inside the click: the window shows "planning" and picks
+/// the result up when the job reports back.
+#[test]
+fn planning_on_a_worker_thread_reports_back() {
+    let options = RunOptions { background_jobs: true, ..RunOptions::default() };
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, options));
+    harness.run();
+    build_cell(&mut harness, "6R 로봇", LEFT, RIGHT);
+    let path = harness.state().session.doc().paths().iter().next().unwrap().0;
+    // The job runs on its own thread; give it up to ten seconds of real time.
+    for _ in 0..1000 {
+        if harness.state().session.plan_status(path) != gc_session::PlanStatus::Planning {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        harness.step();
+    }
+    let session = &harness.state().session;
+    assert_eq!(session.plan_status(path), gc_session::PlanStatus::Ready, "{:?}", session.plan_error(path));
+    assert!(!session.is_planning());
+}
+
 struct Scripted(std::path::PathBuf);
 
 impl gc_app::FileDialogs for Scripted {

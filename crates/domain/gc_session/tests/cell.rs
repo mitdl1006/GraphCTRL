@@ -114,3 +114,43 @@ fn a_waypoint_on_a_sketch_point_follows_the_sketch() {
     // A description that cannot be read is refused with the reason.
     assert!(session.add_robot("Broken", "<robot name=\"x\"><link/></robot>").is_err());
 }
+
+#[test]
+fn planning_in_the_background_can_be_watched_and_cancelled() {
+    let (executor, queue) = gc_jobs::Executor::manual();
+    let mut session = Session::new();
+    session.set_executor(executor);
+    let robot = session.add_robot("Robot1", &six_axis()).unwrap();
+    session.jog(robot, &RIGHT);
+    session.end_jog();
+    let right = session.add_waypoint_here(robot).unwrap();
+    session.jog(robot, &LEFT);
+    session.end_jog();
+    let path = session.add_path(robot, vec![right]).unwrap();
+
+    // Nothing is computed until the job runs; the session stays usable meanwhile.
+    assert_eq!(session.plan(path), PlanStatus::Planning);
+    assert!(session.is_planning() && !session.poll_jobs());
+    assert!(session.planned(path).is_none());
+    queue.run_all();
+    assert!(session.poll_jobs());
+    assert_eq!(session.plan_status(path), PlanStatus::Ready);
+    assert!(!session.is_planning() && !session.poll_jobs());
+
+    // An edit made while a plan is being computed makes its result out of date, not wrong.
+    assert_eq!(session.plan(path), PlanStatus::Planning);
+    let pillar = Solid::Box { size: [0.1, 0.1, 1.4] };
+    session.add_body(pillar, Placement { xyz: [0.55, 0.0, 0.7], rpy: [0.0; 3] }).unwrap();
+    queue.run_all();
+    assert!(session.poll_jobs());
+    assert_eq!(session.plan_status(path), PlanStatus::Stale);
+    assert!(session.planned(path).unwrap().segments[0].straight, "planned before the pillar existed");
+
+    // A cancelled job leaves the previous result alone.
+    assert_eq!(session.plan(path), PlanStatus::Planning);
+    session.cancel_planning();
+    assert_eq!(session.plan_status(path), PlanStatus::Stale);
+    queue.run_all();
+    assert!(!session.poll_jobs());
+    assert!(session.planned(path).unwrap().segments[0].straight);
+}

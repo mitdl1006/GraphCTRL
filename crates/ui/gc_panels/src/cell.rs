@@ -20,6 +20,7 @@ pub struct CellUi {
 pub fn status_text(lang: Lang, status: PlanStatus) -> &'static str {
     match status {
         PlanStatus::NotPlanned => tr!(lang, PlanNotPlanned),
+        PlanStatus::Planning => tr!(lang, PlanPlanning),
         PlanStatus::Ready => tr!(lang, PlanReady),
         PlanStatus::Stale => tr!(lang, PlanStale),
         PlanStatus::Failed => tr!(lang, PlanFailed),
@@ -146,7 +147,7 @@ fn paths(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) {
     let color = match status {
         PlanStatus::Ready => colors::TRACE,
         PlanStatus::Failed => colors::ERROR,
-        PlanStatus::Stale | PlanStatus::NotPlanned => colors::INACTIVE,
+        PlanStatus::Stale | PlanStatus::NotPlanned | PlanStatus::Planning => colors::INACTIVE,
     };
     ui.colored_label(color, status_text(lang, status));
     if let Some(error) = session.plan_error(path_id) {

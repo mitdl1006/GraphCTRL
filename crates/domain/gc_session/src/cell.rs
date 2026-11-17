@@ -13,10 +13,11 @@ use gc_doc::{
     Body, CellOp, Command, Created, Document, EditError, MotionPath, Placement, Robot, Sketch, Solid,
     Waypoint, WaypointTarget,
 };
+use gc_jobs::{CancelToken, Executor, JobHandle, JobOutcome};
 use gc_math::{DPose3, DQuat, DVec3, pose_from_xyz_rpy};
 use gc_mesh::MeshData;
 use gc_motion::{Goal, MotionPlan, MotionRequest, Obstacle, RobotScene, plan_motion};
-use gc_plan::{Algorithm, NeverCancel, Options};
+use gc_plan::{Algorithm, Control, Options};
 use gc_robot::{Chain, RobotModel, Shape};
 use gc_sketch::{SkPoint, Space};
 
@@ -165,6 +166,8 @@ impl PlannedPath {
 pub enum PlanStatus {
     /// Never planned.
     NotPlanned,
+    /// Being planned right now.
+    Planning,
     /// Planned, and nothing it depends on changed since.
     Ready,
     /// Planned, but something it depends on changed.
@@ -178,15 +181,45 @@ struct Planned {
     outcome: Result<PlannedPath, String>,
 }
 
+/// Lets a running planner see that its job was cancelled.
+struct JobControl(CancelToken);
+
+impl Control for JobControl {
+    fn cancelled(&self) -> bool {
+        self.0.is_cancelled()
+    }
+}
+
+/// A plan being computed: the path, the fingerprint of its inputs and the job. A cancelled job yields
+/// `None`.
+type PlanJob = (Id<MotionPath>, String, JobHandle<Option<Result<PlannedPath, String>>>);
+
 /// Robot-cell state of a session that is not part of the document.
-#[derive(Default)]
 pub(crate) struct CellState {
+    executor: Executor,
+    job: Option<PlanJob>,
     robots: BTreeMap<Id<Robot>, Arc<LoadedRobot>>,
     jog: Option<(Id<Robot>, Vec<f64>)>,
     body: Option<(Id<Body>, Body)>,
     plans: BTreeMap<Id<MotionPath>, Planned>,
     playback: Option<(Id<MotionPath>, f64)>,
     resources: Option<Resources>,
+}
+
+impl Default for CellState {
+    fn default() -> Self {
+        Self {
+            // Jobs run to completion where they are started unless the application supplies threads.
+            executor: Executor::inline(),
+            job: None,
+            robots: BTreeMap::new(),
+            jog: None,
+            body: None,
+            plans: BTreeMap::new(),
+            playback: None,
+            resources: None,
+        }
+    }
 }
 
 impl CellState {
@@ -465,6 +498,9 @@ impl Session {
 
     /// How the stored plan of a path relates to the document.
     pub fn plan_status(&self, path: Id<MotionPath>) -> PlanStatus {
+        if self.cell.job.as_ref().is_some_and(|(planning, ..)| *planning == path) {
+            return PlanStatus::Planning;
+        }
         match self.cell.plans.get(&path) {
             None => PlanStatus::NotPlanned,
             Some(planned) if self.plan_inputs(path).as_ref() != Some(&planned.inputs) => PlanStatus::Stale,
@@ -483,77 +519,66 @@ impl Session {
         self.cell.plans.get(&path).and_then(|p| p.outcome.as_ref().err()).map(String::as_str)
     }
 
-    /// Plans a path from the robot's current joint values through its waypoints and stores the result.
+    /// Where planning runs. The default runs it inside [`Session::plan`]; an application passes an
+    /// executor with threads so that its window stays responsive.
+    pub fn set_executor(&mut self, executor: Executor) {
+        self.cell.executor = executor;
+    }
+
+    /// Starts planning a path from the robot's current joint values through its waypoints. With the
+    /// default executor the result is there when this returns; otherwise the status is
+    /// [`PlanStatus::Planning`] until [`Session::poll_jobs`] collects it. A plan that was still being
+    /// computed is cancelled.
     pub fn plan(&mut self, path: Id<MotionPath>) -> PlanStatus {
         self.end_jog();
         self.cell.playback = None;
+        self.cancel_planning();
         let Some(inputs) = self.plan_inputs(path) else { return PlanStatus::NotPlanned };
-        let outcome = self.plan_now(path);
-        self.cell.plans.insert(path, Planned { inputs, outcome });
+        let loaded = self.doc.get(path).and_then(|p| self.robot_model(p.robot)).cloned();
+        // The job works on its own copy of the document: edits made while it runs do not disturb it,
+        // and the fingerprint tells afterwards whether its result is still current.
+        let doc = self.doc.clone();
+        let job = self.cell.executor.spawn("plan", move |ctx| {
+            let control = JobControl(ctx.cancel.clone());
+            let result = match &loaded {
+                Some(loaded) => plan_path(&doc, loaded, path, &control),
+                None => Err("the robot description could not be read".to_owned()),
+            };
+            (!ctx.cancel.is_cancelled()).then_some(result)
+        });
+        self.cell.job = Some((path, inputs, job));
+        self.poll_jobs();
         self.plan_status(path)
     }
 
-    fn plan_now(&self, path_id: Id<MotionPath>) -> Result<PlannedPath, String> {
-        let doc = &self.doc;
-        let path = doc.get(path_id).ok_or("the path no longer exists")?;
-        let robot = doc.get(path.robot).ok_or("the robot no longer exists")?;
-        let loaded = self.robot_model(path.robot).ok_or("the robot description could not be read")?;
-        let algorithm = PLANNERS
-            .iter()
-            .find(|(id, _)| *id == path.planner)
-            .map(|(_, algorithm)| *algorithm)
-            .ok_or_else(|| format!("unknown planner `{}`", path.planner))?;
-        let obstacles: Vec<Obstacle> = doc
-            .bodies()
-            .iter()
-            .map(|(_, body)| Obstacle {
-                name: body.name.clone(),
-                pose: pose_of(&body.placement),
-                shape: match body.solid {
-                    Solid::Box { size } => ShapeDesc::Box(size),
-                    Solid::Cylinder { radius, length } => ShapeDesc::Cylinder { radius, length },
-                    Solid::Sphere { radius } => ShapeDesc::Ball(radius),
-                },
-            })
-            .collect();
-        let (scene, _) = RobotScene::new(
-            Arc::clone(&loaded.model),
-            loaded.chain.clone(),
-            &robot.tip_link,
-            pose_of(&robot.placement),
-            &obstacles,
-            PADDING,
-            &|uri| loaded.file(uri),
-        )
-        .map_err(|e| e.to_string())?;
-        let mut start = robot.joints.clone();
-        let mut segments = Vec::with_capacity(path.waypoints.len());
-        for waypoint_id in &path.waypoints {
-            let waypoint = doc.get(*waypoint_id).ok_or("a waypoint no longer exists")?;
-            let goal = match &waypoint.target {
-                WaypointTarget::Joints(q) => Goal::Joints(q.clone()),
-                WaypointTarget::SketchPoint { sketch, point } => Goal::Pose(
-                    pose_at_point(doc, *sketch, *point)
-                        .ok_or_else(|| format!("{}: its sketch point no longer exists", waypoint.name))?,
-                ),
-            };
-            let request = MotionRequest {
-                start: start.clone(),
-                goal,
-                algorithm,
-                options: Options::default(),
-                seed: path.seed,
-                runs: 4,
-                max_acc: vec![robot.max_acc; start.len()],
-            };
-            let plan =
-                plan_motion(&scene, &request, &NeverCancel).map_err(|e| format!("{}: {e}", waypoint.name))?;
-            if let Some(end) = plan.path.last() {
-                start.clone_from(end);
-            }
-            segments.push(plan);
+    /// True while a plan is being computed.
+    pub fn is_planning(&self) -> bool {
+        self.cell.job.is_some()
+    }
+
+    /// Stops the plan being computed, keeping the previous result.
+    pub fn cancel_planning(&mut self) {
+        if let Some((_, _, job)) = self.cell.job.take() {
+            job.cancel();
         }
-        Ok(PlannedPath { segments })
+    }
+
+    /// Collects finished background work. Returns true when something arrived. Call once per frame.
+    pub fn poll_jobs(&mut self) -> bool {
+        let Some((path, inputs, mut job)) = self.cell.job.take() else { return false };
+        let outcome = match job.poll() {
+            None => {
+                self.cell.job = Some((path, inputs, job));
+                return false;
+            }
+            Some(JobOutcome::Done(None)) => return true,
+            Some(JobOutcome::Done(Some(outcome))) => outcome,
+            Some(JobOutcome::Failed(reason)) => Err(format!("planning stopped unexpectedly: {reason}")),
+        };
+        if self.doc.get(path).is_some() {
+            self.cell.plans.insert(path, Planned { inputs, outcome });
+        }
+        true
     }
 
     /// Shows the robot of `path` at time `t` of its planned motion; `None` shows it where it is.
@@ -565,4 +590,70 @@ impl Session {
     pub fn playback(&self) -> Option<(Id<MotionPath>, f64)> {
         self.cell.playback
     }
+}
+
+/// Plans a path of `doc` from its robot's current joint values through its waypoints.
+fn plan_path(
+    doc: &Document,
+    loaded: &LoadedRobot,
+    path_id: Id<MotionPath>,
+    control: &dyn Control,
+) -> Result<PlannedPath, String> {
+    let path = doc.get(path_id).ok_or("the path no longer exists")?;
+    let robot = doc.get(path.robot).ok_or("the robot no longer exists")?;
+    let algorithm = PLANNERS
+        .iter()
+        .find(|(id, _)| *id == path.planner)
+        .map(|(_, algorithm)| *algorithm)
+        .ok_or_else(|| format!("unknown planner `{}`", path.planner))?;
+    let obstacles: Vec<Obstacle> = doc
+        .bodies()
+        .iter()
+        .map(|(_, body)| Obstacle {
+            name: body.name.clone(),
+            pose: pose_of(&body.placement),
+            shape: match body.solid {
+                Solid::Box { size } => ShapeDesc::Box(size),
+                Solid::Cylinder { radius, length } => ShapeDesc::Cylinder { radius, length },
+                Solid::Sphere { radius } => ShapeDesc::Ball(radius),
+            },
+        })
+        .collect();
+    let (scene, _) = RobotScene::new(
+        Arc::clone(&loaded.model),
+        loaded.chain.clone(),
+        &robot.tip_link,
+        pose_of(&robot.placement),
+        &obstacles,
+        PADDING,
+        &|uri| loaded.file(uri),
+    )
+    .map_err(|e| e.to_string())?;
+    let mut start = robot.joints.clone();
+    let mut segments = Vec::with_capacity(path.waypoints.len());
+    for waypoint_id in &path.waypoints {
+        let waypoint = doc.get(*waypoint_id).ok_or("a waypoint no longer exists")?;
+        let goal = match &waypoint.target {
+            WaypointTarget::Joints(q) => Goal::Joints(q.clone()),
+            WaypointTarget::SketchPoint { sketch, point } => Goal::Pose(
+                pose_at_point(doc, *sketch, *point)
+                    .ok_or_else(|| format!("{}: its sketch point no longer exists", waypoint.name))?,
+            ),
+        };
+        let request = MotionRequest {
+            start: start.clone(),
+            goal,
+            algorithm,
+            options: Options::default(),
+            seed: path.seed,
+            runs: 4,
+            max_acc: vec![robot.max_acc; start.len()],
+        };
+        let plan = plan_motion(&scene, &request, control).map_err(|e| format!("{}: {e}", waypoint.name))?;
+        if let Some(end) = plan.path.last() {
+            start.clone_from(end);
+        }
+        segments.push(plan);
+    }
+    Ok(PlannedPath { segments })
 }

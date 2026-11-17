@@ -27,3 +27,6 @@ gc_plugin_api.workspace = true
 gc_robotics_api.workspace = true
 log.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+gc_jobs.workspace = true

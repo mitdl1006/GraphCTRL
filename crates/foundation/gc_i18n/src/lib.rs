@@ -314,6 +314,8 @@ messages! {
     PropTime => ("시간 (s)", "Time (s)"),
     /// Plan status: never planned.
     PlanNotPlanned => ("계획 안 됨", "Not planned"),
+    /// Plan status: being computed.
+    PlanPlanning => ("계획 중...", "Planning..."),
     /// Plan status: up to date.
     PlanReady => ("계획됨", "Planned"),
     /// Plan status: out of date.

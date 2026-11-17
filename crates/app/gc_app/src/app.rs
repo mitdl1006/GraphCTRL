@@ -19,6 +19,18 @@ pub struct RunOptions {
     pub smoke_frames: Option<u32>,
     /// Write the 3D target to this PNG before closing a smoke run.
     pub screenshot: Option<PathBuf>,
+    /// Plan on a worker thread so that the window stays responsive. Off, planning finishes inside the
+    /// command that starts it, which is what scripted tests want.
+    pub background_jobs: bool,
+}
+
+/// Wakes the window when a background job has finished.
+struct Repaint(egui::Context);
+
+impl gc_jobs::Notifier for Repaint {
+    fn notify(&self) {
+        self.0.request_repaint();
+    }
 }
 
 /// Asks the user for file names. The application uses the operating system's dialogs; tests script the
@@ -127,6 +139,10 @@ impl GraphCtrlApp {
         let (library, resources) = robot_library();
         let mut session = Session::new();
         session.set_resources(resources);
+        if options.background_jobs {
+            let notifier = std::sync::Arc::new(Repaint(cc.egui_ctx.clone()));
+            session.set_executor(gc_jobs::Executor::thread().with_notifier(notifier));
+        }
         Self {
             options,
             frames: 0,
@@ -438,6 +454,7 @@ impl eframe::App for GraphCtrlApp {
         let ctx = ui.ctx().clone();
         let lang = self.lang;
         self.shortcuts(&ctx);
+        self.session.poll_jobs();
         // Closing the window with unsaved changes asks first.
         if ctx.input(|i| i.viewport().close_requested()) && self.session.is_dirty() && !self.quitting {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
