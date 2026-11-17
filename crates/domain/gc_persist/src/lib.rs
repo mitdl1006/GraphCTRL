@@ -317,7 +317,12 @@ mod tests {
             &mut doc,
             &Command::Sketch {
                 sketch,
-                op: SketchOp::AddCircle { centre: [0.05, 0.02, 0.0], radius: 1.0 / 3.0 * 0.01 },
+                op: SketchOp::AddCircle {
+                    centre: [0.05, 0.02, 0.0],
+                    radius: 1.0 / 3.0 * 0.01,
+                    centre_snap: gc_doc::EndSnap::default(),
+                    rim_snap: gc_doc::EndSnap::default(),
+                },
             },
         )
         .unwrap();

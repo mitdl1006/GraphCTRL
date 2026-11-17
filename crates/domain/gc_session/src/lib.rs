@@ -62,6 +62,8 @@ pub struct Session {
     history: History,
     active: Option<Id<Sketch>>,
     tool: Tool,
+    /// The Construction toggle: drawing tools make construction geometry.
+    construction: bool,
     selection: BTreeSet<Item>,
     /// The selected items in the order they were picked (may hold items no longer selected).
     picked: Vec<Item>,
@@ -92,6 +94,7 @@ impl Session {
             history: History::new(),
             active: None,
             tool: Tool::new(ToolKind::Select),
+            construction: false,
             selection: BTreeSet::new(),
             picked: Vec::new(),
             drag: None,
@@ -202,7 +205,37 @@ impl Session {
 
     /// What the tool draws on top of the sketch.
     pub fn preview(&self) -> Preview {
-        self.tool.preview()
+        match self.active_sketch() {
+            Some((_, sketch)) => self.tool.preview(sketch),
+            None => Preview::default(),
+        }
+    }
+
+    /// The input boxes the heads-up display should show for the tool now (empty: no display). Values
+    /// typed go back with `ToolEvent::Hud`, Enter finishes with `ToolEvent::Key(Key::Enter)`.
+    pub fn tool_hud(&self) -> Vec<gc_tools::HudSlot> {
+        self.tool.hud()
+    }
+
+    /// True when the drawing tools make construction geometry (the Format panel's toggle).
+    pub fn tool_construction(&self) -> bool {
+        self.construction
+    }
+
+    /// Turns the Construction toggle on or off. It stays as set when the tool changes. With curves
+    /// selected (and the select tool on), it also converts them, as one undo step.
+    pub fn set_tool_construction(&mut self, construction: bool) -> Result<(), EditError> {
+        self.construction = construction;
+        self.tool.set_construction(construction);
+        let curves: Vec<Id<Curve>> = self
+            .selection
+            .iter()
+            .filter_map(|i| if let gc_sketch::Item::Curve(c) = i { Some(*c) } else { None })
+            .collect();
+        if self.tool.kind() == gc_tools::ToolKind::Select && !curves.is_empty() {
+            self.sketch_op(SketchOp::SetConstructionOf { curves, construction })?;
+        }
+        Ok(())
     }
 
     /// The selected items of the active sketch.
@@ -294,6 +327,7 @@ impl Session {
         self.request = None;
         self.offer = None;
         self.tool = Tool::new(self.tool.kind());
+        self.tool.set_construction(self.construction);
     }
 
     /// Undoes the latest step. Ignored while dragging.

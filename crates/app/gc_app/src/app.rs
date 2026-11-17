@@ -872,8 +872,13 @@ impl eframe::App for GraphCtrlApp {
         self.shortcuts(&ctx);
         self.session.poll_jobs();
         // Agents' calls are carried out here, between frames, like the user's own edits.
+        let before = (self.session.doc().robots().len(), self.session.doc().bodies().len());
         if let Some(edit) = self.agent.serve(&ctx, &mut self.session, &self.packages) {
             self.cell.playing = false;
+            // A robot or body an agent put in is brought into view, as when the user adds one.
+            if (self.session.doc().robots().len(), self.session.doc().bodies().len()) != before {
+                self.fit_view();
+            }
             self.notice = Some(tr!(lang, AgentEdited, edit));
         }
         // Closing the window with unsaved changes asks first.
