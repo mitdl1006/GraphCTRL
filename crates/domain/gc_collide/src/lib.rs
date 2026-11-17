@@ -38,6 +38,20 @@ pub enum ShapeDesc {
     Mesh(Arc<MeshData>),
 }
 
+impl ShapeDesc {
+    /// The largest distance of a point of the shape from its origin.
+    pub fn radius(&self) -> f64 {
+        let norm = |p: [f64; 3]| (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt();
+        match self {
+            Self::Ball(radius) => *radius,
+            Self::Box(size) => norm(size.map(|s| s / 2.0)),
+            Self::Cylinder { radius, length } => (radius * radius + length * length / 4.0).sqrt(),
+            Self::Hull(points) => points.iter().map(|p| norm(*p)).fold(0.0, f64::max),
+            Self::Mesh(mesh) => mesh.positions().iter().map(|p| norm(p.map(f64::from))).fold(0.0, f64::max),
+        }
+    }
+}
+
 /// Why a body could not be built or a query could not be answered.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum CollideError {
@@ -322,6 +336,20 @@ impl World {
     /// Check this pair again.
     pub fn disallow(&mut self, a: BodyId, b: BodyId) {
         self.allowed.remove(&(a.0.min(b.0), a.0.max(b.0)));
+    }
+
+    /// The pairs excluded from checking, by name, each pair ordered and the list sorted.
+    pub fn allowed_pairs(&self) -> Vec<(String, String)> {
+        let mut pairs: Vec<(String, String)> = self
+            .allowed
+            .iter()
+            .map(|(a, b)| {
+                let (a, b) = (self.name(BodyId(*a)).to_owned(), self.name(BodyId(*b)).to_owned());
+                if a <= b { (a, b) } else { (b, a) }
+            })
+            .collect();
+        pairs.sort();
+        pairs
     }
 
     /// True when the pair is excluded from checking.

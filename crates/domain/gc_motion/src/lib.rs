@@ -90,6 +90,46 @@ pub struct MotionPlan {
     pub reused: bool,
     /// True for a straight-line move of the tool tip ([`MotionRequest::linear`]).
     pub linear: bool,
+    /// What the final check of the timed motion establishes.
+    pub guarantee: Guarantee,
+}
+
+/// What the final check of a motion establishes (plan 5.7, appendix E Q2).
+///
+/// The timed motion was checked at states close enough together that no point of a robot body moves
+/// more than [`Guarantee::step_mm`] between two of them. Every checked state keeps
+/// [`Guarantee::padding_nominal`] from every obstacle, so between them the convex collision model keeps
+/// at least [`Guarantee::clearance`] (padding minus half a step, in metres). Not covered: pairs excluded from
+/// checking ([`RobotScene::excluded_pairs`]), bodies that start inside a closed mesh, and how closely the
+/// controller follows the motion. With no padding the check is sampling only.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Guarantee {
+    /// The padding every checked state keeps from obstacles, metres.
+    pub padding_nominal: f64,
+    /// The smallest padding used anywhere along the motion, metres (equal to the nominal padding: the
+    /// motion is not planned with reduced padding anywhere).
+    pub padding_min: f64,
+    /// The largest change of a joint between two checked states, degrees.
+    pub step_deg: f64,
+    /// An upper bound of how far any point of a robot body moves between two checked states, millimetres.
+    pub step_mm: f64,
+    /// The clearance the convex collision model keeps between checked states, metres: padding minus half
+    /// a step. Zero or less means sampling only.
+    pub clearance: f64,
+    /// Number of states checked.
+    pub states: usize,
+    /// The collision model that was checked.
+    pub model: &'static str,
+    /// Fingerprint of the body pairs that are not checked ([`RobotScene::excluded_pairs_hash`]).
+    pub acm_hash: u64,
+}
+
+impl Guarantee {
+    /// True when the clearance is positive: the guarantee holds between the checked states, not only at
+    /// them.
+    pub fn holds_between_states(&self) -> bool {
+        self.clearance > 0.0
+    }
 }
 
 /// Why no motion was produced.
@@ -359,11 +399,16 @@ fn finish(
     let blended = (path.len() > 2)
         .then(|| Trajectory::blended(&path, limits, deviation, &|q| checker.state_valid(q)).ok())
         .flatten()
-        .and_then(|timed| timed.validate(limits, 0.004, &|q| strict.state_valid(q)).ok());
-    let trajectory = match blended {
-        Some(trajectory) => trajectory,
-        None => Trajectory::stopping_at_waypoints(&path, limits)?
-            .validate(limits, 0.004, &|q| strict.state_valid(q))?,
+        .and_then(|timed| timed.validate(limits, 0.004, &|q| strict.state_valid(q)).ok())
+        .and_then(|timed| certify(scene, &timed, &strict).ok().map(|guarantee| (timed, guarantee)));
+    let (trajectory, guarantee) = match blended {
+        Some(found) => found,
+        None => {
+            let timed = Trajectory::stopping_at_waypoints(&path, limits)?
+                .validate(limits, 0.004, &|q| strict.state_valid(q))?;
+            let guarantee = certify(scene, &timed, &strict)?;
+            (timed, guarantee)
+        }
     };
     let mut tip_path = Vec::new();
     let mut min_clearance = f64::INFINITY;
@@ -398,6 +443,76 @@ fn finish(
         planning_margin: checker.margin(),
         reused: false,
         linear: false,
+        guarantee,
+    })
+}
+
+/// Checks a timed motion densely enough for a [`Guarantee`]: the states 4 ms apart, and between two of
+/// them as many more as it takes for no robot point to move further than the padding from one checked
+/// state to the next (so half a step, the most a point can be from its nearest checked position, stays
+/// below the padding).
+fn certify(
+    scene: &RobotScene,
+    trajectory: &Trajectory<Validated>,
+    strict: &scene::Checker<'_>,
+) -> Result<Guarantee, ValidationError> {
+    const STEP: f64 = 0.004;
+    let padding = scene.padding();
+    let duration = trajectory.duration();
+    let intervals = ((duration / STEP).ceil() as usize).clamp(1, 1_000_000);
+    let (mut step_deg, mut step_m, mut states) = (0.0_f64, 0.0_f64, 1_usize);
+    let mut previous = trajectory.sample(0.0).q;
+    for k in 1..=intervals {
+        let (t0, t1) = (duration * (k - 1) as f64 / intervals as f64, duration * k as f64 / intervals as f64);
+        let end = trajectory.sample(t1).q;
+        // With padding, subdivide until no step moves a point further than the padding (the path is
+        // curved, so a sub-step can move more than its share of the whole interval: double until it holds).
+        let mut pieces = if padding > 0.0 {
+            ((scene.sweep_bound(&previous, &end) / padding).ceil() as usize).clamp(1, 4096)
+        } else {
+            1
+        };
+        let steps = loop {
+            let mut qs: Vec<(f64, Vec<f64>)> = (1..pieces)
+                .map(|piece| {
+                    let t = t0 + (t1 - t0) * piece as f64 / pieces as f64;
+                    (t, trajectory.sample(t).q)
+                })
+                .collect();
+            qs.push((t1, end.clone()));
+            let worst = std::iter::once(&previous)
+                .chain(qs.iter().map(|(_, q)| q))
+                .zip(qs.iter().map(|(_, q)| q))
+                .map(|(a, b)| scene.sweep_bound(a, b))
+                .fold(0.0, f64::max);
+            if padding <= 0.0 || worst <= padding || pieces >= 4096 {
+                break qs;
+            }
+            pieces *= 2;
+        };
+        let mut at = previous;
+        let last = steps.len() - 1;
+        for (index, (t, q)) in steps.into_iter().enumerate() {
+            if index < last && !strict.state_valid(&q) {
+                return Err(ValidationError::State { time: t });
+            }
+            step_m = step_m.max(scene.sweep_bound(&at, &q));
+            step_deg =
+                step_deg.max(at.iter().zip(&q).fold(0.0_f64, |m, (a, b)| m.max((a - b).abs())).to_degrees());
+            states += 1;
+            at = q;
+        }
+        previous = at;
+    }
+    Ok(Guarantee {
+        padding_nominal: padding,
+        padding_min: padding,
+        step_deg,
+        step_mm: step_m * 1e3,
+        clearance: padding - step_m / 2.0,
+        states,
+        model: "convex hulls of the collision geometry",
+        acm_hash: scene.excluded_pairs_hash(),
     })
 }
 

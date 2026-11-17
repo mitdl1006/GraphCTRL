@@ -368,3 +368,29 @@ fn replanning_a_moved_pose_goal_stays_in_the_same_configuration() {
     assert!(apart(end, &other) < 0.05, "the arm switched configurations ({} rad)", apart(end, &other));
     assert!((scene.tip_in_world(end).translation - moved.translation).length() < 1e-5);
 }
+
+#[test]
+fn a_plan_carries_its_guarantee() {
+    let scene = scene(&[pillar()]);
+    let plan = plan_motion(
+        &scene,
+        &request(LEFT, Goal::Joints(RIGHT.to_vec()), Algorithm::RrtConnect),
+        &NeverCancel,
+    )
+    .unwrap();
+    let g = &plan.guarantee;
+    assert_eq!(g.padding_nominal, PADDING);
+    assert_eq!(g.padding_min, PADDING);
+    // No robot point moves further than the padding between two checked states, so half the padding
+    // is kept between them.
+    assert!(g.step_mm > 0.0 && g.step_mm <= PADDING * 1e3 + 1e-9, "{}", g.step_mm);
+    assert!(g.holds_between_states() && g.clearance >= PADDING / 2.0 - 1e-12);
+    assert!(g.step_deg > 0.0 && g.states > (plan.trajectory.duration() / 0.004) as usize);
+    assert_eq!(g.acm_hash, scene.excluded_pairs_hash());
+    assert!(!scene.excluded_pairs().is_empty(), "neighbouring links are excluded");
+
+    // The sweep bound really bounds the motion of the tip.
+    let (a, b) = (&plan.path[0], &plan.path[1]);
+    let moved = (scene.tip_in_world(a).translation - scene.tip_in_world(b).translation).length();
+    assert!(scene.sweep_bound(a, b) >= moved, "{} < {moved}", scene.sweep_bound(a, b));
+}

@@ -67,6 +67,11 @@ pub struct RobotScene {
     tool: DPose3,
     /// Largest joint step between checked states of a motion, before refinement.
     resolution: f64,
+    /// Per link: the largest distance of a point of its collision body from the link's origin (0 without
+    /// a body).
+    link_radius: Vec<f64>,
+    /// Per chain coordinate: the model joint, whether it slides, and the links (with bodies) it moves.
+    movers: Vec<(usize, bool, Vec<usize>)>,
 }
 
 impl RobotScene {
@@ -95,6 +100,7 @@ impl RobotScene {
         let tip_link = model.link(tip_link).unwrap_or(model.root);
         let mut missing = Vec::new();
         let mut link_bodies = Vec::with_capacity(model.links.len());
+        let mut link_radius = Vec::with_capacity(model.links.len());
         for (index, link) in model.links.iter().enumerate() {
             let mut shapes = Vec::new();
             // A tool is part of the link that carries it.
@@ -132,6 +138,12 @@ impl RobotScene {
                     },
                 }
             }
+            link_radius.push(
+                shapes
+                    .iter()
+                    .map(|(pose, shape)| pose.translation.length() + shape.radius())
+                    .fold(0.0, f64::max),
+            );
             link_bodies.push(if shapes.is_empty() {
                 None
             } else {
@@ -165,9 +177,46 @@ impl RobotScene {
                 world.allow(*link, body);
             }
         }
+        // The links each chain joint moves: those below its child link in the tree.
+        let parent_joint: Vec<Option<usize>> = (0..model.links.len())
+            .map(|link| model.joints.iter().position(|joint| joint.child == link))
+            .collect();
+        let movers = chain
+            .active_joints()
+            .iter()
+            .map(|&joint| {
+                let below = (0..model.links.len())
+                    .filter(|&link| link_bodies[link].is_some())
+                    .filter(|&link| {
+                        let mut at = link;
+                        // Walk up the tree (at most once per joint, so a malformed tree cannot loop).
+                        for _ in 0..=model.joints.len() {
+                            match parent_joint[at] {
+                                Some(j) if j == joint => return true,
+                                Some(j) => at = model.joints[j].parent,
+                                None => return false,
+                            }
+                        }
+                        false
+                    })
+                    .collect();
+                (joint, model.joints[joint].kind == gc_robot::JointKind::Prismatic, below)
+            })
+            .collect();
         let tool = DPose3::IDENTITY;
-        let mut scene =
-            Self { model, chain, base, world, link_bodies, tip_link, tool, resolution: 0.02, padding };
+        let mut scene = Self {
+            model,
+            chain,
+            base,
+            world,
+            link_bodies,
+            tip_link,
+            tool,
+            resolution: 0.02,
+            padding,
+            link_radius,
+            movers,
+        };
         // Links that touch in the zero configuration are designed to: they are not checked either.
         scene.place(&vec![0.0; scene.chain.dof()]);
         let bodies: Vec<BodyId> = scene.link_bodies.iter().flatten().copied().collect();
@@ -275,6 +324,51 @@ impl RobotScene {
     /// The distance robot links keep from obstacles.
     pub fn padding(&self) -> f64 {
         self.padding
+    }
+
+    /// An upper bound of how far any point of a robot body moves on the joint-space segment from `a` to
+    /// `b` (metres): `Σ_j r_j·|Δq_j|`, where `r_j` is the largest distance from joint `j` to a point of a
+    /// body it moves, taken at both ends (a sliding joint moves everything below it by `|Δq_j|`).
+    pub fn sweep_bound(&self, a: &[f64], b: &[f64]) -> f64 {
+        let ends = [self.link_poses(a), self.link_poses(b)];
+        let mut total = 0.0;
+        for (k, (joint, slides, below)) in self.movers.iter().enumerate() {
+            let delta = (b.get(k).copied().unwrap_or(0.0) - a.get(k).copied().unwrap_or(0.0)).abs();
+            if *slides {
+                total += delta;
+                continue;
+            }
+            let pivot_link = self.model.joints[*joint].child;
+            let radius = ends
+                .iter()
+                .flat_map(|poses| {
+                    let pivot = poses[pivot_link].translation;
+                    below.iter().map(move |link| {
+                        (poses[*link].translation - pivot).length() + self.link_radius[*link]
+                    })
+                })
+                .fold(0.0, f64::max);
+            total += radius * delta;
+        }
+        total
+    }
+
+    /// The body pairs that are never checked (neighbouring links, links that touch in the zero
+    /// configuration, the base against obstacles, ...), by name.
+    pub fn excluded_pairs(&self) -> Vec<(String, String)> {
+        self.world.allowed_pairs()
+    }
+
+    /// A fingerprint of [`RobotScene::excluded_pairs`] (FNV-1a), recorded in a [`crate::Guarantee`].
+    pub fn excluded_pairs_hash(&self) -> u64 {
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        for (a, b) in self.excluded_pairs() {
+            for byte in a.bytes().chain([0]).chain(b.bytes()).chain([0]) {
+                hash ^= u64::from(byte);
+                hash = hash.wrapping_mul(0x0100_0000_01b3);
+            }
+        }
+        hash
     }
 
     /// A validity checker for planning at a fraction of the normal checking step (`fineness` 1 is the
