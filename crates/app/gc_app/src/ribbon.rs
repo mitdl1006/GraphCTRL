@@ -21,6 +21,18 @@ pub(crate) enum Tab {
 }
 
 /// The constraint buttons: kind, symbol and name.
+/// The constraint buttons of a 3D sketch.
+const CONSTRAINTS_3D: [(ConstraintKind, &str, Msg); 8] = [
+    (ConstraintKind::Coincident, "::", Msg::ConCoincident),
+    (ConstraintKind::Fix, "#", Msg::ConFix),
+    (ConstraintKind::AlongX, "X", Msg::ConAlongX),
+    (ConstraintKind::AlongY, "Y", Msg::ConAlongY),
+    (ConstraintKind::AlongZ, "Z", Msg::ConAlongZ),
+    (ConstraintKind::OnXY, "XY", Msg::ConOnXY),
+    (ConstraintKind::OnYZ, "YZ", Msg::ConOnYZ),
+    (ConstraintKind::OnZX, "ZX", Msg::ConOnZX),
+];
+
 const CONSTRAINTS: [(ConstraintKind, &str, Msg); 12] = [
     (ConstraintKind::Coincident, "::", Msg::ConCoincident),
     (ConstraintKind::Collinear, "--", Msg::ConCollinear),
@@ -56,6 +68,7 @@ pub(crate) fn show(
 ) -> Option<RibbonAction> {
     let mut action = None;
     let sketching = session.active_sketch().is_some();
+    let spatial = session.sketch_is_spatial();
     ui.horizontal(|ui| {
         for (this, label) in [
             (Tab::Model, Msg::TabModel),
@@ -81,18 +94,25 @@ pub(crate) fn show(
                             *tab = Tab::Sketch;
                         }
                     }
+                    if ribbon_button(ui, Icon::View, tr!(lang, CmdSketch3d), false, !sketching).clicked() {
+                        drop(session.create_sketch_3d());
+                        *tab = Tab::Sketch;
+                    }
                 });
             }
             Tab::Sketch => {
                 let current = session.tool();
                 ribbon_group(ui, tr!(lang, GroupCreate), |ui| {
-                    for (kind, icon, label) in [
+                    let tools = [
                         (ToolKind::Select, Icon::Select, Msg::ToolSelect),
                         (ToolKind::Line, Icon::Line, Msg::ToolLine),
                         (ToolKind::Circle, Icon::Circle, Msg::ToolCircle),
                         (ToolKind::Arc, Icon::Arc, Msg::ToolArc),
                         (ToolKind::Rectangle, Icon::Rectangle, Msg::ToolRectangle),
-                    ] {
+                    ];
+                    // A 3D sketch has points and lines.
+                    let count = if spatial { 2 } else { tools.len() };
+                    for (kind, icon, label) in tools.into_iter().take(count) {
                         if ribbon_button(ui, icon, label.text(lang), current == kind, sketching).clicked() {
                             session.set_tool(kind);
                         }
@@ -111,7 +131,9 @@ pub(crate) fn show(
                     {
                         session.set_tool(dimension);
                     }
-                    for (kind, symbol, label) in CONSTRAINTS {
+                    let constraints: &[(ConstraintKind, &str, Msg)] =
+                        if spatial { &CONSTRAINTS_3D } else { &CONSTRAINTS };
+                    for (kind, symbol, label) in constraints.iter().copied() {
                         let tool = ToolKind::Constraint(kind);
                         if ribbon_button(ui, Icon::Text(symbol), label.text(lang), current == tool, sketching)
                             .clicked()

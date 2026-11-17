@@ -142,7 +142,8 @@ impl Viewport {
         let active = session.active_sketch().map(|(id, sketch)| (id, plane_of(session, sketch)));
         if self.viewed_sketch != active.map(|(id, _)| id) {
             self.viewed_sketch = active.map(|(id, _)| id);
-            if let Some((_, plane)) = active {
+            // A 3D sketch is drawn from whatever view the user has.
+            if let (Some((_, plane)), false) = (active, session.sketch_is_spatial()) {
                 self.camera.look_along(-plane.normal, plane.v);
             }
         }
@@ -153,7 +154,9 @@ impl Viewport {
             .hover_pos()
             .or_else(|| ui.input(|i| i.pointer.latest_pos()))
             .filter(|p| rect.contains(*p));
-        if let (Some((_, plane)), None) = (active, self.navigating) {
+        if let (Some((_, plane)), None, true) = (active, self.navigating, session.sketch_is_spatial()) {
+            self.spatial_input(ui, &response, rect, session, &plane, cursor);
+        } else if let (Some((_, plane)), None) = (active, self.navigating) {
             let on_sketch = |p: egui::Pos2| {
                 plane
                     .plane()
@@ -340,9 +343,14 @@ impl Viewport {
             self.value_text =
                 if angle { format_angle(request.measured) } else { format_length(request.measured) };
         }
+        let anchor = paint::dimension_anchor(session, sketch, &request.kind).unwrap_or([
+            request.text_pos[0],
+            request.text_pos[1],
+            0.0,
+        ]);
         let at = self
             .camera
-            .project(plane.world([request.text_pos[0], request.text_pos[1], 0.0]), size)
+            .project(plane.world(anchor), size)
             .map_or(rect.center(), |p| egui::pos2(rect.left() + p[0] as f32, rect.top() + p[1] as f32));
         let mut submit = false;
         let mut cancel = false;
@@ -376,6 +384,98 @@ impl Viewport {
         } else if cancel {
             session.cancel_value();
             self.value_open = false;
+        }
+    }
+
+    /// Input of a 3D sketch: the line tool places points along the cursor's ray, the other tools get what
+    /// is under the cursor on screen.
+    fn spatial_input(
+        &mut self,
+        ui: &egui::Ui,
+        response: &egui::Response,
+        rect: egui::Rect,
+        session: &mut Session,
+        plane: &SketchPlane,
+        cursor: Option<egui::Pos2>,
+    ) {
+        let size = [f64::from(rect.width()), f64::from(rect.height())];
+        let to_view = |p: egui::Pos2| [f64::from(p.x - rect.left()), f64::from(p.y - rect.top())];
+        let Some((_, sketch)) = session.active_sketch() else { return };
+        // Everything in the sketch's own coordinates.
+        let local = |w: DVec3| {
+            let d = w - plane.origin;
+            DVec3::new(d.dot(plane.u), d.dot(plane.v), d.dot(plane.normal))
+        };
+        let turned = |d: DVec3| DVec3::new(d.dot(plane.u), d.dot(plane.v), d.dot(plane.normal));
+        let points: Vec<(Id<gc_sketch::SkPoint>, DVec3)> = sketch
+            .points
+            .keys()
+            .filter_map(|id| Some((*id, DVec3::from_array(session.point_pos(*id)?))))
+            .collect();
+        let lines: Vec<(Id<gc_sketch::Curve>, DVec3, DVec3)> = sketch
+            .curves
+            .keys()
+            .filter_map(|id| {
+                let (a, b) = sketch.line(*id)?;
+                let at = |p| session.point_pos(p).map(DVec3::from_array);
+                Some((*id, at(a)?, at(b)?))
+            })
+            .collect();
+        let camera = self.camera;
+        let on_screen = move |p: DVec3| camera.project(plane.world(p.to_array()), size);
+        let away = |screen: [f64; 2]| {
+            move |p: DVec3| {
+                on_screen(p).map(|s| ((s[0] - screen[0]).powi(2) + (s[1] - screen[1]).powi(2)).sqrt())
+            }
+        };
+        let ctrl = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
+        let clicked =
+            response.clicked_by(PointerButton::Primary).then(|| response.interact_pointer_pos()).flatten();
+        if session.tool() == gc_tools::ToolKind::Line {
+            let anchor = session.spatial_anchor().map(DVec3::from_array);
+            let plane_axis = session.spatial_plane();
+            let place = |at: egui::Pos2| {
+                let ray = camera.ray(to_view(at), size);
+                let ray = gc_math::Ray { origin: local(ray.origin), dir: turned(ray.dir) };
+                gc_tools::spatial::place(&ray, anchor, plane_axis, &points, &away(to_view(at)))
+            };
+            let hover = cursor.and_then(place).map(|placed| (placed.pos.to_array(), placed.axis));
+            let click = clicked.and_then(place);
+            session.spatial_hover(hover);
+            if let Some(placed) = click {
+                session.spatial_click(placed.pos.to_array(), placed.point, placed.axis);
+            }
+        } else if let Some(at) = clicked {
+            // Points before lines, nearest first.
+            let distance = away(to_view(at));
+            let point = points
+                .iter()
+                .filter_map(|(id, pos)| Some((distance(*pos)?, *id)))
+                .filter(|(d, _)| *d <= gc_tools::tolerance::POINT_PX)
+                .min_by(|a, b| a.0.total_cmp(&b.0));
+            let screen = to_view(at);
+            let line = || {
+                lines
+                    .iter()
+                    .filter_map(|(id, a, b)| {
+                        let (a, b) = (on_screen(*a)?, on_screen(*b)?);
+                        let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+                        let length = dx * dx + dy * dy;
+                        let t = if length > 0.0 {
+                            (((screen[0] - a[0]) * dx + (screen[1] - a[1]) * dy) / length).clamp(0.0, 1.0)
+                        } else {
+                            0.0
+                        };
+                        let (x, y) = (a[0] + dx * t - screen[0], a[1] + dy * t - screen[1]);
+                        Some(((x * x + y * y).sqrt(), *id))
+                    })
+                    .filter(|(d, _)| *d <= gc_tools::tolerance::CURVE_PX)
+                    .min_by(|a, b| a.0.total_cmp(&b.0))
+            };
+            let item = point
+                .map(|(_, id)| gc_sketch::Item::Point(id))
+                .or_else(|| line().map(|(_, id)| gc_sketch::Item::Curve(id)));
+            session.tool_event(ToolEvent::ClickItem { item, pos: [0.0; 2], modifier: ctrl });
         }
     }
 
@@ -432,6 +532,10 @@ impl Viewport {
 
     /// Passes Escape and Delete to the tool. Call when no text field has the keyboard.
     pub fn keys(&mut self, ctx: &egui::Context, session: &mut Session) {
+        // In a 3D sketch Tab switches the working plane instead of moving the keyboard focus.
+        if session.sketch_is_spatial() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Tab)) {
+            session.cycle_spatial_plane();
+        }
         let (escape, delete) = ctx.input(|i| (i.key_pressed(Key::Escape), i.key_pressed(Key::Delete)));
         if escape {
             session.tool_event(ToolEvent::Key(ToolKey::Escape));

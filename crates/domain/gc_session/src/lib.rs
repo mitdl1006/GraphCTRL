@@ -12,6 +12,7 @@
 #![cfg_attr(test, allow(clippy::float_cmp, reason = "tests compare exactly representable values"))]
 
 mod cell;
+mod spatial;
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -62,6 +63,7 @@ pub struct Session {
     path: Option<PathBuf>,
     saved_revision: Revision,
     cell: cell::CellState,
+    spatial: spatial::SpatialState,
 }
 
 impl Default for Session {
@@ -87,6 +89,7 @@ impl Session {
             path: None,
             saved_revision: Revision::default(),
             cell: cell::CellState::default(),
+            spatial: spatial::SpatialState::default(),
         }
     }
 
@@ -250,6 +253,7 @@ impl Session {
     }
 
     fn reset_interaction(&mut self) {
+        self.spatial.reset();
         self.drag = None;
         self.request = None;
         self.offer = None;
@@ -298,6 +302,20 @@ impl Session {
         }
     }
 
+    /// Creates a 3D sketch in the world frame and starts editing it.
+    pub fn create_sketch_3d(&mut self) -> Result<Id<Sketch>, EditError> {
+        let name = format!("Sketch{}", self.doc.sketches().len() + 1);
+        let frame = self.doc.world().ok_or(gc_sketch::SketchError::MissingItem)?;
+        let created = self.execute(&Command::CreateSketch { name, frame, spatial: true })?;
+        match created.first() {
+            Some(Created::Sketch(id)) => {
+                self.enter_sketch(*id);
+                Ok(*id)
+            }
+            _ => Err(gc_sketch::SketchError::MissingItem.into()),
+        }
+    }
+
     /// Starts editing an existing sketch.
     pub fn enter_sketch(&mut self, sketch: Id<Sketch>) {
         if self.doc.get(sketch).is_some() {
@@ -329,6 +347,10 @@ impl Session {
 
     /// Feeds an input event to the current tool and carries out what the tool asks for.
     pub fn tool_event(&mut self, event: ToolEvent) {
+        // Escape first drops a 3D line in progress.
+        if matches!(event, ToolEvent::Key(gc_tools::Key::Escape)) && self.spatial.drop_line() {
+            return;
+        }
         let Some(sketch) = self.active.and_then(|id| self.doc.get(id)) else { return };
         let outputs = self.tool.handle(sketch, event);
         for output in outputs {

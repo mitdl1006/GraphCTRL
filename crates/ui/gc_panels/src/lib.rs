@@ -263,6 +263,11 @@ pub fn status_bar(ui: &mut Ui, session: &Session, lang: Lang, gpu: bool, notice:
         } else {
             ui.label(tr!(lang, StatusReady));
         }
+        if session.sketch_is_spatial() {
+            let plane = ["YZ", "ZX", "XY"][session.spatial_plane() % 3];
+            ui.separator();
+            ui.label(tr!(lang, StatusPlane, plane));
+        }
         if let Some(error) = session.last_error() {
             let message = match error {
                 gc_doc::EditError::Redundant(_) => Msg::ErrRedundant,

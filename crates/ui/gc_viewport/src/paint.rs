@@ -76,7 +76,22 @@ pub(crate) fn under(ui: &egui::Ui, rect: Rect, camera: &Camera, session: &Sessio
     let view = view_of(ui, rect, camera);
     view.painter.rect_filled(rect, 0.0, colors::BACKGROUND_TOP);
     let world_xy = SketchPlane { origin: DVec3::ZERO, u: DVec3::X, v: DVec3::Y, normal: DVec3::Z };
-    let grid_plane = session.active_sketch().map_or(world_xy, |(_, sketch)| plane_of(session, sketch));
+    let grid_plane = match session.active_sketch() {
+        // A 3D sketch shows its working plane.
+        Some((_, sketch)) if sketch.is_spatial() => {
+            let frame = plane_of(session, sketch);
+            let axis = |k: usize| [frame.u, frame.v, frame.normal][k % 3];
+            let normal = session.spatial_plane();
+            SketchPlane {
+                origin: frame.origin,
+                u: axis(normal + 1),
+                v: axis(normal + 2),
+                normal: axis(normal),
+            }
+        }
+        Some((_, sketch)) => plane_of(session, sketch),
+        None => world_xy,
+    };
     grid(&view, &grid_plane);
 }
 
@@ -260,12 +275,86 @@ fn active_sketch(view: &View<'_>, plane: &SketchPlane, sketch: &Sketch, session:
             color,
         );
     }
+    if sketch.is_spatial() {
+        spatial_marks(view, plane, sketch, session);
+        return;
+    }
     glyphs(view, plane, sketch, session);
     for (id, dimension) in &sketch.dimensions {
         let selected = selection.contains(&Item::Dimension(*id));
         dimension_marks(view, plane, sketch, dimension, session, selected);
     }
     preview(view, plane, session);
+}
+
+/// Where the value of a dimension of a 3D sketch is shown, in sketch coordinates: half-way along what
+/// it measures. `None` for dimensions of 2D sketches, which carry their own text position.
+pub(crate) fn dimension_anchor(
+    session: &Session,
+    sketch: &Sketch,
+    kind: &gc_sketch::DimKind,
+) -> Option<[f64; 3]> {
+    if !sketch.is_spatial() {
+        return None;
+    }
+    let (from, to) = match *kind {
+        gc_sketch::DimKind::Distance { p, q } => (session.point_pos(p)?, session.point_pos(q)?),
+        gc_sketch::DimKind::PlaneDistance { p, axis, .. } => {
+            let at = session.point_pos(p)?;
+            let mut foot = at;
+            foot[axis % 3] = 0.0;
+            (at, foot)
+        }
+        _ => return None,
+    };
+    Some([(from[0] + to[0]) * 0.5, (from[1] + to[1]) * 0.5, (from[2] + to[2]) * 0.5])
+}
+
+/// Dimensions and the line in progress of a 3D sketch.
+fn spatial_marks(view: &View<'_>, plane: &SketchPlane, sketch: &Sketch, session: &Session) {
+    let selection = session.selection();
+    for (id, dimension) in &sketch.dimensions {
+        let Some(anchor) = dimension_anchor(session, sketch, &dimension.kind) else { continue };
+        let color = if selection.contains(&Item::Dimension(*id)) {
+            colors::SELECTED
+        } else if dimension.driving {
+            colors::DIMENSION
+        } else {
+            colors::REFERENCE
+        };
+        // A height is drawn down to the plane it is measured from.
+        if let gc_sketch::DimKind::PlaneDistance { p, axis, .. } = dimension.kind
+            && let Some(at) = session.point_pos(p)
+        {
+            let mut foot = at;
+            foot[axis % 3] = 0.0;
+            view.segment(plane.world(at), plane.world(foot), Stroke::new(1.0, color));
+        }
+        let value = sketch.measure(&dimension.kind).unwrap_or(dimension.value);
+        let text =
+            if dimension.driving { format_length(value) } else { format!("({})", format_length(value)) };
+        if let Some(at) = view.screen(plane.world(anchor)) {
+            let font = FontId::proportional(13.0);
+            let galley = view.painter.layout_no_wrap(text, font, color);
+            let frame = Rect::from_center_size(at, galley.size() + vec2(6.0, 2.0));
+            view.painter.rect_filled(frame, 2.0, Color32::from_white_alpha(215));
+            view.painter.galley(frame.min + vec2(3.0, 1.0), galley, color);
+        }
+    }
+    if let Some((from, to, axis)) = session.spatial_preview() {
+        // Locked to an axis, the rubber band takes the axis' colour and name.
+        let (color, name) = match axis {
+            Some(0) => (Color32::from_rgb(0xD0, 0x30, 0x30), "X"),
+            Some(1) => (Color32::from_rgb(0x20, 0xA0, 0x40), "Y"),
+            Some(_) => (Color32::from_rgb(0x30, 0x50, 0xD0), "Z"),
+            None => (colors::PREVIEW, ""),
+        };
+        view.segment(plane.world(from), plane.world(to), Stroke::new(1.6, color));
+        if let Some(at) = view.screen(plane.world(to)) {
+            view.painter.circle_stroke(at, 4.0, Stroke::new(1.4, color));
+            view.text(pos2(at.x + 10.0, at.y - 10.0), Align2::LEFT_BOTTOM, name, 13.0, color);
+        }
+    }
 }
 
 /// Small letters next to the geometry that say which constraints apply.

@@ -9,6 +9,7 @@
 #![cfg_attr(test, allow(clippy::float_cmp, reason = "tests compare exactly representable values"))]
 
 mod pick;
+pub mod spatial;
 mod tool;
 
 pub use pick::{Snap, SnapKind, pick, snap};

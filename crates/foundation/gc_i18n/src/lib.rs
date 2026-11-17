@@ -366,6 +366,22 @@ messages! {
     ParamAdd => ("추가", "Add"),
     /// Parameter editor: change the parameter with this name.
     ParamApply => ("적용", "Apply"),
+    /// Command: start a 3D sketch.
+    CmdSketch3d => ("3D 스케치", "3D Sketch"),
+    /// 3D constraint: along X.
+    ConAlongX => ("X 방향", "Along X"),
+    /// 3D constraint: along Y.
+    ConAlongY => ("Y 방향", "Along Y"),
+    /// 3D constraint: along Z.
+    ConAlongZ => ("Z 방향", "Along Z"),
+    /// 3D constraint: on the XY plane.
+    ConOnXY => ("XY 평면 위", "On XY"),
+    /// 3D constraint: on the YZ plane.
+    ConOnYZ => ("YZ 평면 위", "On YZ"),
+    /// 3D constraint: on the ZX plane.
+    ConOnZX => ("ZX 평면 위", "On ZX"),
+    /// Status bar: the working plane of 3D sketching. `{0}` is its name.
+    StatusPlane => ("작업 평면 {0} (Tab으로 전환)", "Working plane {0} (Tab switches)"),
     /// Plan status: being computed.
     PlanPlanning => ("계획 중...", "Planning..."),
     /// Plan status: up to date.

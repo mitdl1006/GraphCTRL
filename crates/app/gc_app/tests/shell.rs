@@ -490,6 +490,81 @@ fn a_parameter_drives_a_dimension() {
     harness.get_by_label("아직 사용 중이라 삭제할 수 없습니다");
 }
 
+/// A 3D sketch through the window: the line tool places points with the mouse, Tab switches the working
+/// plane, and with a GPU the result is rendered for review.
+#[test]
+fn a_3d_sketch_is_drawn_in_the_viewport() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("3D 스케치").click();
+    harness.run();
+    assert!(harness.state().session.sketch_is_spatial());
+    harness.get_by_label("작업 평면 XY (Tab으로 전환)");
+    harness.get_by_label("선").click();
+    harness.run();
+
+    // A click in the viewport starts a line on the working plane (z = 0 on the XY plane).
+    let at = egui::pos2(520.0, 520.0);
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run();
+    }
+    let start = harness.state().session.spatial_anchor().unwrap();
+    assert!(start[2].abs() < 1e-12, "{start:?}");
+    // Moving the mouse shows the rubber band from there.
+    harness.event(egui::Event::PointerMoved(egui::pos2(640.0, 470.0)));
+    harness.run();
+    let (from, to, _) = harness.state().session.spatial_preview().unwrap();
+    assert!(from == start && to != start && to[2].abs() < 1e-12);
+    harness.key_press(egui::Key::Tab);
+    harness.run();
+    harness.get_by_label("작업 평면 YZ (Tab으로 전환)");
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert!(harness.state().session.spatial_anchor().is_none());
+
+    // The rest is scripted: 150 mm along X from the origin, 200 mm up, then out into space; a length, a
+    // height.
+    let app = harness.state_mut();
+    let origin = *app.session.active_sketch().unwrap().1.points.keys().next().unwrap();
+    app.session.spatial_click([0.0; 3], Some(origin), None);
+    app.session.spatial_click([0.15, 0.0, 0.0], None, Some(0));
+    app.session.spatial_click([0.15, 0.0, 0.2], None, Some(2));
+    app.session.spatial_click([0.3, 0.12, 0.26], None, None);
+    app.session.tool_event(ToolEvent::Key(gc_tools::Key::Escape));
+    let (_, sketch) = app.session.active_sketch().unwrap();
+    let lines: Vec<_> = sketch.curves.keys().copied().collect();
+    let top = sketch.line(lines[1]).unwrap().1;
+    app.session.set_tool(ToolKind::Dimension);
+    let pick = |item| ToolEvent::ClickItem { item, pos: [0.0; 2], modifier: false };
+    app.session.tool_event(pick(Some(gc_sketch::Item::Curve(lines[0]))));
+    app.session.tool_event(pick(None));
+    app.session.submit_value("150 mm");
+    app.session.tool_event(pick(Some(gc_sketch::Item::Point(top))));
+    app.session.tool_event(pick(None));
+    app.session.submit_value("200 mm");
+    app.session.set_tool(ToolKind::Line);
+    app.session.spatial_click([0.3, 0.12, 0.26], None, None);
+    app.session.spatial_hover(Some(([0.3, 0.12, 0.4], Some(2))));
+    harness.run();
+    harness.get_by_label("3개 치수 필요");
+    if gpu {
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        harness.render().unwrap().save(out.join("review-10-3d-sketch.png")).unwrap();
+    }
+}
+
 /// The view cube turns the view: its right edge, seen from the front, looks from between front and right.
 #[test]
 fn clicking_the_view_cube_turns_the_view() {

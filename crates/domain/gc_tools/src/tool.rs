@@ -37,6 +37,15 @@ pub enum ToolEvent {
         /// Ctrl is held: do not snap; in the select tool, add to the selection.
         modifier: bool,
     },
+    /// A click whose target was found by the caller (3D sketches pick in screen space).
+    ClickItem {
+        /// What was clicked, if anything.
+        item: Option<Item>,
+        /// Where a dimension text placed by this click goes.
+        pos: [f64; 2],
+        /// True while Ctrl is held.
+        modifier: bool,
+    },
     /// The primary button went down and the cursor started moving.
     DragStart {
         /// Where the button went down.
@@ -75,6 +84,14 @@ pub enum ConstraintKind {
     Midpoint,
     Fix,
     Symmetric,
+    /// 3D: the line or the two points lie along X, Y or Z.
+    AlongX,
+    AlongY,
+    AlongZ,
+    /// 3D: the point lies on the XY, YZ or ZX plane through the sketch's origin.
+    OnXY,
+    OnYZ,
+    OnZX,
 }
 
 /// Which tool.
@@ -218,6 +235,11 @@ fn dimension_for(sketch: &Sketch, picks: &[Item]) -> Option<DimKind> {
             CurveGeom::Circle { .. } => Some(DimKind::Diameter(curve)),
             CurveGeom::Arc { .. } => Some(DimKind::Radius(curve)),
         },
+        [Item::Point(p)] if sketch.is_spatial() => {
+            // The distance of a point from the XY plane, on the side it is on now.
+            let side = if sketch.pos(p)?[2] >= 0.0 { 1.0 } else { -1.0 };
+            Some(DimKind::PlaneDistance { p, axis: 2, side })
+        }
         [Item::Point(p), Item::Point(q)] if p != q => Some(DimKind::Distance { p, q }),
         [Item::Point(p), Item::Curve(line)] | [Item::Curve(line), Item::Point(p)] => {
             Some(DimKind::PointLine { p, line, side: side_of(p, line)? })
@@ -288,6 +310,15 @@ fn constraint_for(sketch: &Sketch, kind: ConstraintKind, picks: &[Item]) -> Opti
             line(*c).map(|_| GeoConstraint::Midpoint(*p, *c))
         }
         (K::Fix, [Item::Point(p)]) => Some(GeoConstraint::Fix(*p)),
+        (K::AlongX | K::AlongY | K::AlongZ, [Item::Point(p), Item::Point(q)]) if p != q => {
+            Some(GeoConstraint::AlongAxis { p: *p, q: *q, axis: axis_of(kind) })
+        }
+        (K::AlongX | K::AlongY | K::AlongZ, [Item::Curve(c)]) => {
+            line(*c).map(|(p, q)| GeoConstraint::AlongAxis { p, q, axis: axis_of(kind) })
+        }
+        (K::OnXY | K::OnYZ | K::OnZX, [Item::Point(p)]) => {
+            Some(GeoConstraint::OnPlane { p: *p, axis: axis_of(kind) })
+        }
         (K::Symmetric, [Item::Point(p), Item::Point(q), Item::Curve(axis)]) if p != q => {
             line(*axis).map(|_| GeoConstraint::Symmetric { p: *p, q: *q, axis: *axis })
         }
@@ -295,10 +326,19 @@ fn constraint_for(sketch: &Sketch, kind: ConstraintKind, picks: &[Item]) -> Opti
     }
 }
 
+/// The axis a 3D constraint kind is about: the direction of a line, or the normal of a plane.
+fn axis_of(kind: ConstraintKind) -> usize {
+    match kind {
+        ConstraintKind::AlongX | ConstraintKind::OnYZ => 0,
+        ConstraintKind::AlongY | ConstraintKind::OnZX => 1,
+        _ => 2,
+    }
+}
+
 /// The most items a constraint of this kind needs.
 fn picks_needed(kind: ConstraintKind) -> usize {
     match kind {
-        ConstraintKind::Fix => 1,
+        ConstraintKind::Fix | ConstraintKind::OnXY | ConstraintKind::OnYZ | ConstraintKind::OnZX => 1,
         ConstraintKind::Symmetric => 3,
         _ => 2,
     }
@@ -409,7 +449,10 @@ impl Tool {
                 }
                 Vec::new()
             }
-            ToolEvent::Click { pos, px, modifier } => self.click(sketch, pos, px, modifier),
+            ToolEvent::Click { pos, px, modifier } => self.click(sketch, pos, px, modifier, None),
+            ToolEvent::ClickItem { item, pos, modifier } => {
+                self.click(sketch, pos, 0.0, modifier, Some(item))
+            }
             ToolEvent::DragStart { pos, px } if self.kind == ToolKind::Select => {
                 let grab = match pick(sketch, pos, px) {
                     Some(Item::Point(p)) => SketchGrab::Point(p),
@@ -454,8 +497,17 @@ impl Tool {
         }
     }
 
-    fn click(&mut self, sketch: &Sketch, pos: [f64; 2], px: f64, modifier: bool) -> Vec<ToolOutput> {
+    /// `picked` is what the caller found under the cursor; without it the tool picks in the sketch plane.
+    fn click(
+        &mut self,
+        sketch: &Sketch,
+        pos: [f64; 2],
+        px: f64,
+        modifier: bool,
+        picked: Option<Option<Item>>,
+    ) -> Vec<ToolOutput> {
         let end_snap = |s: &Snap| EndSnap { point: s.point, curve: s.curve };
+        let pick = |sketch: &Sketch, pos: [f64; 2], px: f64| picked.unwrap_or_else(|| pick(sketch, pos, px));
         match self.kind {
             ToolKind::Select => vec![ToolOutput::Select { item: pick(sketch, pos, px), extend: modifier }],
             ToolKind::Line => {

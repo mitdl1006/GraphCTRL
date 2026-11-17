@@ -337,3 +337,87 @@ fn an_arc_follows_the_sweep_of_the_cursor() {
     assert!(session.undo());
     assert_eq!(curves(&session).len(), 2);
 }
+
+/// A 3D sketch: chained lines placed along axes, a length dimension, a height dimension and a plane
+/// constraint, all the way to fully constrained.
+#[test]
+fn a_3d_polyline_is_drawn_dimensioned_and_constrained() {
+    use gc_sketch::CurveGeom;
+    let mut session = Session::new();
+    session.create_sketch_3d().unwrap();
+    assert!(session.sketch_is_spatial());
+    let origin = *session.active_sketch().unwrap().1.points.keys().next().unwrap();
+
+    // From the origin 100 mm along X, then 200 mm up along Z, then freely to a point in space.
+    session.set_tool(ToolKind::Line);
+    session.spatial_click([0.0; 3], Some(origin), None);
+    assert_eq!(session.spatial_anchor(), Some([0.0; 3]));
+    session.spatial_hover(Some(([0.1, 0.0, 0.0], Some(0))));
+    assert_eq!(session.spatial_preview(), Some(([0.0; 3], [0.1, 0.0, 0.0], Some(0))));
+    session.spatial_click([0.1, 0.0, 0.0], None, Some(0));
+    session.spatial_click([0.1, 0.0, 0.2], None, Some(2));
+    session.spatial_click([0.25, 0.1, 0.3], None, None);
+    session.tool_event(ToolEvent::Key(Key::Escape));
+    assert_eq!(session.spatial_anchor(), None, "Escape ends the chain");
+    assert_eq!(session.tool(), ToolKind::Line, "and a second Escape would leave the tool");
+
+    let lines = curves(&session);
+    assert_eq!(lines.len(), 3);
+    let ends = |session: &Session, line: Id<Curve>| {
+        let (_, sketch) = session.active_sketch().unwrap();
+        let CurveGeom::Line { a, b } = sketch.curves[&line].geom else { panic!("not a line") };
+        (a, b)
+    };
+    // Along X: 1 unknown; along Z: 1; free end: 3. Five dimensions to go.
+    assert_eq!(session.report().unwrap().dof, 5);
+
+    // The length of the first line: 150 mm. The second line stays vertical and follows.
+    session.set_tool(ToolKind::Dimension);
+    session.tool_event(ToolEvent::ClickItem {
+        item: Some(Item::Curve(lines[0])),
+        pos: [0.0; 2],
+        modifier: false,
+    });
+    session.tool_event(ToolEvent::ClickItem { item: None, pos: [0.0; 2], modifier: false });
+    session.submit_value("150 mm");
+    let (_, corner) = ends(&session, lines[0]);
+    let (_, top) = ends(&session, lines[1]);
+    let at = |session: &Session, p: Id<SkPoint>| session.point_pos(p).unwrap();
+    assert!((at(&session, corner)[0] - 0.15).abs() < 1e-9 && at(&session, corner)[1].abs() < 1e-12);
+    assert!((at(&session, top)[0] - 0.15).abs() < 1e-9 && (at(&session, top)[2] - 0.2).abs() < 1e-9);
+    assert_eq!(session.report().unwrap().dof, 4);
+
+    // The height of the top point above the XY plane: 250 mm.
+    session.tool_event(ToolEvent::ClickItem { item: Some(Item::Point(top)), pos: [0.0; 2], modifier: false });
+    session.tool_event(ToolEvent::ClickItem { item: None, pos: [0.0; 2], modifier: false });
+    session.submit_value("250 mm");
+    assert!((at(&session, top)[2] - 0.25).abs() < 1e-9);
+    assert_eq!(session.report().unwrap().dof, 3);
+
+    // The free end onto the ZX plane (y = 0), and its line along X: one dimension is left.
+    let (_, free) = ends(&session, lines[2]);
+    session.set_tool(ToolKind::Constraint(ConstraintKind::OnZX));
+    session.tool_event(ToolEvent::ClickItem {
+        item: Some(Item::Point(free)),
+        pos: [0.0; 2],
+        modifier: false,
+    });
+    assert!(at(&session, free)[1].abs() < 1e-9);
+    session.set_tool(ToolKind::Constraint(ConstraintKind::AlongX));
+    session.tool_event(ToolEvent::ClickItem {
+        item: Some(Item::Curve(lines[2])),
+        pos: [0.0; 2],
+        modifier: false,
+    });
+    assert!((at(&session, free)[2] - 0.25).abs() < 1e-9);
+    assert_eq!(session.report().unwrap().dof, 1);
+
+    // A lock that cannot hold is dropped silently: a line from the top point to the origin cannot be
+    // along Y, but the line itself is drawn.
+    session.set_tool(ToolKind::Line);
+    session.spatial_click(at(&session, top), Some(top), None);
+    session.spatial_click([0.0; 3], Some(origin), Some(1));
+    assert_eq!(curves(&session).len(), 4);
+    assert!(session.last_error().is_none());
+    assert!((at(&session, top)[2] - 0.25).abs() < 1e-9, "nothing was pulled out of place");
+}
