@@ -1714,3 +1714,24 @@ fn the_language_is_remembered() {
     harness.run();
     assert!(harness.query_by_label_contains("settings.json").is_some());
 }
+
+/// The performance overlay is switched on in the Tools menu and shows the frame statistics.
+#[test]
+fn the_performance_overlay_is_switched_in_the_tools_menu() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    assert!(!harness.state().viewport().perf_overlay);
+    harness.get_by_label("도구").click();
+    harness.run();
+    harness.get_by_label("성능 오버레이").click();
+    harness.run_steps(3);
+    assert!(harness.state().viewport().perf_overlay);
+    if gpu {
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        harness.render().unwrap().save(out.join("review-28-perf-overlay.png")).unwrap();
+    }
+}

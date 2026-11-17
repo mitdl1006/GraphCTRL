@@ -517,6 +517,11 @@ messages! {
     PlanChecks => ("상태 검사 {0}회", "{0} state checks"),
     /// Plan metric: the move was possible in a straight joint-space line.
     PlanStraight => ("직선 이동(플래너 불필요)", "Straight move (no planner needed)"),
+    // --- frontend ---
+    /// Tools menu: the performance overlay of the viewport.
+    MenuPerfOverlay => ("성능 오버레이", "Performance overlay"),
+    /// The overlay's text. `{0}` frame time in ms, `{1}` frames per second, `{2}` draw calls, `{3}` triangles.
+    PerfStats => ("프레임 {0} ms ({1} fps) · 드로 {2} · 삼각형 {3}", "Frame {0} ms ({1} fps) · draws {2} · triangles {3}"),
 }
 
 impl Msg {
