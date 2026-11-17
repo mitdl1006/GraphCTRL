@@ -40,7 +40,8 @@
 - KNOWN_ISSUES "관계 추가 시간 급증"(400개 9.5 s, 1000개 5분+): 풀이를 **섬**(관계로 묶인 자유 컴포넌트 묶음)으로 나누고 이미 만족된 섬은 건너뜀
   → 관계 하나 추가 시 그 섬만 다시 푼다. `bench_scene --components 1000`으로 셀 구성 전체 ~0.15 s(release).
   프레임 질의: 세션이 `component_statuses()`를 문서 리비전별로 캐시(문서 교체 시 비움) → 1000개 p95 3.8 ms → 1.7 ms(예산 2 ms).
-  테스트 `gc_session/tests/relation_scale.rs`(300개 메이트 디버그에서 0.05 s). KNOWN_ISSUES 항목은 리드가 닫아 주세요(문서 소유 아님).
+  테스트 `gc_session/tests/relation_scale.rs`(300개 메이트 디버그에서 0.05 s).
+  `bench_scene`에 "Many relationships" 표(1000 컴포넌트·1900 관계, 10개씩 섬): 관계 1개 추가 7.8 ms, 오프셋 편집 8.0 ms, 삭제 0.1 ms(목표 100 ms, release). KNOWN_ISSUES 항목은 리드가 닫아 주세요(문서 소유 아님).
 
 ## 2026-11-18 — 툴 컴포넌트 · STEP AP242 · Assemble 유형(리드 ①②④)
 
