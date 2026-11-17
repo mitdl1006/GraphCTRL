@@ -680,6 +680,10 @@ fn a_project_carries_its_mesh_files() {
     let mut session = Session::new();
     let robot = session.add_robot_file(&elsewhere.join("arm/urdf/arm.urdf")).unwrap();
     let body = session.add_mesh_body(&elsewhere.join("table.stl")).unwrap();
+    // The robot's tool is a mesh file too.
+    std::fs::copy(elsewhere.join("table.stl"), elsewhere.join("gripper.stl")).unwrap();
+    session.set_tool_mesh(robot, &elsewhere.join("gripper.stl")).unwrap();
+    assert!(session.doc().get(robot).unwrap().tool.is_some());
     let project = directory.path().join("cell");
     std::fs::create_dir_all(&project).unwrap();
     let file = project.join("Line 1.gctrl");
@@ -688,6 +692,7 @@ fn a_project_carries_its_mesh_files() {
 
     // The files went into the project's folder and the file refers to them relative to itself.
     assert!(project.join("Line_1_files/table.stl").is_file());
+    assert!(project.join("Line_1_files/gripper.stl").is_file());
     assert!(project.join("Line_1_files/arm/meshes/column.stl").is_file());
     let text = std::fs::read_to_string(&file).unwrap();
     assert!(text.contains("\"Line_1_files/table.stl\"") && text.contains("\"Line_1_files/arm\""), "{text}");
@@ -705,6 +710,12 @@ fn a_project_carries_its_mesh_files() {
     let loaded = reopened.robot_model(robot).unwrap();
     assert!(loaded.missing.is_empty(), "{:?}", loaded.missing);
     assert_eq!(loaded.mesh("package://arm/meshes/column.stl", [1.0; 3]).len(), 1);
+    let tool = reopened.doc().get(robot).unwrap().tool.clone().unwrap();
+    assert_eq!(
+        reopened.body_mesh(&tool.solid).unwrap().data.triangle_count(),
+        12,
+        "the tool's mesh is found"
+    );
 
     // Saving it again where it is copies nothing new and keeps the same paths.
     reopened.save().unwrap();

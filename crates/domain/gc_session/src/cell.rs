@@ -691,6 +691,18 @@ impl Session {
         }
     }
 
+    /// Makes a mesh file the tool a robot carries, starting at its flange. A file drawn in millimetres
+    /// is scaled to metres, as for bodies.
+    pub fn set_tool_mesh(&mut self, robot: Id<Robot>, path: &std::path::Path) -> Result<(), String> {
+        let file = path.to_string_lossy().into_owned();
+        let data = read_mesh_file(&file)?;
+        let scale = if data.aabb().diagonal() > 20.0 { 0.001 } else { 1.0 };
+        self.cell.files.insert(file.clone(), Ok(data));
+        let tool = Tool { solid: Solid::Mesh { file, scale }, placement: Placement::default() };
+        self.cell.read_body_mesh(&tool.solid);
+        self.cell_op(CellOp::SetTool { id: robot, tool: Some(tool) }).map(|_| ()).map_err(|e| e.to_string())
+    }
+
     /// The selected item of the cell.
     pub fn selected_item(&self) -> Option<CellItem> {
         self.cell.selected.filter(|item| self.item_exists(*item))

@@ -6,7 +6,7 @@
 
 use std::path::{Component, Path, PathBuf};
 
-use gc_doc::{Body, CellOp, Command, Document, Solid, apply};
+use gc_doc::{Body, CellOp, Command, Document, Solid, Tool, apply};
 use gc_robot::Shape;
 
 use crate::{PersistError, Session};
@@ -67,29 +67,35 @@ impl Session {
         let mut ops = Vec::new();
         let mut taken = std::collections::BTreeSet::new();
 
+        // A mesh file outside the project is copied in, under a name no other file has taken; one inside
+        // it is kept where it is. Either way it is stored relative to the project file.
+        let mut pack = |file: &str| -> Result<String, PersistError> {
+            let source = PathBuf::from(file);
+            if let Some(inside) = relative(&source, base) {
+                return Ok(inside);
+            }
+            let name =
+                source.file_name().map_or_else(|| "mesh.stl".to_owned(), |n| safe_name(&n.to_string_lossy()));
+            let mut target = files.join(&name);
+            let mut n = 2;
+            while taken.contains(&target) {
+                target = files.join(format!("{n}_{name}"));
+                n += 1;
+            }
+            copy(&source, &target)?;
+            taken.insert(target.clone());
+            Ok(relative(&target, base).unwrap_or_default())
+        };
         for (id, body) in self.doc.bodies().iter() {
             let Solid::Mesh { file, scale } = &body.solid else { continue };
-            let source = PathBuf::from(file);
-            let stored = match relative(&source, base) {
-                Some(inside) => inside,
-                None => {
-                    // Outside the project: copied in, under a name no other file has taken.
-                    let name = source
-                        .file_name()
-                        .map_or_else(|| "mesh.stl".to_owned(), |n| safe_name(&n.to_string_lossy()));
-                    let mut target = files.join(&name);
-                    let mut n = 2;
-                    while taken.contains(&target) {
-                        target = files.join(format!("{n}_{name}"));
-                        n += 1;
-                    }
-                    copy(&source, &target)?;
-                    taken.insert(target.clone());
-                    relative(&target, base).unwrap_or_default()
-                }
-            };
-            let solid = Solid::Mesh { file: stored, scale: *scale };
+            let solid = Solid::Mesh { file: pack(file)?, scale: *scale };
             ops.push(CellOp::SetBody { id, body: Body { solid, ..body.clone() } });
+        }
+        for (id, robot) in self.doc.robots().iter() {
+            let Some(tool) = robot.tool.as_deref() else { continue };
+            let Solid::Mesh { file, scale } = &tool.solid else { continue };
+            let solid = Solid::Mesh { file: pack(file)?, scale: *scale };
+            ops.push(CellOp::SetTool { id, tool: Some(Tool { solid, placement: tool.placement }) });
         }
 
         for (id, robot) in self.doc.robots().iter() {
@@ -152,6 +158,14 @@ pub(crate) fn unpacked(mut doc: Document, path: &Path) -> Document {
         }
     }
     for (id, robot) in doc.robots().iter() {
+        if let Some(tool) = robot.tool.as_deref()
+            && let Solid::Mesh { file, scale } = &tool.solid
+            && !Path::new(file).is_absolute()
+        {
+            let file = absolute(file, base).to_string_lossy().into_owned();
+            let solid = Solid::Mesh { file, scale: *scale };
+            ops.push(CellOp::SetTool { id, tool: Some(Tool { solid, placement: tool.placement }) });
+        }
         if !robot.resource_dir.is_empty() && !Path::new(&robot.resource_dir).is_absolute() {
             let resource_dir = absolute(&robot.resource_dir, base).to_string_lossy().into_owned();
             ops.push(CellOp::SetRobotFiles { id, resource_dir });

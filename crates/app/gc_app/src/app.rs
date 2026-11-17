@@ -696,6 +696,12 @@ impl eframe::App for GraphCtrlApp {
                 Err(error) => self.notice = Some(tr!(lang, FileError, error)),
             }
         }
+        if let Some(robot) = self.cell.tool_mesh.take()
+            && let Some(path) = self.dialogs.open_mesh()
+        {
+            self.notice =
+                self.session.set_tool_mesh(robot, &path).err().map(|error| tr!(lang, FileError, error));
+        }
         if ribbon_action == Some(ribbon::RibbonAction::ImportMesh)
             && let Some(path) = self.dialogs.open_mesh()
         {

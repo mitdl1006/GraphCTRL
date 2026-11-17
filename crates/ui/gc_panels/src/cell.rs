@@ -18,6 +18,9 @@ pub struct CellUi {
     pub path: Option<gc_core::Id<gc_doc::MotionPath>>,
     /// The work frame new waypoints are taught in; the newest one when unset or deleted.
     pub frame: Option<gc_core::Id<gc_doc::WorkFrame>>,
+    /// Set when the user asked to load a robot's tool from a mesh file: the application shows the file
+    /// dialog and takes this back.
+    pub tool_mesh: Option<gc_core::Id<gc_doc::Robot>>,
 }
 
 impl CellUi {
@@ -69,7 +72,7 @@ pub fn cell(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) 
     if let Some(robot) = robot {
         jog(ui, session, lang, robot);
         base(ui, session, lang, robot);
-        tool(ui, session, lang, robot);
+        tool(ui, session, lang, robot, state);
     }
     match focus {
         None => bodies(ui, session, lang, None),
@@ -472,12 +475,13 @@ fn tool_of(kind: usize) -> Option<gc_doc::Tool> {
 }
 
 /// Where the far end of a tool is, along its own Z axis, in the flange's frame.
-fn tool_end(tool: &gc_doc::Tool) -> gc_doc::Placement {
-    let half = match tool.solid {
+fn tool_end(session: &Session, tool: &gc_doc::Tool) -> gc_doc::Placement {
+    let half = match &tool.solid {
         Solid::Cylinder { length, .. } => length / 2.0,
         Solid::Box { size } => size[2] / 2.0,
-        Solid::Sphere { radius } => radius,
-        Solid::Mesh { .. } => 0.0,
+        Solid::Sphere { radius } => *radius,
+        // A mesh: the top of its box, which is where most tool models point.
+        Solid::Mesh { .. } => session.body_mesh(&tool.solid).map_or(0.0, |mesh| mesh.bounds.max.z),
     };
     let pose = gc_math::pose_from_xyz_rpy(tool.placement.xyz, tool.placement.rpy);
     let end = pose.transform_point(gc_math::DVec3::new(0.0, 0.0, half));
@@ -486,7 +490,13 @@ fn tool_end(tool: &gc_doc::Tool) -> gc_doc::Placement {
 
 /// What the robot carries on its flange: its shape, size and place. It is drawn with the robot and
 /// checked for collisions like a link.
-fn tool(ui: &mut Ui, session: &mut Session, lang: Lang, robot: gc_core::Id<gc_doc::Robot>) {
+fn tool(
+    ui: &mut Ui,
+    session: &mut Session,
+    lang: Lang,
+    robot: gc_core::Id<gc_doc::Robot>,
+    state: &mut CellUi,
+) {
     let Some(mut tool) = session.shown_tool(robot) else { return };
     let mut changed = false;
     let mut tcp_to_end = false;
@@ -507,6 +517,9 @@ fn tool(ui: &mut Ui, session: &mut Session, lang: Lang, robot: gc_core::Id<gc_do
                     ui.selectable_value(&mut chosen, index, *name);
                 }
             });
+        if ui.button(tr!(lang, ToolFromFile)).clicked() {
+            state.tool_mesh = Some(robot);
+        }
         if chosen != current {
             tool = tool_of(chosen);
             changed = true;
@@ -517,7 +530,7 @@ fn tool(ui: &mut Ui, session: &mut Session, lang: Lang, robot: gc_core::Id<gc_do
             tcp_to_end = ui.button(tr!(lang, ToolTcpAtEnd)).clicked();
         }
     });
-    if tcp_to_end && let Some(end) = tool.as_ref().map(tool_end) {
+    if tcp_to_end && let Some(end) = tool.as_ref().map(|t| tool_end(session, t)) {
         session.preview_tcp(robot, end);
     }
     if changed {

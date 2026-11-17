@@ -431,6 +431,7 @@ messages! {
     ToolBox => ("상자", "Box"),
     ToolSphere => ("구", "Sphere"),
     ToolMesh => ("메시", "Mesh"),
+    ToolFromFile => ("메시 파일에서 불러오기…", "Load from a mesh file…"),
     ToolTcpAtEnd => ("TCP를 툴 끝으로", "TCP at the tool's end"),
     StepUp => ("↑", "↑"),
     StepDown => ("↓", "↓"),
