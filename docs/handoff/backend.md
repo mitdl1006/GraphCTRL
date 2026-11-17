@@ -1,5 +1,33 @@
 # 백엔드 인계 (2026-11-17)
 
+## 2026-11-18 새벽 — 어셈블리 P1-9 Mate·Flush·Insert(+Predict Offset) 솔버
+
+근거(원문 확인, `https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/`): To Place Mate or Flush Constraints
+`GUID-0F500089-4F69-41C5-AFE8-B58AC9E8E15E.htm`, To Place Insert Constraints `GUID-97DD5557-FAEE-46FA-845D-11123D725BA9.htm`,
+Place Constraint Reference - Assembly Tab `GUID-EBD2C784-0E71-452A-B5F2-22738D22D45A.htm`.
+
+- 엔티티 `gc_doc::Relationship{name, kind, first: Selection, second: Selection}` — **gc_core `Kind::Relationship`(StableHash 18) 추가, 리드 확인 부탁**.
+  `Selection{occurrence, geometry}`, `Geometry::{Plane{point, normal}, Axis{point, direction}, Point, Circle{centre, normal}}`(컴포넌트 자기 프레임 =
+  원점 폴더 프레임; 부품이면 부품 프레임), `Geometry::origin(OriginElement)`로 원점 평면·축·점 선택.
+  `RelationKind::{Mate{offset, sense: AxisSense::{Opposed, Aligned, Undirected}}, Flush{offset}, Insert{offset, aligned}}`.
+- 의미(원문 그대로): Mate = 면 대 면(법선 반대) + 오프셋, 곡선·축·점은 일치; Flush = 법선 같은 방향; 두 축 Mate는 Opposed가 기본;
+  Insert = 원형 모서리 축 일치 + 평면 Mate, 축 회전 자유, Opposed 기본. Predict Offset and Orientation = 평행하고 법선이 반대면 Mate,
+  아니면 Flush, 현재 거리를 오프셋으로(`predict_relationship`).
+- 풀이: 움직이는 것은 선택 기하를 가진 컴포넌트(바디·로봇·어셈블리; 부품은 그 어셈블리와 함께). 고정(grounded) 컴포넌트는 그대로.
+  모든 관계를 한꺼번에 감쇠 최소제곱(자세 6자유도/컴포넌트, 결정적)으로 풀고, 만족하는 자세 중 가까운 쪽을 고른다(덜 구속된 방향의 이동은 유지).
+  방향이 반대로 놓인 경우는 먼저 반 바퀴 돌려 안장점을 피한다.
+- 갱신: 관계 추가·수정, 그리고 배치를 바꾸는 명령(SetBody·PlaceRobot·PlaceAssembly) 뒤에 다시 푼다. 고정 컴포넌트를 옮기면 묶인 것이
+  따라오고, 구속된 컴포넌트를 구속 방향으로 끌어내면 돌아온다(원문 Free Move의 Update 복귀). 만족 못 하면 `EditError::Unsolvable(관계들)`로
+  거부, 문서 그대로. 관계가 쓰는 컴포넌트는 삭제 거부(InUse).
+- 세션 API(에이전트 노출용):
+  `session.add_relationship(Relationship) -> Result<Id<Relationship>, EditError>`,
+  `session.set_relationship(id, Relationship) -> Result<(), EditError>`, `session.delete_relationship(id) -> Result<(), EditError>`,
+  `session.relationships() -> Vec<(Id<Relationship>, &Relationship)>`,
+  `session.predict_relationship(&Selection, &Selection) -> Option<RelationKind>`.
+  프론트엔드: 면 피킹 결과를 컴포넌트 프레임 좌표로 넣으면 된다(`component_origin(occ).pose.inverse()`로 변환). `Unsolvable`은 지금 UI에서 ErrOther.
+- 아직: 한계(Maximum/Minimum/Resting), 관계 억제, 구속 상태 점·DOF 표시(P1-10), Angle·Tangent, Drive. 테스트 `gc_doc/tests/relate.rs`(6),
+  `gc_persist/tests/components.rs`(저장·열기).
+
 ## 2026-11-17 밤 2 — 어셈블리 P1-2 컴포넌트 원점 폴더(+P1-4 일부), 리드 b02ac34 병합
 
 - `Document::component_origin(occurrence) -> Option<ComponentOrigin{pose}>`; `ComponentOrigin::{point(), axis(0|1|2), plane(OriginPlane)}`.

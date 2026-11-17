@@ -125,6 +125,8 @@ struct FileV1 {
     assemblies: BTreeMap<Id<gc_doc::Assembly>, gc_doc::Assembly>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     timelines: BTreeMap<Id<gc_doc::Timeline>, gc_doc::Timeline>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    relationships: BTreeMap<Id<gc_doc::Relationship>, gc_doc::Relationship>,
 }
 
 /// A loaded document.
@@ -188,6 +190,7 @@ pub fn to_text(doc: &Document) -> Result<String, PersistError> {
         features: doc.features().iter().map(|(id, f)| (id, f.clone())).collect(),
         assemblies: doc.assemblies().iter().map(|(id, a)| (id, a.clone())).collect(),
         timelines: doc.timeline().map(|(id, t)| (id, t.clone())).into_iter().collect(),
+        relationships: doc.relationships().iter().map(|(id, r)| (id, r.clone())).collect(),
     };
     let mut text = serde_json::to_string_pretty(&file)?;
     text.push('\n');
@@ -250,6 +253,7 @@ pub fn from_text(text: &str) -> Result<Loaded, PersistError> {
         features: file.features,
         assemblies: file.assemblies,
         timelines: file.timelines,
+        relationships: file.relationships,
     })?;
     let needs_repair = doc
         .sketches()

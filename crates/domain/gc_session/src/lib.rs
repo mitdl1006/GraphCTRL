@@ -489,6 +489,49 @@ impl Session {
         self.doc.origin_visible(occurrence, element)
     }
 
+    /// Adds an assembly constraint (Mate, Flush, Insert) and moves the components it ties that are not
+    /// grounded (one undo step). Refused with `EditError::Unsolvable` when it cannot be met together with
+    /// the others.
+    pub fn add_relationship(
+        &mut self,
+        relationship: gc_doc::Relationship,
+    ) -> Result<Id<gc_doc::Relationship>, EditError> {
+        let created = self.execute(&Command::Cell(gc_doc::CellOp::AddRelationship(relationship)))?;
+        created
+            .iter()
+            .find_map(|c| if let gc_doc::Created::Relationship(id) = c { Some(*id) } else { None })
+            .ok_or(EditError::BadValue)
+    }
+
+    /// Changes an assembly constraint (its kind, offset or selections) and solves again (one undo step).
+    pub fn set_relationship(
+        &mut self,
+        id: Id<gc_doc::Relationship>,
+        relationship: gc_doc::Relationship,
+    ) -> Result<(), EditError> {
+        self.execute(&Command::Cell(gc_doc::CellOp::SetRelationship { id, relationship })).map(|_| ())
+    }
+
+    /// Deletes an assembly constraint; the components stay where they are.
+    pub fn delete_relationship(&mut self, id: Id<gc_doc::Relationship>) -> Result<(), EditError> {
+        self.execute(&Command::Cell(gc_doc::CellOp::DeleteRelationship(id))).map(|_| ())
+    }
+
+    /// The assembly constraints, for the Relationships folder.
+    pub fn relationships(&self) -> Vec<(Id<gc_doc::Relationship>, &gc_doc::Relationship)> {
+        self.doc.relationships().iter().collect()
+    }
+
+    /// Predict Offset and Orientation: the constraint two selections suggest as they lie now (Mate when
+    /// planes face each other, otherwise Flush; the current distance as the offset).
+    pub fn predict_relationship(
+        &self,
+        first: &gc_doc::Selection,
+        second: &gc_doc::Selection,
+    ) -> Option<gc_doc::RelationKind> {
+        self.doc.predict_relationship(first, second)
+    }
+
     /// A component's origin folder in the world: centre point, axes and planes (assembly P1-2).
     pub fn component_origin(&self, occurrence: gc_doc::Occurrence) -> Option<gc_doc::ComponentOrigin> {
         self.doc.component_origin(occurrence)
