@@ -87,6 +87,8 @@ impl Constrain {
                 self.aligned = aligned;
                 self.offset = format!("{:.3}", offset * 1000.0);
             }
+            // Joints are placed with the Joint command, not this dialog.
+            RelationKind::Rigid { .. } | RelationKind::Rotational { .. } => {}
         }
     }
 
@@ -230,6 +232,7 @@ fn describe(session: &Session, selection: &Selection, lang: Lang) -> String {
         Geometry::Axis { .. } => tr!(lang, ConstrainAxis),
         Geometry::Point(_) => tr!(lang, ConstrainPoint),
         Geometry::Circle { .. } => tr!(lang, ConstrainCircle),
+        Geometry::Frame { .. } => tr!(lang, ConstrainFrame),
     };
     format!("{name} · {what}")
 }
