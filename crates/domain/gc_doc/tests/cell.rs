@@ -50,6 +50,7 @@ fn a_cell_is_built_undone_and_redone() {
         name: "Path1".into(),
         robot: robot_id,
         waypoints: vec![w],
+        linear: Vec::new(),
         planner: "rrt_connect".into(),
         seed: 1,
     };
@@ -85,6 +86,7 @@ fn what_is_in_use_stays_and_bad_values_change_nothing() {
         name: "Path1".into(),
         robot: robot_id,
         waypoints: vec![w],
+        linear: Vec::new(),
         planner: "rrt".into(),
         seed: 0,
     };

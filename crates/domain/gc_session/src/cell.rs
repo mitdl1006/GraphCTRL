@@ -651,7 +651,14 @@ impl Session {
         waypoints: Vec<Id<Waypoint>>,
     ) -> Result<Id<MotionPath>, EditError> {
         let name = format!("Path{}", self.doc.paths().len() + 1);
-        let path = MotionPath { name, robot, waypoints, planner: PLANNERS[0].0.to_owned(), seed: 1 };
+        let path = MotionPath {
+            name,
+            robot,
+            waypoints,
+            linear: Vec::new(),
+            planner: PLANNERS[0].0.to_owned(),
+            seed: 1,
+        };
         match self.cell_op(CellOp::AddPath(path))?.first() {
             Some(Created::Path(id)) => Ok(*id),
             _ => Err(EditError::BadValue),
@@ -674,16 +681,20 @@ impl Session {
                 None => String::new(),
             })
             .collect();
+        // What counts is how each waypoint is approached, not how the list happens to be stored.
+        let linear: Vec<bool> =
+            (0..path.waypoints.len()).map(|index| path.linear.get(index).copied().unwrap_or(false)).collect();
         let bodies: Vec<(&Placement, &Solid)> =
             doc.bodies().iter().map(|(_, b)| (&b.placement, &b.solid)).collect();
         Some(format!(
-            "{} {} {} {:?} {:?} {} {bodies:?} {targets:?} {} {}",
+            "{} {} {} {:?} {:?} {} {bodies:?} {targets:?} {:?} {} {}",
             robot.urdf.len(),
             robot.base_link,
             robot.tip_link,
             robot.placement,
             robot.joints,
             robot.max_acc,
+            linear,
             path.planner,
             path.seed
         ))
@@ -908,7 +919,7 @@ fn plan_path(
     .map_err(|e| e.to_string())?;
     let mut start = robot.joints.clone();
     let mut segments = Vec::with_capacity(path.waypoints.len());
-    for waypoint_id in &path.waypoints {
+    for (index, waypoint_id) in path.waypoints.iter().enumerate() {
         let waypoint = doc.get(*waypoint_id).ok_or("a waypoint no longer exists")?;
         let goal = match &waypoint.target {
             WaypointTarget::Joints(q) => Goal::Joints(q.clone()),
@@ -925,6 +936,7 @@ fn plan_path(
             seed,
             runs,
             max_acc: vec![robot.max_acc; start.len()],
+            linear: path.linear.get(index).copied().unwrap_or(false),
         };
         let plan = plan_motion(&scene, &request, control).map_err(|e| format!("{}: {e}", waypoint.name))?;
         if let Some(end) = plan.path.last() {

@@ -382,6 +382,9 @@ messages! {
     ConOnZX => ("ZX 평면 위", "On ZX"),
     /// Status bar: the working plane of 3D sketching. `{0}` is its name.
     StatusPlane => ("작업 평면 {0} (Tab으로 전환)", "Working plane {0} (Tab switches)"),
+    /// Checkbox beside a waypoint of a path: go there in a straight line of the tool tip. `{0}` is the
+    /// waypoint's name.
+    PropLinear => ("{0}까지 직선(LIN)", "Straight line (LIN) to {0}"),
     /// Plan status: being computed.
     PlanPlanning => ("계획 중...", "Planning..."),
     /// Plan status: up to date.

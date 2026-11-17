@@ -49,6 +49,7 @@ fn request(start: [f64; 6], goal: Goal, algorithm: Algorithm) -> MotionRequest {
         seed: 7,
         runs: 4,
         max_acc: vec![5.0; 6],
+        linear: false,
     }
 }
 
@@ -199,4 +200,64 @@ fn cancelling_stops_the_planner() {
     let scene = scene(&[pillar()]);
     let request = request(LEFT, Goal::Joints(RIGHT.to_vec()), Algorithm::RrtConnect);
     assert_eq!(plan_motion(&scene, &request, &Cancelled).err(), Some(MotionError::Cancelled));
+}
+
+#[test]
+fn a_linear_move_keeps_the_tip_on_the_line() {
+    let scene = scene(&[]);
+    // From a bent pose, 0.25 m sideways and a little up, keeping the tool's direction.
+    let start = [0.0, 0.2, 0.9, 0.0, 0.5, 0.0];
+    let from = scene.tip_in_world(&start);
+    let to = DPose3::from_parts(from.translation + DVec3::new(-0.05, 0.25, 0.05), from.rotation);
+    let mut request = request(start, Goal::Pose(to), Algorithm::RrtConnect);
+    request.linear = true;
+    let plan = plan_motion(&scene, &request, &NeverCancel).unwrap();
+    let along = (to.translation - from.translation).normalize();
+    for tip in &plan.tip_path {
+        let offset = DVec3::from_array(*tip) - from.translation;
+        let off_line = (offset - along * offset.dot(along)).length();
+        assert!(off_line < 0.5e-3, "{off_line} m off the line");
+    }
+    let steps = (plan.trajectory.duration() / 0.01).ceil() as usize;
+    for k in 0..=steps {
+        let q = plan.trajectory.sample(plan.trajectory.duration() * k as f64 / steps as f64).q;
+        assert!(
+            scene.tip_in_world(&q).rotation.angle_between(from.rotation) < 2e-3,
+            "the tool keeps its direction"
+        );
+    }
+    let end = scene.tip_in_world(plan.path.last().unwrap());
+    assert!((end.translation - to.translation).length() < 1e-5);
+    assert!(plan.trajectory.is_blended(), "driven through its steps without stopping");
+    // The same request again gives the same motion.
+    let again = plan_motion(&scene, &request, &NeverCancel).unwrap();
+    assert_eq!(again.path, plan.path);
+
+    // A line that leaves the arm's reach is followed part of the way and refused with how far.
+    let far = DPose3::from_parts(from.translation + DVec3::new(2.0, 0.0, 0.0), from.rotation);
+    request.goal = Goal::Pose(far);
+    match plan_motion(&scene, &request, &NeverCancel) {
+        Err(MotionError::Linear { percent, .. }) => assert!(percent > 0.5 && percent < 60.0, "{percent}"),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_linear_move_through_an_obstacle_names_it() {
+    let start = [-0.6, 0.2, 0.3, 0.0, 0.5, 0.0];
+    let goal = [0.6, 0.2, 0.3, 0.0, 0.5, 0.0];
+    let free = scene(&[]);
+    let mut request = request(start, Goal::Joints(goal.to_vec()), Algorithm::RrtConnect);
+    request.linear = true;
+    let plan = plan_motion(&free, &request, &NeverCancel).unwrap();
+    assert_eq!(plan.path.last().unwrap(), &goal.to_vec(), "a joint goal on the line is met exactly");
+    // The chord between the two tip positions passes through the pillar.
+    let blocked = scene(&[pillar()]);
+    match plan_motion(&blocked, &request, &NeverCancel) {
+        Err(MotionError::Linear { percent, cause }) => {
+            assert!(percent > 10.0 && percent < 60.0, "{percent}");
+            assert!(cause.contains("pillar"), "{cause}");
+        }
+        other => panic!("{other:?}"),
+    }
 }

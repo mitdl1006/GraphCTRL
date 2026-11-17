@@ -317,6 +317,7 @@ mod tests {
             name: "Path1".into(),
             robot,
             waypoints: vec![waypoint],
+            linear: Vec::new(),
             planner: "rrt_connect".into(),
             seed: 7,
         };

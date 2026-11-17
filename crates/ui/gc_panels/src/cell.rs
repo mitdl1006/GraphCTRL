@@ -228,6 +228,14 @@ fn paths(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) {
         // A refusal is shown in the status bar.
         drop(session.execute(&Command::Cell(CellOp::SetPlanner { id: path_id, planner, seed })));
     }
+    // How each waypoint is approached: freely planned, or in a straight line of the tool tip.
+    for (index, waypoint) in path.waypoints.iter().enumerate() {
+        let Some(name) = session.doc().get(*waypoint).map(|w| w.name.clone()) else { continue };
+        let mut linear = path.linear.get(index).copied().unwrap_or(false);
+        if ui.checkbox(&mut linear, tr!(lang, PropLinear, name)).changed() {
+            drop(session.execute(&Command::Cell(CellOp::SetLinear { id: path_id, index, linear })));
+        }
+    }
     let status = session.plan_status(path_id);
     let color = match status {
         PlanStatus::Ready => colors::TRACE,

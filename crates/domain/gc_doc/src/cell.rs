@@ -147,6 +147,10 @@ pub struct MotionPath {
     pub robot: Id<Robot>,
     /// The waypoints in order.
     pub waypoints: Vec<Id<Waypoint>>,
+    /// For each waypoint, whether the tool tip goes there in a straight line (a linear move) instead of
+    /// by a freely planned motion. Missing entries mean free.
+    #[serde(default)]
+    pub linear: Vec<bool>,
     /// Id of the planner used where the straight move is blocked.
     pub planner: String,
     /// Seed of the planner's random numbers.
@@ -207,6 +211,15 @@ pub enum CellOp {
         planner: String,
         /// Seed.
         seed: u64,
+    },
+    /// Chooses how one waypoint of a path is approached.
+    SetLinear {
+        /// The path.
+        id: Id<MotionPath>,
+        /// Position of the waypoint in the path.
+        index: usize,
+        /// True for a straight line of the tool tip.
+        linear: bool,
     },
     /// Deletes a path.
     DeletePath(Id<MotionPath>),
@@ -310,6 +323,17 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
                 p.seed = *seed;
             })?;
             Ok((Vec::new(), "Choose planner"))
+        }
+        CellOp::SetLinear { id, index, linear } => {
+            let count = txn.doc().get(*id).ok_or(DocError::Missing(id.erase()))?.waypoints.len();
+            if *index >= count {
+                return Err(EditError::BadValue);
+            }
+            txn.modify(*id, |p: &mut MotionPath, _| {
+                p.linear.resize(count, false);
+                p.linear[*index] = *linear;
+            })?;
+            Ok((Vec::new(), "Choose motion"))
         }
         CellOp::DeletePath(id) => {
             txn.remove(*id)?;

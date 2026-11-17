@@ -314,3 +314,44 @@ fn a_robot_file_finds_its_meshes_around_its_folder() {
     let error = session.add_robot_file(&broken).unwrap_err();
     assert!(error.contains("broken.urdf"), "{error}");
 }
+
+#[test]
+fn a_waypoint_can_be_approached_in_a_straight_line() {
+    let mut session = Session::new();
+    let robot = session.add_robot("Robot1", &six_axis()).unwrap();
+    session.jog(robot, &[0.6, 0.2, 0.3, 0.0, 0.5, 0.0]);
+    session.end_jog();
+    let there = session.add_waypoint_here(robot).unwrap();
+    session.jog(robot, &[-0.6, 0.2, 0.3, 0.0, 0.5, 0.0]);
+    session.end_jog();
+    let path = session.add_path(robot, vec![there]).unwrap();
+    assert_eq!(session.plan(path), PlanStatus::Ready);
+    let free: Vec<[f64; 3]> = session.planned(path).unwrap().tip_path().collect();
+
+    // Choosing the straight line is a document edit: the plan goes stale, and planning again follows
+    // the chord between the two tip positions instead of the arc the joints would sweep.
+    session.execute(&Command::Cell(CellOp::SetLinear { id: path, index: 0, linear: true })).unwrap();
+    assert_eq!(session.plan_status(path), PlanStatus::Stale);
+    assert_eq!(session.plan(path), PlanStatus::Ready, "{:?}", session.plan_error(path));
+    let line: Vec<[f64; 3]> = session.planned(path).unwrap().tip_path().collect();
+    let (from, to) = (gc_math::DVec3::from_array(line[0]), gc_math::DVec3::from_array(*line.last().unwrap()));
+    let along = (to - from).normalize();
+    let off_line = |tip: &[f64; 3]| {
+        let offset = gc_math::DVec3::from_array(*tip) - from;
+        (offset - along * offset.dot(along)).length()
+    };
+    assert!(line.iter().map(off_line).fold(0.0, f64::max) < 1e-3);
+    assert!(free.iter().map(off_line).fold(0.0, f64::max) > 0.05, "the free move swings round the base");
+
+    // With a pillar on the chord the straight line is refused, saying how far it gets and what is there.
+    session
+        .add_body(Solid::Box { size: [0.1, 0.1, 1.4] }, Placement { xyz: [0.55, 0.0, 0.7], rpy: [0.0; 3] })
+        .unwrap();
+    assert_eq!(session.plan(path), PlanStatus::Failed);
+    let error = session.plan_error(path).unwrap();
+    assert!(error.contains("straight line") && error.contains("Body1"), "{error}");
+    // Free again, the planner goes round it.
+    session.execute(&Command::Cell(CellOp::SetLinear { id: path, index: 0, linear: false })).unwrap();
+    assert_eq!(session.plan(path), PlanStatus::Ready);
+    assert!(session.execute(&Command::Cell(CellOp::SetLinear { id: path, index: 3, linear: true })).is_err());
+}

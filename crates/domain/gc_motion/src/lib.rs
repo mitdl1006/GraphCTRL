@@ -54,6 +54,8 @@ pub struct MotionRequest {
     pub runs: usize,
     /// Acceleration limit per joint (the robot description has none).
     pub max_acc: Vec<f64>,
+    /// Move the tool tip to the goal in a straight line, turning evenly, instead of planning freely.
+    pub linear: bool,
 }
 
 /// A planned and validated motion.
@@ -103,6 +105,14 @@ pub enum MotionError {
         /// How close the search came to a goal, in weighted joint-space distance.
         nearest_goal_distance: f64,
     },
+    /// The straight line to the goal cannot be followed all the way.
+    #[error("the straight line can be followed for {percent:.0} % only: {cause}")]
+    Linear {
+        /// How much of the line can be followed, in percent.
+        percent: f64,
+        /// What stops it there.
+        cause: String,
+    },
     /// The caller cancelled.
     #[error("planning was cancelled")]
     Cancelled,
@@ -140,8 +150,11 @@ pub fn plan_motion(
         weights: max_vel.iter().map(|v| (1.0 / v) / slowest).collect(),
     };
 
-    let goals = resolve_goals(scene, request, &space)?;
     let limits = Limits { max_vel, max_acc: request.max_acc.clone() };
+    if request.linear {
+        return linear(scene, request, &space, &limits, control);
+    }
+    let goals = resolve_goals(scene, request, &space)?;
     // Plan with more padding than required, so that the timed motion keeps the required padding between
     // the states the planner checked. Where the cell is too tight for that, check in finer steps, which
     // needs less extra room and costs more checks.
@@ -216,13 +229,28 @@ fn attempt(
         return Err(no_path(stats, nearest));
     };
 
+    finish(scene, space, limits, path, &checker, BLEND_DEVIATION, straight, stats)
+}
+
+/// Times a checked path, validates the timed motion against the required padding and measures it.
+#[allow(clippy::too_many_arguments, reason = "the pipeline's state; a struct would only rename it")]
+fn finish(
+    scene: &RobotScene,
+    space: &Space,
+    limits: &Limits,
+    path: Vec<Vec<f64>>,
+    checker: &scene::Checker<'_>,
+    deviation: f64,
+    straight: bool,
+    stats: Stats,
+) -> Result<MotionPlan, MotionError> {
     // The timed motion is checked against the required padding, not the planning margin.
     let strict = scene.strict_checker();
     // A path with corners is driven through them on blends when that passes the final check: the
     // blends are tried with the planning margin and the whole timed motion against the required
     // padding. Otherwise, and for a single straight move, the motion stops at every waypoint.
     let blended = (path.len() > 2)
-        .then(|| Trajectory::blended(&path, limits, BLEND_DEVIATION, &|q| checker.state_valid(q)).ok())
+        .then(|| Trajectory::blended(&path, limits, deviation, &|q| checker.state_valid(q)).ok())
         .flatten()
         .and_then(|timed| timed.validate(limits, 0.004, &|q| strict.state_valid(q)).ok());
     let trajectory = match blended {
@@ -251,6 +279,77 @@ fn attempt(
         min_clearance,
         planning_margin: checker.margin(),
     })
+}
+
+/// A straight line of the tool tip from where it is to the goal, turning evenly on the way.
+///
+/// The line is followed in small steps; at each one the joint values nearest to the previous step are
+/// taken. The motion is refused when a step cannot be reached, when the nearest joint values are a jump
+/// away (the arm would have to reconfigure, typically near a singularity), or when a step is not
+/// allowed.
+fn linear(
+    scene: &RobotScene,
+    request: &MotionRequest,
+    space: &Space,
+    limits: &Limits,
+    control: &dyn Control,
+) -> Result<MotionPlan, MotionError> {
+    /// Steps along the line: at most this far and this much turning each.
+    const STEP: (f64, f64) = (0.005, 0.02);
+    /// The largest change of a joint between two steps that still counts as following.
+    const JUMP: f64 = 0.25;
+    let chain = scene.chain();
+    let from = scene.tip_in_world(&request.start);
+    let to = match &request.goal {
+        Goal::Pose(pose) => *pose,
+        Goal::Joints(q) if q.len() == chain.dof() => scene.tip_in_world(q),
+        Goal::Joints(_) => {
+            return Err(MotionError::InvalidRequest(format!("the chain has {} joints", chain.dof())));
+        }
+    };
+    let distance = (to.translation - from.translation).length();
+    let turn = from.rotation.angle_between(to.rotation);
+    let steps = ((distance / STEP.0).max(turn / STEP.1).ceil() as usize).clamp(1, 20_000);
+    let ik = NumericIk::new(chain, IkOptions::default());
+    let to_base = scene.base().inverse();
+    let stopped = |k: usize, cause: String| MotionError::Linear {
+        percent: 100.0 * (k - 1) as f64 / steps as f64,
+        cause,
+    };
+    let mut path = vec![request.start.clone()];
+    for k in 1..=steps {
+        if control.cancelled() {
+            return Err(MotionError::Cancelled);
+        }
+        let t = k as f64 / steps as f64;
+        let pose = DPose3::from_parts(
+            from.translation.lerp(to.translation, t),
+            from.rotation.slerp(to.rotation, t).normalize(),
+        );
+        let previous = &path[k - 1];
+        let q = ik
+            .solve_near(&(to_base * pose), previous)
+            .map_err(|failure| stopped(k, format!("the arm cannot reach further ({:?})", failure.reason)))?;
+        if q.iter().zip(previous).any(|(a, b)| (a - b).abs() > JUMP) {
+            return Err(stopped(
+                k,
+                "the arm would have to change its configuration (near a singularity)".to_owned(),
+            ));
+        }
+        if let Some(problem) = scene.state_problem(&q) {
+            return Err(stopped(k, problem.to_string()));
+        }
+        path.push(q);
+    }
+    // A joint goal is met exactly when following the line ends there.
+    if let (Goal::Joints(goal), Some(last)) = (&request.goal, path.last_mut())
+        && space.distance(goal, last) < 1e-4
+    {
+        last.clone_from(goal);
+    }
+    let checker = scene.strict_checker();
+    // Small blends: the tip stays on the line within a fraction of a millimetre.
+    finish(scene, space, limits, path, &checker, 0.002, false, Stats::default())
 }
 
 fn add(total: &mut Stats, run: &Stats) {

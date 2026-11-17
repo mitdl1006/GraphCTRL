@@ -213,6 +213,15 @@ fn a_robot_path_is_planned_through_the_ribbon() {
     assert!(current && rows.len() == 5 && rows[0].successes == rows[0].runs);
     harness.get_by_label("Informed RRT*");
 
+    // The motion to a waypoint is chosen with its checkbox; that is an edit, so the plan goes stale.
+    harness.get_by_label("P1까지 직선(LIN)").click();
+    harness.run();
+    assert_eq!(harness.state().session.doc().get(path).unwrap().linear, vec![true]);
+    harness.get_by_label("Path1 (오래됨(다시 계획 필요))");
+    harness.get_by_label("P1까지 직선(LIN)").click();
+    harness.run();
+    harness.get_by_label("Path1 (계획됨)");
+
     // Playing advances the shown robot along the motion without touching the document.
     let revision = harness.state().session.doc().revision();
     harness.get_by_label("재생").click();
