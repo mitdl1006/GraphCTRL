@@ -520,6 +520,12 @@ messages! {
     /// Plan metric: the move was possible in a straight joint-space line.
     PlanStraight => ("직선 이동(플래너 불필요)", "Straight move (no planner needed)"),
     // --- frontend ---
+    /// Marking menu of the assembly environment: place a component.
+    MarkPlace => ("부품 배치", "Place component"),
+    /// Marking menu of the assembly environment: move a component.
+    MarkMove => ("컴포넌트 이동", "Move component"),
+    /// Marking menu of the assembly environment: rotate a component.
+    MarkRotate => ("컴포넌트 회전", "Rotate component"),
     /// View tab group of appearance commands (section views).
     GroupAppearance => ("외형", "Appearance"),
     /// Section view types and mini-toolbar.

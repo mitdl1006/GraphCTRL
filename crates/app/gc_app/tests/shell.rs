@@ -162,6 +162,23 @@ fn screenshots_for_review() {
 const LEFT: [f64; 6] = [-1.0, 0.2, 0.3, 0.0, 0.5, 0.0];
 const RIGHT: [f64; 6] = [1.0, 0.2, 0.3, 0.0, 0.5, 0.0];
 
+/// Clicks a node with the mouse (a click through the accessibility tree does not reach widgets that are
+/// drawn by the view itself, such as the marking menu's commands).
+fn mouse_click_label(harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, label: &str) {
+    let at = harness.get_by_label(label).rect().center();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run_steps(3);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run_steps(3);
+    }
+}
+
 /// Builds a small cell through the ribbon: a robot, a pillar in its way, a waypoint on the other side
 /// and a planned path around the pillar.
 fn build_cell(
@@ -863,7 +880,7 @@ fn items_are_highlighted_selected_and_offer_their_commands() {
                 pressed,
                 modifiers: egui::Modifiers::NONE,
             });
-            harness.run();
+            harness.run_steps(3);
         }
     };
 
@@ -890,8 +907,7 @@ fn items_are_highlighted_selected_and_offer_their_commands() {
     // A right click on the pillar offers to hide it.
     press(&mut harness, on_pillar, egui::PointerButton::Secondary);
     assert_eq!(harness.state().session.selected_item(), Some(CellItem::Body(pillar)));
-    harness.get_by_label("숨기기").click();
-    harness.run();
+    mouse_click_label(&mut harness, "숨기기");
     assert!(harness.state().session.doc().get(pillar).unwrap().look.hidden);
 
     // Esc clears the selection; Delete deletes what is selected, unless it is still in use.
@@ -2169,10 +2185,21 @@ fn sketch_basics_follow_the_cad_conventions() {
         pressed: false,
         modifiers: egui::Modifiers::NONE,
     });
-    harness.run();
+    harness.run_steps(3);
     harness.get_by_label("완료");
-    harness.query_all_by_label("스케치 마무리").last().unwrap().click();
-    harness.run();
+    // The sketch's marking menu: Finish Sketch is one of its four commands (the ribbon has one too).
+    let finish = harness.query_all_by_label("스케치 마무리").last().unwrap().rect().center();
+    harness.event(egui::Event::PointerMoved(finish));
+    harness.run_steps(3);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: finish,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run_steps(3);
+    }
     assert!(harness.state().session.active_sketch().is_none());
 }
 
@@ -2719,9 +2746,8 @@ fn a_component_origin_plane_is_shown_picked_and_sketched_on() {
             modifiers: egui::Modifiers::NONE,
         });
     }
-    harness.run();
-    harness.get_by_label("스케치 만들기").click();
-    harness.run();
+    harness.run_steps(3);
+    mouse_click_label(&mut harness, "스케치 만들기");
     assert!(harness.state().session.active_sketch().is_some());
     assert_eq!(harness.state().session.doc().sketches().len(), 1);
 }
@@ -2896,4 +2922,52 @@ fn section_views_cut_the_model() {
     harness.get_by_label("단면 삭제").click();
     harness.run_steps(3);
     assert!(harness.state().viewport().section.is_none());
+}
+
+/// The marking menu: a quick mark toward a command picks it without showing the menu; a right click
+/// without a mark shows the radial menu, whose commands are named.
+#[test]
+fn the_marking_menu_picks_by_mark_and_by_menu() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let centre = egui::pos2(500.0, 450.0);
+    harness.event(egui::Event::PointerMoved(centre));
+    harness.run();
+    // Mark mode in the assembly environment: north is Constrain.
+    harness.event(egui::Event::PointerButton {
+        pos: centre,
+        button: egui::PointerButton::Secondary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.event(egui::Event::PointerMoved(centre + egui::vec2(0.0, -70.0)));
+    harness.event(egui::Event::PointerButton {
+        pos: centre + egui::vec2(0.0, -70.0),
+        button: egui::PointerButton::Secondary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run_steps(3);
+    harness.get_by_label("첫 번째 선택: 뷰에서 선택");
+
+    // Menu mode: the commands show with their names; the sketch environment has its own four.
+    harness.get_by_label("취소").click();
+    harness.run_steps(3);
+    harness.get_by_label("XY 스케치").click();
+    harness.run_steps(3);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: centre,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+    harness.run_steps(3);
+    for name in ["선", "원", "사각형"] {
+        assert!(harness.query_all_by_label(name).next().is_some(), "{name}");
+    }
 }
