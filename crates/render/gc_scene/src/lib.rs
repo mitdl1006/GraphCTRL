@@ -183,6 +183,15 @@ impl Scene {
             let (Some(loaded), Some(poses)) = (session.robot_model(id), session.link_poses(id)) else {
                 continue;
             };
+            // A robot that collides as shown is drawn reddish.
+            let colliding = session.robot_problem(id).is_some();
+            let shown = |color: [f32; 4]| {
+                if colliding {
+                    [0.55 + 0.45 * color[0], 0.35 * color[1], 0.35 * color[2], color[3]]
+                } else {
+                    color
+                }
+            };
             for (index, (link, link_pose)) in loaded.model.links.iter().zip(&poses).enumerate() {
                 let geometries = if link.visuals.is_empty() { &link.collisions } else { &link.visuals };
                 let color = if index % 2 == 0 { LINK_DARK } else { LINK_LIGHT };
@@ -198,13 +207,13 @@ impl Scene {
                         // be supplied is listed as missing and not drawn.
                         Shape::Mesh { uri, scale } => {
                             for (mesh, part_color) in loaded.mesh(uri, *scale) {
-                                let color = part_color.unwrap_or(color);
+                                let color = shown(part_color.unwrap_or(color));
                                 scene.solids.push(Solid3 { shape: Shape3::Mesh(mesh.clone()), pose, color });
                             }
                             continue;
                         }
                     };
-                    scene.solids.push(Solid3 { shape, pose, color });
+                    scene.solids.push(Solid3 { shape, pose, color: shown(color) });
                 }
             }
         }

@@ -22,6 +22,7 @@ pub use cell::{
 };
 use gc_core::{Id, Revision};
 use gc_doc::{Applied, Command, Created, Document, EditError, History, Sketch, SketchOp, apply};
+pub use gc_motion::StateProblem;
 pub use gc_persist::PersistError;
 use gc_sketch::{Curve, DimKind, Dimension, FrameOutcome, Item, SkPoint, SketchDrag, SketchReport};
 use gc_tools::{Preview, Prompt, Tool, ToolEvent, ToolKind, ToolOutput};

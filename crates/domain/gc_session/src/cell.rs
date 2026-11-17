@@ -16,7 +16,7 @@ use gc_doc::{
 use gc_jobs::{CancelToken, Executor, JobHandle, JobOutcome};
 use gc_math::{DPose3, DQuat, DVec3, pose_from_xyz_rpy};
 use gc_mesh::MeshData;
-use gc_motion::{Goal, MotionPlan, MotionRequest, Obstacle, RobotScene, plan_motion};
+use gc_motion::{Goal, MotionPlan, MotionRequest, Obstacle, RobotScene, StateProblem, plan_motion};
 use gc_plan::{Algorithm, Control, Options};
 use gc_robot::{Chain, RobotModel, Shape};
 use gc_sketch::{SkPoint, Space};
@@ -244,6 +244,10 @@ pub(crate) struct CellState {
     plans: BTreeMap<Id<MotionPath>, Planned>,
     playback: Option<(Id<MotionPath>, f64)>,
     resources: Option<Resources>,
+    /// The collision scene of the cell as it is shown, with what it was built from, and the last
+    /// question asked of it with its answer. Rebuilt when a robot or a body moves.
+    scene: std::cell::RefCell<Option<(String, RobotScene)>>,
+    asked: std::cell::RefCell<Option<(String, Option<StateProblem>)>>,
     /// Mesh files of bodies by path: the triangles as stored, or why the file could not be read.
     files: BTreeMap<String, Result<Arc<MeshData>, String>>,
     /// The same at the scale a body asks for, by path and scale.
@@ -267,6 +271,8 @@ impl Default for CellState {
             resources: None,
             files: BTreeMap::new(),
             meshes: BTreeMap::new(),
+            scene: std::cell::RefCell::new(None),
+            asked: std::cell::RefCell::new(None),
         }
     }
 }
@@ -577,6 +583,48 @@ impl Session {
         {
             self.last_error = self.cell_op(CellOp::PlaceRobot { id, placement }).err();
         }
+    }
+
+    /// What is wrong with the robot as it is shown right now (jog preview, base and body previews
+    /// included): a joint beyond its limit, a collision, or a part closer to a body than the padding.
+    /// `None` when it is fine.
+    pub fn robot_problem(&self, robot: Id<Robot>) -> Option<StateProblem> {
+        let loaded = self.robot_model(robot)?;
+        let stored = self.doc.get(robot)?;
+        let base = self.shown_base(robot)?;
+        let joints = self.robot_joints(robot)?;
+        let mut obstacles = Vec::new();
+        let mut built_from = format!("{:?} {} {base:?}", robot, stored.urdf.len());
+        for (id, _) in self.doc.bodies().iter() {
+            let body = self.shown_body(id)?;
+            // A body whose mesh is not there cannot be checked; it is left out here and stops planning.
+            let Some(shape) = shape_of(&body.solid, &self.cell.meshes) else { continue };
+            built_from.push_str(&format!(" {:?} {:?}", body.placement, body.solid));
+            obstacles.push(Obstacle { name: body.name.clone(), pose: pose_of(&body.placement), shape });
+        }
+        let question = format!("{built_from} {joints:?}");
+        if let Some((asked, answer)) = self.cell.asked.borrow().as_ref()
+            && *asked == question
+        {
+            return answer.clone();
+        }
+        let mut scene = self.cell.scene.borrow_mut();
+        if scene.as_ref().is_none_or(|(from, _)| *from != built_from) {
+            let (built, _) = RobotScene::new(
+                Arc::clone(&loaded.model),
+                loaded.chain.clone(),
+                &stored.tip_link,
+                pose_of(&base),
+                &obstacles,
+                PADDING,
+                &|uri| loaded.file(uri),
+            )
+            .ok()?;
+            *scene = Some((built_from, built));
+        }
+        let answer = scene.as_ref().and_then(|(_, scene)| scene.state_problem(&joints));
+        *self.cell.asked.borrow_mut() = Some((question, answer.clone()));
+        answer
     }
 
     /// World poses of all links of a robot as it is shown.

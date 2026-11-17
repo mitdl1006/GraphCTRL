@@ -355,3 +355,33 @@ fn a_waypoint_can_be_approached_in_a_straight_line() {
     assert_eq!(session.plan(path), PlanStatus::Ready);
     assert!(session.execute(&Command::Cell(CellOp::SetLinear { id: path, index: 3, linear: true })).is_err());
 }
+
+#[test]
+fn the_shown_pose_is_checked_live() {
+    use gc_session::StateProblem;
+    let mut session = Session::new();
+    let robot = session.add_robot("Robot1", &six_axis()).unwrap();
+    assert_eq!(session.robot_problem(robot), None);
+    let pillar = session
+        .add_body(Solid::Box { size: [0.1, 0.1, 1.4] }, Placement { xyz: [0.55, 0.0, 0.7], rpy: [0.0; 3] })
+        .unwrap();
+    // Jogged into the pillar: the preview is checked, before anything is committed.
+    let revision = session.doc().revision();
+    session.jog(robot, &[0.0, 0.2, 0.3, 0.0, 0.5, 0.0]);
+    match session.robot_problem(robot) {
+        Some(StateProblem::Collision { a, b }) => assert!(a == "Body1" || b == "Body1", "{a} / {b}"),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(session.doc().revision(), revision);
+    session.jog(robot, &LEFT);
+    assert_eq!(session.robot_problem(robot), None);
+    session.jog(robot, &[0.0, 0.2, 0.3, 0.0, 0.5, 0.0]);
+    assert!(session.robot_problem(robot).is_some());
+    // Moving the body away (still a preview) clears it; moving the robot's base into it brings it back.
+    let mut moved = session.doc().get(pillar).unwrap().clone();
+    moved.placement.xyz = [0.0, 1.5, 0.7];
+    session.preview_body(pillar, moved);
+    assert_eq!(session.robot_problem(robot), None);
+    session.preview_base(robot, Placement { xyz: [-0.55, 1.5, 0.0], rpy: [0.0; 3] });
+    assert!(matches!(session.robot_problem(robot), Some(StateProblem::Collision { .. })));
+}

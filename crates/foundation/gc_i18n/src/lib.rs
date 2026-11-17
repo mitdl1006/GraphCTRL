@@ -387,6 +387,14 @@ messages! {
     /// Checkbox beside a waypoint of a path: go there in a straight line of the tool tip. `{0}` is the
     /// waypoint's name.
     PropLinear => ("{0}까지 직선(LIN)", "Straight line (LIN) to {0}"),
+    /// The robot as shown is in collision. `{0}` and `{1}` are the two parts.
+    StateCollision => ("충돌: {0} / {1}", "Collision: {0} / {1}"),
+    /// The robot as shown is closer to a body than allowed. `{0}`, `{1}`: the parts; `{2}`: the gap in mm.
+    StateTooClose => ("너무 가까움: {0} / {1} (간격 {2} mm)", "Too close: {0} / {1} (gap {2} mm)"),
+    /// A joint of the robot as shown is beyond its limit. `{0}` is the joint.
+    StateJointLimit => ("관절 한계 초과: {0}", "Joint beyond its limit: {0}"),
+    /// The state of the robot could not be checked.
+    StateUnknown => ("이 자세는 검사할 수 없습니다", "This pose could not be checked"),
     /// Plan status: being computed.
     PlanPlanning => ("계획 중...", "Planning..."),
     /// Plan status: up to date.

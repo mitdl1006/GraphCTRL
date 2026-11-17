@@ -81,6 +81,21 @@ fn jog(ui: &mut Ui, session: &mut Session, lang: Lang) {
     if changed {
         session.jog(robot, &joints);
     }
+    // What is wrong with the pose as it is shown, if anything.
+    if let Some(problem) = session.robot_problem(robot) {
+        ui.colored_label(colors::ERROR, problem_text(lang, &problem));
+    }
+}
+
+/// A state problem in the user's language.
+pub fn problem_text(lang: Lang, problem: &gc_session::StateProblem) -> String {
+    use gc_session::StateProblem as P;
+    match problem {
+        P::Collision { a, b } => tr!(lang, StateCollision, a, b),
+        P::WithinPadding { a, b, gap } => tr!(lang, StateTooClose, a, b, format!("{:.1}", gap * 1000.0)),
+        P::JointLimit { joint } => tr!(lang, StateJointLimit, joint),
+        P::Unknown => tr!(lang, StateUnknown).to_owned(),
+    }
 }
 
 /// An angle shown and edited in degrees. Returns true when the user changed it.

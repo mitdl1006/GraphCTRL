@@ -206,6 +206,17 @@ fn a_robot_path_is_planned_through_the_ribbon() {
     harness.get_by_label("Path1 (계획됨)");
     assert!(harness.query_all_by_label("joint_1").count() >= 1, "the jog sliders are shown");
 
+    // Jogged into the box, the panel says what collides; back out, the message is gone.
+    let app = harness.state_mut();
+    let robot = app.session.doc().robots().iter().next().unwrap().0;
+    app.session.jog(robot, &[0.0, 0.2, 0.3, 0.0, 0.5, 0.0]);
+    harness.run();
+    assert_eq!(harness.query_all_by_label_contains("충돌:").count(), 1);
+    harness.state_mut().session.jog(robot, &LEFT);
+    harness.run();
+    assert_eq!(harness.query_all_by_label_contains("충돌:").count(), 0);
+    harness.state_mut().session.end_jog();
+
     // The comparison runs every planner and lists them.
     harness.get_by_label("알고리즘 비교").click();
     harness.run();
