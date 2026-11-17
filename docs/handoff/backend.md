@@ -42,6 +42,8 @@
   한 번에 만들 수 있게 `session.add_component_frame(occurrence, OriginPlane) -> Id<WorkFrame>`(`CellOp::AddComponentFrame`, Undo 1단계, 링크·툴·부품 occurrence도 가능).
   새 `WaypointTarget::InComponent` 변형은 만들지 않음 — `gc_panels`·`gc_agent`가 WaypointTarget/Reference를 빠짐없이 match해서 UI·앱 수정이 필요(원하면 리드 결정).
   테스트 `gc_session/tests/component_frames.rs`.
+- ③ 큰 셀 저장/열기: `bench_scene` "Many relationships" 표에 행 추가(1000 컴포넌트 + 로봇 5대, 관계 1900개, 2.2 MiB): 저장 ~50 ms, 열기 ~7 ms(release).
+  개선 불필요로 판단. 메시 바디가 있으면 열기 뒤 메시는 잡으로 들어온다(화면 안 막음). 로봇이 많으면 열 때 URDF 재해석 비용이 로봇 수에 비례.
 
 ## 2026-11-18 — QA 버그 5건 · 관계가 많을 때의 속도
 
