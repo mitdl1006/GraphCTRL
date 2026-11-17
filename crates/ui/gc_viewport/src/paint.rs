@@ -430,6 +430,15 @@ fn preview(view: &View<'_>, plane: &SketchPlane, session: &Session) {
             stroke,
         );
     }
+    for (centre, radius, start, sweep) in &preview.arcs {
+        view.polyline(
+            (0..=72).map(|i| {
+                let angle = start + sweep * f64::from(i) / 72.0;
+                world([centre[0] + radius * fm::cos(angle), centre[1] + radius * fm::sin(angle)])
+            }),
+            stroke,
+        );
+    }
     if let Some(snap) = preview.snap {
         let Some(at) = view.screen(world(snap.pos)) else { return };
         match snap.kind {

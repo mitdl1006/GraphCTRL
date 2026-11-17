@@ -323,10 +323,11 @@ impl GraphCtrlApp {
                     self.session.redo();
                 }
                 egui::Key::F6 => self.viewport.look(StandardView::Iso),
-                egui::Key::L | egui::Key::C | egui::Key::R | egui::Key::D if !command => {
+                egui::Key::L | egui::Key::C | egui::Key::A | egui::Key::R | egui::Key::D if !command => {
                     let (tool, name) = match key {
                         egui::Key::L => (ToolKind::Line, "L"),
                         egui::Key::C => (ToolKind::Circle, "C"),
+                        egui::Key::A => (ToolKind::Arc, "A"),
                         egui::Key::R => (ToolKind::Rectangle, "R"),
                         _ => (ToolKind::Dimension, "D"),
                     };

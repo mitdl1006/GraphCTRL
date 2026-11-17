@@ -86,6 +86,8 @@ pub enum ToolKind {
     Line,
     /// Draw a circle by centre and a point on it.
     Circle,
+    /// Draw an arc by centre, start point and end point. The arc runs the way the cursor swept.
+    Arc,
     /// Draw a rectangle by two opposite corners.
     Rectangle,
     /// Place a dimension.
@@ -143,6 +145,12 @@ pub enum Prompt {
     LineEnd,
     CircleCentre,
     CircleRim,
+    /// Arc: click the centre.
+    ArcCentre,
+    /// Arc: click where it starts.
+    ArcStart,
+    /// Arc: click where it ends.
+    ArcEnd,
     RectangleFirst,
     RectangleSecond,
     DimensionPick,
@@ -158,6 +166,8 @@ pub struct Preview {
     pub lines: Vec<([f64; 2], [f64; 2])>,
     /// Rubber-band circles: centre and radius.
     pub circles: Vec<([f64; 2], f64)>,
+    /// Rubber-band arcs: centre, radius, start angle and signed sweep (positive is counter-clockwise).
+    pub arcs: Vec<([f64; 2], f64, f64, f64)>,
     /// Where the next point would go, and why.
     pub snap: Option<Snap>,
     /// Items picked so far (highlighted).
@@ -176,6 +186,14 @@ pub struct Tool {
     /// A dimension waiting for its value: what and where.
     pending: Option<(DimKind, [f64; 2])>,
     dragging: bool,
+    /// Arc: the start point, once clicked.
+    arc_start: Option<[f64; 2]>,
+    /// Arc: the angle swept from the start so far, signed, following the cursor round the centre.
+    arc_sweep: f64,
+}
+
+fn angle_about(centre: [f64; 2], point: [f64; 2]) -> f64 {
+    fm::atan2(point[1] - centre[1], point[0] - centre[0])
 }
 
 fn xy(sketch: &Sketch, point: Id<SkPoint>) -> Option<[f64; 2]> {
@@ -289,7 +307,16 @@ fn picks_needed(kind: ConstraintKind) -> usize {
 impl Tool {
     /// A tool in its initial state.
     pub fn new(kind: ToolKind) -> Self {
-        Self { kind, anchor: None, cursor: None, picks: Vec::new(), pending: None, dragging: false }
+        Self {
+            kind,
+            anchor: None,
+            cursor: None,
+            picks: Vec::new(),
+            pending: None,
+            dragging: false,
+            arc_start: None,
+            arc_sweep: 0.0,
+        }
     }
 
     /// Which tool this is.
@@ -305,6 +332,9 @@ impl Tool {
             (ToolKind::Line, true) => Prompt::LineEnd,
             (ToolKind::Circle, false) => Prompt::CircleCentre,
             (ToolKind::Circle, true) => Prompt::CircleRim,
+            (ToolKind::Arc, false) => Prompt::ArcCentre,
+            (ToolKind::Arc, true) if self.arc_start.is_none() => Prompt::ArcStart,
+            (ToolKind::Arc, true) => Prompt::ArcEnd,
             (ToolKind::Rectangle, false) => Prompt::RectangleFirst,
             (ToolKind::Rectangle, true) => Prompt::RectangleSecond,
             (ToolKind::Dimension, _) if self.pending.is_some() => Prompt::DimensionValue,
@@ -321,6 +351,23 @@ impl Tool {
             match self.kind {
                 ToolKind::Line => preview.lines.push((anchor, cursor)),
                 ToolKind::Circle => preview.circles.push((anchor, distance(anchor, cursor))),
+                ToolKind::Arc => match self.arc_start {
+                    // Before the start is chosen: the radius, and the circle the arc will lie on.
+                    None => {
+                        preview.lines.push((anchor, cursor));
+                        preview.circles.push((anchor, distance(anchor, cursor)));
+                    }
+                    Some(start) => {
+                        preview.lines.push((anchor, start));
+                        preview.lines.push((anchor, cursor));
+                        preview.arcs.push((
+                            anchor,
+                            distance(anchor, start),
+                            angle_about(anchor, start),
+                            self.arc_sweep,
+                        ));
+                    }
+                },
                 ToolKind::Rectangle => {
                     let corners = [anchor, [cursor[0], anchor[1]], cursor, [anchor[0], cursor[1]]];
                     preview.lines.extend((0..4).map(|i| (corners[i], corners[(i + 1) % 4])));
@@ -333,6 +380,8 @@ impl Tool {
 
     fn reset(&mut self) {
         self.anchor = None;
+        self.arc_start = None;
+        self.arc_sweep = 0.0;
         self.picks.clear();
         self.pending = None;
     }
@@ -342,9 +391,22 @@ impl Tool {
     pub fn handle(&mut self, sketch: &Sketch, event: ToolEvent) -> Vec<ToolOutput> {
         match event {
             ToolEvent::Move { pos, px, suppress_snap } => {
-                let drawing = matches!(self.kind, ToolKind::Line | ToolKind::Circle | ToolKind::Rectangle);
+                let drawing = matches!(
+                    self.kind,
+                    ToolKind::Line | ToolKind::Circle | ToolKind::Arc | ToolKind::Rectangle
+                );
                 let previous = if self.kind == ToolKind::Line { self.anchor } else { None };
+                let before = self.cursor.map(|s| s.pos);
                 self.cursor = drawing.then(|| snap(sketch, pos, px, previous, suppress_snap));
+                // The arc follows the cursor round its centre, so that it can be drawn either way and
+                // past half a turn.
+                if let (Some(centre), Some(start), Some(now)) = (self.anchor, self.arc_start, self.cursor) {
+                    let from = angle_about(centre, before.unwrap_or(start));
+                    let mut step = angle_about(centre, now.pos) - from;
+                    let tau = std::f64::consts::TAU;
+                    step -= tau * (step / tau).round();
+                    self.arc_sweep = (self.arc_sweep + step).clamp(-tau, tau);
+                }
                 Vec::new()
             }
             ToolEvent::Click { pos, px, modifier } => self.click(sketch, pos, px, modifier),
@@ -426,6 +488,37 @@ impl Tool {
                     return Vec::new();
                 }
                 vec![ToolOutput::Edit(SketchOp::AddCircle { centre: [centre[0], centre[1], 0.0], radius })]
+            }
+            ToolKind::Arc => {
+                let here = snap(sketch, pos, px, None, modifier).pos;
+                let Some(centre) = self.anchor else {
+                    self.anchor = Some(here);
+                    return Vec::new();
+                };
+                let Some(start) = self.arc_start else {
+                    if distance(centre, here) > px {
+                        self.arc_start = Some(here);
+                        self.arc_sweep = 0.0;
+                        // The sweep is measured from the start point, not from wherever the cursor was.
+                        self.cursor = Some(Snap { pos: here, ..snap(sketch, here, px, None, true) });
+                    }
+                    return Vec::new();
+                };
+                let radius = distance(centre, start);
+                if (self.arc_sweep * radius).abs() <= px {
+                    return Vec::new(); // no arc yet
+                }
+                // The end lies on the circle through the start, in the direction of the click.
+                let angle = angle_about(centre, start) + self.arc_sweep;
+                let end = [centre[0] + radius * fm::cos(angle), centre[1] + radius * fm::sin(angle)];
+                // Stored arcs run counter-clockwise from start to end.
+                let (first, last) = if self.arc_sweep > 0.0 { (start, end) } else { (end, start) };
+                self.reset();
+                vec![ToolOutput::Edit(SketchOp::AddArc {
+                    centre: [centre[0], centre[1], 0.0],
+                    start: [first[0], first[1], 0.0],
+                    end: [last[0], last[1], 0.0],
+                })]
             }
             ToolKind::Rectangle => {
                 let here = snap(sketch, pos, px, None, modifier).pos;

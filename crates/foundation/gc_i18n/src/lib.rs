@@ -136,6 +136,8 @@ messages! {
     ToolLine => ("선", "Line"),
     /// Tool: circle.
     ToolCircle => ("원", "Circle"),
+    /// Tool: arc.
+    ToolArc => ("호", "Arc"),
     /// Tool: rectangle.
     ToolRectangle => ("사각형", "Rectangle"),
     /// Tool: dimension.
@@ -214,6 +216,12 @@ messages! {
     PromptCircleCentre => ("원의 중심을 클릭", "Click the centre of the circle"),
     /// Prompt: a point on the circle.
     PromptCircleRim => ("원 위의 한 점을 클릭", "Click a point on the circle"),
+    /// Prompt: arc centre.
+    PromptArcCentre => ("호의 중심을 클릭", "Click the centre of the arc"),
+    /// Prompt: arc start.
+    PromptArcStart => ("호의 시작점을 클릭", "Click where the arc starts"),
+    /// Prompt: arc end.
+    PromptArcEnd => ("호가 끝나는 곳까지 돌려서 클릭", "Sweep to where the arc ends and click"),
     /// Prompt: first corner of a rectangle.
     PromptRectFirst => ("첫 번째 구석을 클릭", "Click the first corner"),
     /// Prompt: opposite corner of a rectangle.

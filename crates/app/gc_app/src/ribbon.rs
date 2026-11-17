@@ -88,6 +88,7 @@ pub(crate) fn show(
                         (ToolKind::Select, Icon::Select, Msg::ToolSelect),
                         (ToolKind::Line, Icon::Line, Msg::ToolLine),
                         (ToolKind::Circle, Icon::Circle, Msg::ToolCircle),
+                        (ToolKind::Arc, Icon::Arc, Msg::ToolArc),
                         (ToolKind::Rectangle, Icon::Rectangle, Msg::ToolRectangle),
                     ] {
                         if ribbon_button(ui, icon, label.text(lang), current == kind, sketching).clicked() {

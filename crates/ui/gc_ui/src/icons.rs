@@ -11,6 +11,8 @@ pub enum Icon {
     Line,
     /// A circle with its centre.
     Circle,
+    /// A quarter arc with its centre.
+    Arc,
     /// A rectangle.
     Rectangle,
     /// A dimension line with arrows.
@@ -56,6 +58,17 @@ impl Icon {
             Self::Circle => {
                 painter.circle_stroke(at(0.5, 0.5), rect.width() * 0.38, stroke);
                 dot(at(0.5, 0.5));
+            }
+            Self::Arc => {
+                let radius = rect.width() * 0.62;
+                let points: Vec<egui::Pos2> = (0..=12)
+                    .map(|i| {
+                        let angle = std::f32::consts::FRAC_PI_2 * i as f32 / 12.0;
+                        at(0.18, 0.82) + egui::vec2(radius * angle.cos(), -radius * angle.sin())
+                    })
+                    .collect();
+                painter.add(egui::Shape::line(points, stroke));
+                dot(at(0.18, 0.82));
             }
             Self::Rectangle => {
                 painter.rect_stroke(

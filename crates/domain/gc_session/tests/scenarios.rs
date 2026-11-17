@@ -287,3 +287,53 @@ fn undoing_the_sketch_itself_leaves_sketch_mode() {
     assert!(session.redo());
     assert_eq!(session.doc().sketches().len(), 1);
 }
+
+/// The arc tool: centre, start, then sweep to the end. The arc runs the way the cursor went round.
+#[test]
+fn an_arc_follows_the_sweep_of_the_cursor() {
+    use gc_sketch::CurveGeom;
+    let sweep = |session: &mut Session, through: &[[f64; 2]]| {
+        session.set_tool(ToolKind::Arc);
+        assert_eq!(session.prompt(), Prompt::ArcCentre);
+        click(session, mm(40.0, 30.0));
+        assert_eq!(session.prompt(), Prompt::ArcStart);
+        click(session, mm(50.0, 30.0));
+        assert_eq!(session.prompt(), Prompt::ArcEnd);
+        for at in through {
+            session.tool_event(ToolEvent::Move { pos: *at, px: PX, suppress_snap: true });
+        }
+        assert_eq!(session.preview().arcs.len(), 1, "the arc is previewed while it is swept");
+        let last = *through.last().unwrap();
+        session.tool_event(ToolEvent::Click { pos: last, px: PX, modifier: true });
+        assert_eq!(session.prompt(), Prompt::ArcCentre, "the tool stays active for the next arc");
+        let (_, sketch) = session.active_sketch().unwrap();
+        let (id, arc) = sketch.curves.iter().last().unwrap();
+        let CurveGeom::Arc { c, s, e } = arc.geom else { panic!("not an arc") };
+        let at = |p| sketch.pos(p).map(|p| [p[0] * 1e3, p[1] * 1e3]).unwrap();
+        (*id, at(c), at(s), at(e))
+    };
+    let near = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).abs() < 1e-6 && (a[1] - b[1]).abs() < 1e-6;
+    let mut session = new_session();
+
+    // A quarter turn counter-clockwise: from (50, 30) up to (40, 40).
+    let (first, c, s, e) = sweep(&mut session, &[mm(48.0, 36.0), mm(40.0, 45.0)]);
+    assert!(near(c, [40.0, 30.0]) && near(s, [50.0, 30.0]) && near(e, [40.0, 40.0]), "{s:?} {e:?}");
+    assert!((session.radius(first).unwrap() - 0.010).abs() < 1e-12);
+
+    // Clockwise by a quarter turn: stored counter-clockwise, so it starts at (40, 20) and ends at (50, 30).
+    let (_, _, s, e) = sweep(&mut session, &[mm(48.0, 24.0), mm(40.0, 15.0)]);
+    assert!(near(s, [40.0, 20.0]) && near(e, [50.0, 30.0]), "{s:?} {e:?}");
+
+    // Three quarters of a turn counter-clockwise, past half a turn: it ends at (40, 20).
+    let (_, _, s, e) = sweep(&mut session, &[mm(40.0, 42.0), mm(28.0, 30.0), mm(40.0, 12.0)]);
+    assert!(near(s, [50.0, 30.0]) && near(e, [40.0, 20.0]), "{s:?} {e:?}");
+    assert_eq!(curves(&session).len(), 3);
+
+    // Escape drops an arc in progress; each arc is one undo step.
+    click(&mut session, mm(0.0, 50.0));
+    click(&mut session, mm(10.0, 50.0));
+    session.tool_event(ToolEvent::Key(Key::Escape));
+    assert_eq!(session.prompt(), Prompt::ArcCentre);
+    assert!(session.undo());
+    assert_eq!(curves(&session).len(), 2);
+}
