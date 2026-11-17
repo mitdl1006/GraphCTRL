@@ -677,6 +677,11 @@ impl eframe::App for GraphCtrlApp {
                             self.params = gc_panels::ParamsUi::default();
                         }
                     }
+                    Some(BrowserAction::Select(item)) => self.session.select_item(item),
+                    Some(BrowserAction::Plan(path)) => {
+                        self.cell.playing = false;
+                        self.session.plan(path);
+                    }
                     Some(BrowserAction::Show(item, visible)) => {
                         if let Some(look) = self.session.shown_look(item) {
                             drop(self.session.set_look(item, gc_doc::Look { hidden: !visible, ..look }));

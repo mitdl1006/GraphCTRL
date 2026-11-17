@@ -132,9 +132,13 @@ fn cell(view: &View<'_>, scene: &Scene, gpu: bool) {
         view.polyline(trace.points.iter().copied(), Stroke::new(2.0, color));
     }
     // Work frames: larger axes with the frame's name.
-    for (name, frame) in &scene.frames {
-        pose_axes(view, frame, 0.1, 2.5);
+    for (index, (name, frame)) in scene.frames.iter().enumerate() {
+        let emphasis = scene.frame_items.get(index).map_or(gc_scene::Highlight::None, |(_, h)| *h);
+        pose_axes(view, frame, 0.1, if emphasis == gc_scene::Highlight::None { 2.5 } else { 4.0 });
         if let Some(at) = view.screen(frame.translation) {
+            if let Some(ring) = highlight_colour(emphasis) {
+                view.painter.circle_stroke(at, 9.0, Stroke::new(2.5, ring));
+            }
             view.text(pos2(at.x - 6.0, at.y + 6.0), Align2::RIGHT_TOP, name, 13.0, colors::DIMENSION);
         }
     }
@@ -158,15 +162,30 @@ fn cell(view: &View<'_>, scene: &Scene, gpu: bool) {
             }
         }
         let Some(at) = view.screen(waypoint.position) else { continue };
-        let r = 5.0;
+        let emphasised = highlight_colour(waypoint.highlight);
+        let r = if emphasised.is_some() { 7.5 } else { 5.0 };
         let diamond =
             vec![pos2(at.x, at.y - r), pos2(at.x + r, at.y), pos2(at.x, at.y + r), pos2(at.x - r, at.y)];
         view.painter.add(egui::Shape::convex_polygon(
             diamond,
-            colors::WAYPOINT,
+            emphasised.unwrap_or(colors::WAYPOINT),
             Stroke::new(1.0, Color32::WHITE),
         ));
         view.text(pos2(at.x + 8.0, at.y - 8.0), Align2::LEFT_BOTTOM, &waypoint.name, 13.0, colors::WAYPOINT);
+    }
+}
+
+/// The screen colour of a highlight, the same as the 3D picture's.
+fn highlight_colour(highlight: gc_scene::Highlight) -> Option<Color32> {
+    let colour = |c: [f32; 3]| {
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "0..=255")]
+        let byte = |v: f32| (v * 255.0).round() as u8;
+        Color32::from_rgb(byte(c[0]), byte(c[1]), byte(c[2]))
+    };
+    match highlight {
+        gc_scene::Highlight::None => None,
+        gc_scene::Highlight::Hovered => Some(colour(gc_scene::HOVER)),
+        gc_scene::Highlight::Selected => Some(colour(gc_scene::SELECTED)),
     }
 }
 

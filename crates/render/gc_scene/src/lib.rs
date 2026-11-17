@@ -11,7 +11,7 @@ use gc_doc::Solid;
 use gc_math::{Aabb, DPose3, DVec3, pose_from_xyz_rpy};
 use gc_mesh::{MeshData, MeshError, primitives};
 use gc_robot::Shape;
-use gc_session::{MeshRef, PlanStatus, Session, Shown};
+use gc_session::{CellItem, MeshRef, PlanStatus, Session, Shown};
 
 /// A basic solid, centred on its own origin. Solids with equal sizes share one uploaded mesh.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -122,6 +122,8 @@ pub struct Solid3 {
     pub pose: DPose3,
     /// Linear RGBA.
     pub color: [f32; 4],
+    /// What it belongs to, for picking.
+    pub owner: Option<CellItem>,
 }
 
 /// The tool-tip trace of a planned path.
@@ -142,6 +144,45 @@ pub struct Marker {
     pub position: DVec3,
     /// How the tool is turned there: the tool centre point's axes.
     pub rotation: gc_math::DQuat,
+    /// The waypoint.
+    pub id: gc_core::Id<gc_doc::Waypoint>,
+    /// Selected or under the cursor.
+    pub highlight: Highlight,
+}
+
+/// How an item is emphasised.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Highlight {
+    /// Not emphasised.
+    #[default]
+    None,
+    /// Under the cursor.
+    Hovered,
+    /// Selected.
+    Selected,
+}
+
+/// The colour of the cursor's highlight.
+pub const HOVER: [f32; 3] = [1.0, 0.55, 0.1];
+/// The colour of the selection.
+pub const SELECTED: [f32; 3] = [0.15, 0.55, 1.0];
+
+/// A colour mixed towards the highlight colour.
+pub fn emphasised(color: [f32; 4], highlight: Highlight) -> [f32; 4] {
+    let mix = |towards: [f32; 3]| {
+        let k = 0.5;
+        [
+            color[0] + (towards[0] - color[0]) * k,
+            color[1] + (towards[1] - color[1]) * k,
+            color[2] + (towards[2] - color[2]) * k,
+            color[3],
+        ]
+    };
+    match highlight {
+        Highlight::None => color,
+        Highlight::Hovered => mix(HOVER),
+        Highlight::Selected => mix(SELECTED),
+    }
 }
 
 /// Everything 3D in a session.
@@ -157,6 +198,8 @@ pub struct Scene {
     pub tool_points: Vec<DPose3>,
     /// Work frames: name and pose.
     pub frames: Vec<(String, DPose3)>,
+    /// The work frames' ids and highlights, in the order of `frames`.
+    pub frame_items: Vec<(gc_core::Id<gc_doc::WorkFrame>, Highlight)>,
 }
 
 const BODY: [f32; 4] = [0.55, 0.62, 0.70, 1.0];
@@ -168,6 +211,15 @@ impl Scene {
     pub fn of(session: &Session) -> Self {
         let doc = session.doc();
         let mut scene = Self::default();
+        let highlight = |item: CellItem| {
+            if session.selected_item() == Some(item) {
+                Highlight::Selected
+            } else if session.hovered_item() == Some(item) {
+                Highlight::Hovered
+            } else {
+                Highlight::None
+            }
+        };
         for (id, _) in doc.bodies().iter() {
             let Some(body) = session.shown_body(id) else { continue };
             let shape = match &body.solid {
@@ -189,7 +241,9 @@ impl Scene {
             }
             let mut color = BODY;
             color[3] = 1.0 - look.transparency as f32;
-            scene.solids.push(Solid3 { shape, pose, color });
+            let owner = CellItem::Body(id);
+            let color = emphasised(color, highlight(owner));
+            scene.solids.push(Solid3 { shape, pose, color, owner: Some(owner) });
         }
         for (id, _) in doc.robots().iter() {
             let (Some(loaded), Some(poses)) = (session.robot_model(id), session.link_poses(id)) else {
@@ -202,8 +256,10 @@ impl Scene {
             let alpha = 1.0 - look.transparency as f32;
             // A robot that collides as shown is drawn reddish.
             let colliding = session.robot_problem(id).is_some();
+            let owner = CellItem::Robot(id);
+            let emphasis = highlight(owner);
             let shown = |color: [f32; 4]| {
-                let color = [color[0], color[1], color[2], color[3] * alpha];
+                let color = emphasised([color[0], color[1], color[2], color[3] * alpha], emphasis);
                 if colliding {
                     [0.55 + 0.45 * color[0], 0.35 * color[1], 0.35 * color[2], color[3]]
                 } else {
@@ -226,21 +282,27 @@ impl Scene {
                         Shape::Mesh { uri, scale } => {
                             for (mesh, part_color) in loaded.mesh(uri, *scale) {
                                 let color = shown(part_color.unwrap_or(color));
-                                scene.solids.push(Solid3 { shape: Shape3::Mesh(mesh.clone()), pose, color });
+                                scene.solids.push(Solid3 {
+                                    shape: Shape3::Mesh(mesh.clone()),
+                                    pose,
+                                    color,
+                                    owner: Some(owner),
+                                });
                             }
                             continue;
                         }
                     };
-                    scene.solids.push(Solid3 { shape, pose, color: shown(color) });
+                    scene.solids.push(Solid3 { shape, pose, color: shown(color), owner: Some(owner) });
                 }
             }
         }
         scene.tool_points = doc.robots().iter().filter_map(|(id, _)| session.tcp_pose(id)).collect();
-        scene.frames = doc
-            .work_frames()
-            .iter()
-            .filter_map(|(id, frame)| Some((frame.name.clone(), session.work_frame_pose(id)?)))
-            .collect();
+        for (id, frame) in doc.work_frames().iter() {
+            if let Some(pose) = session.work_frame_pose(id) {
+                scene.frames.push((frame.name.clone(), pose));
+                scene.frame_items.push((id, highlight(CellItem::Frame(id))));
+            }
+        }
         for (id, _) in doc.paths().iter() {
             if let Some(planned) = session.planned(id) {
                 scene.traces.push(Trace {
@@ -255,6 +317,8 @@ impl Scene {
                     name: waypoint.name.clone(),
                     position: pose.translation,
                     rotation: pose.rotation,
+                    id,
+                    highlight: highlight(CellItem::Waypoint(id)),
                 });
             }
         }
@@ -286,5 +350,43 @@ impl Scene {
             bounds = bounds.including(*point);
         }
         bounds
+    }
+}
+
+/// Finds what a ray hits first among the solids of a scene. Each mesh's search tree is built the first
+/// time it is needed and kept.
+#[derive(Default)]
+pub struct Picker {
+    trees: std::collections::BTreeMap<u64, Arc<gc_mesh::MeshBvh>>,
+}
+
+impl Picker {
+    /// The owner of the nearest solid the ray hits, and the distance along the ray.
+    pub fn pick(&mut self, scene: &Scene, ray: &gc_math::Ray) -> Option<(f64, CellItem)> {
+        let mut best: Option<(f64, CellItem)> = None;
+        for solid in &scene.solids {
+            let Some(owner) = solid.owner else { continue };
+            // Cheap test first: the ray must pass within the solid's bounding sphere.
+            let centre = solid.pose.translation - ray.origin;
+            let along = centre.dot(ray.dir);
+            if (centre - ray.dir * along).length() > solid.shape.radius() + 1e-9 {
+                continue;
+            }
+            let key = solid.shape.key();
+            let tree = match self.trees.entry(key) {
+                std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
+                std::collections::btree_map::Entry::Vacant(entry) => {
+                    let Ok(mesh) = solid.shape.mesh() else { continue };
+                    entry.insert(Arc::new(gc_mesh::MeshBvh::build(&mesh)))
+                }
+            };
+            let to_local = solid.pose.inverse();
+            let local = gc_math::Ray { origin: to_local * ray.origin, dir: to_local.rotation * ray.dir };
+            let limit = best.map_or(f64::INFINITY, |(t, _)| t);
+            if let Some(hit) = tree.raycast(&local, limit) {
+                best = Some((hit.t, owner));
+            }
+        }
+        best
     }
 }

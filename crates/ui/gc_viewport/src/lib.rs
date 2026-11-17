@@ -79,6 +79,11 @@ pub struct Viewport {
     /// A dimension whose expression is being edited in place: which, the text, and whether the box
     /// still has to take the keyboard.
     dimension_edit: Option<(Id<gc_sketch::Dimension>, String, bool)>,
+    picker: gc_scene::Picker,
+    /// Where the viewport was drawn last.
+    rect: egui::Rect,
+    /// The item the context menu is about.
+    context_item: Option<gc_session::CellItem>,
 }
 
 impl Viewport {
@@ -94,6 +99,9 @@ impl Viewport {
             value_open: false,
             cube_centre: None,
             dimension_edit: None,
+            picker: gc_scene::Picker::default(),
+            rect: egui::Rect::NOTHING,
+            context_item: None,
         }
     }
 
@@ -135,6 +143,7 @@ impl Viewport {
     /// Shows the viewport and feeds the user's input to the view and to the session's tool.
     pub fn ui(&mut self, ui: &mut egui::Ui, session: &mut Session, lang: Lang) {
         let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
+        self.rect = rect;
         let size = [f64::from(rect.width()), f64::from(rect.height())];
         let to_view = |p: egui::Pos2| [f64::from(p.x - rect.left()), f64::from(p.y - rect.top())];
 
@@ -210,6 +219,8 @@ impl Viewport {
             if session.is_dragging() {
                 ui.ctx().request_repaint();
             }
+        } else if active.is_none() && self.navigating.is_none() {
+            self.cell_input(ui, &response, rect, session, lang);
         }
 
         let scene = Scene::of(session);
@@ -479,6 +490,71 @@ impl Viewport {
         }
     }
 
+    /// Where a world point appears in the window, as the viewport was last drawn.
+    pub fn screen_of(&self, world: DVec3) -> Option<egui::Pos2> {
+        let size = [f64::from(self.rect.width()), f64::from(self.rect.height())];
+        let p = self.camera.project(world, size)?;
+        #[allow(clippy::cast_possible_truncation, reason = "screen coordinates fit f32")]
+        Some(egui::pos2(self.rect.left() + p[0] as f32, self.rect.top() + p[1] as f32))
+    }
+
+    /// The item of the cell under a screen position: waypoints and frame origins first (they are small),
+    /// then the nearest solid along the ray.
+    pub fn pick_item(
+        &mut self,
+        session: &Session,
+        at: [f64; 2],
+        size: [f64; 2],
+    ) -> Option<gc_session::CellItem> {
+        use gc_session::CellItem;
+        let scene = Scene::of(session);
+        let near = |world: DVec3, within: f64| {
+            self.camera
+                .project(world, size)
+                .is_some_and(|p| ((p[0] - at[0]).powi(2) + (p[1] - at[1]).powi(2)).sqrt() <= within)
+        };
+        if let Some(marker) = scene.waypoints.iter().find(|m| near(m.position, 9.0)) {
+            return Some(CellItem::Waypoint(marker.id));
+        }
+        let frame =
+            scene.frames.iter().zip(&scene.frame_items).find(|((_, pose), _)| near(pose.translation, 10.0));
+        if let Some((_, (id, _))) = frame {
+            return Some(CellItem::Frame(*id));
+        }
+        self.picker.pick(&scene, &self.camera.ray(at, size)).map(|(_, item)| item)
+    }
+
+    /// Outside sketches: the item under the cursor is highlighted, a click selects it, a right click
+    /// opens its context menu.
+    fn cell_input(
+        &mut self,
+        ui: &egui::Ui,
+        response: &egui::Response,
+        rect: egui::Rect,
+        session: &mut Session,
+        lang: Lang,
+    ) {
+        let size = [f64::from(rect.width()), f64::from(rect.height())];
+        let to_view = |p: egui::Pos2| [f64::from(p.x - rect.left()), f64::from(p.y - rect.top())];
+        let hovered = response.hover_pos().and_then(|p| self.pick_item(session, to_view(p), size));
+        if session.hover_item(hovered) {
+            ui.ctx().request_repaint();
+        }
+        if response.clicked_by(PointerButton::Primary) {
+            let picked =
+                response.interact_pointer_pos().and_then(|p| self.pick_item(session, to_view(p), size));
+            session.select_item(picked);
+        }
+        if response.secondary_clicked() {
+            self.context_item =
+                response.interact_pointer_pos().and_then(|p| self.pick_item(session, to_view(p), size));
+            session.select_item(self.context_item);
+        }
+        if let Some(item) = self.context_item {
+            response.context_menu(|ui| item_menu(ui, session, lang, item));
+        }
+    }
+
     /// Opens the in-place editor of a driving dimension of the sketch being edited.
     pub fn edit_dimension(&mut self, session: &Session, id: Id<gc_sketch::Dimension>) {
         let source = session
@@ -537,11 +613,52 @@ impl Viewport {
             session.cycle_spatial_plane();
         }
         let (escape, delete) = ctx.input(|i| (i.key_pressed(Key::Escape), i.key_pressed(Key::Delete)));
+        // Outside sketches the keys are about the selected item of the cell.
+        if session.active_sketch().is_none() {
+            if escape {
+                session.select_item(None);
+            }
+            if delete && let Some(item) = session.selected_item() {
+                // A refusal (still in use) is explained in the status bar.
+                drop(session.delete_item(item));
+            }
+            return;
+        }
         if escape {
             session.tool_event(ToolEvent::Key(ToolKey::Escape));
         }
         if delete {
             session.tool_event(ToolEvent::Key(ToolKey::Delete));
         }
+    }
+}
+
+/// The context menu of an item of the cell: its name, show or hide, plan (a path), delete.
+pub fn item_menu(ui: &mut egui::Ui, session: &mut Session, lang: Lang, item: gc_session::CellItem) {
+    let Some(name) = session.item_name(item) else {
+        ui.close();
+        return;
+    };
+    ui.label(egui::RichText::new(&name).strong());
+    ui.separator();
+    if let Some(shown) = item.shown()
+        && let Some(look) = session.shown_look(shown)
+    {
+        let label = if look.hidden { tr!(lang, CmdShow) } else { tr!(lang, CmdHide) };
+        if ui.button(label).clicked() {
+            drop(session.set_look(shown, gc_doc::Look { hidden: !look.hidden, ..look }));
+            ui.close();
+        }
+    }
+    if let gc_session::CellItem::Path(path) = item
+        && ui.button(tr!(lang, CmdPlan)).clicked()
+    {
+        session.plan(path);
+        ui.close();
+    }
+    if ui.button(tr!(lang, CmdDeleteItem, name)).clicked() {
+        // A refusal (still in use) is explained in the status bar.
+        drop(session.delete_item(item));
+        ui.close();
     }
 }

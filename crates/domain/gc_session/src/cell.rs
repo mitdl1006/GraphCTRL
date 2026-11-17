@@ -54,6 +54,43 @@ pub struct MeshRef {
 /// A part of a mesh file as it is drawn: the mesh and the colour the file gives it, if any.
 pub type ShownPart = (MeshRef, Option<[f32; 4]>);
 
+/// Something of the robot cell that can be selected, in the viewport or in the browser.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum CellItem {
+    /// A body.
+    Body(Id<Body>),
+    /// A robot.
+    Robot(Id<Robot>),
+    /// A waypoint.
+    Waypoint(Id<Waypoint>),
+    /// A work frame.
+    Frame(Id<WorkFrame>),
+    /// A path.
+    Path(Id<MotionPath>),
+}
+
+impl CellItem {
+    /// The look of a body or robot.
+    pub fn shown(self) -> Option<Shown> {
+        match self {
+            Self::Body(id) => Some(Shown::Body(id)),
+            Self::Robot(id) => Some(Shown::Robot(id)),
+            _ => None,
+        }
+    }
+
+    /// The edit that deletes it.
+    pub fn delete_op(self) -> CellOp {
+        match self {
+            Self::Body(id) => CellOp::DeleteBody(id),
+            Self::Robot(id) => CellOp::DeleteRobot(id),
+            Self::Waypoint(id) => CellOp::DeleteWaypoint(id),
+            Self::Frame(id) => CellOp::DeleteFrame(id),
+            Self::Path(id) => CellOp::DeletePath(id),
+        }
+    }
+}
+
 /// Something whose look can be changed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shown {
@@ -254,6 +291,8 @@ pub(crate) struct CellState {
     waypoint: Option<(Id<Waypoint>, WaypointTarget)>,
     frame: Option<(Id<WorkFrame>, WorkFrame)>,
     look: Option<(Shown, gc_doc::Look)>,
+    selected: Option<CellItem>,
+    hovered: Option<CellItem>,
     plans: BTreeMap<Id<MotionPath>, Planned>,
     playback: Option<(Id<MotionPath>, f64)>,
     resources: Option<Resources>,
@@ -283,6 +322,8 @@ impl Default for CellState {
             waypoint: None,
             frame: None,
             look: None,
+            selected: None,
+            hovered: None,
             plans: BTreeMap::new(),
             playback: None,
             resources: None,
@@ -605,6 +646,55 @@ impl Session {
             Some(Created::Body(id)) => Ok(*id),
             _ => Err("the body was not created".to_owned()),
         }
+    }
+
+    /// The selected item of the cell.
+    pub fn selected_item(&self) -> Option<CellItem> {
+        self.cell.selected.filter(|item| self.item_exists(*item))
+    }
+
+    /// Selects an item of the cell, or nothing.
+    pub fn select_item(&mut self, item: Option<CellItem>) {
+        self.cell.selected = item.filter(|item| self.item_exists(*item));
+    }
+
+    /// The item under the cursor (shown highlighted before it is clicked).
+    pub fn hovered_item(&self) -> Option<CellItem> {
+        self.cell.hovered.filter(|item| self.item_exists(*item))
+    }
+
+    /// Tells the session which item is under the cursor. Returns true when that changed.
+    pub fn hover_item(&mut self, item: Option<CellItem>) -> bool {
+        let changed = self.cell.hovered != item;
+        self.cell.hovered = item;
+        changed
+    }
+
+    /// True while the item is in the document.
+    pub fn item_exists(&self, item: CellItem) -> bool {
+        match item {
+            CellItem::Body(id) => self.doc.get(id).is_some(),
+            CellItem::Robot(id) => self.doc.get(id).is_some(),
+            CellItem::Waypoint(id) => self.doc.get(id).is_some(),
+            CellItem::Frame(id) => self.doc.get(id).is_some(),
+            CellItem::Path(id) => self.doc.get(id).is_some(),
+        }
+    }
+
+    /// The name of an item, as the browser shows it.
+    pub fn item_name(&self, item: CellItem) -> Option<String> {
+        Some(match item {
+            CellItem::Body(id) => self.doc.get(id)?.name.clone(),
+            CellItem::Robot(id) => self.doc.get(id)?.name.clone(),
+            CellItem::Waypoint(id) => self.doc.get(id)?.name.clone(),
+            CellItem::Frame(id) => self.doc.get(id)?.name.clone(),
+            CellItem::Path(id) => self.doc.get(id)?.name.clone(),
+        })
+    }
+
+    /// Deletes an item. What is still in use is refused, and the status bar says so.
+    pub fn delete_item(&mut self, item: CellItem) -> Result<(), EditError> {
+        self.cell_op(item.delete_op()).map(|_| ())
     }
 
     /// How a body or a robot is shown: the preview while it is being changed, else the document's.

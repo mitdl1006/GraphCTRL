@@ -729,6 +729,87 @@ fn equipment_can_be_hidden_or_made_see_through() {
     assert!(reopened.doc().get(robot).unwrap().look.hidden);
 }
 
+/// Selecting as in CAD programs: the item under the cursor is highlighted, a click selects it in the view
+/// and in the browser, the panel shows only it, a right click offers its commands, Esc and Delete work.
+#[test]
+fn items_are_highlighted_selected_and_offer_their_commands() {
+    use gc_session::CellItem;
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    build_cell(
+        &mut harness,
+        "UR5e 로봇",
+        [-0.9, -1.3, 1.5, -1.8, -1.57, 0.0],
+        [0.9, -1.3, 1.5, -1.8, -1.57, 0.0],
+    );
+    let session = &harness.state().session;
+    let (pillar, body) = session.doc().bodies().iter().next().map(|(id, b)| (id, b.clone())).unwrap();
+    let robot = session.doc().robots().iter().next().unwrap().0;
+    let centre = gc_math::DVec3::from_array(body.placement.xyz) + gc_math::DVec3::new(0.0, 0.0, 0.3);
+    let on_pillar = harness.state().viewport().screen_of(centre).unwrap();
+    let move_to = |harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, at: egui::Pos2| {
+        harness.event(egui::Event::PointerMoved(at));
+        harness.run();
+    };
+    let press = |harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, at: egui::Pos2, button| {
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos: at,
+                button,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.run();
+        }
+    };
+
+    // The pillar under the cursor is highlighted; clicking selects it and the panel shows only it.
+    move_to(&mut harness, on_pillar);
+    assert_eq!(harness.state().session.hovered_item(), Some(CellItem::Body(pillar)));
+    press(&mut harness, on_pillar, egui::PointerButton::Primary);
+    assert_eq!(harness.state().session.selected_item(), Some(CellItem::Body(pillar)));
+    assert_eq!(harness.query_all_by_label("joint_1").count(), 0, "the robot's sliders are not shown");
+    assert!(harness.query_all_by_label("투명도").count() >= 1, "the body's own settings are shown");
+    // Clicking the robot in the browser selects it there and in the view.
+    harness.get_by_label("UR5e_1").click();
+    harness.run();
+    assert_eq!(harness.state().session.selected_item(), Some(CellItem::Robot(robot)));
+    assert!(harness.query_all_by_label("shoulder_pan_joint").count() >= 1, "the robot's sliders are shown");
+    if gpu {
+        // The robot selected (blue) and the pillar under the cursor (orange).
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        move_to(&mut harness, on_pillar);
+        harness.render().unwrap().save(out.join("review-15-selection.png")).unwrap();
+    }
+
+    // A right click on the pillar offers to hide it.
+    press(&mut harness, on_pillar, egui::PointerButton::Secondary);
+    assert_eq!(harness.state().session.selected_item(), Some(CellItem::Body(pillar)));
+    harness.get_by_label("숨기기").click();
+    harness.run();
+    assert!(harness.state().session.doc().get(pillar).unwrap().look.hidden);
+
+    // Esc clears the selection; Delete deletes what is selected, unless it is still in use.
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert_eq!(harness.state().session.selected_item(), None);
+    harness.get_by_label("P1").click();
+    harness.run();
+    harness.key_press(egui::Key::Delete);
+    harness.run();
+    assert_eq!(harness.state().session.doc().waypoints().len(), 1, "the path still uses it");
+    harness.get_by_label("Path1 (계획됨)").click();
+    harness.run();
+    harness.key_press(egui::Key::Delete);
+    harness.run();
+    assert!(harness.state().session.doc().paths().is_empty());
+    assert_eq!(harness.state().session.selected_item(), None);
+}
+
 /// With worker threads, planning does not finish inside the click: the window shows "planning" and picks
 /// the result up when the job reports back.
 #[test]

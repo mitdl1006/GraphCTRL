@@ -438,7 +438,13 @@ messages! {
     ShowItem => ("{0} 보이기", "Show {0}"),
     /// Slider: how see-through a body or robot is, in percent.
     PropTransparency => ("투명도", "Transparency"),
-    /// Plan status: being computed.
+    /// Context menu: hide the body or robot.
+    CmdHide => ("숨기기", "Hide"),
+    /// Context menu: show the body or robot.
+    CmdShow => ("보이기", "Show"),
+    /// Properties panel heading when nothing is selected: everything of the cell is listed.
+    PropCellOverview => ("셀 전체 (뷰포트나 브라우저에서 항목을 클릭하면 그 항목만 표시)", "Whole cell (click an item in the view or browser to show only it)"),
+
     PlanPlanning => ("계획 중...", "Planning..."),
     /// Plan status: up to date.
     PlanReady => ("계획됨", "Planned"),

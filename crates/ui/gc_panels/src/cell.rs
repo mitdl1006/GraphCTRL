@@ -47,11 +47,37 @@ pub fn status_text(lang: Lang, status: PlanStatus) -> &'static str {
 
 /// Jog sliders, body placement and path planning. Shows nothing while the cell is empty.
 pub fn cell(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) {
+    use gc_session::CellItem;
     let pointer_down = ui.input(|i| i.pointer.any_down());
-    jog(ui, session, lang);
-    base(ui, session, lang);
-    bodies(ui, session, lang);
-    frames(ui, session, lang, state);
+    // As in CAD programs, the panel shows the selected item; with nothing selected, the whole cell.
+    let focus = session.selected_item();
+    if let Some(item) = focus {
+        if let Some(name) = session.item_name(item) {
+            ui.add_space(6.0);
+            ui.label(RichText::new(name).heading().color(colors::SELECTED));
+        }
+    } else if !session.doc().robots().is_empty() || !session.doc().bodies().is_empty() {
+        ui.add_space(6.0);
+        ui.weak(tr!(lang, PropCellOverview));
+    }
+    let first_robot = session.doc().robots().iter().next().map(|(id, _)| id);
+    let robot = match focus {
+        Some(CellItem::Robot(id)) => Some(id),
+        None => first_robot,
+        Some(_) => None,
+    };
+    if let Some(robot) = robot {
+        jog(ui, session, lang, robot);
+        base(ui, session, lang, robot);
+    }
+    match focus {
+        None => bodies(ui, session, lang, None),
+        Some(CellItem::Body(id)) => bodies(ui, session, lang, Some(id)),
+        Some(_) => {}
+    }
+    if matches!(focus, None | Some(CellItem::Frame(_) | CellItem::Waypoint(_))) {
+        frames(ui, session, lang, state, focus);
+    }
     if !pointer_down && !ui.memory(|m| m.focused().is_some()) {
         // The previews become one undo step each when the mouse is released.
         session.end_jog();
@@ -62,11 +88,17 @@ pub fn cell(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) 
         session.end_frame_preview();
         session.end_look_preview();
     }
-    paths(ui, session, lang, state);
+    match focus {
+        None => paths(ui, session, lang, state),
+        Some(CellItem::Path(id)) => {
+            state.path = Some(id);
+            paths(ui, session, lang, state);
+        }
+        Some(_) => {}
+    }
 }
 
-fn jog(ui: &mut Ui, session: &mut Session, lang: Lang) {
-    let Some((robot, _)) = session.doc().robots().iter().next() else { return };
+fn jog(ui: &mut Ui, session: &mut Session, lang: Lang, robot: gc_core::Id<gc_doc::Robot>) {
     let (Some(loaded), Some(mut joints)) = (session.robot_model(robot).cloned(), session.robot_joints(robot))
     else {
         return;
@@ -141,8 +173,7 @@ fn placement(ui: &mut Ui, lang: Lang, placement: &mut gc_doc::Placement) -> bool
 }
 
 /// Where the robot's base stands: on the floor, on a table, on a piece of equipment.
-fn base(ui: &mut Ui, session: &mut Session, lang: Lang) {
-    let Some((robot, _)) = session.doc().robots().iter().next() else { return };
+fn base(ui: &mut Ui, session: &mut Session, lang: Lang, robot: gc_core::Id<gc_doc::Robot>) {
     let Some(mut shown) = session.shown_base(robot) else { return };
     let mut changed = false;
     egui::CollapsingHeader::new(tr!(lang, PanelBase)).id_salt("gc_robot_base").show(ui, |ui| {
@@ -262,7 +293,15 @@ fn frame_pose(ui: &mut Ui, session: &Session, lang: Lang, id: gc_core::Id<gc_doc
 
 /// The work frames (which one new waypoints are taught in, and how each is turned) and the waypoints
 /// defined in them, whose positions are edited here.
-fn frames(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) {
+fn frames(
+    ui: &mut Ui,
+    session: &mut Session,
+    lang: Lang,
+    state: &mut CellUi,
+    focus: Option<gc_session::CellItem>,
+) {
+    use gc_session::CellItem;
+    let shows = |item: CellItem| focus.is_none_or(|f| f == item);
     let frames: Vec<_> = session.doc().work_frames().iter().map(|(id, f)| (id, f.name.clone())).collect();
     if frames.is_empty() {
         return;
@@ -281,25 +320,28 @@ fn frames(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) {
             });
         state.frame = Some(chosen);
     }
-    for (id, name) in &frames {
+    for (id, name) in frames.iter().filter(|(id, _)| shows(CellItem::Frame(*id))) {
         let Some(mut frame) = session.shown_frame(*id) else { continue };
         let mut changed = false;
-        egui::CollapsingHeader::new(name).id_salt(("gc_frame", id.raw())).show(ui, |ui| {
-            frame_axes(ui, session, lang, *id, &frame);
-            frame_pose(ui, session, lang, *id);
-            ui.label(tr!(lang, PropRotation));
-            ui.horizontal(|ui| {
-                for (value, axis) in frame.rpy.iter_mut().zip(["R", "P", "Y"]) {
-                    changed |= degrees(ui, value, axis);
-                }
+        egui::CollapsingHeader::new(name)
+            .id_salt(("gc_frame", id.raw()))
+            .open(focus.is_some().then_some(true))
+            .show(ui, |ui| {
+                frame_axes(ui, session, lang, *id, &frame);
+                frame_pose(ui, session, lang, *id);
+                ui.label(tr!(lang, PropRotation));
+                ui.horizontal(|ui| {
+                    for (value, axis) in frame.rpy.iter_mut().zip(["R", "P", "Y"]) {
+                        changed |= degrees(ui, value, axis);
+                    }
+                });
             });
-        });
         if changed {
             session.preview_frame(*id, frame);
         }
     }
     let waypoints: Vec<_> = session.doc().waypoints().iter().map(|(id, w)| (id, w.name.clone())).collect();
-    for (id, name) in waypoints {
+    for (id, name) in waypoints.into_iter().filter(|(id, _)| shows(CellItem::Waypoint(*id))) {
         let Some(gc_doc::WaypointTarget::InFrame { frame, mut offset }) = session.shown_target(id) else {
             continue;
         };
@@ -307,6 +349,7 @@ fn frames(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) {
         let mut changed = false;
         egui::CollapsingHeader::new(tr!(lang, PropInFrame, name, frame_name))
             .id_salt(("gc_in_frame", id.raw()))
+            .open(focus.is_some().then_some(true))
             .show(ui, |ui| changed = placement(ui, lang, &mut offset));
         if changed {
             session.preview_target(id, gc_doc::WaypointTarget::InFrame { frame, offset });
@@ -314,8 +357,9 @@ fn frames(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) {
     }
 }
 
-fn bodies(ui: &mut Ui, session: &mut Session, lang: Lang) {
-    let ids: Vec<_> = session.doc().bodies().iter().map(|(id, _)| id).collect();
+fn bodies(ui: &mut Ui, session: &mut Session, lang: Lang, only: Option<gc_core::Id<gc_doc::Body>>) {
+    let ids: Vec<_> =
+        session.doc().bodies().iter().map(|(id, _)| id).filter(|id| only.is_none_or(|o| o == *id)).collect();
     if ids.is_empty() {
         return;
     }
@@ -324,41 +368,44 @@ fn bodies(ui: &mut Ui, session: &mut Session, lang: Lang) {
     for id in ids {
         let Some(mut body) = session.shown_body(id).cloned() else { continue };
         let mut changed = false;
-        egui::CollapsingHeader::new(&body.name).id_salt(("gc_body", id.raw())).show(ui, |ui| {
-            transparency(ui, session, lang, gc_session::Shown::Body(id));
-            changed |= placement(ui, lang, &mut body.placement);
-            match &mut body.solid {
-                Solid::Mesh { file, scale } => {
-                    ui.horizontal(|ui| {
-                        let label = ui.label(tr!(lang, PropScale));
-                        let drag = egui::DragValue::new(scale).speed(0.001).range(1e-6..=1000.0);
-                        changed |= ui.add(drag).labelled_by(label.id).changed();
-                    });
-                    if let Some(error) = session.mesh_error(file) {
-                        ui.colored_label(colors::ERROR, error);
+        egui::CollapsingHeader::new(&body.name)
+            .id_salt(("gc_body", id.raw()))
+            .open(only.is_some().then_some(true))
+            .show(ui, |ui| {
+                transparency(ui, session, lang, gc_session::Shown::Body(id));
+                changed |= placement(ui, lang, &mut body.placement);
+                match &mut body.solid {
+                    Solid::Mesh { file, scale } => {
+                        ui.horizontal(|ui| {
+                            let label = ui.label(tr!(lang, PropScale));
+                            let drag = egui::DragValue::new(scale).speed(0.001).range(1e-6..=1000.0);
+                            changed |= ui.add(drag).labelled_by(label.id).changed();
+                        });
+                        if let Some(error) = session.mesh_error(file) {
+                            ui.colored_label(colors::ERROR, error);
+                        }
+                    }
+                    Solid::Box { size } => {
+                        ui.label(tr!(lang, PropSize));
+                        ui.horizontal(|ui| {
+                            for (value, name) in size.iter_mut().zip(["X", "Y", "Z"]) {
+                                changed |= millimetres(ui, value, name, 1.0);
+                            }
+                        });
+                    }
+                    Solid::Cylinder { radius, length } => {
+                        ui.label(tr!(lang, PropSize));
+                        ui.horizontal(|ui| {
+                            changed |= millimetres(ui, radius, "R", 1.0);
+                            changed |= millimetres(ui, length, "L", 1.0);
+                        });
+                    }
+                    Solid::Sphere { radius } => {
+                        ui.label(tr!(lang, PropSize));
+                        changed |= ui.horizontal(|ui| millimetres(ui, radius, "R", 1.0)).inner;
                     }
                 }
-                Solid::Box { size } => {
-                    ui.label(tr!(lang, PropSize));
-                    ui.horizontal(|ui| {
-                        for (value, name) in size.iter_mut().zip(["X", "Y", "Z"]) {
-                            changed |= millimetres(ui, value, name, 1.0);
-                        }
-                    });
-                }
-                Solid::Cylinder { radius, length } => {
-                    ui.label(tr!(lang, PropSize));
-                    ui.horizontal(|ui| {
-                        changed |= millimetres(ui, radius, "R", 1.0);
-                        changed |= millimetres(ui, length, "L", 1.0);
-                    });
-                }
-                Solid::Sphere { radius } => {
-                    ui.label(tr!(lang, PropSize));
-                    changed |= ui.horizontal(|ui| millimetres(ui, radius, "R", 1.0)).inner;
-                }
-            }
-        });
+            });
         if changed {
             session.preview_body(id, body);
         }

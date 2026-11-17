@@ -22,6 +22,10 @@ pub enum BrowserAction {
     Edit(Box<gc_doc::Command>),
     /// Show or hide a body or a robot.
     Show(gc_session::Shown, bool),
+    /// Select an item of the cell, or nothing.
+    Select(Option<gc_session::CellItem>),
+    /// Plan a path.
+    Plan(gc_core::Id<gc_doc::MotionPath>),
 }
 
 /// What is typed into the parameter editor of the browser.
@@ -111,94 +115,98 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
     if let Some(command) = params(ui, session, lang, state) {
         action = Some(BrowserAction::Edit(Box::new(command)));
     }
-    // Cell items: name and a small button that deletes the item.
+    // Cell items: a selectable name with a context menu, and a small button that deletes the item.
     let doc = session.doc();
-    type Row = (String, String, gc_doc::CellOp, Option<gc_session::Shown>);
+    let selected = session.selected_item();
+    type Row = (String, String, gc_session::CellItem);
     let mut section = |ui: &mut Ui, title: &str, items: Vec<Row>| {
         if items.is_empty() {
             return;
         }
         egui::CollapsingHeader::new(title).default_open(true).show(ui, |ui| {
-            for (name, shown, delete, toggled) in items {
+            for (name, shown, item) in items {
                 ui.horizontal(|ui| {
                     // Bodies and robots can be hidden; they stay obstacles for planning.
-                    if let Some(item) = toggled {
-                        let mut visible = !session.shown_look(item).unwrap_or_default().hidden;
+                    let look = item.shown().and_then(|shown| Some((shown, session.shown_look(shown)?)));
+                    if let Some((shown, look)) = look {
+                        let mut visible = !look.hidden;
                         let label = tr!(lang, ShowItem, name);
                         let check = ui.add(egui::Checkbox::without_text(&mut visible)).on_hover_text(&label);
                         check.widget_info(|| {
                             egui::WidgetInfo::selected(egui::Role::CheckBox, true, visible, &label)
                         });
                         if check.changed() {
-                            action = Some(BrowserAction::Show(item, visible));
+                            action = Some(BrowserAction::Show(shown, visible));
                         }
                     }
-                    ui.label(shown);
+                    let row = ui.selectable_label(selected == Some(item), shown);
+                    if row.clicked() {
+                        action = Some(BrowserAction::Select(Some(item)));
+                    }
+                    if row.secondary_clicked() {
+                        action = Some(BrowserAction::Select(Some(item)));
+                    }
+                    row.context_menu(|ui| {
+                        ui.label(RichText::new(&name).strong());
+                        ui.separator();
+                        if let Some((shown, look)) = look {
+                            let text = if look.hidden { tr!(lang, CmdShow) } else { tr!(lang, CmdHide) };
+                            if ui.button(text).clicked() {
+                                action = Some(BrowserAction::Show(shown, look.hidden));
+                                ui.close();
+                            }
+                        }
+                        if let gc_session::CellItem::Path(path) = item
+                            && ui.button(tr!(lang, CmdPlan)).clicked()
+                        {
+                            action = Some(BrowserAction::Plan(path));
+                            ui.close();
+                        }
+                        if ui.button(tr!(lang, CmdDeleteItem, name)).clicked() {
+                            action =
+                                Some(BrowserAction::Edit(Box::new(gc_doc::Command::Cell(item.delete_op()))));
+                            ui.close();
+                        }
+                    });
                     let button = ui.small_button("x").on_hover_text(tr!(lang, CmdDeleteItem, name));
                     button.widget_info(|| {
                         egui::WidgetInfo::labeled(egui::Role::Button, true, tr!(lang, CmdDeleteItem, name))
                     });
                     if button.clicked() {
-                        action = Some(BrowserAction::Edit(Box::new(gc_doc::Command::Cell(delete))));
+                        action = Some(BrowserAction::Edit(Box::new(gc_doc::Command::Cell(item.delete_op()))));
                     }
                 });
             }
         });
     };
-    use gc_doc::CellOp;
-    let plain = |name: &str| (name.to_owned(), name.to_owned());
+    use gc_session::CellItem;
+    let row = |name: &str, item| (name.to_owned(), name.to_owned(), item);
     section(
         ui,
         tr!(lang, BrowserBodies),
-        doc.bodies()
-            .iter()
-            .map(|(id, b)| {
-                (
-                    plain(&b.name).0,
-                    plain(&b.name).1,
-                    CellOp::DeleteBody(id),
-                    Some(gc_session::Shown::Body(id)),
-                )
-            })
-            .collect(),
+        doc.bodies().iter().map(|(id, b)| row(&b.name, CellItem::Body(id))).collect(),
     );
     section(
         ui,
         tr!(lang, BrowserRobots),
-        doc.robots()
-            .iter()
-            .map(|(id, r)| {
-                (
-                    plain(&r.name).0,
-                    plain(&r.name).1,
-                    CellOp::DeleteRobot(id),
-                    Some(gc_session::Shown::Robot(id)),
-                )
-            })
-            .collect(),
+        doc.robots().iter().map(|(id, r)| row(&r.name, CellItem::Robot(id))).collect(),
     );
     section(
         ui,
         tr!(lang, BrowserFrames),
-        doc.work_frames()
-            .iter()
-            .map(|(id, f)| (plain(&f.name).0, plain(&f.name).1, CellOp::DeleteFrame(id), None))
-            .collect(),
+        doc.work_frames().iter().map(|(id, f)| row(&f.name, CellItem::Frame(id))).collect(),
     );
     section(
         ui,
         tr!(lang, BrowserWaypoints),
-        doc.waypoints()
-            .iter()
-            .map(|(id, w)| (plain(&w.name).0, plain(&w.name).1, CellOp::DeleteWaypoint(id), None))
-            .collect(),
+        doc.waypoints().iter().map(|(id, w)| row(&w.name, CellItem::Waypoint(id))).collect(),
     );
     let paths = doc
         .paths()
         .iter()
         .map(|(id, p)| {
             let shown = format!("{} ({})", p.name, status_text(lang, session.plan_status(id)));
-            (p.name.clone(), shown, CellOp::DeletePath(id), None)
+            (p.name.clone(), shown, CellItem::Path(id))
         })
         .collect();
     section(ui, tr!(lang, BrowserPaths), paths);
@@ -209,10 +217,8 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
 pub fn properties(ui: &mut Ui, session: &mut Session, lang: Lang, expression: &mut String) {
     ui.heading(tr!(lang, PanelProperties));
     ui.separator();
-    let Some((_, sketch)) = session.active_sketch() else {
-        ui.weak(tr!(lang, PropNothing));
-        return;
-    };
+    // Outside sketches the robot cell's panel below says what is selected.
+    let Some((_, sketch)) = session.active_sketch() else { return };
     let selection: Vec<Item> = session.selection().iter().copied().collect();
     let length = |si: f64| format!("{} mm", trim(si * 1000.0));
     match selection.as_slice() {
