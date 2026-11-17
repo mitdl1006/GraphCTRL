@@ -63,6 +63,8 @@ pub struct RobotScene {
     /// The collision body of each link, where the link has collision geometry.
     link_bodies: Vec<Option<BodyId>>,
     tip_link: usize,
+    /// The tool centre point in the tip link's frame.
+    tool: DPose3,
     /// Largest joint step between checked states of a motion, before refinement.
     resolution: f64,
 }
@@ -139,7 +141,9 @@ impl RobotScene {
             world.set_pose(body, obstacle.pose);
         }
         let tip_link = model.link(tip_link).unwrap_or(model.root);
-        let mut scene = Self { model, chain, base, world, link_bodies, tip_link, resolution: 0.02, padding };
+        let tool = DPose3::IDENTITY;
+        let mut scene =
+            Self { model, chain, base, world, link_bodies, tip_link, tool, resolution: 0.02, padding };
         // Links that touch in the zero configuration are designed to: they are not checked either.
         scene.place(&vec![0.0; scene.chain.dof()]);
         let bodies: Vec<BodyId> = scene.link_bodies.iter().flatten().copied().collect();
@@ -175,9 +179,23 @@ impl RobotScene {
         poses.iter().map(|pose| self.base * *pose).collect()
     }
 
-    /// World pose of the chain's tip link.
+    /// Sets the tool centre point: its pose in the tip link's frame. Goals and paths are about this
+    /// point; without a tool it is the tip link itself.
+    #[must_use]
+    pub fn with_tool(mut self, tool: DPose3) -> Self {
+        self.tool = tool;
+        self
+    }
+
+    /// World pose of the tool centre point.
     pub fn tip_in_world(&self, q: &[f64]) -> DPose3 {
-        self.link_poses(q)[self.tip_link]
+        self.link_poses(q)[self.tip_link] * self.tool
+    }
+
+    /// The pose the tip link must take, in the robot's base frame, for the tool centre point to be at
+    /// `world`.
+    pub fn flange_target(&self, world: &DPose3) -> DPose3 {
+        self.base.inverse() * *world * self.tool.inverse()
     }
 
     fn place_in(&self, world: &mut World, q: &[f64]) {

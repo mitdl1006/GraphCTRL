@@ -19,7 +19,7 @@ pub enum BrowserAction {
     /// Edit this sketch.
     EditSketch(Id<Sketch>),
     /// Apply this edit (delete a cell item, add or change a parameter).
-    Edit(gc_doc::Command),
+    Edit(Box<gc_doc::Command>),
 }
 
 /// What is typed into the parameter editor of the browser.
@@ -107,7 +107,7 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
         }
     });
     if let Some(command) = params(ui, session, lang, state) {
-        action = Some(BrowserAction::Edit(command));
+        action = Some(BrowserAction::Edit(Box::new(command)));
     }
     // Cell items: name and a small button that deletes the item.
     let doc = session.doc();
@@ -124,7 +124,7 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
                         egui::WidgetInfo::labeled(egui::Role::Button, true, tr!(lang, CmdDeleteItem, name))
                     });
                     if button.clicked() {
-                        action = Some(BrowserAction::Edit(gc_doc::Command::Cell(delete)));
+                        action = Some(BrowserAction::Edit(Box::new(gc_doc::Command::Cell(delete))));
                     }
                 });
             }

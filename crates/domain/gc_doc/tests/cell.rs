@@ -21,6 +21,7 @@ fn robot() -> Robot {
         base_link: "base_link".into(),
         tip_link: "tool0".into(),
         placement: Placement::default(),
+        tcp: Placement::default(),
         joints: vec![0.0; 6],
         max_acc: 5.0,
     }

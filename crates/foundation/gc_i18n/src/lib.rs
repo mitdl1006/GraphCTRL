@@ -314,6 +314,8 @@ messages! {
     PanelJog => ("조그", "Jog"),
     /// Panel section: where the robot's base stands.
     PanelBase => ("로봇 베이스", "Robot Base"),
+    /// Panel section: the tool centre point relative to the flange.
+    PanelTcp => ("툴 중심점(TCP)", "Tool Centre Point (TCP)"),
     /// Panel section: placement and size of bodies.
     PanelBodies => ("바디 배치", "Body Placement"),
     /// Panel section: path planning.

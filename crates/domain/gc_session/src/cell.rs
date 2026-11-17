@@ -241,6 +241,7 @@ pub(crate) struct CellState {
     jog: Option<(Id<Robot>, Vec<f64>)>,
     body: Option<(Id<Body>, Body)>,
     base: Option<(Id<Robot>, Placement)>,
+    tcp: Option<(Id<Robot>, Placement)>,
     plans: BTreeMap<Id<MotionPath>, Planned>,
     playback: Option<(Id<MotionPath>, f64)>,
     resources: Option<Resources>,
@@ -266,6 +267,7 @@ impl Default for CellState {
             jog: None,
             body: None,
             base: None,
+            tcp: None,
             plans: BTreeMap::new(),
             playback: None,
             resources: None,
@@ -300,6 +302,9 @@ impl CellState {
         self.comparisons.retain(|id, _| doc.get(*id).is_some());
         if self.jog.as_ref().is_some_and(|(id, _)| doc.get(*id).is_none()) {
             self.jog = None;
+        }
+        if self.tcp.as_ref().is_some_and(|(id, _)| doc.get(*id).is_none()) {
+            self.tcp = None;
         }
         if self.base.as_ref().is_some_and(|(id, _)| doc.get(*id).is_none()) {
             self.base = None;
@@ -474,6 +479,7 @@ impl Session {
             base_link,
             tip_link,
             placement: Placement::default(),
+            tcp: Placement::default(),
             joints: vec![0.0; loaded.chain.dof()],
             max_acc: 5.0,
         };
@@ -627,6 +633,38 @@ impl Session {
         answer
     }
 
+    /// A robot's tool centre point as it is shown (in the tip link's frame): the preview while it is
+    /// being edited, else the document's.
+    pub fn shown_tcp(&self, robot: Id<Robot>) -> Option<Placement> {
+        match &self.cell.tcp {
+            Some((id, preview)) if *id == robot => Some(*preview),
+            _ => self.doc.get(robot).map(|r| r.tcp),
+        }
+    }
+
+    /// Previews a tool centre point without touching the document.
+    pub fn preview_tcp(&mut self, robot: Id<Robot>, tcp: Placement) {
+        if self.doc.get(robot).is_some() {
+            self.cell.tcp = Some((robot, tcp));
+        }
+    }
+
+    /// Commits the tool centre point preview as one undo step.
+    pub fn end_tcp_preview(&mut self) {
+        if let Some((id, tcp)) = self.cell.tcp.take()
+            && self.doc.get(id).is_some_and(|r| r.tcp != tcp)
+        {
+            self.last_error = self.cell_op(CellOp::SetTcp { id, tcp }).err();
+        }
+    }
+
+    /// The world pose of a robot's tool centre point as it is shown.
+    pub fn tcp_pose(&self, robot: Id<Robot>) -> Option<DPose3> {
+        let loaded = self.robot_model(robot)?;
+        let tip = loaded.model.link(&self.doc.get(robot)?.tip_link)?;
+        Some(*self.link_poses(robot)?.get(tip)? * pose_of(&self.shown_tcp(robot)?))
+    }
+
     /// World poses of all links of a robot as it is shown.
     pub fn link_poses(&self, robot: Id<Robot>) -> Option<Vec<DPose3>> {
         let loaded = self.robot_model(robot)?;
@@ -647,7 +685,7 @@ impl Session {
                 let mut poses = Vec::new();
                 loaded.model.link_poses(&loaded.chain.expand(q), &mut poses);
                 let tip = poses.get(loaded.model.link(&robot.tip_link)?)?;
-                Some(pose_of(&robot.placement) * *tip)
+                Some(pose_of(&robot.placement) * *tip * pose_of(&robot.tcp))
             }
         }
     }
@@ -775,11 +813,12 @@ impl Session {
         let bodies: Vec<(&Placement, &Solid)> =
             doc.bodies().iter().map(|(_, b)| (&b.placement, &b.solid)).collect();
         Some(format!(
-            "{} {} {} {:?} {:?} {} {bodies:?} {targets:?} {:?} {} {}",
+            "{} {} {} {:?} {:?} {:?} {} {bodies:?} {targets:?} {:?} {} {}",
             robot.urdf.len(),
             robot.base_link,
             robot.tip_link,
             robot.placement,
+            robot.tcp,
             robot.joints,
             robot.max_acc,
             linear,
@@ -824,6 +863,7 @@ impl Session {
     pub fn plan(&mut self, path: Id<MotionPath>) -> PlanStatus {
         self.end_jog();
         self.end_base_preview();
+        self.end_tcp_preview();
         self.end_body_preview();
         self.cell.playback = None;
         self.cancel_planning();
@@ -1005,6 +1045,7 @@ fn plan_path(
         &|uri| loaded.file(uri),
     )
     .map_err(|e| e.to_string())?;
+    let scene = scene.with_tool(pose_of(&robot.tcp));
     let mut start = robot.joints.clone();
     let mut segments = Vec::with_capacity(path.waypoints.len());
     for (index, waypoint_id) in path.waypoints.iter().enumerate() {

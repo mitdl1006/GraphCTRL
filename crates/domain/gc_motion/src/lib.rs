@@ -33,7 +33,7 @@ pub const BLEND_DEVIATION: f64 = 0.1;
 pub enum Goal {
     /// A joint configuration.
     Joints(Vec<f64>),
-    /// A pose of the chain's tip link in the world.
+    /// A pose of the tool centre point in the world (of the chain's tip link when there is no tool).
     Pose(DPose3),
 }
 
@@ -311,7 +311,6 @@ fn linear(
     let turn = from.rotation.angle_between(to.rotation);
     let steps = ((distance / STEP.0).max(turn / STEP.1).ceil() as usize).clamp(1, 20_000);
     let ik = NumericIk::new(chain, IkOptions::default());
-    let to_base = scene.base().inverse();
     let stopped = |k: usize, cause: String| MotionError::Linear {
         percent: 100.0 * (k - 1) as f64 / steps as f64,
         cause,
@@ -328,7 +327,7 @@ fn linear(
         );
         let previous = &path[k - 1];
         let q = ik
-            .solve_near(&(to_base * pose), previous)
+            .solve_near(&scene.flange_target(&pose), previous)
             .map_err(|failure| stopped(k, format!("the arm cannot reach further ({:?})", failure.reason)))?;
         if q.iter().zip(previous).any(|(a, b)| (a - b).abs() > JUMP) {
             return Err(stopped(
@@ -374,7 +373,7 @@ fn resolve_goals(
             vec![q.clone()]
         }
         Goal::Pose(world) => {
-            let target = scene.base().inverse() * *world;
+            let target = scene.flange_target(world);
             let ik = NumericIk::new(chain, IkOptions::default());
             let found = ik.solve_many(&target, Some(&request.start), 32);
             if found.is_empty() {

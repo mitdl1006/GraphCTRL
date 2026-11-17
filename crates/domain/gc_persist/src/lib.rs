@@ -304,6 +304,7 @@ mod tests {
             base_link: "base_link".into(),
             tip_link: "tool0".into(),
             placement: Placement::default(),
+            tcp: Placement::default(),
             joints: vec![0.1, -0.2, 0.3],
             max_acc: 5.0,
         };

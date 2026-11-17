@@ -261,3 +261,32 @@ fn a_linear_move_through_an_obstacle_names_it() {
         other => panic!("{other:?}"),
     }
 }
+
+#[test]
+fn goals_are_about_the_tool_centre_point() {
+    // A tool 120 mm long, bent 30 degrees.
+    let tool = DPose3::from_parts(DVec3::new(0.02, 0.0, 0.12), DQuat::from_rotation_y(0.5));
+    let bare = scene(&[]);
+    let with_tool = scene(&[]).with_tool(tool);
+    let q = [0.0, 0.2, 0.9, 0.0, 0.5, 0.0];
+    let flange = bare.tip_in_world(&q);
+    let tcp = with_tool.tip_in_world(&q);
+    assert!(((flange * tool).translation - tcp.translation).length() < 1e-12);
+
+    // A pose goal is reached by the tool centre point, not by the flange.
+    let target = DPose3::from_parts(tcp.translation + DVec3::new(0.0, 0.15, 0.05), tcp.rotation);
+    for linear in [false, true] {
+        let mut request = request(q, Goal::Pose(target), Algorithm::RrtConnect);
+        request.linear = linear;
+        let plan = plan_motion(&with_tool, &request, &NeverCancel).unwrap();
+        let end = plan.path.last().unwrap();
+        assert!(
+            (with_tool.tip_in_world(end).translation - target.translation).length() < 1e-5,
+            "linear {linear}"
+        );
+        assert!((bare.tip_in_world(end).translation - target.translation).length() > 0.1, "linear {linear}");
+        // The trace shown is the tool centre point's.
+        let last = DVec3::from_array(*plan.tip_path.last().unwrap());
+        assert!((last - target.translation).length() < 1e-5);
+    }
+}

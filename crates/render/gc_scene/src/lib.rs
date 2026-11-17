@@ -151,6 +151,8 @@ pub struct Scene {
     pub traces: Vec<Trace>,
     /// Waypoints.
     pub waypoints: Vec<Marker>,
+    /// The tool centre point of every robot.
+    pub tool_points: Vec<DPose3>,
 }
 
 const BODY: [f32; 4] = [0.55, 0.62, 0.70, 1.0];
@@ -217,6 +219,7 @@ impl Scene {
                 }
             }
         }
+        scene.tool_points = doc.robots().iter().filter_map(|(id, _)| session.tcp_pose(id)).collect();
         for (id, _) in doc.paths().iter() {
             if let Some(planned) = session.planned(id) {
                 scene.traces.push(Trace {

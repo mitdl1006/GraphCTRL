@@ -127,6 +127,17 @@ fn cell(view: &View<'_>, scene: &Scene) {
         let color = if trace.current { colors::TRACE } else { colors::INACTIVE };
         view.polyline(trace.points.iter().copied(), Stroke::new(2.0, color));
     }
+    // The tool centre point of each robot: a small frame, X red, Y green, Z blue.
+    for tool in &scene.tool_points {
+        let length = 0.05;
+        for (axis, color) in [
+            (DVec3::X, Color32::from_rgb(0xD0, 0x30, 0x30)),
+            (DVec3::Y, Color32::from_rgb(0x20, 0xA0, 0x40)),
+            (DVec3::Z, Color32::from_rgb(0x30, 0x50, 0xD0)),
+        ] {
+            view.segment(tool.translation, *tool * (axis * length), Stroke::new(2.0, color));
+        }
+    }
     for waypoint in &scene.waypoints {
         let Some(at) = view.screen(waypoint.position) else { continue };
         let r = 5.0;

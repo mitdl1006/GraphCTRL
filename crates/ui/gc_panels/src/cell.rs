@@ -47,6 +47,7 @@ pub fn cell(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) 
         // The previews become one undo step each when the mouse is released.
         session.end_jog();
         session.end_base_preview();
+        session.end_tcp_preview();
         session.end_body_preview();
     }
     paths(ui, session, lang, state);
@@ -136,6 +137,15 @@ fn base(ui: &mut Ui, session: &mut Session, lang: Lang) {
     });
     if changed {
         session.preview_base(robot, shown);
+    }
+    // The tool centre point, measured from the flange: what waypoints and paths are about.
+    let Some(mut tcp) = session.shown_tcp(robot) else { return };
+    let mut changed = false;
+    egui::CollapsingHeader::new(tr!(lang, PanelTcp)).id_salt("gc_robot_tcp").show(ui, |ui| {
+        changed = placement(ui, lang, &mut tcp);
+    });
+    if changed {
+        session.preview_tcp(robot, tcp);
     }
 }
 

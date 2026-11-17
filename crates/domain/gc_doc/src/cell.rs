@@ -91,6 +91,10 @@ pub struct Robot {
     pub tip_link: String,
     /// Where the robot's root link stands.
     pub placement: Placement,
+    /// The tool centre point: its pose in the tip link's frame. Waypoints and paths are about this
+    /// point. The default is the tip link itself (no tool).
+    #[serde(default)]
+    pub tcp: Placement,
     /// The current joint values of the planning chain.
     pub joints: Vec<f64>,
     /// Acceleration limit applied to every joint, rad/s² (robot descriptions carry none).
@@ -188,6 +192,13 @@ pub enum CellOp {
         /// The new placement.
         placement: Placement,
     },
+    /// Sets a robot's tool centre point.
+    SetTcp {
+        /// The robot.
+        id: Id<Robot>,
+        /// The pose of the tool centre point in the tip link's frame.
+        tcp: Placement,
+    },
     /// Sets a robot's joint values.
     SetJoints {
         /// The robot.
@@ -265,6 +276,11 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
             placed(placement)?;
             txn.modify(*id, |r: &mut Robot, _| r.placement = *placement)?;
             Ok((Vec::new(), "Place robot"))
+        }
+        CellOp::SetTcp { id, tcp } => {
+            placed(tcp)?;
+            txn.modify(*id, |r: &mut Robot, _| r.tcp = *tcp)?;
+            Ok((Vec::new(), "Set tool centre point"))
         }
         CellOp::SetJoints { id, joints } => {
             let count = txn.doc().get(*id).ok_or(DocError::Missing(id.erase()))?.joints.len();

@@ -543,7 +543,7 @@ impl eframe::App for GraphCtrlApp {
                     Some(BrowserAction::Edit(command)) => {
                         self.cell.playing = false;
                         if self.session.execute(&command).is_ok()
-                            && matches!(command, gc_doc::Command::AddParam { .. })
+                            && matches!(*command, gc_doc::Command::AddParam { .. })
                         {
                             self.params = gc_panels::ParamsUi::default();
                         }

@@ -385,3 +385,59 @@ fn the_shown_pose_is_checked_live() {
     session.preview_base(robot, Placement { xyz: [-0.55, 1.5, 0.0], rpy: [0.0; 3] });
     assert!(matches!(session.robot_problem(robot), Some(StateProblem::Collision { .. })));
 }
+
+#[test]
+fn waypoints_and_paths_are_about_the_tool_centre_point() {
+    let mut session = Session::new();
+    let robot = session.add_robot("Robot1", &six_axis()).unwrap();
+    session
+        .execute(&Command::Cell(CellOp::PlaceRobot {
+            id: robot,
+            placement: Placement { xyz: [0.0, -0.6, 0.0], rpy: [0.0; 3] },
+        }))
+        .unwrap();
+    session.jog(robot, &[1.5, -0.3, 0.6, 0.0, 0.6, 0.0]);
+    session.end_jog();
+    let flange = session.tcp_pose(robot).unwrap();
+    let here = session.add_waypoint_here(robot).unwrap();
+
+    // A tool 100 mm long: previewed live, committed as one step.
+    let (revision, depth) = (session.doc().revision(), session.history().undo_depth());
+    let tcp = Placement { xyz: [0.0, 0.0, 0.1], rpy: [0.0; 3] };
+    session.preview_tcp(robot, tcp);
+    assert_eq!(session.doc().revision(), revision);
+    let tip = session.tcp_pose(robot).unwrap();
+    assert!((tip.translation - flange * gc_math::DVec3::new(0.0, 0.0, 0.1)).length() < 1e-12);
+    session.end_tcp_preview();
+    assert_eq!(session.history().undo_depth(), depth + 1);
+    assert_eq!(session.doc().get(robot).unwrap().tcp, tcp);
+    // A joint waypoint is where the tool centre point is in those joint values.
+    assert!((session.waypoint_pose(here).unwrap().translation - tip.translation).length() < 1e-12);
+
+    // A sketch point on the wall is reached by the tool centre point; the flange stays 100 mm short.
+    let sketch = session.create_sketch("XZ").unwrap();
+    let created = session
+        .execute(&Command::Sketch { sketch, op: SketchOp::AddPoint { pos: [0.1, 0.5, 0.0] } })
+        .unwrap();
+    let gc_doc::Created::Point(point) = created[0] else { panic!("no point") };
+    session.finish_sketch();
+    let on_wall = session.add_waypoint(robot, WaypointTarget::SketchPoint { sketch, point }).unwrap();
+    let path = session.add_path(robot, vec![on_wall]).unwrap();
+    assert_eq!(session.plan(path), PlanStatus::Ready, "{:?}", session.plan_error(path));
+    let end = session.planned(path).unwrap().tip_path().last().unwrap();
+    assert!((end[0] - 0.1).abs() < 1e-4 && end[1].abs() < 1e-4 && (end[2] - 0.5).abs() < 1e-4, "{end:?}");
+    let duration = session.planned(path).unwrap().duration();
+    session.set_playback(Some((path, duration)));
+    let shown = session.tcp_pose(robot).unwrap().translation;
+    assert!((shown - gc_math::DVec3::new(0.1, 0.0, 0.5)).length() < 1e-4);
+    session.set_playback(None);
+
+    // Another tool makes the plan out of date.
+    session
+        .execute(&Command::Cell(CellOp::SetTcp {
+            id: robot,
+            tcp: Placement { xyz: [0.0, 0.0, 0.15], rpy: [0.0; 3] },
+        }))
+        .unwrap();
+    assert_eq!(session.plan_status(path), PlanStatus::Stale);
+}
