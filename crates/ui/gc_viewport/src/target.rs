@@ -2,21 +2,33 @@
 
 use gc_draw::Camera;
 use gc_math::DMat4;
-use gc_render::{DrawStats, Instance, Line, MeshRenderer, View, ViewTarget};
+use gc_render::{DrawStats, EdgeVertex, Instance, Line, MeshRenderer, View, ViewTarget};
 use gc_scene::Scene;
 use gc_ui::colors;
+
+/// The most edges drawn for one mesh: past it a scanned or finely tessellated mesh would turn into a
+/// web of lines, so only its sharpest edges (70°) are kept, or none.
+const EDGE_BUDGET: usize = 3000;
 
 /// Owns the offscreen render target and its registration with egui.
 pub struct Background {
     render_state: Option<egui_wgpu::RenderState>,
     target: Option<(ViewTarget, egui::TextureId)>,
     meshes: Option<MeshRenderer>,
+    /// The feature edges of each uploaded mesh, as segments in the mesh's own frame.
+    edges: std::collections::BTreeMap<u64, std::sync::Arc<Vec<[gc_math::DVec3; 2]>>>,
     stats: DrawStats,
 }
 
 impl Background {
     pub(crate) fn new(render_state: Option<egui_wgpu::RenderState>) -> Self {
-        Self { render_state, target: None, meshes: None, stats: DrawStats::default() }
+        Self {
+            render_state,
+            target: None,
+            meshes: None,
+            edges: std::collections::BTreeMap::new(),
+            stats: DrawStats::default(),
+        }
     }
 
     /// True when a GPU renders the background.
@@ -75,6 +87,22 @@ impl Background {
                     && let Ok(mesh) = solid.shape.mesh()
                 {
                     renderer.upload(&rs.device, &rs.queue, key, &mesh);
+                    // The edges drawn as lines, as CAD programs do: folds sharper than 30 degrees. A finely
+                    // detailed mesh keeps only its sharpest folds, and none if even those are too many,
+                    // so that the picture stays quick.
+                    let at = |i: u32| {
+                        let p = mesh.positions().get(i as usize).copied().unwrap_or_default();
+                        gc_math::DVec3::new(f64::from(p[0]), f64::from(p[1]), f64::from(p[2]))
+                    };
+                    let mut found = gc_mesh::edges::feature_edges(&mesh, 30.0_f64.to_radians());
+                    if found.len() > EDGE_BUDGET {
+                        found = gc_mesh::edges::feature_edges(&mesh, 70.0_f64.to_radians());
+                    }
+                    if found.len() > EDGE_BUDGET {
+                        found.clear();
+                    }
+                    let edges = found.into_iter().map(|[a, b]| [at(a), at(b)]).collect();
+                    self.edges.insert(key, std::sync::Arc::new(edges));
                 }
             }
             let eye = camera.eye();
@@ -125,7 +153,19 @@ impl Background {
                     })
                 })
                 .collect();
-            self.stats = renderer.draw(&rs.device, &rs.queue, target, clear, &view, &instances, &lines);
+            // Edges in a darker shade of the solid's own colour, fading with it.
+            let mut edges = Vec::new();
+            for solid in &scene.solids {
+                let Some(segments) = self.edges.get(&solid.shape.key()) else { continue };
+                let c = solid.color;
+                let color = [c[0] * 0.30, c[1] * 0.30, c[2] * 0.32, c[3]];
+                for [a, b] in segments.iter() {
+                    edges.push(EdgeVertex { position: vec3(solid.pose * *a - eye), color });
+                    edges.push(EdgeVertex { position: vec3(solid.pose * *b - eye), color });
+                }
+            }
+            self.stats =
+                renderer.draw(&rs.device, &rs.queue, target, clear, &view, &instances, &lines, &edges);
         }
         if let Some((_, id)) = self.target.as_ref() {
             let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));

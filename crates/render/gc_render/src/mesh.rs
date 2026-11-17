@@ -34,6 +34,16 @@ pub struct Line {
     pub width: f32,
 }
 
+/// One end of a hairline edge: drawn one pixel wide by the hardware.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
+pub struct EdgeVertex {
+    /// Eye-relative position.
+    pub position: [f32; 3],
+    /// Linear RGBA.
+    pub color: [f32; 4],
+}
+
 /// The camera and light of one frame.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct View {
@@ -95,6 +105,8 @@ pub struct MeshRenderer {
     instances: Option<(wgpu::Buffer, u64)>,
     lines: wgpu::RenderPipeline,
     line_buffer: Option<(wgpu::Buffer, u64)>,
+    edges: wgpu::RenderPipeline,
+    edge_buffer: Option<(wgpu::Buffer, u64)>,
 }
 
 impl MeshRenderer {
@@ -214,9 +226,49 @@ impl MeshRenderer {
             multiview_mask: None,
             cache: None,
         });
+        let edges = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("gc_render.edges"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_edge"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: size_of::<EdgeVertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4],
+                })],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::LineList,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState { count: MSAA_SAMPLES, ..Default::default() },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_edge"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: COLOR_FORMAT,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
         Self {
             lines,
             line_buffer: None,
+            edges,
+            edge_buffer: None,
             opaque: pipeline("gc_render.mesh.opaque", None, true),
             translucent: pipeline(
                 "gc_render.mesh.translucent",
@@ -278,6 +330,7 @@ impl MeshRenderer {
         view: &View,
         instances: &[Instance],
         lines: &[Line],
+        edges: &[EdgeVertex],
     ) -> DrawStats {
         let uniform = ViewUniform {
             clip_from_relative: view.clip_from_relative,
@@ -351,6 +404,30 @@ impl MeshRenderer {
                     }
                     first += count;
                 }
+            }
+            // Edges, pairs of vertices, in one draw.
+            let edge_bytes: &[u8] = bytemuck::cast_slice(edges);
+            if !edge_bytes.is_empty()
+                && self.edge_buffer.as_ref().is_none_or(|(_, capacity)| *capacity < edge_bytes.len() as u64)
+            {
+                let capacity = (edge_bytes.len() as u64).next_power_of_two().max(4096);
+                let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("gc_render.edges"),
+                    size: capacity,
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                self.edge_buffer = Some((buffer, capacity));
+            }
+            if let Some((buffer, _)) = self.edge_buffer.as_ref()
+                && edges.len() >= 2
+            {
+                queue.write_buffer(buffer, 0, edge_bytes);
+                pass.set_pipeline(&self.edges);
+                pass.set_bind_group(0, &self.bind_group, &[]);
+                pass.set_vertex_buffer(0, buffer.slice(..));
+                pass.draw(0..u32::try_from(edges.len() / 2 * 2).unwrap_or(u32::MAX), 0..1);
+                stats.draw_calls += 1;
             }
             if let Some((buffer, _)) = self.line_buffer.as_ref()
                 && !line_records.is_empty()

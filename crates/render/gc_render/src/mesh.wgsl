@@ -39,9 +39,18 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     if (dot(normal, view.forward.xyz) > 0.0) {
         normal = -normal;
     }
-    let diffuse = max(dot(normal, -view.light.xyz), 0.0);
-    let shade = 0.42 + 0.58 * diffuse;
-    return vec4<f32>(in.color.rgb * shade, in.color.a);
+    // A light from above and behind the viewer, sky and ground light from all around (the positions are
+    // world-oriented, so +Z is up), and a soft highlight: the look of CAD programs.
+    let to_light = -view.light.xyz;
+    let to_eye = -view.forward.xyz;
+    let sky = vec3<f32>(0.95, 0.97, 1.0);
+    let ground = vec3<f32>(0.50, 0.48, 0.46);
+    let ambient = mix(ground, sky, 0.5 + 0.5 * normal.z);
+    let diffuse = max(dot(normal, to_light), 0.0);
+    let halfway = normalize(to_light + to_eye);
+    let highlight = pow(max(dot(normal, halfway), 0.0), 40.0) * 0.16;
+    let rgb = in.color.rgb * (0.40 * ambient + 0.62 * diffuse) + vec3<f32>(highlight);
+    return vec4<f32>(min(rgb, vec3<f32>(1.0)), in.color.a);
 }
 
 // Lines of constant width on screen, tested against the same depth as the solids.
@@ -85,5 +94,27 @@ fn vs_line(
 
 @fragment
 fn fs_line(in: LineOut) -> @location(0) vec4<f32> {
+    return in.color;
+}
+
+// Edges: one-pixel lines drawn by the hardware, a little towards the eye so that a surface does not hide
+// its own edges.
+
+struct EdgeOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) color: vec4<f32>,
+};
+
+@vertex
+fn vs_edge(@location(0) position: vec3<f32>, @location(1) color: vec4<f32>) -> EdgeOut {
+    let clip = view.clip_from_relative * vec4<f32>(position, 1.0);
+    var out: EdgeOut;
+    out.clip = vec4<f32>(clip.xy, clip.z + 3e-4 * clip.w, clip.w);
+    out.color = color;
+    return out;
+}
+
+@fragment
+fn fs_edge(in: EdgeOut) -> @location(0) vec4<f32> {
     return in.color;
 }

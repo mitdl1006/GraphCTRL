@@ -9,6 +9,7 @@
 mod bvh;
 pub mod collada;
 mod data;
+pub mod edges;
 pub mod primitives;
 pub mod stl;
 mod store;

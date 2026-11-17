@@ -52,6 +52,12 @@ mod meshes {
         Instance { mesh, model, color }
     }
 
+    /// The lit face shows its own colour plus a little white highlight: the channel that is the colour
+    /// stays near full and the others stay low.
+    fn mostly(p: [u8; 4], channel: usize) -> bool {
+        (0..3).all(|c| if c == channel { p[c] > 200 } else { p[c] < 80 }) && p[3] == 255
+    }
+
     fn pixel(pixels: &[u8], x: u32, y: u32) -> [u8; 4] {
         let i = ((y * SIZE.0 + x) * 4) as usize;
         [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
@@ -83,19 +89,20 @@ mod meshes {
                     &view,
                     &instances,
                     &[],
+                    &[],
                 );
                 assert_eq!(stats.draw_calls, 1, "two instances of one mesh are one call");
                 assert_eq!(stats.triangles, 24);
                 let pixels = read_rgba(&gpu.device, &gpu.queue, &target).unwrap();
-                // The face looks straight at the light: full brightness. Whatever the draw order, the
-                // nearer cube covers the centre.
-                assert_eq!(pixel(&pixels, SIZE.0 / 2, SIZE.1 / 2), [255, 0, 0, 255], "ortho {ortho}");
+                // The face looks straight at the light: bright red with a touch of highlight. Whatever the
+                // draw order, the nearer cube covers the centre.
+                let centre = pixel(&pixels, SIZE.0 / 2, SIZE.1 / 2);
+                assert!(mostly(centre, 0), "ortho {ortho}: {centre:?}");
                 assert_eq!(pixel(&pixels, 1, 1), [0, 0, 255, 255], "background, ortho {ortho}");
                 let right_of_front = pixel(&pixels, SIZE.0 / 2 + if ortho { 11 } else { 9 }, SIZE.1 / 2);
-                assert_eq!(
-                    right_of_front,
-                    [0, 255, 0, 255],
-                    "the cube behind shows beside it, ortho {ortho}"
+                assert!(
+                    mostly(right_of_front, 1),
+                    "the cube behind shows beside it, ortho {ortho}: {right_of_front:?}"
                 );
             }
             // A white line 4 px wide across the view: in front of the cube it covers it, behind the cube
@@ -117,6 +124,7 @@ mod meshes {
                     &view,
                     &[front],
                     &[line(y)],
+                    &[],
                 );
                 let pixels = read_rgba(&gpu.device, &gpu.queue, &target).unwrap();
                 let centre = pixel(&pixels, SIZE.0 / 2, SIZE.1 / 2);
@@ -144,10 +152,11 @@ mod meshes {
                 &view,
                 &[glass, unknown, front],
                 &[],
+                &[],
             );
             assert_eq!(stats.draw_calls, 2);
             let centre = pixel(&read_rgba(&gpu.device, &gpu.queue, &target).unwrap(), SIZE.0 / 2, SIZE.1 / 2);
-            assert!(centre[0] > 55 && centre[0] < 75 && centre[1] == 0 && centre[2] > 150, "{centre:?}");
+            assert!(centre[0] > 55 && centre[0] < 100 && centre[1] < 60 && centre[2] > 150, "{centre:?}");
         }
     }
 }

@@ -1685,6 +1685,7 @@ dependencies = [
  "gc_draw",
  "gc_i18n",
  "gc_math",
+ "gc_mesh",
  "gc_render",
  "gc_scene",
  "gc_session",

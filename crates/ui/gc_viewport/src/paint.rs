@@ -73,7 +73,20 @@ fn view_of<'a>(ui: &egui::Ui, rect: Rect, camera: &'a Camera) -> View<'a> {
 /// Paints what lies under the solids: the background and the grid.
 pub(crate) fn under(ui: &egui::Ui, rect: Rect, camera: &Camera, session: &Session) {
     let view = view_of(ui, rect, camera);
-    view.painter.rect_filled(rect, 0.0, colors::BACKGROUND_TOP);
+    // A gradient from light at the top to a little darker at the bottom, as in CAD programs.
+    let mut gradient = egui::Mesh::default();
+    let (top, bottom) = (colors::BACKGROUND_TOP, colors::BACKGROUND_BOTTOM);
+    for (corner, colour) in [
+        (rect.left_top(), top),
+        (rect.right_top(), top),
+        (rect.right_bottom(), bottom),
+        (rect.left_bottom(), bottom),
+    ] {
+        gradient.colored_vertex(corner, colour);
+    }
+    gradient.add_triangle(0, 1, 2);
+    gradient.add_triangle(0, 2, 3);
+    view.painter.add(egui::Shape::mesh(gradient));
     let world_xy = SketchPlane { origin: DVec3::ZERO, u: DVec3::X, v: DVec3::Y, normal: DVec3::Z };
     let grid_plane = match session.active_sketch() {
         // A 3D sketch shows its working plane.
