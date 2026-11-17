@@ -4,7 +4,9 @@ struct View {
     light: vec4<f32>,
     forward: vec4<f32>,
     // Width and height of the target in pixels.
+    // Its z is 1 when a slicing plane cuts away what lies on its normal's side.
     viewport: vec4<f32>,
+    slice: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> view: View;
 
@@ -34,6 +36,9 @@ fn vs_main(
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
+    if (view.viewport.z > 0.5 && dot(view.slice.xyz, in.relative) + view.slice.w > 0.0) {
+        discard;
+    }
     // Face normal from the surface itself: no vertex normals are needed and flat faces stay flat.
     var normal = normalize(cross(dpdx(in.relative), dpdy(in.relative)));
     if (dot(normal, view.forward.xyz) > 0.0) {

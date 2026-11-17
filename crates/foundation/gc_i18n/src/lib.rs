@@ -520,6 +520,8 @@ messages! {
     /// Plan metric: the move was possible in a straight joint-space line.
     PlanStraight => ("직선 이동(플래너 불필요)", "Straight move (no planner needed)"),
     // --- frontend ---
+    /// Status bar button: cut away what hides the sketch plane (F7).
+    StatusSlice => ("그래픽 자르기 (F7)", "Slice Graphics (F7)"),
     /// Sketch context menu: end the command in progress.
     CmdDone => ("완료", "Done"),
     /// Browser menu: rename in place.

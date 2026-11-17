@@ -359,6 +359,11 @@ impl GraphCtrlApp {
         &self.viewport
     }
 
+    /// Frames everything in the view, as "fit" in the View tab does.
+    pub fn fit_view(&mut self) {
+        self.viewport.fit(&self.session, [1000.0, 700.0]);
+    }
+
     /// The viewport, for tests that move the view.
     pub fn viewport_mut(&mut self) -> &mut Viewport {
         &mut self.viewport
@@ -944,6 +949,8 @@ impl eframe::App for GraphCtrlApp {
                 lang,
                 self.viewport.background().has_gpu(),
                 self.notice.as_deref(),
+                (self.session.active_sketch().is_some() && !self.session.sketch_is_spatial())
+                    .then_some(&mut self.viewport.slice),
             );
         });
         // The 3D view fills the window; the browser and the properties float over it, see-through, and

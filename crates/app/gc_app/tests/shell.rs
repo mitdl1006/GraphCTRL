@@ -2080,3 +2080,47 @@ fn sketch_basics_follow_the_cad_conventions() {
     harness.run();
     assert!(harness.state().session.active_sketch().is_none());
 }
+
+/// Slice Graphics (F7): a body in front of the sketch plane hides it; F7 cuts it away, and finishing the
+/// sketch brings it back.
+#[test]
+fn slice_graphics_reveals_the_sketch_plane() {
+    let Some(_) = gc_test_support::gpu() else { return };
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .wgpu()
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    // A big box that covers the origin plane's view from above.
+    let solid = gc_doc::Solid::Box { size: [0.6, 0.6, 0.2] };
+    let placement = gc_doc::Placement { xyz: [0.0, 0.0, 0.1], rpy: [0.0; 3] };
+    harness.state_mut().session.add_body(solid, placement).unwrap();
+    harness.get_by_label("XY 스케치").click();
+    harness.run();
+    harness.state_mut().fit_view();
+    harness.run();
+    let covered = harness.render().unwrap();
+    assert!(!harness.state().viewport().slice);
+    harness.key_press(egui::Key::F7);
+    harness.run();
+    assert!(harness.state().viewport().slice);
+    let sliced = harness.render().unwrap();
+    // The box that hid the plane is gone from the picture: it differs a lot.
+    let centre = |image: &image::RgbaImage| -> Vec<image::Rgba<u8>> {
+        (400..700)
+            .flat_map(|x| (250..600).map(move |y| (x, y)))
+            .map(|(x, y)| *image.get_pixel(x, y))
+            .collect()
+    };
+    let different = centre(&covered).iter().zip(centre(&sliced)).filter(|(a, b)| **a != *b).count();
+    assert!(different > 5000, "{different} pixels changed");
+    let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+    std::fs::create_dir_all(&out).unwrap();
+    covered.save(out.join("review-31-slice-off.png")).unwrap();
+    sliced.save(out.join("review-31-slice-on.png")).unwrap();
+    // Finishing the sketch restores it.
+    harness.query_all_by_label("스케치 마무리").last().unwrap().click();
+    harness.run();
+    assert!(!harness.state().viewport().slice);
+}

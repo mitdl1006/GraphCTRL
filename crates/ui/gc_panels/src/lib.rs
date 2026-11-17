@@ -452,12 +452,29 @@ fn prompt_text(lang: Lang, prompt: Prompt) -> &'static str {
 
 /// The status bar: what the tool expects next, why the last edit was refused, a notice from the
 /// application (file saved, file error) and how constrained the sketch is.
-pub fn status_bar(ui: &mut Ui, session: &Session, lang: Lang, gpu: bool, notice: Option<&str>) {
+pub fn status_bar(
+    ui: &mut Ui,
+    session: &Session,
+    lang: Lang,
+    gpu: bool,
+    notice: Option<&str>,
+    slice: Option<&mut bool>,
+) {
     ui.horizontal(|ui| {
         if session.active_sketch().is_some() {
             ui.label(prompt_text(lang, session.prompt()));
         } else {
             ui.label(tr!(lang, StatusReady));
+        }
+        // Slice Graphics (F7): offered while a 2D sketch is edited.
+        if let Some(slice) = slice {
+            ui.separator();
+            let label = tr!(lang, StatusSlice);
+            let button = ui.selectable_label(*slice, label);
+            button.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, *slice, label));
+            if button.clicked() {
+                *slice = !*slice;
+            }
         }
         if session.sketch_is_spatial() {
             let plane = ["YZ", "ZX", "XY"][session.spatial_plane() % 3];

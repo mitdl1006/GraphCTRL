@@ -70,6 +70,9 @@ pub(crate) fn plane_of(session: &Session, sketch: &Sketch) -> SketchPlane {
 pub struct Viewport {
     /// Whether the frame time and draw statistics are shown in the corner.
     pub perf_overlay: bool,
+    /// Slice Graphics (F7): the part of the model in front of the sketch plane is cut away while a 2D
+    /// sketch is edited.
+    pub slice: bool,
     /// Whether the constraint glyphs are drawn (F8 shows them, F9 hides them).
     pub show_constraints: bool,
     /// A selection box being dragged in a sketch: where the mouse went down.
@@ -109,6 +112,7 @@ impl Viewport {
             perf_overlay: false,
             clear: None,
             spatial_drag: None,
+            slice: false,
             show_constraints: true,
             box_select: None,
             frame_time: 0.0,
@@ -314,7 +318,17 @@ impl Viewport {
 
         let scene = Scene::of(session);
         paint::under(ui, rect, &self.camera, session);
-        self.background.paint(ui, rect, &self.camera, &scene);
+        // Finishing the sketch restores the sliced graphics.
+        if active.is_none() || session.sketch_is_spatial() {
+            self.slice = false;
+        }
+        let slice = active.filter(|_| self.slice).map(|(_, plane)| {
+            // The side of the plane the eye is on is cut away.
+            let toward_eye =
+                if plane.normal.dot(self.camera.forward()) < 0.0 { plane.normal } else { -plane.normal };
+            (toward_eye, toward_eye.dot(plane.origin))
+        });
+        self.background.paint(ui, rect, &self.camera, &scene, slice);
         paint::over(
             ui,
             rect,
@@ -845,6 +859,12 @@ impl Viewport {
         // In a 3D sketch Tab switches the working plane instead of moving the keyboard focus.
         if session.sketch_is_spatial() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Tab)) {
             session.cycle_spatial_plane();
+        }
+        if ctx.input(|i| i.key_pressed(Key::F7))
+            && session.active_sketch().is_some()
+            && !session.sketch_is_spatial()
+        {
+            self.slice = !self.slice;
         }
         if ctx.input(|i| i.key_pressed(Key::F8)) {
             self.show_constraints = true;

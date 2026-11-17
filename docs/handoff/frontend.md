@@ -24,7 +24,10 @@
 - 스케치 P1(FE): P1-1 새 스케치는 선 도구로 시작, P1-10 F8/F9(`Viewport::show_constraints`), P1-9 창(왼→오른쪽, 완전히 포함)/교차(오른→왼쪽, 점선 상자) 선택 + Shift/Ctrl 유지·토글(뷰포트가 `ClickItem`으로 적용), P1-7 우클릭 "완료"(지금은 Esc)·"스케치 마무리". 테스트 `sketch_basics_follow_the_cad_conventions`. 백엔드가 올릴 도구 API(HUD·ToolCommand·정렬선·스냅 종류)는 합의했고 올라오면 화면을 붙임. P1-14 단축키: L·C·A·R·D·F8·F9 있음, T·TR·`-`는 도구가 생기면.
 - 리드 공지: GraphCTRL은 어셈블리(.iam) 수준 — 브라우저 트리는 구성요소(설비 부품·UR·툴·필드) 아래 각자의 원점 폴더(평면·축·중심점)를 가져야 하고 뷰포트에서 평면 호버·선택으로 스케치 시작. 트리 구조를 이 계층으로 확장 예정(명세 `docs/ux/inventor-assembly-parity.md` 대기).
 
+- 어셈블리 P1-7 Slice Graphics(F7): 2D 스케치 편집 중 F7 또는 상태바 "그래픽 자르기 (F7)"가 시점 쪽 모델을 잘라 스케치 평면을 드러냄(렌더러 `View::slice` 평면 + 셰이더 discard, 피처 엣지는 양 끝이 잘린 쪽이면 생략; 평면에 놓인 면도 잘림), 스케치 마무리 시 자동 복원, 3D 스케치는 해당 없음. 근거: 인벤터 2026 "To Work with Sketches"의 Slice Graphics 절 — https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-F5A5790A-F748-49F0-A81F-BCA56C7C1E89.htm (원문의 복원 조건 중 "피처 명령 클릭"은 피처가 없어 미구현). 테스트 `slice_graphics_reveals_the_sketch_plane`(GPU), `review-31-slice-on/off.png`.
+
 ## 남은 일
+- 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹
 - 인벤터 P1 FE 남은 것(우선순위 순): #2 마킹 메뉴, #3 F2 이름 바꾸기(백엔드 `Rename` 명령 필요), #5 전 노드 가시성(스케치·웨이포인트·경로·좌표계의 Look 문서 데이터 필요), #7 Navigation Bar, #8 Look At, #9 Select Other, #10 캔버스 치수 상자, #11 속성 패널 입력 규칙, #12 상태바 프롬프트(좌표·구속·단위 칸), #15 우클릭 메뉴 정비
 - 사각형 3종(2점·3점·중심): 자리 버튼을 "생성" 그룹에 넣으면 "스케치 마무리"가 밀려 kittest가 실패해 "예정" 그룹을 맨 끝에 둠. 사각형은 드롭다운 한 버튼으로 묶을 것
