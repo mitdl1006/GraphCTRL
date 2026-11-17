@@ -810,6 +810,98 @@ fn items_are_highlighted_selected_and_offer_their_commands() {
     assert_eq!(harness.state().session.selected_item(), None);
 }
 
+/// The move and turn handles: dragging the X arrow of a selected body moves it along X in whole
+/// millimetres, the ring turns it about the vertical, and each drag is one undo step.
+#[test]
+fn a_selected_body_is_moved_and_turned_with_its_handles() {
+    use gc_session::CellItem;
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("로봇").click();
+    harness.run();
+    harness.get_by_label("상자").click();
+    harness.run();
+    let (body, start) = {
+        let session = &harness.state().session;
+        let (id, b) = session.doc().bodies().iter().next().unwrap();
+        (id, b.placement)
+    };
+    harness.state_mut().session.select_item(Some(CellItem::Body(body)));
+    harness.run();
+    let origin = gc_math::DVec3::from_array(start.xyz);
+    let screen = |harness: &egui_kittest::Harness<'_, GraphCtrlApp>, w| {
+        harness.state().viewport().screen_of(w).unwrap()
+    };
+    let drag = |harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, from: egui::Pos2, to: egui::Pos2| {
+        harness.event(egui::Event::PointerMoved(from));
+        harness.run();
+        let button = |pressed| egui::Event::PointerButton {
+            pos: if pressed { from } else { to },
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        harness.event(button(true));
+        harness.step();
+        for k in 1..=6 {
+            harness.event(egui::Event::PointerMoved(from + (to - from) * (k as f32 / 6.0)));
+            harness.step();
+        }
+        harness.event(button(false));
+        harness.run();
+    };
+    let depth = harness.state().session.history().undo_depth();
+
+    // Along the X arrow: grab it half-way along, drag to where 100 mm further along X appears.
+    let tip = screen(&harness, origin + gc_math::DVec3::X * 0.05);
+    let unit = screen(&harness, origin + gc_math::DVec3::X * 0.15)
+        - screen(&harness, origin + gc_math::DVec3::X * 0.05);
+    let grab = harness.state().viewport().screen_of(origin).unwrap()
+        + (tip - harness.state().viewport().screen_of(origin).unwrap()).normalized() * 40.0;
+    drag(&mut harness, grab, grab + unit);
+    let moved = harness.state().session.doc().get(body).unwrap().placement;
+    assert!((moved.xyz[0] - start.xyz[0] - 0.1).abs() < 0.0051, "{:?} -> {:?}", start.xyz, moved.xyz);
+    assert_eq!((moved.xyz[1], moved.xyz[2]), (start.xyz[1], start.xyz[2]), "only X changes");
+    let mm = moved.xyz[0] * 1000.0;
+    assert!((mm - mm.round()).abs() < 1e-6, "whole millimetres: {mm}");
+    assert_eq!(harness.state().session.history().undo_depth(), depth + 1);
+    assert_eq!(harness.state().session.selected_item(), Some(CellItem::Body(body)), "still selected");
+    if gpu {
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        harness.render().unwrap().save(out.join("review-16-gizmo.png")).unwrap();
+    }
+
+    // The ring: from its +X side round to its +Y side is a quarter turn about Z.
+    let origin = gc_math::DVec3::from_array(moved.xyz);
+    let px = |harness: &egui_kittest::Harness<'_, GraphCtrlApp>| {
+        // Along the screen's own right the projection is not foreshortened.
+        let right = harness.state().viewport().camera.right();
+        screen(harness, origin + right * 0.1).distance(screen(harness, origin)) / 0.1
+    };
+    let radius = 60.0 / px(&harness) as f64;
+    let on_ring = |harness: &egui_kittest::Harness<'_, GraphCtrlApp>, angle: f64| {
+        screen(
+            harness,
+            origin + gc_math::DVec3::new(gc_math::fm::cos(angle), gc_math::fm::sin(angle), 0.0) * radius,
+        )
+    };
+    let (from, to) = (on_ring(&harness, 0.3), on_ring(&harness, 0.3 + std::f64::consts::FRAC_PI_2));
+    drag(&mut harness, from, to);
+    let turned = harness.state().session.doc().get(body).unwrap().placement;
+    assert!(
+        (turned.rpy[2] - start.rpy[2] - std::f64::consts::FRAC_PI_2).abs() < 0.0175 + 1e-9,
+        "{:?}",
+        turned.rpy
+    );
+    assert_eq!(turned.xyz, moved.xyz, "turning does not move it");
+    assert!(harness.state_mut().session.undo());
+    assert_eq!(harness.state().session.doc().get(body).unwrap().placement, moved);
+}
+
 /// With worker threads, planning does not finish inside the click: the window shows "planning" and picks
 /// the result up when the job reports back.
 #[test]

@@ -119,3 +119,13 @@ Frame1 기준으로 저장 → 경로 계획 → X 치수를 600 mm로 바꾸면
 |---|---|---|
 | `img/review-14-see-through.png` | 60 % 투명한 기둥 뒤로 궤적이 비쳐 보임. 브라우저의 Body1·UR5e_1 앞 체크박스, 조그 위 "투명도" 슬라이더 | 확인함 |
 
+## 선택과 이동/회전 기즈모 (2026-11-17)
+
+| 파일 | 보여야 할 것 | 확인 |
+|---|---|---|
+| `img/review-15-selection.png` | 선택한 UR5e가 파란색, 커서 아래 기둥이 주황색. 브라우저에서 UR5e_1이 선택 표시, 패널은 UR5e_1 항목만 | 확인함 |
+| `img/review-16-gizmo.png` | 선택한 상자(파란색)에 X/Y/Z 화살표와 파란 회전 링, 끌고 있는 X 화살표가 호박색. 패널의 위치 X 650(550에서 +100) | 확인함 |
+
+`items_are_highlighted_selected_and_offer_their_commands`, `a_selected_body_is_moved_and_turned_with_its_handles`가 실제 마우스
+이벤트로 호버·클릭·우클릭 메뉴·Esc·Delete, 화살표 끌기(1 mm 단위, 실행 취소 1단계)와 링 회전(1° 단위)을 확인한다.
+

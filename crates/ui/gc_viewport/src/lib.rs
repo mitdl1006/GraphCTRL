@@ -4,6 +4,7 @@
 //! is painted under that image and sketches, dimensions, traces and tool previews over it with egui's
 //! painter, through the same camera. Without a GPU everything still works; only the solids are missing.
 
+mod gizmo;
 mod paint;
 mod target;
 
@@ -80,6 +81,7 @@ pub struct Viewport {
     /// still has to take the keyboard.
     dimension_edit: Option<(Id<gc_sketch::Dimension>, String, bool)>,
     picker: gc_scene::Picker,
+    gizmo: Option<gizmo::Drag>,
     /// Where the viewport was drawn last.
     rect: egui::Rect,
     /// The item the context menu is about.
@@ -100,6 +102,7 @@ impl Viewport {
             cube_centre: None,
             dimension_edit: None,
             picker: gc_scene::Picker::default(),
+            gizmo: None,
             rect: egui::Rect::NOTHING,
             context_item: None,
         }
@@ -536,11 +539,17 @@ impl Viewport {
     ) {
         let size = [f64::from(rect.width()), f64::from(rect.height())];
         let to_view = |p: egui::Pos2| [f64::from(p.x - rect.left()), f64::from(p.y - rect.top())];
-        let hovered = response.hover_pos().and_then(|p| self.pick_item(session, to_view(p), size));
+        // The move and turn handles of the selected item come first: dragging them is not a selection.
+        let on_handles = gizmo::ui(ui, response, rect, &self.camera, session, &mut self.gizmo);
+        let hovered = if on_handles {
+            None
+        } else {
+            response.hover_pos().and_then(|p| self.pick_item(session, to_view(p), size))
+        };
         if session.hover_item(hovered) {
             ui.ctx().request_repaint();
         }
-        if response.clicked_by(PointerButton::Primary) {
+        if !on_handles && response.clicked_by(PointerButton::Primary) {
             let picked =
                 response.interact_pointer_pos().and_then(|p| self.pick_item(session, to_view(p), size));
             session.select_item(picked);
