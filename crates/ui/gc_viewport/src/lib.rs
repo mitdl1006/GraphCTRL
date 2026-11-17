@@ -4,6 +4,7 @@
 //! is painted under that image and sketches, dimensions, traces and tool previews over it with egui's
 //! painter, through the same camera. Without a GPU everything still works; only the solids are missing.
 
+mod dof;
 mod freemove;
 mod gizmo;
 mod hud;
@@ -418,7 +419,7 @@ impl Viewport {
                     if plane.normal.dot(self.camera.forward()) < 0.0 { plane.normal } else { -plane.normal };
                 (toward_eye, toward_eye.dot(plane.origin))
             });
-            target::Slicing { planes: one.into_iter().collect(), union: false }
+            target::Slicing { planes: one.into_iter().collect(), union: false, cap: false }
         };
         self.background.paint(ui, rect, &self.camera, &scene, slice);
         paint::over(
@@ -438,6 +439,7 @@ impl Viewport {
                 Some(egui::pos2(rect.left() + p[0] as f32, rect.top() + p[1] as f32))
             };
             origin::paint(&ui.painter_at(rect), &screen, session, self.origin_selected, self.constrain_mode);
+            dof::paint(&ui.painter_at(rect), &screen, session, camera.distance * 0.12);
         }
         if let Some(section) = &self.section {
             let camera = self.camera;

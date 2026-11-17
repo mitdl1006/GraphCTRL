@@ -291,6 +291,21 @@ pub(crate) fn show(
                         viewport.section = None;
                     }
                 });
+                ribbon_group(ui, tr!(lang, GroupVisibility), |ui| {
+                    // Degrees of freedom: a symbol at every component that can still move.
+                    let items: Vec<gc_core::AnyId> = session
+                        .components()
+                        .iter()
+                        .filter_map(|node| match node.occurrence {
+                            gc_doc::Occurrence::Item(id) => Some(id),
+                            _ => None,
+                        })
+                        .collect();
+                    let on = !session.dof_symbols().is_empty();
+                    if ribbon_button(ui, Icon::Orbit, tr!(lang, CmdDof), on, !items.is_empty()).clicked() {
+                        drop(session.set_dof_shown(&items, !on));
+                    }
+                });
                 ribbon_group(ui, tr!(lang, GroupPanels), |ui| {
                     if ribbon_button(ui, Icon::View, tr!(lang, ViewPanelsSeeThrough), *translucent, true)
                         .clicked()

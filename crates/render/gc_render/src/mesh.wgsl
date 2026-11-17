@@ -36,19 +36,24 @@ fn vs_main(
 }
 
 @fragment
-fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
+fn fs_main(in: VertexOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
     if (view.viewport.z > 0.5) {
         let first = dot(view.slice.xyz, in.relative) + view.slice.w > 0.0;
         if (view.viewport.z < 1.5) {
             if (first) { discard; }
         } else {
             let second = dot(view.slice2.xyz, in.relative) + view.slice2.w > 0.0;
-            if (view.viewport.w > 0.5) {
+            if (u32(view.viewport.w) % 2u == 1u) {
                 if (first || second) { discard; }
             } else {
                 if (first && second) { discard; }
             }
         }
+    }
+    // A cut opens the solid: what is seen through it is the inside of the far walls, a back face. Those
+    // are drawn as the cap, a flat face where the plane cuts the material.
+    if (view.viewport.z > 0.5 && u32(view.viewport.w) >= 2u && !front && in.color.a > 0.99) {
+        return vec4<f32>(0.80, 0.76, 0.66, 1.0);
     }
     // Face normal from the surface itself: no vertex normals are needed and flat faces stay flat.
     var normal = normalize(cross(dpdx(in.relative), dpdy(in.relative)));

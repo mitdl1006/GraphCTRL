@@ -750,6 +750,10 @@ messages! {
     CmdPlace => ("배치", "Place"),
     /// Assemble tab: group of free move and free rotate.
     GroupPosition => ("위치", "Position"),
+    /// View tab: group of what is drawn on top of the model.
+    GroupVisibility => ("가시성", "Visibility"),
+    /// View tab, Visibility: shows the degrees-of-freedom symbols of the components.
+    CmdDof => ("자유도", "Degrees of Freedom"),
     /// Plan card: what the checks guarantee. `{0}` padding mm, `{1}` step mm, `{2}` step degrees, `{3}` clearance mm.
     PlanGuarantee => ("패딩 {0} mm, 검사 간격 {1} mm·{2}°에서 볼록 충돌 모델이 장애물과 {3} mm 이상 떨어짐", "Padding {0} mm; with check steps of {1} mm and {2} degrees the convex collision model stays at least {3} mm from obstacles"),
     /// Plan card: the guarantee holds only at the checked states.

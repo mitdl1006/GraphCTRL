@@ -151,6 +151,7 @@ impl Background {
                 slice: slice.planes.first().map(|plane| relative_plane(*plane, eye)),
                 slice2: slice.planes.get(1).map(|plane| relative_plane(*plane, eye)),
                 slice_union: slice.union,
+                slice_cap: slice.cap,
             };
             let removed = |p: gc_math::DVec3| slice.removes(p);
             // Transparent where nothing is drawn, so that the grid painted underneath shows through.
@@ -201,6 +202,8 @@ impl Background {
 pub(crate) struct Slicing {
     pub(crate) planes: Vec<(gc_math::DVec3, f64)>,
     pub(crate) union: bool,
+    /// Draw the cut open (a section view): the inside of the far walls is a flat cap.
+    pub(crate) cap: bool,
 }
 
 impl Slicing {

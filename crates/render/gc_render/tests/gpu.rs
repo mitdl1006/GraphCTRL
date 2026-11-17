@@ -49,6 +49,7 @@ mod meshes {
                 slice: None,
                 slice2: None,
                 slice_union: false,
+                slice_cap: false,
             },
         )
     }
@@ -71,6 +72,35 @@ mod meshes {
     fn pixel(pixels: &[u8], x: u32, y: u32) -> [u8; 4] {
         let i = ((y * SIZE.0 + x) * 4) as usize;
         [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
+    }
+
+    /// A slicing plane through a cube opens it: the cut shows the inside of the far wall as a flat cap, not
+    /// the cube's colour, and the cube is whole again without the plane.
+    #[test]
+    fn a_slice_through_a_solid_shows_a_cap() {
+        let Some(gpu) = gc_test_support::gpu_or_skip("a_slice_through_a_solid_shows_a_cap") else {
+            return;
+        };
+        let target = ViewTarget::new(&gpu.device, SIZE.0, SIZE.1);
+        let mut renderer = MeshRenderer::new(&gpu.device);
+        renderer.upload(&gpu.device, &gpu.queue, 1, &primitives::cuboid([0.4, 0.4, 0.4]).unwrap());
+        let (camera, mut view) = view(true);
+        let cube = at(&camera, 1, DVec3::ZERO, [1.0, 0.0, 0.0, 1.0]);
+        let centre = |renderer: &mut MeshRenderer, view: &View| {
+            renderer.draw(&gpu.device, &gpu.queue, &target, [0.0, 0.0, 1.0, 1.0], view, &[cube], &[], &[]);
+            pixel(&read_rgba(&gpu.device, &gpu.queue, &target).unwrap(), SIZE.0 / 2, SIZE.1 / 2)
+        };
+        assert!(mostly(centre(&mut renderer, &view), 0), "whole cube is red");
+        // Cut away the near half: the plane y = 0 (the eye is 2 m before the origin), normal towards -Y.
+        view.slice = Some([0.0, -1.0, 0.0, 2.0]);
+        let open = centre(&mut renderer, &view);
+        assert!(
+            mostly(open, 2) || open[0] > 200,
+            "without the cap flag the far wall keeps its colour: {open:?}"
+        );
+        view.slice_cap = true;
+        let cut = centre(&mut renderer, &view);
+        assert!(cut[0] > 150 && cut[1] > 150 && cut[2] > 100 && cut[2] < 220, "a cap, not red: {cut:?}");
     }
 
     #[test]
