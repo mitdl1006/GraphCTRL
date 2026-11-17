@@ -1,5 +1,38 @@
 # 백엔드 인계 (2026-11-17)
 
+## 2026-11-18 — QA 버그 2건(원점 표시), Unsolvable 메시지
+
+- 리드 브랜치 병합. `qa_origin_folder`의 두 `#[ignore]` 해제: ① 이미 보이는 원점 요소를 다시 보이면 중복 저장 → 처음 보인 순서대로 한 번만,
+  ② 삭제된 컴포넌트의 `origin_visible`이 true → `has_occurrence` 확인 + 모델 트리 상태를 쓸 때 없는 컴포넌트의 상태(고정·비활성·숨김·억제·원점 표시)를
+  정리(삭제를 되돌리면 그 쓰기 이전 상태가 함께 돌아옴).
+- `EditError::Unsolvable{ids, names}` — Display: "these assembly constraints cannot be satisfied together: Mate:1, Flush:2"(이름 포함).
+  UI 문구로 쓰려면 `names`를 i18n 문장에 넣으면 된다.
+
+## 2026-11-18 — 매개변수 이름 바꾸기(리드 요청)
+
+- `Command::RenameParam{id, name}`: 이름 형식·중복 검사(`EditError::BadName`), 이 매개변수를 쓰는 다른 매개변수와 모든 스케치 치수의 수식 안
+  이름을 같은 트랜잭션에서 바꿈(구문 트리의 이름 위치만 바꾸므로 `w`가 `width`의 일부일 때 등은 건드리지 않음), undo 1단계, 값은 그대로.
+  세션 래퍼 없이 `session.execute(&Command::RenameParam{..})`(매개변수 명령은 원래 execute로 씀). 테스트 `gc_doc/tests/document.rs`.
+- 모델 매개변수(d0, d1 …, 치수를 수식에서 참조) 검토: 가능하다. 제안 — 치수마다 문서 전역 이름(`Dimension.name`, 새 치수에 다음 `dN`)을
+  두고 `scope_of`에 치수 값을 넣으며, `propagate`의 의존 순서에 치수↔매개변수를 함께 넣는다(순환 금지). 스케치 저장 형식에 필드 하나 추가
+  (serde 기본값으로 기존 파일은 열 때 이름 부여). 인벤터 원문(매개변수 대화상자) 확인 후 진행 — 지금 구현하지 않았다.
+
+## 2026-11-18 새벽 2 — 어셈블리 P1-11 Rigid·Rotational 조인트, 로봇 마운트, 툴→플랜지
+
+- `RelationKind::{Rigid{flip}, Rotational{flip}}` — 구속과 같은 `Relationship`/`add_relationship`로 추가, 같은 솔버로 풀림.
+  조인트 원점 `Geometry::Frame{origin, z, x}`(컴포넌트 프레임), `Geometry::origin_frame()` = 컴포넌트 자기 원점(중심점+Z+X).
+  평면·원·축·점도 원점으로 쓸 수 있다(Z = 법선/방향, X = 컴포넌트 X를 수직화).
+- 의미: Rigid = 두 원점 일치 + Z 반대(flip이면 같은 방향) + X 같은 방향 → 모든 자유도 제거. Rotational = 원점 일치 + Z 정렬, Z축 회전 자유.
+  Automatic = 원형 원점이면 Rotational, 아니면 Rigid(`session.automatic_joint(&a, &b)`).
+- **로봇 마운트**: `Selection{occurrence: Item(robot), geometry: Geometry::origin_frame()}`를 설비의 원점/작업 프레임에 Rigid로 → 설비를
+  옮기면 로봇이 따라감(테스트는 바디로; 로봇도 같은 owner 경로).
+- **툴→플랜지**: 툴은 아직 별도 컴포넌트가 아니라(`Robot.tool`) `session.mount_tool(robot, origin: Geometry, flip) -> Result<(), EditError>`가
+  같은 Rigid 규칙으로 툴 배치를 계산한다(`Geometry::rigid_mount(flip) -> DPose3`). 툴 원점 = 툴 장착면 중심, Z는 면 밖(플랜지 쪽).
+- **확인 필요**: 조인트 원문 A30(`GUID-21DC3336-5C51-42C1-90FB-4299CD66E0…`)의 GUID가 잘려 원문을 못 읽었다. 기본 Z 방향(반대 vs 같은 방향)과
+  Flip component·Align·Invert의 정확한 의미는 명세 요약 기준으로 추정했다 — 전체 GUID를 받으면 확인 후 맞춘다.
+- 아직: 각도 한계(Angular Start/End)·Drive, Slider·Cylindrical·Ball, 링크 프레임(플랜지·TCP) 선택, 툴의 독립 컴포넌트화.
+- 테스트: `gc_doc/tests/relate.rs`(마운트 추종·Rigid 복귀·flip, Rotational 회전 유지, Automatic, 툴 마운트).
+
 ## 2026-11-18 새벽 — 어셈블리 P1-9 Mate·Flush·Insert(+Predict Offset) 솔버
 
 근거(원문 확인, `https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/`): To Place Mate or Flush Constraints

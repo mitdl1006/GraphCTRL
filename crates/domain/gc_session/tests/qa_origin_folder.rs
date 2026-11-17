@@ -181,7 +181,6 @@ fn deleting_and_reopening_keeps_the_shown_set_consistent() {
 /// Showing an element that is already shown (or naming it twice) records it twice: the document differs
 /// from the one-time state and the list of shown elements grows with every repeat.
 #[test]
-#[ignore = "BUG: SetOriginVisible stores duplicate entries when an element is shown twice; see docs/handoff/qa.md"]
 fn showing_an_element_twice_stores_it_once() {
     let mut s = Session::new();
     let body = s.add_body(Solid::Box { size: [0.1; 3] }, placed(0.0, 0.0, 0.0, 0.0)).unwrap();
@@ -206,7 +205,6 @@ fn showing_an_element_twice_stores_it_once() {
 /// After a component is deleted, nothing about it is "shown" any more (an entry for it must not linger
 /// in the list of shown origin elements, where it would also be saved).
 #[test]
-#[ignore = "BUG: origin_visible still reports true for a deleted component (stale entry); see docs/handoff/qa.md"]
 fn a_deleted_components_origin_is_not_shown() {
     let mut s = Session::new();
     let body = s.add_body(Solid::Box { size: [0.1; 3] }, placed(0.0, 0.0, 0.0, 0.0)).unwrap();

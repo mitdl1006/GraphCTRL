@@ -231,7 +231,8 @@ impl Document {
 
     /// True when an element of a component's origin folder is shown (all are hidden by default).
     pub fn origin_visible(&self, occurrence: Occurrence, element: OriginElement) -> bool {
-        self.components_state().origins_shown.contains(&(occurrence, element))
+        self.has_occurrence(occurrence)
+            && self.components_state().origins_shown.contains(&(occurrence, element))
     }
 
     /// True when the document has no component yet (the first one placed is grounded).
@@ -313,9 +314,15 @@ pub(crate) fn set_origin_visible(
     }
     crate::cell::set_timeline(txn, |t| {
         let shown = &mut t.components.origins_shown;
-        shown.retain(|(o, e)| !(*o == occurrence && elements.contains(e)));
         if visible {
-            shown.extend(elements.iter().map(|e| (occurrence, *e)));
+            // Each element once, in the order first shown: showing it again changes nothing.
+            for element in elements {
+                if !shown.contains(&(occurrence, *element)) {
+                    shown.push((occurrence, *element));
+                }
+            }
+        } else {
+            shown.retain(|(o, e)| !(*o == occurrence && elements.contains(e)));
         }
     })?;
     Ok((Vec::new(), if visible { "Show origin" } else { "Hide origin" }))

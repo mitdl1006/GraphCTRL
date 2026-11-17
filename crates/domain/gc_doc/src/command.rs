@@ -297,6 +297,14 @@ pub enum Command {
         /// The new expression.
         source: String,
     },
+    /// Renames a parameter and the references to it in other parameters and in dimensions, as one step.
+    /// Refused when the name is not a valid parameter name or another parameter has it.
+    RenameParam {
+        /// The parameter.
+        id: Id<Param>,
+        /// The new name.
+        name: String,
+    },
     /// Deletes a parameter that nothing uses.
     DeleteParam {
         /// The parameter.
@@ -430,9 +438,14 @@ pub enum EditError {
     /// A value is not a finite number, not positive where it must be, or of the wrong length.
     #[error("a value is out of range")]
     BadValue,
-    /// Assembly constraints cannot all be satisfied; these are not.
-    #[error("the assembly constraints cannot all be satisfied")]
-    Unsolvable(Vec<Id<crate::relate::Relationship>>),
+    /// Assembly constraints cannot all be satisfied; these are not (ids and names, in the same order).
+    #[error("these assembly constraints cannot be satisfied together: {}", names.join(", "))]
+    Unsolvable {
+        /// The constraints that are not satisfied.
+        ids: Vec<Id<crate::relate::Relationship>>,
+        /// Their names as shown in the Relationships folder.
+        names: Vec<String>,
+    },
 }
 
 /// Unit of a bare number in a dimension field.
@@ -469,6 +482,35 @@ fn scope_of(doc: &Document) -> BTreeMap<String, Quantity> {
 }
 
 /// The names an expression refers to (empty when it does not parse).
+/// `source` with every reference to the parameter `old` renamed to `new`; `None` when it does not refer
+/// to `old` (or does not parse).
+fn rename_in(source: &str, old: &str, new: &str) -> Option<String> {
+    fn spans(expr: &gc_expr::Expr, old: &str, out: &mut Vec<(usize, usize)>) {
+        match expr {
+            gc_expr::Expr::Name { name, span } if name == old => out.push((span.start, span.end)),
+            gc_expr::Expr::Neg(inner, _) => spans(inner, old, out),
+            gc_expr::Expr::Binary { lhs, rhs, .. } => {
+                spans(lhs, old, out);
+                spans(rhs, old, out);
+            }
+            gc_expr::Expr::Call { args, .. } => args.iter().for_each(|a| spans(a, old, out)),
+            _ => {}
+        }
+    }
+    let expr = gc_expr::parse(source).ok()?;
+    let mut found = Vec::new();
+    spans(&expr, old, &mut found);
+    if found.is_empty() {
+        return None;
+    }
+    found.sort_unstable();
+    let mut out = source.to_owned();
+    for (start, end) in found.into_iter().rev() {
+        out.replace_range(start..end, new);
+    }
+    Some(out)
+}
+
 fn names_in(source: &str) -> BTreeSet<String> {
     gc_expr::parse(source).map(|e| e.names().into_iter().map(str::to_owned).collect()).unwrap_or_default()
 }
@@ -1036,6 +1078,45 @@ fn run(txn: &mut Txn<'_>, command: &Command) -> Result<(Vec<Created>, &'static s
             txn.modify(*id, |p: &mut Param, _| p.source.clone_from(source))?;
             propagate(txn)?;
             Ok((Vec::new(), "Edit parameter"))
+        }
+        Command::RenameParam { id, name } => {
+            let name = name.trim().to_owned();
+            let old = txn.doc().get(*id).ok_or(DocError::Missing(id.erase()))?.name.clone();
+            if name == old {
+                return Ok((Vec::new(), "Rename parameter"));
+            }
+            let taken = txn.doc().params().iter().any(|(other, p)| other != *id && p.name == name);
+            if taken || !gc_expr::is_valid_param_name(&name) {
+                return Err(EditError::BadName(name));
+            }
+            let params: Vec<(Id<Param>, String)> = txn
+                .doc()
+                .params()
+                .iter()
+                .filter_map(|(other, p)| rename_in(&p.source, &old, &name).map(|source| (other, source)))
+                .collect();
+            for (other, source) in params {
+                txn.modify(other, |p: &mut Param, _| p.source = source)?;
+            }
+            let sketches: Vec<Id<Sketch>> = txn
+                .doc()
+                .sketches()
+                .iter()
+                .filter(|(_, s)| s.dimensions.values().any(|d| rename_in(&d.source, &old, &name).is_some()))
+                .map(|(id, _)| id)
+                .collect();
+            for sketch in sketches {
+                txn.modify(sketch, |s: &mut Sketch, _| {
+                    for d in s.dimensions.values_mut() {
+                        if let Some(source) = rename_in(&d.source, &old, &name) {
+                            d.source = source;
+                        }
+                    }
+                })?;
+            }
+            txn.modify(*id, |p: &mut Param, _| p.name.clone_from(&name))?;
+            propagate(txn)?;
+            Ok((Vec::new(), "Rename parameter"))
         }
         Command::DeleteParam { id } => {
             let name = txn.doc().get(*id).ok_or(DocError::Missing(id.erase()))?.name.clone();
