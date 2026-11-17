@@ -109,3 +109,59 @@ fn an_older_project_gets_its_link_tree_when_opened_without_counting_as_changed()
     assert!(!reopened.doc().get(robot).unwrap().links.is_empty());
     assert!(!reopened.is_dirty(), "filling in the tree is not an edit");
 }
+
+#[test]
+fn drive_plays_a_relationship_through_values_without_changing_the_document() {
+    let mut session = Session::new();
+    let table = session
+        .add_body(Solid::Box { size: [1.0, 1.0, 1.0] }, Placement { xyz: [0.0, 0.0, 0.5], rpy: [0.0; 3] })
+        .unwrap();
+    let lid = session
+        .add_body(Solid::Box { size: [0.2; 3] }, Placement { xyz: [0.3, 0.0, 1.5], rpy: [0.0; 3] })
+        .unwrap();
+    let plane = |z: f64, n: f64| Geometry::Plane { point: [0.0, 0.0, z], normal: [0.0, 0.0, n] };
+    let on = |body: gc_core::Id<gc_doc::Body>, geometry| Selection {
+        occurrence: Occurrence::Item(body.erase()),
+        geometry,
+    };
+    let mate = session
+        .add_relationship(Relationship {
+            name: "Mate:1".into(),
+            kind: RelationKind::Mate { offset: 0.0, sense: gc_doc::AxisSense::Opposed },
+            first: on(lid, plane(-0.1, -1.0)),
+            second: on(table, plane(0.5, 1.0)),
+        })
+        .unwrap();
+    let before = session.doc().clone();
+    session.drive_relationship(mate, 0.25).unwrap();
+    let shown = session.driven_placement(lid.erase()).unwrap();
+    assert!((shown.xyz[2] - 1.35).abs() < 1e-7, "{:?}", shown.xyz);
+    assert!((session.shown_body(lid).unwrap().placement.xyz[2] - 1.35).abs() < 1e-7, "drawn there");
+    assert!(session.doc().same_content(&before), "the document is unchanged");
+    session.end_drive_relationship();
+    assert!(session.driven_placement(lid.erase()).is_none());
+    assert!((session.shown_body(lid).unwrap().placement.xyz[2] - 1.1).abs() < 1e-7);
+
+    // A rotational joint turns by the driven angle about its axis; a rigid one cannot be driven.
+    let frame = Geometry::Frame { origin: [0.0, 0.0, 0.5], z: [0.0, 0.0, 1.0], x: [1.0, 0.0, 0.0] };
+    session.delete_relationship(mate).unwrap();
+    let hinge = session
+        .add_relationship(Relationship {
+            name: "Rotational:1".into(),
+            kind: RelationKind::Rotational { flip: true },
+            first: on(lid, Geometry::origin_frame()),
+            second: on(table, frame),
+        })
+        .unwrap();
+    session.drive_relationship(hinge, std::f64::consts::FRAC_PI_2).unwrap();
+    let shown = session.driven_placement(lid.erase()).unwrap();
+    assert!((shown.rpy[2] - std::f64::consts::FRAC_PI_2).abs() < 1e-6, "{:?}", shown.rpy);
+    let rigid = Relationship {
+        name: "Rigid:1".into(),
+        kind: RelationKind::Rigid { flip: true },
+        first: on(lid, Geometry::origin_frame()),
+        second: on(table, frame),
+    };
+    session.set_relationship(hinge, rigid).unwrap();
+    assert!(session.drive_relationship(hinge, 1.0).is_err());
+}

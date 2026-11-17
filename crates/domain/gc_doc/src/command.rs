@@ -159,6 +159,14 @@ pub enum SketchOp {
     },
     /// Deletes items and everything that depends on them.
     Delete(Vec<Item>),
+    /// Projects geometry of a component or work feature onto the sketch as reference geometry that follows
+    /// it (Project Geometry): a point, or a reference line between two.
+    Project {
+        /// What to project.
+        source: crate::project::ProjectSource,
+        /// Project as construction geometry.
+        construction: bool,
+    },
     /// Removes the piece of a curve around `at` up to the nearest crossing curves on either side; the
     /// cut ends are tied to the crossing curves. A curve that nothing crosses is deleted.
     Trim {
@@ -1044,6 +1052,8 @@ fn sketch_op(
             sketch.delete(items);
             "Delete"
         }
+        // Resolved against the document in `run`; inside a wrapper it is not supported.
+        SketchOp::Project { .. } => return Err(SketchError::InvalidValue.into()),
         SketchOp::Trim { curve, at } => {
             push_cut(&mut created, &sketch.trim(ids, *curve, *at)?);
             "Trim"
@@ -1196,6 +1206,9 @@ fn run(txn: &mut Txn<'_>, command: &Command) -> Result<(Vec<Created>, &'static s
             }
             Ok((Vec::new(), "Delete sketch"))
         }
+        Command::Sketch { sketch, op: SketchOp::Project { source, construction } } => {
+            crate::project::project(txn, *sketch, source, *construction)
+        }
         Command::Sketch { sketch, op } => {
             let scope = scope_of(txn.doc());
             txn.modify(*sketch, |s: &mut Sketch, ids| sketch_op(s, ids, op, &scope))?
@@ -1217,6 +1230,7 @@ fn run(txn: &mut Txn<'_>, command: &Command) -> Result<(Vec<Created>, &'static s
 pub fn apply(doc: &mut Document, command: &Command) -> Result<Applied, EditError> {
     let mut txn = Txn::new(doc);
     let (created, label) = run(&mut txn, command)?; // an early return drops `txn`, which rolls back
+    crate::project::refresh(&mut txn)?;
     let (delta, changed) = txn.commit()?;
     Ok(Applied { delta, changed, created, label })
 }

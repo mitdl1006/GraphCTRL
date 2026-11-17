@@ -1,5 +1,33 @@
 # 백엔드 인계 (2026-11-17)
 
+## 2026-11-18 — 어셈블리 P1-5 Project Geometry
+
+근거(원문): To Project Geometry into a 2D Sketch `GUID-B8D8B07B-86F2-4CB7-AB21-3131D94AD1CC.htm`, About Projecting Sketch Geometry
+`GUID-B61431DA-FABC-41EE-945C-6E54B4806582.htm` — 투영은 원본과 연결(원본이 바뀌면 갱신), 원본 삭제 시 고정 스케치 곡선으로 바뀌고
+구속·치수는 유지, Shift+클릭은 구성선 토글의 반대로 투영, Break Link로 연결 해제.
+**명세와 차이**: 원문은 Project **Cut Edges**는 연관되지 않는 스냅샷("if the parent geometry changes, the projected geometry does not
+update")이라고 한다 — 명세 P1-6 수용 기준("평면을 옮기면 갱신")과 다르다. P1-6은 원문대로 스냅샷으로 구현할 예정(리드 판단 필요하면 알려 주세요).
+
+- `SketchOp::Project{source: ProjectSource, construction}` / `session.project_geometry(source, shift) -> Result<Vec<Created>, EditError>`
+  (구성선 = 서식 토글 XOR shift). `ProjectSource::{Point{occurrence, local}, Edge{occurrence, a, b}, OriginAxis{occurrence, axis},
+  WorkPoint(id), WorkAxis(id)}` — 컴포넌트(부품·로봇 링크 포함) 프레임 좌표. 점은 참조점, 모서리·축은 참조점 2개 + 선(축은 ±0.1 m,
+  끝에서 보면 점 하나). 메시 꼭짓점·모서리는 프론트엔드가 피킹 좌표를 컴포넌트 프레임으로 바꿔 Point/Edge로 넘긴다.
+- 연결: `ExternalRef::Projected{owner, part, local_nm}`(gc_sketch). 모든 명령 뒤 `apply`가 투영점을 원본 위치로 옮기고 스케치를 다시 푼다.
+  원본이 없어지면 점은 Free + `Fix` 구속(구속 유지). 원본 삭제를 막지 않는다.
+- 아직: Break Link 명령, 면 클릭 = 모든 루프(메시 루프 추출), 치수·구속 시 자동 투영.
+- 테스트 `gc_session/tests/project_geometry.rs`.
+
+## 2026-11-18 — 관계 구동(Drive) — 리드 요청
+
+- `session.drive_relationship(id, value) -> Result<(), EditError>`: 문서를 바꾸지 않고 관계를 `value`로 구동했을 때의 위치로 보여 준다
+  (Mate·Flush·Insert = 오프셋 m, Rotational = 지금 자세에서의 회전 rad; Rigid는 거부). 풀 수 없는 값은 거부하고 직전 표시 유지.
+  `session.end_drive_relationship()`로 문서 위치로 복귀. `session.driven_placement(item) -> Option<Placement>`.
+- 표시 연결: `shown_body`(바디), `shown_base`(로봇), `assembly_parts`(어셈블리)가 구동 위치를 쓴다 — 렌더가 이 셋을 쓰면 추가 작업 없음.
+  계산은 `Document::driven(id, value) -> Result<Vec<(AnyId, DPose3)>, EditError>`(문서 사본에 같은 명령을 적용해 풀이).
+- 아직: 한계(Start/End)·단계·반복 재생은 대시보드 쪽(리드). 구동 중 문서가 바뀌면 표시가 낡을 수 있으니 대화상자를 닫을 때 end 호출.
+  원문 A31(To Drive Relationships)의 GUID가 명세 표에서 잘려 있어 원문 대조는 아직.
+- 테스트 `gc_session/tests/robot_links.rs::drive_plays_a_relationship_through_values_without_changing_the_document`.
+
 ## 2026-11-18 — 로봇 링크를 하위 컴포넌트로(리드 순서 ②)
 
 사용자 요구 "로봇조차도 xyz가 있으니 xy평면 같은 것들에 접근 가능해야".

@@ -17,6 +17,7 @@ mod command;
 mod document;
 mod history;
 mod placement;
+mod project;
 mod relate;
 mod tree;
 mod txn;
@@ -38,6 +39,7 @@ pub use document::{ChangeSet, Contents, DocDelta, Document, Frame, FrameKind, Pa
 pub use gc_sketch::Sketch;
 pub use history::History;
 pub use placement::{ComponentOrigin, WorkShape};
+pub use project::ProjectSource;
 pub use relate::{
     AxisSense, ComponentStatus, Dof, Geometry, RelationKind, RelationStatus, Relationship, Selection,
     Unsolved,

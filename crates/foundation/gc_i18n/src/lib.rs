@@ -839,6 +839,13 @@ messages! {
     DriveValue => ("현재 값 {0}", "Value {0}"),
     /// Drive: collision detection stopped the motion. `{0}` what collided, `{1}` the value.
     DriveCollided => ("충돌 감지: {0} ({1}에서 멈춤)", "Collision detected: {0} (stopped at {1})"),
+    /// Drive: what is driven — a robot joint, or an assembly relationship.
+    DriveRelation => ("구동 대상", "Drive"),
+    DriveTargetJoint => ("로봇 관절", "Robot joint"),
+    /// Drive: a relationship could not be driven. `{0}` the reason.
+    DriveRefused => ("구동할 수 없음: {0}", "Cannot drive: {0}"),
+    /// Drive: collision detection found two components overlapping. `{0}`, `{1}` the components, `{2}` the value.
+    DriveInterfered => ("충돌 감지: {0} ↔ {1} ({2}에서 멈춤)", "Collision detected: {0} ↔ {1} (stopped at {2})"),
     // --- Parameters (Inventor: Manage tab > Parameters panel > Parameters) ---
     /// Tools menu and the dialog title.
     MenuParameters => ("매개변수", "Parameters"),

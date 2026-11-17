@@ -394,6 +394,9 @@ pub(crate) struct CellState {
     jog: Option<(Id<Robot>, Vec<f64>)>,
     /// A pose shown by Drive: never committed, and not touched by the jog previews.
     drive: Option<(Id<Robot>, Vec<f64>)>,
+    /// Components shown where Drive puts an assembly relationship (never committed): their placements.
+    relation_drive: BTreeMap<gc_core::AnyId, Placement>,
+    driven_bodies: BTreeMap<Id<Body>, Body>,
     body: Option<(Id<Body>, Body)>,
     base: Option<(Id<Robot>, Placement)>,
     tcp: Option<(Id<Robot>, Placement)>,
@@ -439,6 +442,8 @@ impl Default for CellState {
             robots: BTreeMap::new(),
             jog: None,
             drive: None,
+            relation_drive: BTreeMap::new(),
+            driven_bodies: BTreeMap::new(),
             body: None,
             base: None,
             tcp: None,
@@ -838,7 +843,8 @@ impl Session {
         let assembly = self.doc.get(id).ok_or("the assembly no longer exists")?;
         let meshes = self.cell.assemblies.of(assembly)?;
         let keep = self.doc.parts_shown(id, false);
-        Ok(crate::assembly::shown_parts(assembly, &pose_of(&assembly.placement), meshes, &keep))
+        let placement = self.driven_placement(id.erase()).unwrap_or(assembly.placement);
+        Ok(crate::assembly::shown_parts(assembly, &pose_of(&placement), meshes, &keep))
     }
 
     /// Sets where the files robot descriptions refer to come from, and reloads the robots.
@@ -1086,7 +1092,7 @@ impl Session {
     pub fn shown_body(&self, body: Id<Body>) -> Option<&Body> {
         match &self.cell.body {
             Some((id, preview)) if *id == body => Some(preview),
-            _ => self.doc.get(body),
+            _ => self.cell.driven_bodies.get(&body).or_else(|| self.doc.get(body)),
         }
     }
 
@@ -1131,8 +1137,55 @@ impl Session {
     pub fn shown_base(&self, robot: Id<Robot>) -> Option<Placement> {
         match &self.cell.base {
             Some((id, preview)) if *id == robot => Some(*preview),
-            _ => self.doc.get(robot).map(|r| r.placement),
+            _ => self
+                .cell
+                .relation_drive
+                .get(&robot.erase())
+                .copied()
+                .or_else(|| self.doc.get(robot).map(|r| r.placement)),
         }
+    }
+
+    /// Drive for an assembly relationship: shows the components where the relationship driven to `value`
+    /// puts them (the offset in metres of a Mate, Flush or Insert; the turn in radians of a Rotational
+    /// joint, from where it stands), without changing the document, until [`Self::end_drive_relationship`].
+    /// Refused for a Rigid joint or a value the relationships cannot reach; the shown positions then stay.
+    pub fn drive_relationship(&mut self, id: Id<gc_doc::Relationship>, value: f64) -> Result<(), EditError> {
+        let moves = self.doc.driven(id, value)?;
+        self.cell.relation_drive = moves
+            .into_iter()
+            .map(|(item, pose)| {
+                let placement = Placement {
+                    xyz: pose.translation.to_array(),
+                    rpy: gc_math::rpy_from_quat(pose.rotation),
+                };
+                (item, placement)
+            })
+            .collect();
+        self.cell.driven_bodies = self
+            .cell
+            .relation_drive
+            .iter()
+            .filter(|(item, _)| item.kind == gc_core::Kind::Body)
+            .filter_map(|(item, placement)| {
+                let id = Id::<Body>::from_raw(item.raw);
+                let mut body = self.doc.get(id)?.clone();
+                body.placement = *placement;
+                Some((id, body))
+            })
+            .collect();
+        Ok(())
+    }
+
+    /// Ends Drive for a relationship: the components are shown as the document has them again.
+    pub fn end_drive_relationship(&mut self) {
+        self.cell.relation_drive.clear();
+        self.cell.driven_bodies.clear();
+    }
+
+    /// Where Drive shows a component (body, robot or assembly) right now, if it moves it.
+    pub fn driven_placement(&self, item: gc_core::AnyId) -> Option<Placement> {
+        self.cell.relation_drive.get(&item).copied()
     }
 
     /// Previews a placement of a robot's base without touching the document.
