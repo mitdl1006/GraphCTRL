@@ -159,6 +159,14 @@ pub enum SketchOp {
     },
     /// Deletes items and everything that depends on them.
     Delete(Vec<Item>),
+    /// Adds fixed line segments (each end held by a Fix constraint): what Project Cut Edges leaves, a
+    /// snapshot that does not follow its source.
+    AddFixedSegments {
+        /// The segments in sketch coordinates.
+        segments: Vec<([f64; 2], [f64; 2])>,
+        /// As construction geometry.
+        construction: bool,
+    },
     /// Projects geometry of a component or work feature onto the sketch as reference geometry that follows
     /// it (Project Geometry): a point, or a reference line between two.
     Project {
@@ -1031,6 +1039,27 @@ fn sketch_op(
         SketchOp::Delete(items) => {
             sketch.delete(items);
             "Delete"
+        }
+        SketchOp::AddFixedSegments { segments, construction } => {
+            if sketch.is_spatial() || segments.iter().any(|(a, b)| !a.iter().chain(b).all(|v| v.is_finite()))
+            {
+                return Err(SketchError::InvalidValue.into());
+            }
+            for (a, b) in segments {
+                let line = sketch.add_line(ids, [a[0], a[1], 0.0], [b[0], b[1], 0.0]);
+                if let Some(c) = sketch.curves.get_mut(&line) {
+                    c.construction = *construction;
+                }
+                created.push(Created::Curve(line));
+                if let Some((p, q)) = sketch.line(line) {
+                    for point in [p, q] {
+                        let id: Id<GeoConstraint> = ids.alloc();
+                        sketch.constraints.insert(id, GeoConstraint::Fix(point));
+                        created.push(Created::Constraint(id));
+                    }
+                }
+            }
+            "Project cut edges"
         }
         // Resolved against the document in `run`; inside a wrapper it is not supported.
         SketchOp::Project { .. } => return Err(SketchError::InvalidValue.into()),

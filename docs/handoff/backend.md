@@ -1,5 +1,15 @@
 # 백엔드 인계 (2026-11-17)
 
+## 2026-11-18 — 어셈블리 P1-6 Project Cut Edges(원문대로 스냅샷)
+
+- `session.project_cut_edges(occurrence, shift) -> Result<usize, EditError>`: 편집 중인 2D 스케치의 평면이 바디(상자·원통·구·메시)·
+  가져온 어셈블리·부품(과 그 아래 부품)의 메시를 자르는 선을 고정 선분으로 추가(끝점마다 `Fix`). 같은 직선으로 이어지는 조각은 합치고
+  중복은 버린다. 0을 돌려주면 평면이 컴포넌트와 안 만남 → 상태바 안내. 구성선 = 토글 XOR Shift. 한 undo 단계.
+  문서 쪽은 `SketchOp::AddFixedSegments{segments, construction}`.
+- 원문(GUID-B8D8B07B…, GUID-B61431DA…): "Projected cut edges are not associative … a snapshot" → 컴포넌트를 옮겨도 갱신하지 않는다.
+  명세 P1-6 수용 기준의 "평면을 옮기면 갱신"과 다름(리드에게 판단 요청함). 로봇 링크 메시는 아직(BadValue).
+- 테스트 `gc_session/tests/project_geometry.rs::project_cut_edges_traces_where_the_plane_cuts_a_box_as_a_fixed_snapshot`.
+
 ## 2026-11-18 — 어셈블리 P1-5 Project Geometry
 
 근거(원문): To Project Geometry into a 2D Sketch `GUID-B8D8B07B-86F2-4CB7-AB21-3131D94AD1CC.htm`, About Projecting Sketch Geometry

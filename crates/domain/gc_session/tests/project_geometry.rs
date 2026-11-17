@@ -107,3 +107,61 @@ fn edges_axes_and_work_features_project_as_reference_lines() {
     let Created::Point(p) = created[0] else { panic!() };
     assert!((session.doc().get(sketch).unwrap().pos(p).unwrap()[1] - 0.2).abs() < 1e-9);
 }
+
+fn plane_at(session: &mut Session, height: f64) -> gc_core::Id<gc_doc::WorkFeature> {
+    let feature = gc_doc::WorkFeature {
+        name: format!("Plane{height}"),
+        geometry: gc_doc::WorkGeometry::PlaneOffset {
+            base: gc_doc::PlaneRef::Origin(gc_doc::OriginPlane::Xy),
+            distance: height,
+        },
+        visible: true,
+    };
+    let Created::WorkFeature(id) =
+        session.execute(&Command::Cell(CellOp::AddWorkFeature(feature))).unwrap()[0]
+    else {
+        panic!()
+    };
+    id
+}
+
+#[test]
+fn project_cut_edges_traces_where_the_plane_cuts_a_box_as_a_fixed_snapshot() {
+    let mut session = Session::new();
+    let body = session
+        .add_body(
+            gc_doc::Solid::Box { size: [0.2, 0.4, 1.0] },
+            Placement { xyz: [1.0, 0.0, 0.5], rpy: [0.0; 3] },
+        )
+        .unwrap();
+    let occurrence = Occurrence::Item(body.erase());
+    let plane = plane_at(&mut session, 0.3);
+    let sketch = session.create_sketch_on_work_plane(plane).unwrap();
+    assert_eq!(session.project_cut_edges(occurrence, false).unwrap(), 4, "a rectangle: the box's four sides");
+    let s = session.doc().get(sketch).unwrap();
+    let mut lengths: Vec<f64> = s
+        .curves
+        .keys()
+        .map(|c| {
+            let (a, b) = s.line(*c).unwrap();
+            let (a, b) = (s.pos(a).unwrap(), s.pos(b).unwrap());
+            ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)).sqrt()
+        })
+        .collect();
+    lengths.sort_by(f64::total_cmp);
+    // Meshes are single precision.
+    assert!((lengths[0] - 0.2).abs() < 1e-6 && (lengths[3] - 0.4).abs() < 1e-6, "{lengths:?}");
+    assert_eq!(session.report().unwrap().dof, 0, "fixed geometry");
+    // A snapshot: moving the box leaves the trace where it was.
+    let before = session.doc().get(sketch).unwrap().points.clone();
+    session.finish_sketch();
+    let mut moved = session.doc().get(body).unwrap().clone();
+    moved.placement.xyz = [2.0, 0.0, 0.5];
+    session.execute(&Command::Cell(CellOp::SetBody { id: body, body: moved })).unwrap();
+    assert_eq!(session.doc().get(sketch).unwrap().points, before);
+
+    // A plane that misses the box adds nothing.
+    let high = plane_at(&mut session, 2.0);
+    session.create_sketch_on_work_plane(high).unwrap();
+    assert_eq!(session.project_cut_edges(occurrence, false).unwrap(), 0);
+}
