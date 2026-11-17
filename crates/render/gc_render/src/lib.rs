@@ -4,8 +4,10 @@
 //! (4x MSAA colour + reverse-Z depth, resolved to an `Rgba8Unorm` texture). A UI toolkit shows the
 //! resolved texture; tests read it back with [`read_rgba`].
 
+mod mesh;
 mod target;
 
+pub use mesh::{DrawStats, Instance, MeshRenderer, View};
 pub use target::{RenderError, ViewTarget, clear, read_rgba};
 
 /// Sample count used for the multisampled colour and depth attachments.

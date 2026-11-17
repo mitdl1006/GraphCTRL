@@ -95,6 +95,48 @@ impl Camera {
         self.look_along(direction, up);
     }
 
+    /// The matrix (column-major) taking a position relative to the eye to clip space, for a renderer with
+    /// reverse-Z depth (1 at the near plane, 0 at the far plane).
+    ///
+    /// `extent` is the radius of what must stay visible around the pivot. Working relative to the eye
+    /// keeps single-precision GPU arithmetic exact far from the world origin.
+    pub fn clip_from_eye_relative(&self, viewport: [f64; 2], extent: f64) -> [[f64; 4]; 4] {
+        let half_h = (self.view_height() * 0.5).max(1e-12);
+        let half_w = half_h * viewport[0].max(1.0) / viewport[1].max(1.0);
+        let extent = extent.max(self.distance).max(1e-6);
+        let (right, up, forward) = (self.right(), self.up(), self.forward());
+        // Rows of the result: clip x, y, z and w as functions of (relative position, 1).
+        let rows: [[f64; 4]; 4] = if self.ortho {
+            // An orthographic eye may sit inside the scene: keep what is behind it too.
+            let (near, far) = (self.distance - 2.0 * extent, self.distance + 2.0 * extent);
+            let k = 1.0 / (far - near);
+            [
+                [right.x / half_w, right.y / half_w, right.z / half_w, 0.0],
+                [up.x / half_h, up.y / half_h, up.z / half_h, 0.0],
+                [-forward.x * k, -forward.y * k, -forward.z * k, far * k],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+        } else {
+            let far = self.distance + 2.0 * extent;
+            let near = (self.distance * 0.02).min(far * 0.5);
+            let (sx, sy) = (self.distance / half_w, self.distance / half_h);
+            let k = near / (far - near);
+            [
+                [right.x * sx, right.y * sx, right.z * sx, 0.0],
+                [up.x * sy, up.y * sy, up.z * sy, 0.0],
+                [-forward.x * k, -forward.y * k, -forward.z * k, far * k],
+                [forward.x, forward.y, forward.z, 0.0],
+            ]
+        };
+        let mut columns = [[0.0; 4]; 4];
+        for (r, row) in rows.iter().enumerate() {
+            for (c, value) in row.iter().enumerate() {
+                columns[c][r] = *value;
+            }
+        }
+        columns
+    }
+
     /// Where a world point appears on screen. `None` when it is behind a perspective camera.
     pub fn project(&self, point: DVec3, viewport: [f64; 2]) -> Option<[f64; 2]> {
         let relative = point - self.eye();
@@ -185,6 +227,30 @@ mod tests {
 
     fn close(a: DVec3, b: DVec3) -> bool {
         (a - b).length() < 1e-9
+    }
+
+    #[test]
+    fn the_clip_matrix_agrees_with_project_and_orders_depth_near_to_far() {
+        for ortho in [true, false] {
+            let mut camera =
+                Camera { pivot: DVec3::new(3.0, -2.0, 1.0), distance: 2.5, ortho, ..Camera::default() };
+            camera.orbit(0.4, -0.3);
+            let m = camera.clip_from_eye_relative(VIEW, 4.0);
+            let clip = |p: DVec3| {
+                let r = p - camera.eye();
+                let row = |i: usize| m[0][i] * r.x + m[1][i] * r.y + m[2][i] * r.z + m[3][i];
+                (row(0) / row(3), row(1) / row(3), row(2) / row(3))
+            };
+            for point in [camera.pivot, DVec3::new(3.4, -1.5, 1.2), DVec3::new(2.0, -2.5, 0.1)] {
+                let (x, y, z) = clip(point);
+                let screen = camera.project(point, VIEW).unwrap();
+                assert!((VIEW[0] * 0.5 * (1.0 + x) - screen[0]).abs() < 1e-6, "{ortho}");
+                assert!((VIEW[1] * 0.5 * (1.0 - y) - screen[1]).abs() < 1e-6, "{ortho}");
+                assert!(z > 0.0 && z < 1.0, "{ortho}: {z}");
+            }
+            let (near, far) = (camera.pivot - camera.forward(), camera.pivot + camera.forward());
+            assert!(clip(near).2 > clip(far).2, "reverse-Z: nearer is larger");
+        }
     }
 
     #[test]
