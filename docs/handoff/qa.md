@@ -25,3 +25,9 @@
 - 로봇 라이브러리 경계 테스트 추가: `gc_session/tests/qa_library.rs`(8개, 1개는 위 버그 3로 `#[ignore]`).
 - 리드 답: 프로젝트의 `Robot.urdf` 사본이 기구학 기준, 메시만 라이브러리에서 찾는다. `qa_library.rs::the_projects_urdf_copy_decides_the_kinematics_not_the_library`로 고정.
 - 대기: 백엔드·프론트엔드 브랜치에 버그 1–4 수정과 M2-1 기능이 올라오면 `#[ignore]`를 풀고 `m2-scenarios.md` 기준 테스트 추가(리드 브랜치에는 아직 없음, 2026-11-17 확인).
+
+## 2026-11-17 백엔드 브랜치 merge 후
+
+- 백엔드 브랜치(`7826efd`)와 리드 브랜치를 QA 브랜치에 merge. 버그 1–3의 `#[ignore]`는 백엔드가 풀었고(수정 커밋 `241e015`) 해당 재현 테스트는 모두 통과. `--include-ignored` 전체 통과, `cargo xtask gate` 전체 통과.
+- 남은 버그: 5.11 배관은 프론트엔드 브랜치(`fe3e2af` 로그·패닉 훅·창 아이콘)에서 처리 중 — 프론트엔드 브랜치는 아직 merge하지 않음(리드가 병합하면 확인).
+- 다음: 백엔드의 트리 API·작업 평면 스케치(U13)·GLB 불러오기(U14) 테스트를 `m2-scenarios.md` 기준으로 추가.
