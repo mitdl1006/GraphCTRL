@@ -92,3 +92,103 @@ pub fn chip(ui: &mut Ui, text: &str, color: egui::Color32) {
         },
     );
 }
+
+/// What a [`tree_row`] shows.
+pub struct TreeRow<'a> {
+    /// The icon of the kind of item.
+    pub icon: crate::icons::Icon,
+    /// The text of the row.
+    pub text: &'a str,
+    /// Whether the item is selected.
+    pub selected: bool,
+    /// A visibility check box: its state and the accessible name.
+    pub visible: Option<(&'a mut bool, &'a str)>,
+    /// The accessible name of the delete button, when the item can be deleted.
+    pub delete: Option<&'a str>,
+}
+
+/// What happened to a [`tree_row`].
+pub struct TreeRowResult {
+    /// The row itself: click to select, double-click to open, secondary click for the menu.
+    pub row: egui::Response,
+    /// The delete button was pressed.
+    pub deleted: bool,
+    /// The visibility check box changed.
+    pub toggled: bool,
+}
+
+/// One row of the browser tree: a kind icon, the text, an optional visibility check box and an optional
+/// delete button. The delete button is drawn only while the row is hovered or selected; it is always
+/// there for assistive technology.
+pub fn tree_row(ui: &mut Ui, row: TreeRow<'_>) -> TreeRowResult {
+    const HEIGHT: f32 = 22.0;
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), HEIGHT), Sense::click());
+    let hovered = ui.rect_contains_pointer(rect);
+    let painter = ui.painter();
+    if row.selected {
+        painter.rect_filled(rect, 4.0, with_alpha(colors::ACCENT, 34));
+    } else if hovered {
+        painter.rect_filled(rect, 4.0, with_alpha(colors::TEXT, 14));
+    }
+    let mut x = rect.left() + 4.0;
+    let mut toggled = false;
+    if let Some((state, name)) = row.visible {
+        let box_rect = egui::Rect::from_min_size(egui::pos2(x, rect.top()), vec2(HEIGHT, HEIGHT));
+        let check = ui.put(box_rect, egui::Checkbox::without_text(state)).on_hover_text(name);
+        check.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, true, *state, name));
+        toggled = check.changed();
+        x += HEIGHT + 2.0;
+    }
+    let tint = if row.selected { colors::ACCENT } else { colors::MUTED };
+    let icon_rect = egui::Rect::from_center_size(egui::pos2(x + 8.0, rect.center().y), vec2(16.0, 16.0));
+    row.icon.paint(ui.painter(), icon_rect, tint);
+    x += 22.0;
+    let right = rect.right() - if row.delete.is_some() { HEIGHT + 2.0 } else { 4.0 };
+    let clip = egui::Rect::from_min_max(egui::pos2(x, rect.top()), egui::pos2(right, rect.bottom()));
+    ui.painter().with_clip_rect(clip).text(
+        egui::pos2(x, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        row.text,
+        egui::FontId::proportional(13.0),
+        colors::TEXT,
+    );
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, row.selected, row.text));
+    let mut deleted = false;
+    if let Some(name) = row.delete {
+        let cross_rect = egui::Rect::from_min_size(
+            egui::pos2(rect.right() - HEIGHT - 2.0, rect.top()),
+            vec2(HEIGHT, HEIGHT),
+        );
+        let shown = hovered || row.selected;
+        let color = if shown { colors::MUTED } else { egui::Color32::TRANSPARENT };
+        let cross = egui::Button::new(RichText::new("×").size(14.0).color(color)).frame(false);
+        let button = ui.put(cross_rect, cross);
+        button.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, name));
+        let button = if shown { button.on_hover_text(name) } else { button };
+        deleted = button.clicked();
+    }
+    TreeRowResult { row: response, deleted, toggled }
+}
+
+fn with_alpha(color: egui::Color32, alpha: u8) -> egui::Color32 {
+    egui::Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha)
+}
+
+/// A property row with a drop-down: the muted label in the label column, the combo box filling the rest.
+/// The label is also the combo box's accessible name.
+pub fn combo_row<R>(
+    ui: &mut Ui,
+    salt: impl std::hash::Hash + std::fmt::Debug,
+    text: &str,
+    selected: &str,
+    add_contents: impl FnOnce(&mut Ui) -> R,
+) {
+    ui.horizontal(|ui| {
+        let name = label(ui, text);
+        let combo = egui::ComboBox::from_id_salt(salt)
+            .selected_text(selected)
+            .width(ui.available_width() - 8.0)
+            .show_ui(ui, add_contents);
+        combo.response.labelled_by(name.id);
+    });
+}

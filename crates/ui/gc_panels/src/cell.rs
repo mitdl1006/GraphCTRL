@@ -344,15 +344,13 @@ fn frame_axes(
     for (title, chosen, salt) in
         [(tr!(lang, PropXPoint), &mut x_point, "x"), (tr!(lang, PropXyPoint), &mut xy_point, "xy")]
     {
-        egui::ComboBox::new(("gc_frame_axis", id.raw(), salt), title).selected_text(label(*chosen)).show_ui(
-            ui,
-            |ui| {
-                ui.selectable_value(chosen, None, tr!(lang, PropSketchAxes));
-                for (point, text) in &points {
-                    ui.selectable_value(chosen, Some(*point), text);
-                }
-            },
-        );
+        let selected = label(*chosen);
+        gc_ui::panel::combo_row(ui, ("gc_frame_axis", id.raw(), salt), title, &selected, |ui| {
+            ui.selectable_value(chosen, None, tr!(lang, PropSketchAxes));
+            for (point, text) in &points {
+                ui.selectable_value(chosen, Some(*point), text);
+            }
+        });
     }
     if (x_point, xy_point) != (frame.x_point, frame.xy_point) {
         // A refusal is explained in the status bar.
@@ -391,13 +389,12 @@ fn frames(
     if let Some(active) = state.active_frame(session) {
         let mut chosen = active;
         let name = frames.iter().find(|(id, _)| *id == active).map(|(_, n)| n.clone()).unwrap_or_default();
-        egui::ComboBox::from_label(tr!(lang, BrowserFrames))
-            .selected_text(tr!(lang, PropTeachFrame, name))
-            .show_ui(ui, |ui| {
-                for (id, name) in &frames {
-                    ui.selectable_value(&mut chosen, *id, name);
-                }
-            });
+        let selected = tr!(lang, PropTeachFrame, name);
+        gc_ui::panel::combo_row(ui, "gc_teach_frame", tr!(lang, BrowserFrames), &selected, |ui| {
+            for (id, name) in &frames {
+                ui.selectable_value(&mut chosen, *id, name);
+            }
+        });
         state.frame = Some(chosen);
     }
     for (id, name) in frames.iter().filter(|(id, _)| shows(CellItem::Frame(*id))) {
@@ -523,13 +520,12 @@ fn tool(
             Some(Solid::Mesh { .. }) => 4,
         };
         let mut chosen = current;
-        egui::ComboBox::from_label(tr!(lang, PropToolShape))
-            .selected_text(kinds.get(current).copied().unwrap_or(tr!(lang, ToolMesh)))
-            .show_ui(ui, |ui| {
-                for (index, name) in kinds.iter().enumerate() {
-                    ui.selectable_value(&mut chosen, index, *name);
-                }
-            });
+        let selected = kinds.get(current).copied().unwrap_or(tr!(lang, ToolMesh));
+        gc_ui::panel::combo_row(ui, "gc_tool_shape", tr!(lang, PropToolShape), selected, |ui| {
+            for (index, name) in kinds.iter().enumerate() {
+                ui.selectable_value(&mut chosen, index, *name);
+            }
+        });
         if ui.button(tr!(lang, ToolFromFile)).clicked() {
             state.tool_mesh = Some(robot);
         }
@@ -586,7 +582,7 @@ fn paths(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) {
     let names: Vec<_> = session.doc().paths().iter().map(|(id, p)| (id, p.name.clone())).collect();
     if names.len() > 1 {
         let mut chosen = path_id;
-        egui::ComboBox::from_label(tr!(lang, BrowserPaths)).selected_text(&path.name).show_ui(ui, |ui| {
+        gc_ui::panel::combo_row(ui, "gc_path_choice", tr!(lang, BrowserPaths), &path.name, |ui| {
             for (id, name) in names {
                 ui.selectable_value(&mut chosen, id, name);
             }
@@ -600,15 +596,17 @@ fn paths(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) {
     }
     let mut planner = path.planner.clone();
     let mut seed = path.seed;
-    let shown =
-        PLANNERS.iter().position(|(id, _)| *id == planner).map_or(planner.as_str(), |i| PLANNER_NAMES[i]);
-    egui::ComboBox::from_label(tr!(lang, PropPlanner)).selected_text(shown).show_ui(ui, |ui| {
+    let shown = PLANNERS
+        .iter()
+        .position(|(id, _)| *id == planner)
+        .map_or(planner.clone(), |i| PLANNER_NAMES[i].to_owned());
+    gc_ui::panel::combo_row(ui, "gc_planner", tr!(lang, PropPlanner), &shown, |ui| {
         for ((id, _), name) in PLANNERS.iter().zip(PLANNER_NAMES) {
             ui.selectable_value(&mut planner, (*id).to_owned(), name);
         }
     });
     ui.horizontal(|ui| {
-        let label = ui.label(tr!(lang, PropSeed));
+        let label = gc_ui::panel::label(ui, tr!(lang, PropSeed));
         ui.add(egui::DragValue::new(&mut seed).speed(0.1)).labelled_by(label.id);
     });
     if planner != path.planner || seed != path.seed {
@@ -733,7 +731,7 @@ fn steps(
         .filter(|(_, w)| w.robot == path.robot)
         .map(|(id, w)| (id, w.name.clone()))
         .collect();
-    egui::ComboBox::from_label(tr!(lang, StepAdd)).selected_text("").show_ui(ui, |ui| {
+    gc_ui::panel::combo_row(ui, "gc_step_add", tr!(lang, StepAdd), "", |ui| {
         for (id, name) in candidates {
             if ui.selectable_label(false, name).clicked() {
                 added = Some(id);

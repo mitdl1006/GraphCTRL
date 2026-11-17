@@ -10,7 +10,9 @@ use gc_i18n::{Lang, Msg, tr};
 use gc_session::Session;
 use gc_sketch::{CurveGeom, Item, SketchError};
 use gc_tools::Prompt;
+use gc_ui::Icon;
 use gc_ui::colors;
+use gc_ui::panel::TreeRow;
 
 pub use cell::{CellUi, cell, status_text};
 pub use pose::{PoseCalc, RotationInput, pose_calculator};
@@ -45,21 +47,25 @@ fn params(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi) -> O
     let mut command = None;
     egui::CollapsingHeader::new(tr!(lang, BrowserParams)).default_open(true).show(ui, |ui| {
         let doc = session.doc();
+        ui.spacing_mut().item_spacing.y = 1.0;
         for (id, param) in doc.params().iter() {
-            ui.horizontal(|ui| {
-                let text = format!("{} = {}", param.name, param.source);
-                if ui.selectable_label(state.name == param.name, text).clicked() {
-                    state.name.clone_from(&param.name);
-                    state.source.clone_from(&param.source);
-                }
-                let delete = ui.small_button("x").on_hover_text(tr!(lang, CmdDeleteItem, param.name));
-                delete.widget_info(|| {
-                    egui::WidgetInfo::labeled(egui::Role::Button, true, tr!(lang, CmdDeleteItem, param.name))
-                });
-                if delete.clicked() {
-                    command = Some(gc_doc::Command::DeleteParam { id });
-                }
-            });
+            let text = format!("{} = {}", param.name, param.source);
+            let delete = tr!(lang, CmdDeleteItem, param.name);
+            let row = TreeRow {
+                icon: Icon::Text("="),
+                text: &text,
+                selected: state.name == param.name,
+                visible: None,
+                delete: Some(&delete),
+            };
+            let result = gc_ui::panel::tree_row(ui, row);
+            if result.row.clicked() {
+                state.name.clone_from(&param.name);
+                state.source.clone_from(&param.source);
+            }
+            if result.deleted {
+                command = Some(gc_doc::Command::DeleteParam { id });
+            }
         }
         let existing = doc.params().iter().find(|(_, p)| p.name == state.name).map(|(id, _)| id);
         ui.horizontal(|ui| {
@@ -100,14 +106,26 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
     let mut action = None;
     gc_ui::panel::header(ui, tr!(lang, PanelBrowser));
     egui::CollapsingHeader::new(tr!(lang, BrowserOrigin)).default_open(true).show(ui, |ui| {
+        ui.spacing_mut().item_spacing.y = 1.0;
         for (_, frame) in session.doc().frames().iter().filter(|(_, f)| f.kind == FrameKind::OriginPlane) {
-            ui.label(&frame.name);
+            let row = TreeRow {
+                icon: Icon::Frame,
+                text: &frame.name,
+                selected: false,
+                visible: None,
+                delete: None,
+            };
+            gc_ui::panel::tree_row(ui, row);
         }
     });
     egui::CollapsingHeader::new(tr!(lang, BrowserSketches)).default_open(true).show(ui, |ui| {
         let active = session.active_sketch().map(|(id, _)| id);
+        ui.spacing_mut().item_spacing.y = 1.0;
         for (id, sketch) in session.doc().sketches().iter() {
-            let label = ui.selectable_label(active == Some(id), &sketch.name);
+            let selected = active == Some(id);
+            let row =
+                TreeRow { icon: Icon::Sketch, text: &sketch.name, selected, visible: None, delete: None };
+            let label = gc_ui::panel::tree_row(ui, row).row;
             if label.double_clicked() {
                 action = Some(BrowserAction::EditSketch(id));
             }
@@ -119,71 +137,68 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
     // Cell items: a selectable name with a context menu, and a small button that deletes the item.
     let doc = session.doc();
     let selected = session.selected_item();
-    type Row = (String, String, gc_session::CellItem);
+    use gc_session::CellItem;
+    type Row = (String, String, CellItem);
     let mut section = |ui: &mut Ui, title: &str, items: Vec<Row>| {
         if items.is_empty() {
             return;
         }
         egui::CollapsingHeader::new(title).default_open(true).show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 1.0;
             for (name, shown, item) in items {
-                ui.horizontal(|ui| {
-                    // Bodies and robots can be hidden; they stay obstacles for planning.
-                    let look = item.shown().and_then(|shown| Some((shown, session.shown_look(shown)?)));
+                // Bodies and robots can be hidden; they stay obstacles for planning.
+                let look = item.shown().and_then(|shown| Some((shown, session.shown_look(shown)?)));
+                let mut visible = look.is_some_and(|(_, look)| !look.hidden);
+                let show_label = tr!(lang, ShowItem, name);
+                let delete_label = tr!(lang, CmdDeleteItem, name);
+                let icon = match item {
+                    CellItem::Body(_) => Icon::Cuboid,
+                    CellItem::Robot(_) => Icon::Robot,
+                    CellItem::Frame(_) => Icon::Frame,
+                    CellItem::Waypoint(_) => Icon::Waypoint,
+                    CellItem::Path(_) => Icon::Path,
+                };
+                let row = TreeRow {
+                    icon,
+                    text: &shown,
+                    selected: selected == Some(item),
+                    visible: look.map(|_| (&mut visible, show_label.as_str())),
+                    delete: Some(&delete_label),
+                };
+                let result = gc_ui::panel::tree_row(ui, row);
+                if let (true, Some((shown, _))) = (result.toggled, look) {
+                    action = Some(BrowserAction::Show(shown, visible));
+                }
+                if result.row.clicked() || result.row.secondary_clicked() {
+                    action = Some(BrowserAction::Select(Some(item)));
+                }
+                result.row.context_menu(|ui| {
+                    ui.label(RichText::new(&name).strong());
+                    ui.separator();
                     if let Some((shown, look)) = look {
-                        let mut visible = !look.hidden;
-                        let label = tr!(lang, ShowItem, name);
-                        let check = ui.add(egui::Checkbox::without_text(&mut visible)).on_hover_text(&label);
-                        check.widget_info(|| {
-                            egui::WidgetInfo::selected(egui::Role::CheckBox, true, visible, &label)
-                        });
-                        if check.changed() {
-                            action = Some(BrowserAction::Show(shown, visible));
-                        }
-                    }
-                    let row = ui.selectable_label(selected == Some(item), shown);
-                    if row.clicked() {
-                        action = Some(BrowserAction::Select(Some(item)));
-                    }
-                    if row.secondary_clicked() {
-                        action = Some(BrowserAction::Select(Some(item)));
-                    }
-                    row.context_menu(|ui| {
-                        ui.label(RichText::new(&name).strong());
-                        ui.separator();
-                        if let Some((shown, look)) = look {
-                            let text = if look.hidden { tr!(lang, CmdShow) } else { tr!(lang, CmdHide) };
-                            if ui.button(text).clicked() {
-                                action = Some(BrowserAction::Show(shown, look.hidden));
-                                ui.close();
-                            }
-                        }
-                        if let gc_session::CellItem::Path(path) = item
-                            && ui.button(tr!(lang, CmdPlan)).clicked()
-                        {
-                            action = Some(BrowserAction::Plan(path));
+                        let text = if look.hidden { tr!(lang, CmdShow) } else { tr!(lang, CmdHide) };
+                        if ui.button(text).clicked() {
+                            action = Some(BrowserAction::Show(shown, look.hidden));
                             ui.close();
                         }
-                        if ui.button(tr!(lang, CmdDeleteItem, name)).clicked() {
-                            action =
-                                Some(BrowserAction::Edit(Box::new(gc_doc::Command::Cell(item.delete_op()))));
-                            ui.close();
-                        }
-                    });
-                    let cross = RichText::new("×").color(gc_ui::colors::MUTED);
-                    let button = ui
-                        .add(egui::Button::new(cross).small().frame_when_inactive(false))
-                        .on_hover_text(tr!(lang, CmdDeleteItem, name));
-                    button.widget_info(|| {
-                        egui::WidgetInfo::labeled(egui::Role::Button, true, tr!(lang, CmdDeleteItem, name))
-                    });
-                    if button.clicked() {
+                    }
+                    if let CellItem::Path(path) = item
+                        && ui.button(tr!(lang, CmdPlan)).clicked()
+                    {
+                        action = Some(BrowserAction::Plan(path));
+                        ui.close();
+                    }
+                    if ui.button(delete_label.as_str()).clicked() {
                         action = Some(BrowserAction::Edit(Box::new(gc_doc::Command::Cell(item.delete_op()))));
+                        ui.close();
                     }
                 });
+                if result.deleted {
+                    action = Some(BrowserAction::Edit(Box::new(gc_doc::Command::Cell(item.delete_op()))));
+                }
             }
         });
     };
-    use gc_session::CellItem;
     let row = |name: &str, item| (name.to_owned(), name.to_owned(), item);
     section(
         ui,
