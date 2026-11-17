@@ -69,6 +69,8 @@ pub(crate) fn plane_of(session: &Session, sketch: &Sketch) -> SketchPlane {
 pub struct Viewport {
     /// Whether the frame time and draw statistics are shown in the corner.
     pub perf_overlay: bool,
+    /// A point of a 3D sketch being dragged: the working plane's normal axis and the level it keeps.
+    spatial_drag: Option<(usize, f64)>,
     /// The part of the window that no floating panel covers. The view cube and the statistics sit in its
     /// corners and "fit" frames the model in it. `None`: the whole viewport.
     pub clear: Option<egui::Rect>,
@@ -101,6 +103,7 @@ impl Viewport {
         Self {
             perf_overlay: false,
             clear: None,
+            spatial_drag: None,
             frame_time: 0.0,
             background: Background::new(render_state),
             camera: Camera { distance: 0.35, ..Camera::default() },
@@ -192,6 +195,7 @@ impl Viewport {
             .or_else(|| ui.input(|i| i.pointer.latest_pos()))
             .filter(|p| rect.contains(*p));
         if let (Some((_, plane)), None, true) = (active, self.navigating, session.sketch_is_spatial()) {
+            self.spatial_drag_input(ui, &response, rect, session, &plane, cursor);
             self.spatial_input(ui, &response, rect, session, &plane, cursor);
         } else if let (Some((_, plane)), None) = (active, self.navigating) {
             let on_sketch = |p: egui::Pos2| {
@@ -451,6 +455,82 @@ impl Viewport {
         } else if cancel {
             session.cancel_value();
             self.value_open = false;
+        }
+    }
+
+    /// Dragging a point of a 3D sketch with the select tool moves it in the plane through it that the
+    /// working plane sets; the solver keeps the constraints.
+    fn spatial_drag_input(
+        &mut self,
+        ui: &egui::Ui,
+        response: &egui::Response,
+        rect: egui::Rect,
+        session: &mut Session,
+        plane: &SketchPlane,
+        cursor: Option<egui::Pos2>,
+    ) {
+        if session.tool() != gc_tools::ToolKind::Select {
+            return;
+        }
+        let size = [f64::from(rect.width()), f64::from(rect.height())];
+        let to_view = |p: egui::Pos2| [f64::from(p.x - rect.left()), f64::from(p.y - rect.top())];
+        let local = |w: DVec3| {
+            let d = w - plane.origin;
+            DVec3::new(d.dot(plane.u), d.dot(plane.v), d.dot(plane.normal))
+        };
+        let turned = |d: DVec3| DVec3::new(d.dot(plane.u), d.dot(plane.v), d.dot(plane.normal));
+        let camera = self.camera;
+        let on_screen = move |p: DVec3| camera.project(plane.world(p.to_array()), size);
+        let points: Vec<(Id<gc_sketch::SkPoint>, DVec3)> = match session.active_sketch() {
+            Some((_, sketch)) => sketch
+                .points
+                .keys()
+                .filter_map(|id| Some((*id, DVec3::from_array(session.point_pos(*id)?))))
+                .collect(),
+            None => return,
+        };
+        let away = |screen: [f64; 2]| {
+            move |p: DVec3| {
+                on_screen(p).map(|s| ((s[0] - screen[0]).powi(2) + (s[1] - screen[1]).powi(2)).sqrt())
+            }
+        };
+        let on_plane = |at: egui::Pos2, axis: usize, level: f64| -> Option<[f64; 3]> {
+            let ray = camera.ray(to_view(at), size);
+            let (origin, dir) = (local(ray.origin), turned(ray.dir));
+            let (o, d) = (origin.to_array(), dir.to_array());
+            (d[axis].abs() > 0.1).then(|| {
+                let t = (level - o[axis]) / d[axis];
+                [o[0] + d[0] * t, o[1] + d[1] * t, o[2] + d[2] * t]
+            })
+        };
+        if response.drag_started_by(PointerButton::Primary)
+            && let Some(press) = ui.input(|i| i.pointer.press_origin())
+        {
+            let distance = away(to_view(press));
+            let grabbed = points
+                .iter()
+                .filter_map(|(id, pos)| Some((distance(*pos)?, *id, *pos)))
+                .filter(|(d, _, _)| *d <= gc_tools::tolerance::POINT_PX)
+                .min_by(|a, b| a.0.total_cmp(&b.0));
+            let axis = session.spatial_plane();
+            if let Some((_, id, pos)) = grabbed
+                && let Some(start) = on_plane(press, axis, pos[axis])
+                && session.spatial_drag_start(id, start)
+            {
+                self.spatial_drag = Some((axis, pos[axis]));
+            }
+        }
+        if let Some((axis, level)) = self.spatial_drag {
+            if response.dragged_by(PointerButton::Primary) {
+                if let Some(to) = cursor.and_then(|at| on_plane(at, axis, level)) {
+                    drop(session.spatial_drag_move(to));
+                }
+                ui.ctx().request_repaint();
+            }
+            if response.drag_stopped_by(PointerButton::Primary) {
+                session.spatial_drag_end();
+                self.spatial_drag = None;
+            }
         }
     }
 

@@ -520,6 +520,14 @@ messages! {
     /// Plan metric: the move was possible in a straight joint-space line.
     PlanStraight => ("직선 이동(플래너 불필요)", "Straight move (no planner needed)"),
     // --- frontend ---
+    /// Browser menu: rename in place.
+    CmdRename => ("이름 바꾸기", "Rename"),
+    /// Browser menu: suppress an item (kept, not computed).
+    CmdSuppress => ("억제", "Suppress"),
+    /// Browser menu: bring a suppressed item back.
+    CmdUnsuppress => ("억제 해제", "Unsuppress"),
+    /// Status bar: the name is taken by another item of the same kind.
+    ErrNameTaken => ("같은 이름이 이미 있습니다", "That name is already taken"),
     /// View tab: the dark colour scheme.
     ViewDarkTheme => ("어두운 테마", "Dark theme"),
     /// Ribbon group of the View tab that holds the panel options.

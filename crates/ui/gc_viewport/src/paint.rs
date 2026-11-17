@@ -116,7 +116,7 @@ pub(crate) fn over(ui: &egui::Ui, rect: Rect, camera: &Camera, session: &Session
         let plane = plane_of(session, sketch);
         if active.is_some_and(|(active_id, _)| active_id == id) {
             active_sketch(&view, &plane, sketch, session);
-        } else {
+        } else if session.doc().is_visible(id.erase()) && !session.doc().is_inactive(id.erase()) {
             let stroke = Stroke::new(1.2, colors::inactive());
             for curve in sketch.curves.values() {
                 curve_path(&view, &plane, curve, |p| sketch.pos(p), None, stroke);

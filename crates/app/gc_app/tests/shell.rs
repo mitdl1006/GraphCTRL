@@ -1894,3 +1894,110 @@ fn the_dark_theme_is_switched_in_the_view_tab() {
     harness.run_steps(3);
     assert!(!gc_ui::colors::is_dark());
 }
+
+/// The browser: a node is renamed in place (F2 or a second click), shown or hidden with its check box,
+/// and a hidden waypoint leaves the 3D view.
+#[test]
+fn browser_nodes_are_renamed_and_hidden() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("파일").click();
+    harness.run();
+    harness.get_by_label("예제 열기 (UR5e 셀)").click();
+    harness.run();
+    let waypoint = harness.state().session.doc().waypoints().iter().next().unwrap().0;
+    assert_eq!(harness.state().session.doc().waypoints().iter().next().unwrap().1.name, "P1");
+
+    // The first click selects, the second one edits the name.
+    harness.query_all_by_label("P1").next().unwrap().click();
+    harness.run();
+    harness.query_all_by_label("P1").next().unwrap().click();
+    harness.run();
+    harness.get_by_label("name").focus();
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.get_by_label("name").type_text("Pick");
+    harness.key_press(egui::Key::Enter);
+    harness.run();
+    assert_eq!(harness.state().session.doc().get(waypoint).unwrap().name, "Pick");
+    // A name another waypoint has is refused and explained.
+    let other = harness.state().session.doc().waypoints().iter().nth(1).unwrap().1.name.clone();
+    harness.query_all_by_label("Pick").next().unwrap().click();
+    harness.run();
+    harness.query_all_by_label("Pick").next().unwrap().click();
+    harness.run();
+    harness.get_by_label("name").focus();
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.get_by_label("name").type_text(&other);
+    harness.key_press(egui::Key::Enter);
+    harness.run();
+    harness.get_by_label("같은 이름이 이미 있습니다");
+
+    // Hiding a waypoint takes its marker out of the scene.
+    let shown = |h: &egui_kittest::Harness<'_, GraphCtrlApp>| {
+        gc_scene::Scene::of(&h.state().session).waypoints.iter().any(|m| m.id == waypoint)
+    };
+    assert!(shown(&harness));
+    harness.get_by_label("Pick 보이기").click();
+    harness.run();
+    assert!(!harness.state().session.doc().is_visible(waypoint.erase()));
+    assert!(!shown(&harness));
+    harness.get_by_label("Pick 보이기").click();
+    harness.run();
+    assert!(shown(&harness));
+}
+
+/// A point of a 3D sketch is dragged with the mouse: the point follows, the constraints hold, and the
+/// drag is one undo step.
+#[test]
+fn a_3d_sketch_point_is_dragged() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("3D 스케치").click();
+    harness.run();
+    let app = harness.state_mut();
+    app.session.set_tool(ToolKind::Line);
+    let origin = *app.session.active_sketch().unwrap().1.points.keys().next().unwrap();
+    app.session.spatial_click([0.0; 3], Some(origin), None);
+    app.session.spatial_click([0.15, 0.0, 0.0], None, Some(0));
+    app.session.tool_event(ToolEvent::Key(gc_tools::Key::Escape));
+    app.session.set_tool(ToolKind::Select);
+    let end = *app.session.active_sketch().unwrap().1.points.keys().last().unwrap();
+    let before = app.session.point_pos(end).unwrap();
+    // Out from under the floating properties panel.
+    app.viewport_mut().camera.pan([0.0, 0.0], [-300.0, 0.0], [1280.0, 700.0]);
+    harness.run();
+    let from = harness.state().viewport().screen_of(gc_math::DVec3::from_array(before)).unwrap();
+    // Along the line (the X axis runs down to the right in the isometric view).
+    let to = from + egui::vec2(50.0, 29.0);
+    harness.event(egui::Event::PointerMoved(from));
+    harness.run();
+    harness.event(egui::Event::PointerButton {
+        pos: from,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run();
+    for step in 1..=6 {
+        harness.event(egui::Event::PointerMoved(from + (to - from) * (step as f32 / 6.0)));
+        harness.run_steps(2);
+    }
+    harness.event(egui::Event::PointerButton {
+        pos: to,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run();
+    let after = harness.state().session.point_pos(end).unwrap();
+    let moved = (0..3).map(|k| (after[k] - before[k]).powi(2)).sum::<f64>().sqrt();
+    assert!(moved > 0.01, "{before:?} -> {after:?}");
+    // The axis constraint of the line holds: the point stays on the X axis through the origin.
+    assert!(after[1].abs() < 1e-6 && after[2].abs() < 1e-6, "{after:?}");
+}

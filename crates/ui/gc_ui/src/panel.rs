@@ -105,6 +105,12 @@ pub struct TreeRow<'a> {
     pub visible: Option<(&'a mut bool, &'a str)>,
     /// The accessible name of the delete button, when the item can be deleted.
     pub delete: Option<&'a str>,
+    /// The text is being renamed: the buffer to edit, in place of the text.
+    pub edit: Option<&'a mut String>,
+    /// Take the keyboard focus into the edit field (the first frame of a rename).
+    pub focus: bool,
+    /// The item is not computed (suppressed or after the rollback marker): its text is dimmed.
+    pub dim: bool,
 }
 
 /// What happened to a [`tree_row`].
@@ -115,6 +121,8 @@ pub struct TreeRowResult {
     pub deleted: bool,
     /// The visibility check box changed.
     pub toggled: bool,
+    /// A rename ended: `Some(true)` with Enter, `Some(false)` with Escape or by leaving the field.
+    pub edited: Option<bool>,
 }
 
 /// One row of the browser tree: a kind icon, the text, an optional visibility check box and an optional
@@ -145,13 +153,42 @@ pub fn tree_row(ui: &mut Ui, row: TreeRow<'_>) -> TreeRowResult {
     x += 22.0;
     let right = rect.right() - if row.delete.is_some() { HEIGHT + 2.0 } else { 4.0 };
     let clip = egui::Rect::from_min_max(egui::pos2(x, rect.top()), egui::pos2(right, rect.bottom()));
-    ui.painter().with_clip_rect(clip).text(
-        egui::pos2(x, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        row.text,
-        egui::FontId::proportional(13.0),
-        colors::text(),
-    );
+    let mut edited = None;
+    if let Some(buffer) = row.edit {
+        let id = egui::Id::unique(("gc_rename_field", row.text));
+        if row.focus {
+            // The whole name is selected, so that typing replaces it.
+            let mut state = egui::TextEdit::load_state(ui.ctx(), id).unwrap_or_default();
+            let end = buffer.chars().count();
+            state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
+                egui::text::CCursor::new(0),
+                egui::text::CCursor::new(end),
+            )));
+            state.store(ui.ctx(), id);
+        }
+        let field = ui.put(
+            clip.shrink2(vec2(0.0, 1.0)),
+            egui::TextEdit::singleline(buffer).id(id).font(egui::FontId::proportional(13.0)),
+        );
+        field.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, "name"));
+        if row.focus {
+            field.request_focus();
+        }
+        if field.lost_focus() {
+            edited = Some(ui.input(|i| i.key_pressed(egui::Key::Enter)));
+        } else if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            edited = Some(false);
+        }
+    } else {
+        let color = if row.dim { colors::muted() } else { colors::text() };
+        ui.painter().with_clip_rect(clip).text(
+            egui::pos2(x, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            row.text,
+            egui::FontId::proportional(13.0),
+            color,
+        );
+    }
     response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, row.selected, row.text));
     let mut deleted = false;
     if let Some(name) = row.delete {
@@ -167,7 +204,7 @@ pub fn tree_row(ui: &mut Ui, row: TreeRow<'_>) -> TreeRowResult {
         let button = if shown { button.on_hover_text(name) } else { button };
         deleted = button.clicked();
     }
-    TreeRowResult { row: response, deleted, toggled }
+    TreeRowResult { row: response, deleted, toggled, edited }
 }
 
 fn with_alpha(color: egui::Color32, alpha: u8) -> egui::Color32 {
