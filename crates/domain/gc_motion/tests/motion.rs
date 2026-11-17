@@ -59,6 +59,7 @@ fn request(start: [f64; 6], goal: Goal, algorithm: Algorithm) -> MotionRequest {
         max_acc: vec![5.0; 6],
         linear: false,
         max_tcp_speed: None,
+        goal_seeds: Vec::new(),
     }
 }
 

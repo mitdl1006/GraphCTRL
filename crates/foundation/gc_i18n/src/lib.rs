@@ -448,6 +448,8 @@ messages! {
     CalcRelative => ("A^-1 · B (A에서 본 B)", "A^-1 · B (B seen from A)"),
     PropSteps => ("웨이포인트 순서", "Waypoints in order"),
     PropResult => ("결과", "Result"),
+    IkAnalytic => ("IK: 해석적 ({0}) · 한계 안의 자세 {1}개", "IK: closed form ({0}) · {1} configurations within limits"),
+    IkNumeric => ("IK: 수치 계산 · 찾은 자세 {0}개", "IK: numerical · {0} configurations found"),
     CmdExample => ("예제 열기 (UR5e 셀)", "Open example (UR5e cell)"),
     ExampleFailed => ("예제를 열 수 없습니다: {0}", "The example could not be opened: {0}"),
     PanelTool => ("툴", "Tool"),

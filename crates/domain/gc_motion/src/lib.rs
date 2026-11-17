@@ -59,6 +59,9 @@ pub struct MotionRequest {
     /// For a straight move: the fastest the tool tip may go, m/s. The motion is slowed down evenly
     /// until it keeps to it.
     pub max_tcp_speed: Option<f64>,
+    /// Goal configurations already known for a pose goal (from a closed-form solver), nearest first.
+    /// When given, they replace the numerical search for goal configurations.
+    pub goal_seeds: Vec<Vec<f64>>,
 }
 
 /// A planned and validated motion.
@@ -399,7 +402,10 @@ fn resolve_goals(
         Goal::Pose(world) => {
             let target = scene.flange_target(world);
             let ik = NumericIk::new(chain, IkOptions::default());
-            let found = ik.solve_many(&target, Some(&request.start), 32);
+            let seeded =
+                request.goal_seeds.iter().filter(|q| q.len() == chain.dof()).cloned().collect::<Vec<_>>();
+            let found =
+                if seeded.is_empty() { ik.solve_many(&target, Some(&request.start), 32) } else { seeded };
             if found.is_empty() {
                 let reason = ik
                     .solve_near(&target, &request.start)

@@ -115,6 +115,63 @@ pub struct LoadedRobot {
     scaled: BTreeMap<String, Vec<ShownPart>>,
     /// Mesh files the description refers to that could not be supplied or read.
     pub missing: Vec<String>,
+    /// The closed-form inverse kinematics a plugin offers for the chain, when one recognises it.
+    pub analytic: Option<AnalyticIk>,
+}
+
+/// Closed-form inverse kinematics from a plugin, for one robot's chain.
+#[derive(Clone)]
+pub struct AnalyticIk {
+    /// The kinematic family that recognised the chain, e.g. `ur6r`.
+    pub family: String,
+    solver: Arc<dyn gc_robotics_api::KinematicsSolver>,
+}
+
+impl std::fmt::Debug for AnalyticIk {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AnalyticIk").field("family", &self.family).finish_non_exhaustive()
+    }
+}
+
+/// Joint values that put the tip of a chain at `flange` (in the chain's base frame), nearest to `start`
+/// first: every closed-form solution, each turned by whole turns per joint to lie within the limits and
+/// as near `start` as it can, then refined on the real chain (a calibrated arm differs slightly from
+/// the nominal model). Empty without a closed form or when nothing is reachable within the limits.
+pub(crate) fn analytic_goals(loaded: &LoadedRobot, flange: &DPose3, start: &[f64]) -> Vec<Vec<f64>> {
+    use std::f64::consts::TAU;
+    let Some(analytic) = &loaded.analytic else { return Vec::new() };
+    let target =
+        gc_robotics_api::Pose { xyz: flange.translation.to_array(), quat_xyzw: flange.rotation.to_array() };
+    let (mut flat, mut branches) = (Vec::new(), Vec::new());
+    if analytic.solver.solve_all(&target, Some(start), &mut flat, &mut branches).is_err() {
+        return Vec::new();
+    }
+    let chain = &loaded.chain;
+    let dof = chain.dof();
+    let ik = gc_robot::NumericIk::new(chain, gc_robot::IkOptions::default());
+    let mut goals: Vec<Vec<f64>> = flat
+        .chunks(dof.max(1))
+        .filter_map(|solution| {
+            let turned: Option<Vec<f64>> = solution
+                .iter()
+                .enumerate()
+                .map(|(j, value)| {
+                    let (lower, upper) = (chain.lower()[j], chain.upper()[j]);
+                    let near = start.get(j).copied().unwrap_or(0.0);
+                    let k = ((near - value) / TAU).round();
+                    [k, k - 1.0, k + 1.0]
+                        .iter()
+                        .map(|k| value + k * TAU)
+                        .filter(|v| *v >= lower - 1e-9 && *v <= upper + 1e-9)
+                        .min_by(|a, b| (a - near).abs().total_cmp(&(b - near).abs()))
+                })
+                .collect();
+            ik.solve_near(flange, &turned?).ok()
+        })
+        .collect();
+    let distance = |q: &Vec<f64>| q.iter().zip(start).map(|(a, b)| (a - b).abs()).fold(0.0_f64, f64::max);
+    goals.sort_by(|a, b| distance(a).total_cmp(&distance(b)));
+    goals
 }
 
 /// A mesh file's triangles with its coordinates multiplied by `scale`.
@@ -297,6 +354,10 @@ pub struct Ghost {
     pub joints: Option<Vec<f64>>,
     /// What is wrong in that pose: a joint beyond its limit, a collision, too close to a body.
     pub problem: Option<StateProblem>,
+    /// How many arm configurations reach the waypoint within the joint limits.
+    pub solutions: usize,
+    /// The kinematic family whose closed form found them; `None` when they were found numerically.
+    pub analytic: Option<String>,
 }
 
 pub(crate) struct CellState {
@@ -318,6 +379,8 @@ pub(crate) struct CellState {
     plans: BTreeMap<Id<MotionPath>, Planned>,
     playback: Option<(Id<MotionPath>, f64)>,
     resources: Option<Resources>,
+    /// Plugins that offer closed-form inverse kinematics.
+    kinematics: Vec<Arc<dyn gc_robotics_api::KinematicsFactory>>,
     /// The collision scene of the cell as it is shown, with what it was built from, and the last
     /// question asked of it with its answer. Rebuilt when a robot or a body moves.
     scene: std::cell::RefCell<Option<(String, RobotScene)>>,
@@ -352,6 +415,7 @@ impl Default for CellState {
             plans: BTreeMap::new(),
             playback: None,
             resources: None,
+            kinematics: Vec::new(),
             files: BTreeMap::new(),
             meshes: BTreeMap::new(),
             scene: std::cell::RefCell::new(None),
@@ -367,14 +431,22 @@ impl CellState {
         self.robots.retain(|id, loaded| doc.get(*id).is_some_and(|r| r.urdf == loaded.urdf));
         for (id, robot) in doc.robots().iter() {
             if !self.robots.contains_key(&id)
-                && let Ok(loaded) = load(
+                && let Ok((mut loaded, ..)) = load(
                     &robot.urdf,
                     Some((&robot.base_link, &robot.tip_link)),
                     self.resources.as_ref(),
                     &robot.resource_dir,
                 )
             {
-                self.robots.insert(id, Arc::new(loaded.0));
+                // The first plugin that recognises the chain gives its closed form.
+                if let Some(spec) = loaded.chain.to_spec() {
+                    loaded.analytic = self.kinematics.iter().find_map(|factory| {
+                        factory.probe(&spec, None)?;
+                        let solver = factory.build(&spec).ok()?;
+                        Some(AnalyticIk { family: factory.id().to_owned(), solver: Arc::from(solver) })
+                    });
+                }
+                self.robots.insert(id, Arc::new(loaded));
             }
         }
         for (_, body) in doc.bodies().iter() {
@@ -526,6 +598,7 @@ fn load(
         files: BTreeMap::new(),
         scaled: BTreeMap::new(),
         missing: Vec::new(),
+        analytic: None,
     };
     loaded.read_meshes(resources, resource_dir);
     Ok((loaded, base, tip))
@@ -622,6 +695,13 @@ pub enum Reference {
 impl Session {
     fn cell_op(&mut self, op: CellOp) -> Result<Vec<Created>, EditError> {
         self.execute(&Command::Cell(op))
+    }
+
+    /// Sets the plugins that offer closed-form inverse kinematics, and reloads the robots.
+    pub fn set_kinematics(&mut self, factories: Vec<Arc<dyn gc_robotics_api::KinematicsFactory>>) {
+        self.cell.kinematics = factories;
+        self.cell.robots.clear();
+        self.cell.sync(&self.doc);
     }
 
     /// Sets where the files robot descriptions refer to come from, and reloads the robots.
@@ -966,23 +1046,32 @@ impl Session {
         }
         let candidates = match &target {
             WaypointTarget::Joints(q) => vec![q.clone()],
+            // Every arm configuration from the closed form when there is one; otherwise numerical
+            // solutions from many starts.
             _ => {
                 let flange = pose_of(&base).inverse() * world * pose_of(&tcp).inverse();
-                let ik = gc_robot::NumericIk::new(&loaded.chain, gc_robot::IkOptions::default());
-                let mut found = ik.solve_many(&flange, Some(&seed), GHOST_STARTS);
-                let distance =
-                    |q: &Vec<f64>| q.iter().zip(&seed).map(|(a, b)| (a - b).abs()).fold(0.0_f64, f64::max);
-                found.sort_by(|a, b| distance(a).total_cmp(&distance(b)));
-                found
+                if loaded.analytic.is_some() {
+                    analytic_goals(loaded, &flange, &seed)
+                } else {
+                    let ik = gc_robot::NumericIk::new(&loaded.chain, gc_robot::IkOptions::default());
+                    let mut found = ik.solve_many(&flange, Some(&seed), GHOST_STARTS);
+                    let distance = |q: &Vec<f64>| {
+                        q.iter().zip(&seed).map(|(a, b)| (a - b).abs()).fold(0.0_f64, f64::max)
+                    };
+                    found.sort_by(|a, b| distance(a).total_cmp(&distance(b)));
+                    found
+                }
             }
         };
+        let solutions = candidates.len();
         // The nearest pose without a problem; failing that, the nearest with what is wrong there.
-        let mut ghost = Ghost { robot, joints: None, problem: None };
+        let analytic = loaded.analytic.as_ref().map(|a| a.family.clone());
+        let mut ghost = Ghost { robot, joints: None, problem: None, solutions, analytic: analytic.clone() };
         for q in candidates {
             let problem = self.problem_at(robot, &q, false);
             let fine = problem.is_none();
             if ghost.joints.is_none() || fine {
-                ghost = Ghost { robot, joints: Some(q), problem };
+                ghost = Ghost { robot, joints: Some(q), problem, solutions, analytic: analytic.clone() };
             }
             if fine {
                 break;
@@ -1689,6 +1778,10 @@ fn plan_path(
                 )?)
             }
         };
+        let goal_pose = match &goal {
+            Goal::Pose(world) => Some(*world),
+            Goal::Joints(_) => None,
+        };
         let request = MotionRequest {
             start: start.clone(),
             goal,
@@ -1699,6 +1792,10 @@ fn plan_path(
             max_acc: vec![robot.max_acc; start.len()],
             linear: path.linear.get(index).copied().unwrap_or(false),
             max_tcp_speed: path.tcp_speed,
+            goal_seeds: match &goal_pose {
+                Some(world) => analytic_goals(loaded, &scene.flange_target(world), &start),
+                None => Vec::new(),
+            },
         };
         let plan = plan_motion(&scene, &request, control).map_err(|e| format!("{}: {e}", waypoint.name))?;
         if let Some(end) = plan.path.last() {

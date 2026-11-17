@@ -122,14 +122,19 @@ fn builtin_plugins() -> Vec<Box<dyn gc_plugin_api::Plugin>> {
 /// The bundled sample robot: a six-axis arm described with basic solids.
 const SAMPLE_ROBOT: &str = include_str!("../../../../fixtures/urdf/six_axis.urdf");
 
-/// The robots plugins offer (name and description) and a resolver for the files they refer to.
-fn robot_library() -> (Vec<(String, String)>, gc_session::Resources) {
+/// The closed-form inverse kinematics plugins offer.
+type Kinematics = Vec<std::sync::Arc<dyn gc_robotics_api::KinematicsFactory>>;
+
+/// The robots plugins offer (name and description), a resolver for the files they refer to, and the
+/// closed-form inverse kinematics they offer.
+fn robot_library() -> (Vec<(String, String)>, gc_session::Resources, Kinematics) {
     let mut registry = gc_plugin_api::Registry::default();
     for plugin in builtin_plugins() {
         if let Err(error) = registry.load(plugin.as_ref()) {
             log::error!("plugin `{}` was not loaded: {error}", plugin.manifest().id);
         }
     }
+    let kinematics = registry.get(gc_robotics_api::KINEMATICS_FACTORIES);
     let providers = registry.get(gc_robotics_api::ROBOT_MODEL_PROVIDERS);
     let mut library = Vec::new();
     let mut models = Vec::new();
@@ -148,7 +153,7 @@ fn robot_library() -> (Vec<(String, String)>, gc_session::Resources) {
     let resources: gc_session::Resources = std::sync::Arc::new(move |uri: &str| {
         models.iter().find_map(|(provider, model)| provider.resource(model, uri).ok())
     });
-    (library, resources)
+    (library, resources, kinematics)
 }
 
 /// The application state.
@@ -188,11 +193,12 @@ impl GraphCtrlApp {
     pub fn new(cc: &eframe::CreationContext<'_>, options: RunOptions) -> Self {
         gc_ui::fonts::install(&cc.egui_ctx);
         gc_ui::install_theme(&cc.egui_ctx);
-        let (library, resources) = robot_library();
+        let (library, resources, kinematics) = robot_library();
         let recent = options.settings_dir.as_deref().map(gc_persist::places::load_recent).unwrap_or_default();
         let recovery = options.settings_dir.as_deref().and_then(gc_persist::places::pending_autosave);
         let mut session = Session::new();
         session.set_resources(resources);
+        session.set_kinematics(kinematics);
         if options.background_jobs {
             let notifier = std::sync::Arc::new(Repaint(cc.egui_ctx.clone()));
             session.set_executor(gc_jobs::Executor::thread().with_notifier(notifier));

@@ -8,9 +8,12 @@
 
 use std::sync::Arc;
 
+pub mod ik;
+
 use gc_plugin_api::{GC_PLUGIN_API_VERSION, Plugin, PluginError, PluginManifest, Registrar};
 use gc_robotics_api::{
-    PlanningProfileData, ProviderError, ROBOT_MODEL_PROVIDERS, RobotModelInfo, RobotModelProvider,
+    KINEMATICS_FACTORIES, KinematicsFactory, PlanningProfileData, ProviderError, ROBOT_MODEL_PROVIDERS,
+    RobotModelInfo, RobotModelProvider,
 };
 
 /// The models offered: id, name, reach (m), payload (kg) and description.
@@ -138,6 +141,7 @@ impl Plugin for UrPlugin {
 
     fn register(&self, reg: &mut Registrar<'_>) -> Result<(), PluginError> {
         reg.add(ROBOT_MODEL_PROVIDERS, Arc::new(UrModels) as Arc<dyn RobotModelProvider>);
+        reg.add(KINEMATICS_FACTORIES, Arc::new(ik::UrKinematics) as Arc<dyn KinematicsFactory>);
         Ok(())
     }
 }

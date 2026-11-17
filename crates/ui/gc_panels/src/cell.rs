@@ -224,6 +224,12 @@ fn reach(ui: &mut Ui, session: &Session, lang: Lang, waypoint: gc_core::Id<gc_do
             ui.weak(degrees.join("  "));
         }
     }
+    // How the configurations were found: the closed form of the arm's family, or numerically.
+    let how = match &ghost.analytic {
+        Some(family) => tr!(lang, IkAnalytic, family, ghost.solutions),
+        None => tr!(lang, IkNumeric, ghost.solutions),
+    };
+    gc_ui::panel::note(ui, &how);
 }
 
 /// A state problem in the user's language.

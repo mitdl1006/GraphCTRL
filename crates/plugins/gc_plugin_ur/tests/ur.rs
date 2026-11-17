@@ -153,3 +153,68 @@ fn every_model_matches_its_dh_parameters() {
         }
     }
 }
+
+/// The closed-form solver: every UR model is recognised exactly, every solution reaches the pose, the
+/// configuration a pose came from is among its solutions, and a general pose has eight.
+#[test]
+fn the_closed_form_solver_finds_every_arm_configuration() {
+    use gc_robotics_api::{Fit, KINEMATICS_FACTORIES};
+    let mut registry = Registry::default();
+    registry.load(&UrPlugin).unwrap();
+    let provider = &registry.get(ROBOT_MODEL_PROVIDERS)[0];
+    let factory = &registry.get(KINEMATICS_FACTORIES)[0];
+    assert_eq!(factory.id(), "ur6r");
+    for model in ["ur3e", "ur5e", "ur10e", "ur16e"] {
+        let (robot, _) = import(&provider.urdf(model).unwrap()).unwrap();
+        let spec = robot.default_chain().unwrap().to_spec().unwrap();
+        assert_eq!(factory.probe(&spec, None), Some(Fit::Exact), "{model}");
+        let solver = factory.build(&spec).unwrap();
+        let (mut q_out, mut branches) = (Vec::new(), Vec::new());
+        for k in 0..40 {
+            let q: Vec<f64> = (0..6).map(|j| (((k * 5 + j * 7) % 19) as f64 / 19.0 * 5.6) - 2.8).collect();
+            let target = spec.fk(&q).unwrap();
+            let count = solver.solve_all(&target, Some(&q), &mut q_out, &mut branches).unwrap();
+            assert!((1..=8).contains(&count) && q_out.len() == count * 6, "{model} {q:?}");
+            for solution in q_out.chunks(6) {
+                let reached = spec.fk(solution).unwrap();
+                let error =
+                    reached.xyz.iter().zip(&target.xyz).map(|(a, b)| (a - b).abs()).fold(0.0, f64::max);
+                assert!(error < 1e-6, "{model}: {solution:?} misses by {error}");
+            }
+            let wrap =
+                |a: f64| (a + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+            let found = q_out.chunks(6).any(|s| s.iter().zip(&q).all(|(a, b)| wrap(a - b).abs() < 1e-6));
+            assert!(found, "{model}: {q:?} not among {q_out:?}");
+            assert!(solver.classify(&q).is_some());
+        }
+    }
+
+    // The reference pose of the plan (UR5e, tool pointing down): eight solutions, eight branches.
+    let (robot, _) = import(&provider.urdf("ur5e").unwrap()).unwrap();
+    let spec = robot.default_chain().unwrap().to_spec().unwrap();
+    let solver = factory.build(&spec).unwrap();
+    let q = [
+        0.0,
+        -std::f64::consts::FRAC_PI_2,
+        std::f64::consts::FRAC_PI_2,
+        -std::f64::consts::FRAC_PI_2,
+        -std::f64::consts::FRAC_PI_2,
+        0.0,
+    ];
+    let (mut q_out, mut branches) = (Vec::new(), Vec::new());
+    assert_eq!(solver.solve_all(&spec.fk(&q).unwrap(), None, &mut q_out, &mut branches), Ok(8));
+    branches.sort_unstable();
+    branches.dedup();
+    assert_eq!(branches.len(), 8);
+    assert!(!solver.branch_label(branches[0]).is_empty());
+
+    // Out of reach: no solution, said so.
+    let far = gc_robotics_api::Pose::from_translation([3.0, 0.0, 0.5]);
+    assert!(solver.solve_all(&far, None, &mut q_out, &mut branches).is_err());
+
+    // The sample six-axis arm is not a UR: no closed form.
+    let path = format!("{}/../../../fixtures/urdf/six_axis.urdf", env!("CARGO_MANIFEST_DIR"));
+    let (sample, _) = import(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let spec = sample.default_chain().unwrap().to_spec().unwrap();
+    assert_eq!(factory.probe(&spec, None), None);
+}

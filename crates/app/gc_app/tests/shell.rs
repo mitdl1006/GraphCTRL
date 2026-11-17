@@ -1607,6 +1607,11 @@ fn waypoint_references_and_the_pose_calculator() {
     harness.state_mut().session.select_item(Some(CellItem::Waypoint(p1)));
     harness.run();
     harness.get_by_label("P1 (기준: Frame1)");
+    // The UR5e's configurations come from its closed form: several, all within the joint limits.
+    let ghost = harness.state().session.waypoint_ghost(p1).unwrap();
+    assert_eq!(ghost.analytic.as_deref(), Some("ur6r"));
+    assert!(ghost.solutions >= 2 && ghost.joints.is_some(), "{ghost:?}");
+    assert!(harness.query_by_label_contains("IK: 해석적 (ur6r)").is_some());
     harness.get_by_label("기준 좌표계").click();
     harness.run();
     harness.query_all_by_label("로봇 베이스").last().unwrap().click();
