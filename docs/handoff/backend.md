@@ -1,6 +1,35 @@
 # 백엔드 인계 (2026-11-17)
 
-## M2-1 (진행 중)
+## 2026-11-17 오후 — QA 버그·트리 API·작업 평면 스케치·S2 품질
+
+**QA 버그 3건(수정, 테스트의 `#[ignore]` 제거)**: ① UR IK가 팔을 곧게 위로 세운 자세(손목 중심이 d4 원기둥 위)를 반올림 때문에
+도달 불가로 판정 → 허용오차 ② 툴은 별도 바디("tool"): tip 링크와 장착 링크만 허용, 나머지 링크와는 검사(영자세 자동 허용 없음),
+tip 링크의 접촉 허용은 툴에도 적용 ③ `library::scan`이 `..`·절대 경로 description을 거부. `StateChecker::motion_cost` 전달 완료.
+
+**프론트엔드용 트리 API**
+
+| 요청 | API |
+|---|---|
+| 이름 바꾸기(F2) | `Command::Rename { item: AnyId, name }` — 앞뒤 공백 제거, 같은 종류의 이름 중복이면 `EditError::NameTaken`, 파라미터는 거부(수식이 이름으로 참조) |
+| 가시성 전 노드 저장 | `Command::SetVisible { item, visible }`, 읽기 `doc.is_visible(item)` (바디·로봇·설비는 look, 나머지는 트리 상태에 저장) |
+| 억제 | `CellOp::SetSuppressed { item, suppressed }` — 스케치·작업 피처·피처·설비 + **웨이포인트·경로**. 읽기 `doc.is_inactive(item)`(억제 또는 롤백 뒤). 억제한 웨이포인트는 계획에서 건너뛰고, 억제한 경로는 계획 거부 |
+| 삭제 시 종속 안내 | `doc.dependents_of(item) -> Vec<AnyId>` (간접 포함, 직접 먼저). 종속이 있는 삭제는 커밋에서 거부됨 |
+| 순서 바꾸기 | `CellOp::MoveInTree { item, before }` — 종속 위반 시 `EditError::InUse`; 순서 읽기 `doc.model_order()` |
+| 롤백 위치 | `doc.rollback_index() -> Option<usize>`(model_order에서 마커가 선 항목의 위치), 옮기기 `CellOp::SetRollback { after }` |
+| 3D 스케치 점 드래그 | `session.spatial_drag_start(point, cursor3) -> bool`, `spatial_drag_move(cursor3) -> Option<FrameOutcome>`, `spatial_drag_end()`(실행 취소 1단계), `spatial_drag_cancel()`. 미리보기는 `point_pos`. 하위: `Sketch::begin_drag_3d`, `SketchDrag::update_3d`, `gc_solver::Grab::Point3`·`begin_drag_3d`·`update_3d` |
+
+**13 임의 면·작업 평면 위 스케치**: `session.create_sketch_on_work_plane(id)`, `session.create_sketch_on_face(assembly, part, mesh, triangle)`
+(피킹한 삼각형: 원점=삼각형 중심, 법선=앞면, X=첫 모서리). 스케치 평면 프레임이 `Frame::source`(`PlaneSource::Work | Face`)로 붙어
+작업 평면·설비가 움직이면 따라가고, 저장·재열기 후에도 유지, 쓰는 동안 그 작업 평면·설비는 삭제 거부, 스케치를 지우면 프레임도 지워짐.
+문서 명령 `Command::CreateSketchOn { name, source }`. 작업 피처 위치 계산은 `doc.work_shape(id)`(세션 `work_shape`는 위임).
+
+**S2 경로 품질**: 부분(조인트별) 숏컷 추가(`gc_plan::partial_shortcut`, 파이프라인·벤치 공통 `gc_motion::simplify_path`). S2 RRT-Connect
+20시드: 중앙값 2.50 → 1.90(최선 대비 1.07배), best-of-4 변동 2.9 %. 전체 보고서는 재측정 후 갱신.
+
+**확정된 규칙(리드)**: 프로젝트의 `Robot.urdf` 사본이 기구학의 기준, 메시만 라이브러리에서 찾는다 — 현재 구현이 그렇게 동작(세션은 문서의 urdf로 모델을
+만들고 `resource_dir`/`library://`로 메시만 찾음). 라이브러리 패키지와 다를 때 알림은 아직 없음.
+
+## M2-1 (1차)
 
 | 항목 | 위치 | 상태 |
 |---|---|---|
