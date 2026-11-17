@@ -1115,6 +1115,9 @@ impl eframe::App for GraphCtrlApp {
                         Some(BrowserAction::DriveRelationship(id)) => {
                             self.drive.start_relationship(&mut self.session, id)
                         }
+                        Some(BrowserAction::SuppressRelationship(id, suppressed)) => {
+                            drop(self.session.set_relationship_suppressed(id, suppressed));
+                        }
                         Some(BrowserAction::SketchOnComponent(occurrence, plane)) => {
                             drop(self.session.create_sketch_on_component(occurrence, plane));
                         }
