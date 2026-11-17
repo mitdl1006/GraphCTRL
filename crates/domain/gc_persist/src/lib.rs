@@ -13,6 +13,8 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(test, allow(clippy::float_cmp, reason = "tests compare exactly representable values"))]
 
+pub mod places;
+
 use std::collections::BTreeMap;
 use std::io::Write as _;
 use std::num::NonZeroU64;

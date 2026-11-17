@@ -1336,6 +1336,7 @@ dependencies = [
  "gc_math",
  "gc_mesh",
  "gc_panels",
+ "gc_persist",
  "gc_plugin_api",
  "gc_plugin_ur",
  "gc_render",
@@ -1874,6 +1875,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "gc_app",
+ "gc_persist",
  "gc_plugin_mesh",
  "gc_plugin_planners",
  "gc_plugin_ur",

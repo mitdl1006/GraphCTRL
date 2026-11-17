@@ -956,6 +956,70 @@ fn clicking_the_view_cube_turns_the_view() {
     assert!((forward - expected).length() < 1e-9, "{forward:?}");
 }
 
+/// Recent projects in the File menu, and unsaved work recovered after the program did not close normally.
+#[test]
+fn recent_projects_and_recovery_after_a_crash() {
+    let directory = tempfile::tempdir().unwrap();
+    let settings = directory.path().join("settings");
+    let project = directory.path().join("cell.gctrl");
+    let options = RunOptions { settings_dir: Some(settings.clone()), ..RunOptions::default() };
+    let start = |options: RunOptions, dialogs: Scripted| {
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(SIZE)
+            .with_pixels_per_point(1.0)
+            .build_eframe(move |cc| GraphCtrlApp::new(cc, options).with_dialogs(Box::new(dialogs)));
+        harness.run();
+        harness
+    };
+
+    // Saved once: listed under recent projects.
+    let mut harness = start(options.clone(), Scripted(project.clone()));
+    harness.get_by_label("XY 스케치").click();
+    harness.run();
+    draw_sample(harness.state_mut());
+    harness.run();
+    assert!(harness.state_mut().save(false));
+    assert_eq!(harness.state().recent().len(), 1);
+    let saved = harness.state().session.doc().clone();
+
+    // More work, saved automatically, then the program "crashes" (the harness is dropped).
+    let app = harness.state_mut();
+    app.session.set_tool(ToolKind::Circle);
+    click(app, mm(150.0, 20.0));
+    click(app, mm(160.0, 20.0));
+    assert!(app.session.is_dirty());
+    app.autosave();
+    let unsaved = app.session.doc().clone();
+    drop(harness);
+
+    // Started again: the recovery question; recovering gives the unsaved work, still to be saved.
+    let mut harness = start(options.clone(), Scripted(project.clone()));
+    harness.get_by_label("복구").click();
+    harness.run();
+    let session = &harness.state().session;
+    assert!(session.doc().same_content(&unsaved));
+    assert!(session.is_dirty());
+    assert_eq!(session.file_path(), Some(project.as_path()));
+    // Saving keeps it and removes the automatic copy.
+    assert!(harness.state_mut().save(false));
+    harness.run();
+    assert!(gc_persist::places::pending_autosave(&settings).is_none());
+    drop(harness);
+
+    // Started again: no question; the project opens from the recent list.
+    let mut harness = start(options, Scripted(project.clone()));
+    assert_eq!(harness.query_all_by_label("복구").count(), 0);
+    harness.get_by_label("파일").click();
+    harness.run();
+    harness.get_by_label("최근 프로젝트").hover();
+    harness.run();
+    harness.get_by_label("cell.gctrl").click();
+    harness.run();
+    let session = &harness.state().session;
+    assert!(session.doc().same_content(&unsaved) && !session.doc().same_content(&saved));
+    assert!(!session.is_dirty());
+}
+
 /// File dialogs that always answer with one path.
 struct Scripted(std::path::PathBuf);
 

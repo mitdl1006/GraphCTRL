@@ -22,6 +22,9 @@ pub struct RunOptions {
     /// Plan on a worker thread so that the window stays responsive. Off, planning finishes inside the
     /// command that starts it, which is what scripted tests want.
     pub background_jobs: bool,
+    /// The application's own folder (recent projects, automatic saves). `None` keeps nothing, which is
+    /// what tests want; the application passes the system's settings folder.
+    pub settings_dir: Option<PathBuf>,
 }
 
 /// Wakes the window when a background job has finished.
@@ -74,12 +77,17 @@ impl FileDialogs for NativeDialogs {
 }
 
 /// Something that would discard unsaved changes and therefore waits for the user's answer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum Pending {
     New,
     Open,
+    /// Open this project (from the recent list).
+    OpenPath(PathBuf),
     Quit,
 }
+
+/// Unsaved work is saved automatically this often, in seconds.
+const AUTOSAVE_SECONDS: f64 = 60.0;
 
 /// The fields of the Korean input test window.
 #[derive(Default)]
@@ -148,6 +156,11 @@ pub struct GraphCtrlApp {
     notice: Option<String>,
     pending: Option<Pending>,
     quitting: bool,
+    recent: Vec<PathBuf>,
+    /// An automatic save found at start, offered for recovery, and the project it belongs to.
+    recovery: Option<(PathBuf, Option<PathBuf>)>,
+    autosaved: bool,
+    last_autosave: f64,
     title: String,
 }
 
@@ -157,6 +170,8 @@ impl GraphCtrlApp {
         gc_ui::fonts::install(&cc.egui_ctx);
         gc_ui::install_theme(&cc.egui_ctx);
         let (library, resources) = robot_library();
+        let recent = options.settings_dir.as_deref().map(gc_persist::places::load_recent).unwrap_or_default();
+        let recovery = options.settings_dir.as_deref().and_then(gc_persist::places::pending_autosave);
         let mut session = Session::new();
         session.set_resources(resources);
         if options.background_jobs {
@@ -179,6 +194,10 @@ impl GraphCtrlApp {
             notice: None,
             pending: None,
             quitting: false,
+            recent,
+            recovery,
+            autosaved: false,
+            last_autosave: 0.0,
             title: String::new(),
         }
     }
@@ -212,12 +231,89 @@ impl GraphCtrlApp {
         match self.session.save_as(&path) {
             Ok(()) => {
                 self.notice = Some(tr!(lang, FileSaved, path.display()));
+                self.remember(&path);
                 true
             }
             Err(error) => {
                 self.notice = Some(tr!(lang, FileError, error));
                 false
             }
+        }
+    }
+
+    /// Puts a project first in the recent list.
+    fn remember(&mut self, path: &std::path::Path) {
+        if let Some(dir) = &self.options.settings_dir {
+            match gc_persist::places::remember_recent(dir, path) {
+                Ok(list) => self.recent = list,
+                Err(error) => log::warn!("the recent projects could not be written: {error}"),
+            }
+        }
+    }
+
+    /// The recent projects, newest first.
+    pub fn recent(&self) -> &[PathBuf] {
+        &self.recent
+    }
+
+    /// Saves unsaved work to the application's folder (done every minute on its own), or removes the
+    /// automatic save once nothing is unsaved.
+    pub fn autosave(&mut self) {
+        let Some(dir) = self.options.settings_dir.clone() else { return };
+        if self.session.is_dirty() {
+            match gc_persist::places::write_autosave(&dir, self.session.doc(), self.session.file_path()) {
+                Ok(()) => self.autosaved = true,
+                Err(error) => log::warn!("the automatic save failed: {error}"),
+            }
+        } else if self.autosaved {
+            gc_persist::places::clear_autosave(&dir);
+            self.autosaved = false;
+        }
+    }
+
+    /// The question at start when a session that did not end normally left unsaved work.
+    fn recover_question(&mut self, ctx: &egui::Context) {
+        let Some((autosave, project)) = self.recovery.clone() else { return };
+        let lang = self.lang;
+        let mut answer = None;
+        egui::Window::new(tr!(lang, AppTitle))
+            .id(egui::Id::unique("gc_recover"))
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.label(tr!(lang, AskRecover));
+                if let Some(project) = &project {
+                    ui.weak(project.display().to_string());
+                }
+                ui.horizontal(|ui| {
+                    if ui.button(tr!(lang, BtnRecover)).clicked() {
+                        answer = Some(true);
+                    }
+                    if ui.button(tr!(lang, BtnDiscard)).clicked() {
+                        answer = Some(false);
+                    }
+                });
+            });
+        match answer {
+            Some(true) => {
+                self.recovery = None;
+                match self.session.open_recovered(&autosave, project.as_deref()) {
+                    Ok(()) => {
+                        let named = project.map(|p| p.display().to_string()).unwrap_or_default();
+                        self.notice = Some(tr!(lang, FileRecovered, named));
+                        self.autosaved = true;
+                    }
+                    Err(error) => self.notice = Some(tr!(lang, FileError, error)),
+                }
+            }
+            Some(false) => {
+                self.recovery = None;
+                if let Some(dir) = &self.options.settings_dir {
+                    gc_persist::places::clear_autosave(dir);
+                }
+            }
+            None => {}
         }
     }
 
@@ -238,19 +334,30 @@ impl GraphCtrlApp {
                 self.tab = Tab::Model;
                 self.notice = None;
             }
-            Pending::Open => {
-                let Some(path) = self.dialogs.open() else { return };
+            Pending::Open | Pending::OpenPath(_) => {
+                let path = match action {
+                    Pending::OpenPath(path) => path,
+                    _ => match self.dialogs.open() {
+                        Some(path) => path,
+                        None => return,
+                    },
+                };
                 match self.session.open(&path) {
                     Ok(needs_repair) => {
                         self.tab = Tab::Model;
                         self.notice = (!needs_repair.is_empty())
                             .then(|| tr!(lang, FileNeedsRepair, needs_repair.len()));
+                        self.remember(&path);
                     }
                     Err(error) => self.notice = Some(tr!(lang, FileError, error)),
                 }
             }
             Pending::Quit => {
                 self.quitting = true;
+                // Leaving on purpose: nothing to recover next time.
+                if let Some(dir) = &self.options.settings_dir {
+                    gc_persist::places::clear_autosave(dir);
+                }
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
         }
@@ -258,7 +365,7 @@ impl GraphCtrlApp {
 
     /// The question shown before unsaved changes would be lost.
     fn unsaved_question(&mut self, ctx: &egui::Context) {
-        let Some(action) = self.pending else { return };
+        let Some(action) = self.pending.clone() else { return };
         let lang = self.lang;
         let mut answer = None;
         egui::Window::new(tr!(lang, AppTitle))
@@ -378,6 +485,19 @@ impl GraphCtrlApp {
                 if ui.button(tr!(lang, CmdSaveAs)).clicked() {
                     self.save(true);
                 }
+                let recent = self.recent.clone();
+                ui.add_enabled_ui(!recent.is_empty(), |ui| {
+                    ui.menu_button(tr!(lang, MenuRecent), |ui| {
+                        for path in recent {
+                            let name = path
+                                .file_name()
+                                .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+                            if ui.button(&name).on_hover_text(path.display().to_string()).clicked() {
+                                self.request(Pending::OpenPath(path), &ctx);
+                            }
+                        }
+                    });
+                });
                 ui.separator();
                 if ui.button(tr!(lang, CmdQuit)).clicked() {
                     self.request(Pending::Quit, &ctx);
@@ -488,6 +608,12 @@ impl eframe::App for GraphCtrlApp {
             self.pending = Some(Pending::Quit);
         }
         self.update_title(&ctx);
+        // Unsaved work is kept safe every minute; once saved, the copy goes.
+        let now = ctx.input(|i| i.time);
+        if now - self.last_autosave >= AUTOSAVE_SECONDS || (self.autosaved && !self.session.is_dirty()) {
+            self.last_autosave = now;
+            self.autosave();
+        }
 
         egui::Panel::top("menu").show(ui, |ui| self.menu(ui));
         let mut ribbon_action = None;
@@ -570,6 +696,7 @@ impl eframe::App for GraphCtrlApp {
         egui::CentralPanel::no_frame().show(ui, |ui| self.viewport.ui(ui, &mut self.session, lang));
         self.reference_question(&ctx);
         self.unsaved_question(&ctx);
+        self.recover_question(&ctx);
         if self.ime.open {
             self.ime_window(&ctx);
         }

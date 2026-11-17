@@ -260,6 +260,14 @@ messages! {
     GpuOff => ("GPU 없음", "No GPU"),
     /// Question before discarding unsaved changes.
     AskSaveChanges => ("변경 내용을 저장할까요?", "Save the changes?"),
+    /// Menu: recently used projects.
+    MenuRecent => ("최근 프로젝트", "Recent Projects"),
+    /// Question at start: unsaved work from a session that did not end normally was found.
+    AskRecover => ("저장하지 않은 작업이 자동 저장되어 있습니다(프로그램이 정상 종료되지 않음). 복구할까요?", "Unsaved work was saved automatically (the program did not close normally). Recover it?"),
+    /// Button: recover the automatic save.
+    BtnRecover => ("복구", "Recover"),
+    /// Notice after recovering. `{0}` is the project, or empty for a new one.
+    FileRecovered => ("복구했습니다. 저장해야 남습니다. {0}", "Recovered. Save it to keep it. {0}"),
     /// Button: do not save.
     BtnDiscard => ("저장 안 함", "Don't Save"),
     /// Status: a file operation failed. `{0}` is the reason.

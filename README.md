@@ -29,7 +29,9 @@
   장애물입니다. 설정은 프로젝트에 저장됩니다.
 - **프로젝트 저장/열기**: 파일 메뉴(Ctrl+S, Ctrl+Shift+S는 다른 이름으로, Ctrl+O, Ctrl+N). `이름.gctrl` 옆에 `이름_files`
   폴더가 생기고, 불러온 설비 메시와 URDF 로봇의 메시 파일이 그 안에 복사됩니다. 파일은 그 폴더를 상대 경로로 가리키므로
-  `.gctrl` 파일과 `_files` 폴더를 함께 옮기면 다른 PC에서도 그대로 열립니다.
+  `.gctrl` 파일과 `_files` 폴더를 함께 옮기면 다른 PC에서도 그대로 열립니다. 파일 메뉴의 "최근 프로젝트"에 최근 8개가
+  남고, 저장하지 않은 작업은 1분마다 자동 저장되어 프로그램이 비정상 종료되면 다음 실행 때 복구할지 묻습니다
+  (Windows `%APPDATA%\GraphCTRL`, Linux `~/.config/graphctrl`).
 - **뷰 조작(Inventor 방식)**: 휠 = 줌, 가운데 드래그 = 팬, Shift + 가운데 드래그 또는 F4 + 왼쪽 드래그 = 오빗, F6 = 홈.
 
 계획은 [docs/PLAN.md](docs/PLAN.md), 진행 상태는 [docs/STATUS.md](docs/STATUS.md), 화면 캡처는

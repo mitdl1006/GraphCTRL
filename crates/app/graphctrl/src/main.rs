@@ -5,7 +5,11 @@
 use std::path::PathBuf;
 
 fn main() -> anyhow::Result<()> {
-    let mut options = gc_app::RunOptions { background_jobs: true, ..gc_app::RunOptions::default() };
+    let mut options = gc_app::RunOptions {
+        background_jobs: true,
+        settings_dir: gc_persist::places::settings_dir(),
+        ..gc_app::RunOptions::default()
+    };
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {

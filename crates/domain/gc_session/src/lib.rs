@@ -66,6 +66,8 @@ pub struct Session {
     last_error: Option<EditError>,
     path: Option<PathBuf>,
     saved_revision: Revision,
+    /// True for work recovered from an automatic save until it is saved.
+    recovered: bool,
     cell: cell::CellState,
     spatial: spatial::SpatialState,
 }
@@ -93,6 +95,7 @@ impl Session {
             last_error: None,
             path: None,
             saved_revision: Revision::default(),
+            recovered: false,
             cell: cell::CellState::default(),
             spatial: spatial::SpatialState::default(),
         }
@@ -110,10 +113,11 @@ impl Session {
 
     /// True when the document has changes that are not in its file.
     pub fn is_dirty(&self) -> bool {
-        self.doc.revision() != self.saved_revision
+        self.recovered || self.doc.revision() != self.saved_revision
     }
 
     fn replace_document(&mut self, doc: Document, path: Option<PathBuf>) {
+        self.recovered = false;
         self.saved_revision = doc.revision();
         self.doc = doc;
         self.path = path;
@@ -138,6 +142,7 @@ impl Session {
     pub fn save_as(&mut self, path: &Path) -> Result<(), PersistError> {
         let packed = self.packed_for(path)?;
         gc_persist::save(&packed, path)?;
+        self.recovered = false;
         self.path = Some(path.to_path_buf());
         self.saved_revision = self.doc.revision();
         Ok(())
@@ -158,6 +163,15 @@ impl Session {
         let doc = project::unpacked(loaded.doc, path);
         self.replace_document(doc, Some(path.to_path_buf()));
         Ok(loaded.needs_repair)
+    }
+
+    /// Takes up work from an automatic save: the document as it was, belonging to `project` (saving goes
+    /// there), and marked as not saved.
+    pub fn open_recovered(&mut self, autosave: &Path, project: Option<&Path>) -> Result<(), PersistError> {
+        let loaded = gc_persist::load(autosave)?;
+        self.replace_document(loaded.doc, project.map(Path::to_path_buf));
+        self.recovered = true;
+        Ok(())
     }
 
     /// The history, for the undo and redo menu entries.

@@ -11,6 +11,7 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+gc_persist.workspace = true
 gc_app.workspace = true
 gc_plugin_ur.workspace = true
 gc_plugin_mesh.workspace = true
