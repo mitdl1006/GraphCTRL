@@ -227,7 +227,7 @@ fn lines_pick_up_the_constraints_implied_by_how_they_were_drawn() {
         SketchOp::AddLine {
             a: [0.0, 0.0, 0.0],
             b: [0.03, 0.0004, 0.0],
-            snap_a: EndSnap { point: Some(origin), curve: None },
+            snap_a: EndSnap { point: Some(origin), ..EndSnap::default() },
             snap_b: EndSnap::default(),
             horizontal: Some(true),
         },
