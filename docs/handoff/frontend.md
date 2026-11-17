@@ -48,6 +48,8 @@
 
 - 관계 구동 연결(리드 요청): 브라우저 "관계" 폴더의 구속/조인트 노드 우클릭 메뉴에 "구동"(강체 조인트는 비활성)과 삭제, 선택하면 `drive.start_relationship`. 리본 관계 그룹의 구동 버튼은 로봇이 없어도 관계가 있으면 활성이고, 로봇이 없으면 첫 번째 구동 가능한 관계를 엶. 마킹 메뉴 overflow에는 넣지 않음. 테스트 `a_relationship_is_driven_from_the_browser`(메뉴 항목이 눌리는 것까지만 확인, 구동 동작 자체는 리드의 구동 테스트).
 
+- 관계 억제·구성요소 상태 1회 조회(리드 배치 ②⑥): 브라우저가 프레임마다 `session.component_statuses()`를 한 번만 부르고(`ParamsUi.statuses`) 행은 그 맵을 읽음. "관계" 폴더 행은 억제되면 흐리게 그리고 상태 점을 숨기며, 우클릭 메뉴에 "억제/억제 해제"(`BrowserAction::SuppressRelationship` → `set_relationship_suppressed`, 한 번의 실행 취소 단계). 근거: Inventor 억제 도움말 원문은 아직 확인하지 못함(GUID 미확인) — 흐림 표시는 기존 노드 억제 표시를 따른 것. 테스트 `a_relationship_is_suppressed_from_the_browser`.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

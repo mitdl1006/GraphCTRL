@@ -38,6 +38,8 @@ pub enum BrowserAction {
     SketchOnComponent(gc_doc::Occurrence, gc_doc::OriginPlane),
     /// Drive an assembly relationship (the Drive dialog).
     DriveRelationship(gc_core::Id<gc_doc::Relationship>),
+    /// Suppress a relationship (or bring it back) and solve again.
+    SuppressRelationship(gc_core::Id<gc_doc::Relationship>, bool),
 }
 
 /// What is typed into the parameter editor of the browser.
@@ -53,6 +55,8 @@ pub struct ParamsUi {
     pub rename_fresh: bool,
     /// The origin element selected in the view or here.
     pub origin_selected: Option<(gc_doc::Occurrence, gc_doc::OriginElement)>,
+    /// The component statuses of this frame: one query for the whole tree, not one per row.
+    pub statuses: std::collections::BTreeMap<gc_core::AnyId, gc_doc::ComponentStatus>,
 }
 
 /// The named parameters: a list, and one editor that adds a parameter or, when the name exists, changes
@@ -121,6 +125,7 @@ fn params(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi) -> O
 /// The model browser: origin geometry and sketches. Double-click a sketch to edit it.
 pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi) -> Option<BrowserAction> {
     let mut action = None;
+    state.statuses = session.component_statuses();
     gc_ui::panel::header(ui, tr!(lang, PanelBrowser));
     // F2 renames the selected node when the mouse is over the browser (over the 3D view, F2 pans).
     let hovering = ui.rect_contains_pointer(ui.max_rect());
@@ -167,6 +172,7 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
             ui.spacing_mut().item_spacing.y = 1.0;
             egui::CollapsingHeader::new(tr!(lang, BrowserRelationships)).default_open(true).show(ui, |ui| {
                 for (id, relationship) in session.relationships() {
+                    let suppressed = session.doc().is_inactive(id.erase());
                     let delete = tr!(lang, CmdDeleteItem, relationship.name);
                     let row = TreeRow {
                         icon: Icon::Path,
@@ -176,10 +182,10 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
                         delete: Some(&delete),
                         edit: None,
                         focus: false,
-                        dim: false,
+                        dim: suppressed,
                     };
                     let result = gc_ui::panel::tree_row(ui, row);
-                    if let Some(status) = session.relationship_status(id) {
+                    if let Some(status) = session.relationship_status(id).filter(|_| !suppressed) {
                         use gc_doc::RelationStatus;
                         status_dot(
                             ui,
@@ -193,6 +199,11 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
                     result.row.context_menu(|ui| {
                         if ui.add_enabled(drivable, egui::Button::new(tr!(lang, MenuDrive))).clicked() {
                             action = Some(BrowserAction::DriveRelationship(id));
+                            ui.close();
+                        }
+                        let text = if suppressed { tr!(lang, CmdUnsuppress) } else { tr!(lang, CmdSuppress) };
+                        if ui.button(text).clicked() {
+                            action = Some(BrowserAction::SuppressRelationship(id, !suppressed));
                             ui.close();
                         }
                         if ui.button(delete.as_str()).clicked() {
@@ -602,7 +613,7 @@ fn node_row(
         dim: inactive,
     };
     let result = gc_ui::panel::tree_row(ui, row);
-    if let Some(status) = session.component_status(node.any) {
+    if let Some(&status) = state.statuses.get(&node.any) {
         use gc_doc::ComponentStatus;
         status_dot(
             ui,

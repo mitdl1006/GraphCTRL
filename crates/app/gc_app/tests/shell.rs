@@ -3265,3 +3265,47 @@ fn a_relationship_is_driven_from_the_browser() {
     // The dialog is up: its title and the menu entry's name are the same word.
     assert!(harness.query_all_by_label("구동").count() >= 1);
 }
+
+#[test]
+fn a_relationship_is_suppressed_from_the_browser() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.05, 0.05, 0.05] };
+    let app = harness.state_mut();
+    let fixed = app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    let placement = gc_doc::Placement { xyz: [0.0, 0.0, 0.2], rpy: [0.0; 3] };
+    let moving = app.session.add_body(solid, placement).unwrap();
+    let plane = gc_doc::Geometry::origin(gc_doc::OriginElement::Plane(gc_doc::OriginPlane::Xy));
+    let select = |body: gc_core::Id<gc_doc::Body>| gc_doc::Selection {
+        occurrence: gc_doc::Occurrence::Item(body.erase()),
+        geometry: plane,
+    };
+    let relationship = gc_doc::Relationship::new(
+        "Mate:1",
+        gc_doc::RelationKind::Mate { offset: 0.0, sense: gc_doc::AxisSense::Opposed },
+        select(moving),
+        select(fixed),
+    );
+    let id = app.session.add_relationship(relationship).unwrap();
+    harness.run();
+    assert!(!harness.state().session.doc().is_inactive(id.erase()));
+
+    let at = harness.get_by_label("Mate:1").rect().center();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run();
+    }
+    harness.get_by_label("억제").click();
+    harness.run();
+    assert!(harness.state().session.doc().is_inactive(id.erase()));
+}
