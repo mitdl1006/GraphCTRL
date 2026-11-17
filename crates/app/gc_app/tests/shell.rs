@@ -1261,6 +1261,42 @@ fn a_3d_sketch_is_drawn_in_the_viewport() {
         std::fs::create_dir_all(&out).unwrap();
         harness.render().unwrap().save(out.join("review-10-3d-sketch.png")).unwrap();
     }
+
+    // The constraint glyphs of a 3D sketch can be clicked and deleted.
+    let app = harness.state_mut();
+    app.session.tool_event(ToolEvent::Key(gc_tools::Key::Escape));
+    app.session.set_tool(ToolKind::Select);
+    let (_, sketch) = app.session.active_sketch().unwrap();
+    let before = sketch.constraints.len();
+    let (id, q) = sketch
+        .constraints
+        .iter()
+        .find_map(|(id, c)| match c {
+            gc_sketch::GeoConstraint::AlongAxis { q, axis: 0, .. } => Some((*id, *q)),
+            _ => None,
+        })
+        .unwrap();
+    let world = app.session.active_sketch().map(|_| app.session.point_pos(q).unwrap()).unwrap();
+    let at = harness.state().viewport().screen_of(gc_math::DVec3::from_array(world)).unwrap();
+    // The letters sit up and to the right of the point.
+    let glyph = at + egui::vec2(8.0 + 14.0, -14.5);
+    harness.event(egui::Event::PointerMoved(glyph));
+    harness.run();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: glyph,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run();
+    }
+    let selection = harness.state().session.selection().iter().copied().collect::<Vec<_>>();
+    assert_eq!(selection, [gc_sketch::Item::Constraint(id)]);
+    harness.key_press(egui::Key::Delete);
+    harness.run();
+    let (_, sketch) = harness.state().session.active_sketch().unwrap();
+    assert_eq!(sketch.constraints.len(), before - 1);
 }
 
 /// The view cube turns the view: its right edge, seen from the front, looks from between front and right.

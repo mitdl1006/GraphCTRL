@@ -486,8 +486,23 @@ impl Viewport {
                     .filter(|(d, _)| *d <= gc_tools::tolerance::CURVE_PX)
                     .min_by(|a, b| a.0.total_cmp(&b.0))
             };
-            let item = point
-                .map(|(_, id)| gc_sketch::Item::Point(id))
+            // A glyph is picked by its letters, before the geometry under them.
+            let glyph = paint::glyph_spots(plane, sketch, session, |w| {
+                let p = camera.project(w, size)?;
+                #[allow(clippy::cast_possible_truncation, reason = "screen coordinates fit f32")]
+                Some(egui::pos2(rect.left() + p[0] as f32, rect.top() + p[1] as f32))
+            })
+            .into_iter()
+            .map(|spot| {
+                let half = 3.5 * spot.label.len().max(1) as f32;
+                let centre = if spot.label.is_empty() { spot.at } else { spot.at + egui::vec2(half, -5.0) };
+                (centre.distance(at) - half.min(8.0), spot.id)
+            })
+            .filter(|(d, _)| *d <= 6.0)
+            .min_by(|a, b| a.0.total_cmp(&b.0));
+            let item = glyph
+                .map(|(_, id)| gc_sketch::Item::Constraint(id))
+                .or_else(|| point.map(|(_, id)| gc_sketch::Item::Point(id)))
                 .or_else(|| line().map(|(_, id)| gc_sketch::Item::Curve(id)));
             session.tool_event(ToolEvent::ClickItem { item, pos: [0.0; 2], modifier: ctrl });
         }
