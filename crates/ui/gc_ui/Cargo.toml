@@ -16,3 +16,6 @@ egui.workspace = true
 egui_tiles.workspace = true
 egui_ltreeview.workspace = true
 egui-notify.workspace = true
+
+[dev-dependencies]
+egui_kittest.workspace = true
