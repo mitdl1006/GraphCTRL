@@ -766,6 +766,11 @@ impl Viewport {
         let pixels = |p: DVec3| {
             screen(p).map_or(f64::INFINITY, |s| ((s[0] - at[0]).powi(2) + (s[1] - at[1]).powi(2)).sqrt())
         };
+        if let Some((centre, axis, radius, length)) = hit.cylinder {
+            let feature =
+                Feature::Cylinder { centre: centre.to_array(), axis: axis.to_array(), radius, length };
+            return Some((hit.owner, feature));
+        }
         let Some((normal, point, area, outline)) = hit.face else {
             return Some((hit.owner, Feature::Point(hit.point.to_array())));
         };

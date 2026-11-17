@@ -631,6 +631,8 @@ messages! {
     /// Measure: a picked flat face. `{0}` its area in mm².
     MeasureFace => ("면 면적 {0} mm²", "Face area {0} mm²"),
     MeasureDistance => ("거리", "Distance"),
+    /// Measure: a picked cylindrical face. `{0}` diameter, `{1}` radius, `{2}` length, all mm.
+    MeasureCylinder => ("원통 지름 {0} mm · 반지름 {1} mm · 길이 {2} mm", "Cylinder diameter {0} mm · radius {1} mm · length {2} mm"),
     /// Measure: the angle between two picked features. `{0}` degrees.
     MeasureFeatureAngle => ("각도 {0}°", "Angle {0}°"),
     MeasureRestart => ("다시 시작", "Restart"),

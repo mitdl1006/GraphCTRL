@@ -2522,3 +2522,45 @@ fn drive_moves_a_joint_and_stops_at_a_collision() {
     assert_eq!(harness.state().session.robot_joints(robot).unwrap(), stored);
     assert_eq!(harness.state().session.history().undo_depth(), undo_depth);
 }
+
+/// Measure with the Edges and Faces priority on a cylinder (same Inventor help page): its diameter and
+/// radius; against the pillar's face, the gap and the distance to its axis (Center to Center).
+#[test]
+fn measure_gives_a_cylinders_diameter() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("파일").click();
+    harness.run();
+    harness.get_by_label("예제 열기 (UR5e 셀)").click();
+    harness.run();
+    // An upright shaft of diameter 100 mm in front of the pillar.
+    harness
+        .state_mut()
+        .session
+        .add_body(
+            gc_doc::Solid::Cylinder { radius: 0.05, length: 0.4 },
+            gc_doc::Placement { xyz: [0.45, -0.25, 0.2], rpy: [0.0; 3] },
+        )
+        .unwrap();
+    harness.run();
+    harness.get_by_label("도구").click();
+    harness.run();
+    harness.get_by_label("측정").click();
+    harness.run();
+    harness.get_by_label("모서리 및 면 우선").click();
+    harness.run();
+    let on_shaft = harness.state().viewport().screen_of(gc_math::DVec3::new(0.45, -0.25, 0.2)).unwrap();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: on_shaft,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run();
+    }
+    harness.get_by_label_contains("원통 지름 100.000 mm · 반지름 50.000 mm · 길이 400.000 mm");
+}

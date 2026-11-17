@@ -119,6 +119,17 @@ pub enum Feature {
     Point([f64; 3]),
     /// A straight edge between two corners.
     Edge([f64; 3], [f64; 3]),
+    /// A cylindrical face: the middle of its axis, the unit axis, the radius and the length.
+    Cylinder {
+        /// The middle of the axis.
+        centre: [f64; 3],
+        /// The unit axis.
+        axis: [f64; 3],
+        /// The radius.
+        radius: f64,
+        /// The length along the axis.
+        length: f64,
+    },
     /// A flat face: a point of its plane, its unit normal and its area.
     Face {
         /// A point of the plane.
@@ -139,6 +150,8 @@ pub struct FeaturePair {
     pub closest: Option<([f64; 3], [f64; 3])>,
     /// The second point minus the first, for two points.
     pub delta: Option<[f64; 3]>,
+    /// With a cylinder: the distance measured to its axis (Inventor's Center to Center).
+    pub centre_distance: Option<f64>,
     /// The angle between two directed features (radians): lines 0–90°, a line and a plane 0–90°, two
     /// planes between their normals 0–180°.
     pub angle: Option<f64>,
@@ -196,8 +209,75 @@ fn segments(p1: DVec3, q1: DVec3, p2: DVec3, q2: DVec3) -> (DVec3, DVec3) {
     (p1 + d1 * s, p2 + d2 * t)
 }
 
+/// A cylinder's axis as a segment, its radius, and the feature it is measured against.
+fn with_cylinder(centre: [f64; 3], axis: [f64; 3], radius: f64, length: f64, other: &Feature) -> FeaturePair {
+    let (c, a) = (v(centre), v(axis));
+    let half = a * (length / 2.0).max(1e-9);
+    let (lo, hi) = (c - half, c + half);
+    // The distance to the axis, and the gap to the surface.
+    let gap = |centre_distance: f64, other_radius: f64| (centre_distance - radius - other_radius).max(0.0);
+    match other {
+        Feature::Point(p) => {
+            let foot = on_segment(v(*p), lo, hi);
+            let d = v(*p).distance(foot);
+            let on_surface = foot + (v(*p) - foot).try_normalize().unwrap_or(DVec3::ZERO) * radius;
+            FeaturePair {
+                distance: Some((d - radius).abs()),
+                closest: Some((on_surface.to_array(), *p)),
+                centre_distance: Some(d),
+                ..FeaturePair::default()
+            }
+        }
+        Feature::Edge(e0, e1) => {
+            let (on_axis, on_edge) = segments(lo, hi, v(*e0), v(*e1));
+            let d = on_axis.distance(on_edge);
+            let angle = angle_between(a, v(*e1) - v(*e0));
+            FeaturePair {
+                distance: Some(gap(d, 0.0)),
+                closest: Some((on_axis.to_array(), on_edge.to_array())),
+                centre_distance: Some(d),
+                angle: Some(angle.min(std::f64::consts::PI - angle)),
+                ..FeaturePair::default()
+            }
+        }
+        Feature::Face { point, normal, .. } => {
+            let n = v(*normal);
+            let angle = (std::f64::consts::FRAC_PI_2 - angle_between(a, n)).abs();
+            let mut pair = FeaturePair { angle: Some(angle), ..FeaturePair::default() };
+            if a.dot(n).abs() <= PARALLEL.max(1e-6) {
+                let d = (c - v(*point)).dot(n).abs();
+                pair.centre_distance = Some(d);
+                pair.distance = Some(gap(d, 0.0));
+                pair.closest = Some((c.to_array(), (c - n * (c - v(*point)).dot(n)).to_array()));
+            }
+            pair
+        }
+        Feature::Cylinder { centre: c2, axis: a2, radius: r2, length: l2 } => {
+            let half2 = v(*a2) * (l2 / 2.0).max(1e-9);
+            let (on1, on2) = segments(lo, hi, v(*c2) - half2, v(*c2) + half2);
+            let d = on1.distance(on2);
+            let angle = angle_between(a, v(*a2));
+            FeaturePair {
+                distance: Some(gap(d, *r2)),
+                closest: Some((on1.to_array(), on2.to_array())),
+                centre_distance: Some(d),
+                angle: Some(angle.min(std::f64::consts::PI - angle)),
+                ..FeaturePair::default()
+            }
+        }
+    }
+}
+
 /// What two picked features measure together (Inventor's Measure with Edges and Faces priority).
 pub fn measure_features(first: &Feature, second: &Feature) -> FeaturePair {
+    if let Feature::Cylinder { centre, axis, radius, length } = first {
+        return with_cylinder(*centre, *axis, *radius, *length, second);
+    }
+    if let Feature::Cylinder { centre, axis, radius, length } = second {
+        let mut pair = with_cylinder(*centre, *axis, *radius, *length, first);
+        pair.closest = pair.closest.map(|(a, b)| (b, a));
+        return pair;
+    }
     let with_points = |a: DVec3, b: DVec3| FeaturePair {
         distance: Some(a.distance(b)),
         closest: Some((a.to_array(), b.to_array())),
@@ -241,6 +321,8 @@ pub fn measure_features(first: &Feature, second: &Feature) -> FeaturePair {
             }
             pair
         }
+        // Cylinders were measured above.
+        (Feature::Cylinder { .. }, _) | (_, Feature::Cylinder { .. }) => FeaturePair::default(),
         (Feature::Face { point: p1, normal: n1, .. }, Feature::Face { point: p2, normal: n2, .. }) => {
             let (n1, n2) = (v(*n1), v(*n2));
             let mut pair = FeaturePair { angle: Some(angle_between(n1, n2)), ..FeaturePair::default() };
@@ -297,6 +379,22 @@ mod tests {
         let crossing = measure_features(&post, &across);
         assert!(crossing.distance.unwrap().abs() < 1e-12);
         assert!((crossing.angle.unwrap() - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
+        // A cylinder of radius 0.05 along Z at the origin: a point 0.3 away on X is 0.25 from its surface;
+        // a parallel cylinder of radius 0.02 at 0.3 is 0.23 from it, 0.3 centre to centre.
+        let shaft = Feature::Cylinder { centre: [0.0; 3], axis: UP, radius: 0.05, length: 1.0 };
+        let near = measure_features(&shaft, &Feature::Point([0.3, 0.0, 0.0]));
+        assert!(
+            (near.distance.unwrap() - 0.25).abs() < 1e-12
+                && (near.centre_distance.unwrap() - 0.3).abs() < 1e-12
+        );
+        let pin =
+            Feature::Cylinder { centre: [0.3, 0.0, 0.2], axis: [0.0, 0.0, -1.0], radius: 0.02, length: 0.5 };
+        let pair = measure_features(&pin, &shaft);
+        assert!((pair.distance.unwrap() - 0.23).abs() < 1e-12, "{pair:?}");
+        assert!(pair.angle.unwrap().abs() < 1e-12);
+        let side = Feature::Face { point: [0.5, 0.0, 0.0], normal: [1.0, 0.0, 0.0], area: 1.0 };
+        let to_wall = measure_features(&shaft, &side);
+        assert!((to_wall.distance.unwrap() - 0.45).abs() < 1e-12);
         let reversed = measure_features(
             &Feature::Edge([0.0; 3], [1.0, 0.0, 0.0]),
             &Feature::Edge([0.0; 3], [-1.0, 0.1, 0.0]),

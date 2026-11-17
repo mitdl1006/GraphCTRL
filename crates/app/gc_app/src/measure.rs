@@ -138,6 +138,9 @@ impl Measure {
                         mm(gc_math::DVec3::from_array(*a).distance(gc_math::DVec3::from_array(*b)))
                     )
                 }
+                Feature::Cylinder { radius, length, .. } => {
+                    tr!(lang, MeasureCylinder, mm(radius * 2.0), mm(*radius), mm(*length))
+                }
                 Feature::Face { area, .. } => tr!(lang, MeasureFace, format!("{:.2}", area * 1e6)),
             };
             lines.push((colour, format!("{title}: {text}")));
@@ -147,6 +150,9 @@ impl Measure {
             let text = egui::Color32::PLACEHOLDER;
             if let Some(distance) = pair.distance {
                 lines.push((text, format!("{}: {} mm", tr!(lang, MeasureDistance), mm(distance))));
+            }
+            if let Some(centre) = pair.centre_distance {
+                lines.push((text, format!("{}: {} mm", tr!(lang, MeasureCentres), mm(centre))));
             }
             if let Some(delta) = pair.delta {
                 let [dx, dy, dz] = delta.map(mm);
@@ -278,6 +284,12 @@ impl Measure {
                     Some(Feature::Edge(a, b)) => {
                         if let (Some(a), Some(b)) = (screen(*a), screen(*b)) {
                             painter.line_segment([a, b], egui::Stroke::new(4.0, colour));
+                        }
+                    }
+                    Some(Feature::Cylinder { centre, axis, length, .. }) => {
+                        let end = |sign: f64| [0, 1, 2].map(|i| centre[i] + axis[i] * length / 2.0 * sign);
+                        if let (Some(a), Some(b)) = (screen(end(-1.0)), screen(end(1.0))) {
+                            painter.line_segment([a, b], egui::Stroke::new(2.5, colour));
                         }
                     }
                     Some(Feature::Face { point, normal, .. }) => {
