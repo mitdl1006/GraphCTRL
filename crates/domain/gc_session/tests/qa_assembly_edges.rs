@@ -286,7 +286,6 @@ fn cylinder_measures_give_the_surface_gap_and_the_axis_distance() {
 
 /// The nearest points reported must be as far apart as the distance (the overlay draws a line between them).
 #[test]
-#[ignore = "BUG: Measure cylinder vs edge/face/cylinder: `closest` is axis-to-feature while `distance` is surface-to-feature; see docs/handoff/qa.md"]
 fn cylinder_closest_points_agree_with_the_distance() {
     let up = [0.0, 0.0, 1.0];
     let a = shaft([0.0; 3], up, 0.05);

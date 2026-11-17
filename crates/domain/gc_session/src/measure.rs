@@ -216,6 +216,18 @@ fn with_cylinder(centre: [f64; 3], axis: [f64; 3], radius: f64, length: f64, oth
     let (lo, hi) = (c - half, c + half);
     // The distance to the axis, and the gap to the surface.
     let gap = |centre_distance: f64, other_radius: f64| (centre_distance - radius - other_radius).max(0.0);
+    // Nearest points on the surfaces: each axis point moved toward the other by its radius (not past it,
+    // so overlapping surfaces meet at one point and agree with a gap of 0).
+    let surfaces = |on_axis: DVec3, other: DVec3, other_radius: f64| {
+        let d = on_axis.distance(other);
+        let toward = (other - on_axis).try_normalize().unwrap_or(DVec3::ZERO);
+        if d <= radius + other_radius {
+            let meet = on_axis + toward * (d * radius / (radius + other_radius).max(f64::MIN_POSITIVE));
+            (meet, meet)
+        } else {
+            (on_axis + toward * radius, other - toward * other_radius)
+        }
+    };
     match other {
         Feature::Point(p) => {
             let foot = on_segment(v(*p), lo, hi);
@@ -232,9 +244,10 @@ fn with_cylinder(centre: [f64; 3], axis: [f64; 3], radius: f64, length: f64, oth
             let (on_axis, on_edge) = segments(lo, hi, v(*e0), v(*e1));
             let d = on_axis.distance(on_edge);
             let angle = angle_between(a, v(*e1) - v(*e0));
+            let (p, q) = surfaces(on_axis, on_edge, 0.0);
             FeaturePair {
                 distance: Some(gap(d, 0.0)),
-                closest: Some((on_axis.to_array(), on_edge.to_array())),
+                closest: Some((p.to_array(), q.to_array())),
                 centre_distance: Some(d),
                 angle: Some(angle.min(std::f64::consts::PI - angle)),
                 ..FeaturePair::default()
@@ -248,7 +261,8 @@ fn with_cylinder(centre: [f64; 3], axis: [f64; 3], radius: f64, length: f64, oth
                 let d = (c - v(*point)).dot(n).abs();
                 pair.centre_distance = Some(d);
                 pair.distance = Some(gap(d, 0.0));
-                pair.closest = Some((c.to_array(), (c - n * (c - v(*point)).dot(n)).to_array()));
+                let (p, q) = surfaces(c, c - n * (c - v(*point)).dot(n), 0.0);
+                pair.closest = Some((p.to_array(), q.to_array()));
             }
             pair
         }
@@ -257,15 +271,24 @@ fn with_cylinder(centre: [f64; 3], axis: [f64; 3], radius: f64, length: f64, oth
             let (on1, on2) = segments(lo, hi, v(*c2) - half2, v(*c2) + half2);
             let d = on1.distance(on2);
             let angle = angle_between(a, v(*a2));
+            let (p, q) = surfaces(on1, on2, *r2);
             FeaturePair {
                 distance: Some(gap(d, *r2)),
-                closest: Some((on1.to_array(), on2.to_array())),
+                closest: Some((p.to_array(), q.to_array())),
                 centre_distance: Some(d),
                 angle: Some(angle.min(std::f64::consts::PI - angle)),
                 ..FeaturePair::default()
             }
         }
     }
+}
+
+/// The angle at `vertex` between the directions to `a` and to `c` (Inventor: two points, then a third
+/// with Shift); `None` when a point coincides with the vertex or a value is not finite.
+pub fn angle_at(a: [f64; 3], vertex: [f64; 3], c: [f64; 3]) -> Option<f64> {
+    let (u, w) = (v(a) - v(vertex), v(c) - v(vertex));
+    let usable = |d: DVec3| d.is_finite() && d.length() > 1e-12;
+    (usable(u) && usable(w)).then(|| angle_between(u, w))
 }
 
 /// What two picked features measure together (Inventor's Measure with Edges and Faces priority).
