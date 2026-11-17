@@ -59,6 +59,22 @@ fn a_path_around_a_pillar_is_planned_goes_stale_and_plays_back() {
     assert_eq!(session.doc().get(robot).unwrap().joints, LEFT.to_vec());
     session.set_playback(None);
 
+    // Nudging the obstacle makes the plan stale; the old path still clears it, so planning again keeps
+    // it as it was instead of finding another one (plan 5.8, re-planning ladder).
+    let nudged = gc_doc::Body {
+        placement: Placement { xyz: [0.55, 0.0, 0.699], rpy: [0.0; 3] },
+        ..session.doc().get(pillar).unwrap().clone()
+    };
+    let first_path = session.planned(path).unwrap().segments[0].path.clone();
+    session.execute(&Command::Cell(CellOp::SetBody { id: pillar, body: nudged })).unwrap();
+    assert_eq!(session.plan_status(path), PlanStatus::Stale);
+    assert_eq!(session.plan(path), PlanStatus::Ready, "{:?}", session.plan_error(path));
+    let kept = &session.planned(path).unwrap().segments[0];
+    assert!(kept.reused);
+    assert_eq!(kept.path, first_path);
+    assert!(session.undo());
+    assert_eq!(session.plan(path), PlanStatus::Ready);
+
     // Moving the obstacle makes the plan stale; undoing that makes it current again.
     let moved = gc_doc::Body {
         placement: Placement { xyz: [0.0, 0.9, 0.7], rpy: [0.0; 3] },

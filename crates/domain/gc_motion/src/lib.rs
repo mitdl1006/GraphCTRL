@@ -85,6 +85,11 @@ pub struct MotionPlan {
     pub planning_margin: f64,
     /// The highest speed of the tool tip along the trajectory, m/s.
     pub peak_tcp_speed: f64,
+    /// True when the previous path was still valid for the new input and was kept as it was ("valid,
+    /// not re-optimised"; see [`replan`]).
+    pub reused: bool,
+    /// True for a straight-line move of the tool tip ([`MotionRequest::linear`]).
+    pub linear: bool,
 }
 
 /// Why no motion was produced.
@@ -138,13 +143,40 @@ pub fn plan_motion(
     request: &MotionRequest,
     control: &dyn Control,
 ) -> Result<MotionPlan, MotionError> {
+    plan_preferring(scene, request, None, control)
+}
+
+/// Plans a motion again after its input changed, re-using what can be re-used (plan 5.8, re-planning
+/// ladder):
+///
+/// 1. When `previous` (the last plan) is the same kind of motion, still starts at the start, still ends at
+///    the goal and is still valid in the scene, it is kept as it is and only timed again: the result has
+///    [`MotionPlan::reused`] set ("valid, not re-optimised"). A detour is not kept when the straight move
+///    to its end has become free.
+/// 2. Otherwise the motion is planned in full, with the goal configuration nearest to the previous end
+///    (the same IK branch and turn) tried first, so that a small change of the goal does not make the
+///    arm switch configurations.
+pub fn replan(
+    scene: &RobotScene,
+    request: &MotionRequest,
+    previous: &MotionPlan,
+    control: &dyn Control,
+) -> Result<MotionPlan, MotionError> {
+    let (space, limits) = setup(scene, request)?;
+    if previous.linear == request.linear
+        && let Some(plan) = keep(scene, request, &space, &limits, &previous.path)
+    {
+        return Ok(plan);
+    }
+    plan_preferring(scene, request, previous.path.last().map(Vec::as_slice), control)
+}
+
+/// The planning space and the limits of a request, after checking that it fits the robot.
+fn setup(scene: &RobotScene, request: &MotionRequest) -> Result<(Space, Limits), MotionError> {
     let chain = scene.chain();
     let dof = chain.dof();
     if request.start.len() != dof || request.max_acc.len() != dof || request.runs == 0 {
         return Err(MotionError::InvalidRequest(format!("the chain has {dof} joints")));
-    }
-    if let Some(problem) = scene.state_problem(&request.start) {
-        return Err(MotionError::StartInvalid(problem));
     }
     let mut max_vel = Vec::with_capacity(dof);
     for (name, speed) in chain.joint_names().iter().zip(chain.max_vel()) {
@@ -157,12 +189,77 @@ pub fn plan_motion(
         hi: chain.upper().to_vec(),
         weights: max_vel.iter().map(|v| (1.0 / v) / slowest).collect(),
     };
+    Ok((space, Limits { max_vel, max_acc: request.max_acc.clone() }))
+}
 
-    let limits = Limits { max_vel, max_acc: request.max_acc.clone() };
+/// Rung 1 of the re-planning ladder: the previous path, timed again, when it still fits the request.
+fn keep(
+    scene: &RobotScene,
+    request: &MotionRequest,
+    space: &Space,
+    limits: &Limits,
+    previous: &[Vec<f64>],
+) -> Option<MotionPlan> {
+    let dof = scene.chain().dof();
+    let (first, last) = (previous.first()?, previous.last()?);
+    if previous.iter().any(|q| q.len() != dof || q.iter().any(|v| !v.is_finite()))
+        || space.distance(first, &request.start) > 1e-9
+    {
+        return None;
+    }
+    let reaches = match &request.goal {
+        Goal::Joints(goal) => goal.len() == dof && space.distance(goal, last) <= 1e-9,
+        Goal::Pose(goal) => {
+            let at = scene.tip_in_world(last);
+            (at.translation - goal.translation).length() <= 1e-6
+                && at.rotation.angle_between(goal.rotation) <= 1e-6
+        }
+    };
+    if !reaches || scene.state_problem(first).is_some() {
+        return None;
+    }
+    let path = previous.to_vec();
+    let mut plan = if request.linear {
+        // A straight move was checked against the required padding alone.
+        let checker = scene.strict_checker();
+        if !validate(&path, &checker) {
+            return None;
+        }
+        let mut plan = finish(scene, space, limits, path, &checker, 0.002, false, Stats::default()).ok()?;
+        plan.linear = true;
+        cap_tcp_speed(plan, request.max_tcp_speed)
+    } else {
+        // A free move keeps the planning margin of the finest checking step the pipeline uses.
+        let checker = [1.0, 0.25, 0.0625]
+            .into_iter()
+            .map(|fineness| scene.checker(fineness))
+            .find(|checker| validate(&path, checker))?;
+        let straight = path.len() == 2;
+        // A detour gives way once the straight move has become free: that is shorter, and cheap to see.
+        if !straight && checker.motion_valid(first, last) {
+            return None;
+        }
+        finish(scene, space, limits, path, &checker, BLEND_DEVIATION, straight, Stats::default()).ok()?
+    };
+    plan.reused = true;
+    Some(plan)
+}
+
+/// The pipeline, with the goal configuration nearest to `prefer` tried first.
+fn plan_preferring(
+    scene: &RobotScene,
+    request: &MotionRequest,
+    prefer: Option<&[f64]>,
+    control: &dyn Control,
+) -> Result<MotionPlan, MotionError> {
+    let (space, limits) = setup(scene, request)?;
+    if let Some(problem) = scene.state_problem(&request.start) {
+        return Err(MotionError::StartInvalid(problem));
+    }
     if request.linear {
         return linear(scene, request, &space, &limits, control);
     }
-    let goals = resolve_goals(scene, request, &space)?;
+    let goals = resolve_goals(scene, request, &space, prefer)?;
     // Plan with more padding than required, so that the timed motion keeps the required padding between
     // the states the planner checked. Where the cell is too tight for that, check in finer steps, which
     // needs less extra room and costs more checks.
@@ -297,6 +394,8 @@ fn finish(
         stats,
         min_clearance,
         planning_margin: checker.margin(),
+        reused: false,
+        linear: false,
     })
 }
 
@@ -368,14 +467,20 @@ fn linear(
     let checker = scene.strict_checker();
     // Small blends: the tip stays on the line within a fraction of a millimetre.
     let mut plan = finish(scene, space, limits, path, &checker, 0.002, false, Stats::default())?;
-    if let Some(cap) = request.max_tcp_speed.filter(|v| v.is_finite() && *v > 0.0)
+    plan.linear = true;
+    Ok(cap_tcp_speed(plan, request.max_tcp_speed))
+}
+
+/// Slows a motion down evenly until its tool tip keeps to `cap` (m/s).
+fn cap_tcp_speed(mut plan: MotionPlan, cap: Option<f64>) -> MotionPlan {
+    if let Some(cap) = cap.filter(|v| v.is_finite() && *v > 0.0)
         && plan.peak_tcp_speed > cap
     {
         let factor = plan.peak_tcp_speed / cap;
         plan.trajectory = plan.trajectory.slowed(factor);
         plan.peak_tcp_speed = cap;
     }
-    Ok(plan)
+    plan
 }
 
 fn add(total: &mut Stats, run: &Stats) {
@@ -385,11 +490,13 @@ fn add(total: &mut Stats, run: &Stats) {
     total.nodes += run.nodes;
 }
 
-/// The valid goal configurations, nearest to the start first.
+/// The valid goal configurations, nearest to the start first. With `prefer`, the configuration in the
+/// same IK branch and turn as `prefer` (nearest to it, every joint within half a radian) comes first.
 fn resolve_goals(
     scene: &RobotScene,
     request: &MotionRequest,
     space: &Space,
+    prefer: Option<&[f64]>,
 ) -> Result<Vec<Vec<f64>>, MotionError> {
     let chain = scene.chain();
     let candidates = match &request.goal {
@@ -430,6 +537,16 @@ fn resolve_goals(
         return Err(MotionError::GoalInvalid(problem.unwrap_or(StateProblem::Unknown)));
     }
     valid.sort_by(|a, b| space.distance(&request.start, a).total_cmp(&space.distance(&request.start, b)));
+    if let Some(prefer) = prefer.filter(|p| p.len() == chain.dof()) {
+        let apart = |q: &[f64]| q.iter().zip(prefer).fold(0.0_f64, |acc, (a, b)| acc.max((a - b).abs()));
+        let same_branch = (0..valid.len())
+            .filter(|i| apart(&valid[*i]) < 0.5)
+            .min_by(|a, b| apart(&valid[*a]).total_cmp(&apart(&valid[*b])).then(a.cmp(b)));
+        if let Some(index) = same_branch {
+            let preferred = valid.remove(index);
+            valid.insert(0, preferred);
+        }
+    }
     valid.truncate(8);
     Ok(valid)
 }

@@ -16,7 +16,7 @@ use gc_doc::{
 use gc_jobs::{CancelToken, Executor, JobHandle, JobOutcome};
 use gc_math::{DPose3, DQuat, DVec3, pose_from_xyz_rpy, rpy_from_quat};
 use gc_mesh::MeshData;
-use gc_motion::{Goal, MotionPlan, MotionRequest, Obstacle, RobotScene, StateProblem, plan_motion};
+use gc_motion::{Goal, MotionPlan, MotionRequest, Obstacle, RobotScene, StateProblem, plan_motion, replan};
 use gc_plan::{Algorithm, Control, Options};
 use gc_robot::{Chain, RobotModel, Shape};
 use gc_sketch::{SkPoint, Space};
@@ -239,6 +239,8 @@ impl LoadedRobot {
 pub struct PlannedPath {
     /// One motion per waypoint, in order.
     pub segments: Vec<MotionPlan>,
+    /// The planner id and seed it was planned with.
+    strategy: (String, u64),
 }
 
 impl PlannedPath {
@@ -1590,10 +1592,14 @@ impl Session {
         // and the fingerprint tells afterwards whether its result is still current.
         let doc = self.doc.clone();
         let meshes = self.cell.meshes.clone();
+        // The last good plan: a segment that is still valid for the new input is kept (plan 5.8). A new
+        // planner or seed asks for a new plan, so the old one is not offered then.
+        let strategy = self.doc.get(path).map(|p| (p.planner.clone(), p.seed));
+        let previous = self.planned(path).filter(|old| Some(&old.strategy) == strategy.as_ref()).cloned();
         let job = self.cell.executor.spawn("plan", move |ctx| {
             let control = JobControl(ctx.cancel.clone());
             let result = match &loaded {
-                Some(loaded) => plan_path(&doc, loaded, &meshes, path, None, &control),
+                Some(loaded) => plan_path(&doc, loaded, &meshes, path, None, previous.as_ref(), &control),
                 None => Err("the robot description could not be read".to_owned()),
             };
             (!ctx.cancel.is_cancelled()).then_some(result)
@@ -1633,7 +1639,7 @@ impl Session {
                 let (mut durations, mut costs, mut checks) = (Vec::new(), Vec::new(), Vec::new());
                 for seed in 0..seeds.max(1) {
                     let strategy = Some((*algorithm, seed as u64, 1));
-                    if let Ok(planned) = plan_path(&doc, &loaded, &meshes, path, strategy, &control) {
+                    if let Ok(planned) = plan_path(&doc, &loaded, &meshes, path, strategy, None, &control) {
                         durations.push(planned.duration());
                         costs.push(planned.segments.iter().map(|s| s.cost).sum());
                         checks.push(planned.state_checks() as f64);
@@ -1730,6 +1736,7 @@ fn plan_path(
     meshes: &BTreeMap<String, MeshRef>,
     path_id: Id<MotionPath>,
     strategy: Option<(Algorithm, u64, usize)>,
+    previous: Option<&PlannedPath>,
     control: &dyn Control,
 ) -> Result<PlannedPath, String> {
     let path = doc.get(path_id).ok_or("the path no longer exists")?;
@@ -1797,11 +1804,15 @@ fn plan_path(
                 None => Vec::new(),
             },
         };
-        let plan = plan_motion(&scene, &request, control).map_err(|e| format!("{}: {e}", waypoint.name))?;
+        let planned = match previous.and_then(|p| p.segments.get(index)) {
+            Some(old) => replan(&scene, &request, old, control),
+            None => plan_motion(&scene, &request, control),
+        };
+        let plan = planned.map_err(|e| format!("{}: {e}", waypoint.name))?;
         if let Some(end) = plan.path.last() {
             start.clone_from(end);
         }
         segments.push(plan);
     }
-    Ok(PlannedPath { segments })
+    Ok(PlannedPath { segments, strategy: (path.planner.clone(), seed) })
 }

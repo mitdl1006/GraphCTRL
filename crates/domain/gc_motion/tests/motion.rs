@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use gc_collide::ShapeDesc;
 use gc_math::{DPose3, DQuat, DVec3};
-use gc_motion::{Goal, MotionError, MotionRequest, Obstacle, RobotScene, StateProblem, plan_motion};
+use gc_motion::{Goal, MotionError, MotionRequest, Obstacle, RobotScene, StateProblem, plan_motion, replan};
 use gc_plan::{Algorithm, Control, NeverCancel, Options};
 use gc_robot::import;
 
@@ -299,4 +299,72 @@ fn goals_are_about_the_tool_centre_point() {
         let last = DVec3::from_array(*plan.tip_path.last().unwrap());
         assert!((last - target.translation).length() < 1e-5);
     }
+}
+
+#[test]
+fn replanning_keeps_a_path_that_is_still_valid() {
+    let scene = scene(&[pillar()]);
+    let mut request = request(LEFT, Goal::Joints(RIGHT.to_vec()), Algorithm::RrtConnect);
+    let first = plan_motion(&scene, &request, &NeverCancel).unwrap();
+    assert!(!first.reused);
+    // Nothing that matters changed (a different seed would plan differently): the path is kept.
+    request.seed = 99;
+    let again = replan(&scene, &request, &first, &NeverCancel).unwrap();
+    assert!(again.reused);
+    assert_eq!(again.path, first.path);
+    assert_eq!(again.stats.state_checks, 0, "no planner ran");
+    // A slower robot: the same path, timed again.
+    request.max_acc = vec![1.0; 6];
+    let slower = replan(&scene, &request, &first, &NeverCancel).unwrap();
+    assert!(slower.reused && slower.trajectory.duration() > first.trajectory.duration());
+
+    // An obstacle in the way of the old path: planned again, and the new path is valid.
+    let blocker = Obstacle {
+        name: "blocker".to_owned(),
+        pose: scene.tip_in_world(&first.path[first.path.len() / 2]),
+        shape: ShapeDesc::Ball(0.08),
+    };
+    let moved = self::scene(&[pillar(), blocker]);
+    let fresh = replan(&moved, &request, &first, &NeverCancel).unwrap();
+    assert!(!fresh.reused);
+    assert_ne!(fresh.path, first.path);
+    for q in &fresh.path {
+        assert_eq!(moved.state_problem(q), None);
+    }
+
+    // A path that does not start at the start or end at the goal is never kept.
+    let mut shifted = request.clone();
+    shifted.goal = Goal::Joints(vec![1.0, 0.2, 0.3, 0.0, 0.6, 0.0]);
+    assert!(!replan(&scene, &shifted, &first, &NeverCancel).unwrap().reused);
+}
+
+#[test]
+fn replanning_a_moved_pose_goal_stays_in_the_same_configuration() {
+    let scene = scene(&[]);
+    // A wrist that can also be reached flipped (joint 4 and 6 half a turn round, joint 5 negated).
+    let target = scene.tip_in_world(&[1.0, 0.2, 0.3, 1.0, 0.5, 1.0]);
+    // The previous plan ended in an IK branch that is not the one nearest to the start.
+    let ik = gc_robot::NumericIk::new(scene.chain(), gc_robot::IkOptions::default());
+    let mut branches: Vec<Vec<f64>> = ik
+        .solve_many(&scene.flange_target(&target), Some(&LEFT), 32)
+        .into_iter()
+        .filter(|q| scene.state_problem(q).is_none())
+        .collect();
+    let distance = |q: &[f64]| q.iter().zip(&LEFT).map(|(a, b)| (a - b).powi(2)).sum::<f64>();
+    branches.sort_by(|a, b| distance(a).total_cmp(&distance(b)));
+    let apart = |a: &[f64], b: &[f64]| a.iter().zip(b).fold(0.0_f64, |acc, (x, y)| acc.max((x - y).abs()));
+    let other = branches.iter().skip(1).find(|q| apart(q, &branches[0]) > 0.5).unwrap().clone();
+    let mut request = request(LEFT, Goal::Joints(other.clone()), Algorithm::RrtConnect);
+    let first = plan_motion(&scene, &request, &NeverCancel).unwrap();
+    // The waypoint moves by a millimetre: the old end no longer reaches it, the new end stays in that
+    // branch although another one is nearer to the start.
+    let moved = DPose3::from_parts(target.translation + DVec3::new(0.0, 0.001, 0.0), target.rotation);
+    request.goal = Goal::Pose(moved);
+    let fresh = plan_motion(&scene, &request, &NeverCancel).unwrap();
+    assert!(apart(fresh.path.last().unwrap(), &other) > 0.5, "without the previous plan: the nearest branch");
+    let plan = replan(&scene, &request, &first, &NeverCancel).unwrap();
+    assert!(!plan.reused);
+    let end = plan.path.last().unwrap();
+    assert!(apart(end, &other) < 0.05, "the arm switched configurations ({} rad)", apart(end, &other));
+    assert!((scene.tip_in_world(end).translation - moved.translation).length() < 1e-5);
 }
