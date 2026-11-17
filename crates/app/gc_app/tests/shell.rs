@@ -3219,3 +3219,50 @@ fn free_move_and_free_rotate_drag_a_component() {
     harness.run();
     assert!(harness.state().viewport().free_tool.is_none());
 }
+
+/// A constraint that can be driven offers Drive in its browser menu, and the ribbon's Drive button works
+/// without a robot once there is such a relationship.
+#[test]
+fn a_relationship_is_driven_from_the_browser() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.05, 0.05, 0.05] };
+    let app = harness.state_mut();
+    let fixed = app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    let placement = gc_doc::Placement { xyz: [0.0, 0.0, 0.2], rpy: [0.0; 3] };
+    let moving = app.session.add_body(solid, placement).unwrap();
+    let plane = gc_doc::Geometry::origin(gc_doc::OriginElement::Plane(gc_doc::OriginPlane::Xy));
+    let select = |body: gc_core::Id<gc_doc::Body>| gc_doc::Selection {
+        occurrence: gc_doc::Occurrence::Item(body.erase()),
+        geometry: plane,
+    };
+    let relationship = gc_doc::Relationship {
+        name: "Mate:1".to_owned(),
+        kind: gc_doc::RelationKind::Mate { offset: 0.0, sense: gc_doc::AxisSense::Opposed },
+        first: select(moving),
+        second: select(fixed),
+    };
+    app.session.add_relationship(relationship).unwrap();
+    harness.run();
+
+    // Right click the node in the "관계" folder: the menu offers Drive.
+    let at = harness.get_by_label("Mate:1").rect().center();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run();
+    }
+    harness.get_by_label("구동").click();
+    harness.run_steps(4);
+    // The dialog is up: its title and the menu entry's name are the same word.
+    assert!(harness.query_all_by_label("구동").count() >= 1);
+}

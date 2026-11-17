@@ -318,7 +318,15 @@ fn robot_tab(
         if ribbon_button(ui, Icon::Orbit, tr!(lang, JointTitle), false, true).clicked() {
             action = Some(RibbonAction::StartJoint);
         }
-        if ribbon_button(ui, Icon::Play, tr!(lang, MenuDrive), false, robot.is_some()).clicked() {
+        if ribbon_button(
+            ui,
+            Icon::Play,
+            tr!(lang, MenuDrive),
+            false,
+            robot.is_some() || !session.relationships().is_empty(),
+        )
+        .clicked()
+        {
             action = Some(RibbonAction::StartDrive);
         }
     });

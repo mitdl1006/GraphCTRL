@@ -970,7 +970,19 @@ impl eframe::App for GraphCtrlApp {
         match ribbon_action {
             Some(ribbon::RibbonAction::StartMeasure) => self.measure.start(&self.session),
             Some(ribbon::RibbonAction::StartInterference) => self.interference.start(&self.session),
-            Some(ribbon::RibbonAction::StartDrive) => self.drive.start(&mut self.session),
+            Some(ribbon::RibbonAction::StartDrive) => {
+                // Without a robot, the first relationship that can be driven (not a rigid joint).
+                let drivable = self
+                    .session
+                    .relationships()
+                    .iter()
+                    .find(|(_, r)| !matches!(r.kind, gc_doc::RelationKind::Rigid { .. }))
+                    .map(|(id, _)| *id);
+                match (self.session.doc().robots().is_empty(), drivable) {
+                    (true, Some(id)) => self.drive_relationship(id),
+                    _ => self.drive.start(&mut self.session),
+                }
+            }
             Some(ribbon::RibbonAction::StartConstrain) => self.constrain.start(),
             Some(ribbon::RibbonAction::StartJoint) => self.joint.start(),
             Some(ribbon::RibbonAction::StartParameters) => self.parameters.open = true,
@@ -1099,6 +1111,9 @@ impl eframe::App for GraphCtrlApp {
                         Some(BrowserAction::OriginSelect(chosen)) => {
                             self.session.select_item(None);
                             self.viewport.origin_selected = chosen;
+                        }
+                        Some(BrowserAction::DriveRelationship(id)) => {
+                            self.drive.start_relationship(&mut self.session, id)
                         }
                         Some(BrowserAction::SketchOnComponent(occurrence, plane)) => {
                             drop(self.session.create_sketch_on_component(occurrence, plane));
