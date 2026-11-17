@@ -170,6 +170,8 @@ fn build_cell(
 ) {
     harness.get_by_label("로봇").click();
     harness.run();
+    harness.get_by_label("로봇 추가").click();
+    harness.run();
     harness.get_by_label(robot).click();
     harness.run();
     let robot = harness.state().session.doc().robots().iter().next().unwrap().0;
@@ -318,15 +320,16 @@ fn robot_cell_renders_with_gpu() {
     build_cell(&mut harness, "6R 로봇", LEFT, RIGHT);
     let image = harness.render().unwrap();
     image.save(out.join("review-5-robot-path.png")).unwrap();
-    // Somewhere in the viewport the dark and the orange links of the robot are visible.
+    // Somewhere in the viewport the dark and the steel-grey links of the robot are visible (the steel is
+    // bluer and darker than the background).
     let viewport = (220..1000).flat_map(|x| (130..760).map(move |y| (x, y)));
-    let (mut dark, mut orange) = (0, 0);
+    let (mut dark, mut steel) = (0, 0);
     for (x, y) in viewport {
         let px = image.get_pixel(x, y);
         dark += u32::from(px[0] < 110 && px[1] < 110 && px[2] < 120 && px[0].abs_diff(px[2]) < 40);
-        orange += u32::from(px[0] > 150 && px[1] > 60 && px[1] < 150 && px[2] < 80);
+        steel += u32::from(px[0] > 110 && px[0] < 175 && px[2] > px[0].saturating_add(15));
     }
-    assert!(dark > 500 && orange > 500, "dark {dark}, orange {orange}");
+    assert!(dark > 500 && steel > 500, "dark {dark}, steel {steel}");
 
     // Half-way through the motion, with the planner comparison in the side panel.
     harness.get_by_label("알고리즘 비교").click();
@@ -393,6 +396,8 @@ fn ur5e_close_up_renders_with_gpu() {
     harness.run();
     harness.get_by_label("로봇").click();
     harness.run();
+    harness.get_by_label("로봇 추가").click();
+    harness.run();
     harness.get_by_label("UR5e 로봇").click();
     harness.run();
     let app = harness.state_mut();
@@ -440,6 +445,8 @@ fn the_ur5e_follows_a_sketched_polyline() {
     let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
     harness.run();
     harness.get_by_label("로봇").click();
+    harness.run();
+    harness.get_by_label("로봇 추가").click();
     harness.run();
     harness.get_by_label("UR5e 로봇").click();
     harness.run();
@@ -531,6 +538,8 @@ fn waypoints_follow_a_work_frame() {
     let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
     harness.run();
     harness.get_by_label("로봇").click();
+    harness.run();
+    harness.get_by_label("로봇 추가").click();
     harness.run();
     harness.get_by_label("UR5e 로봇").click();
     harness.run();
@@ -652,6 +661,8 @@ fn a_frame_from_picked_points_shows_its_six_numbers() {
     let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
     harness.run();
     harness.get_by_label("로봇").click();
+    harness.run();
+    harness.get_by_label("로봇 추가").click();
     harness.run();
     harness.get_by_label("UR5e 로봇").click();
     harness.run();
@@ -978,6 +989,8 @@ fn waypoints_and_frames_have_handles_too() {
         .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
     harness.run();
     harness.get_by_label("로봇").click();
+    harness.run();
+    harness.get_by_label("로봇 추가").click();
     harness.run();
     harness.get_by_label("6R 로봇").click();
     harness.run();
@@ -1525,4 +1538,46 @@ fn the_example_cell_opens_planned() {
     harness.run_steps(3);
     harness.get_by_label("Jetendard font (SIL Open Font License 1.1)");
     assert!(harness.query_by_label_contains("Universal Robots ROS2 Description").is_some());
+}
+
+/// The robot library lists the four UR e-Series models and the sample arm; a UR10e is drawn with its
+/// collision meshes.
+#[test]
+fn the_library_offers_the_ur_e_series() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("로봇").click();
+    harness.run();
+    harness.get_by_label("로봇 추가").click();
+    harness.run();
+    for name in ["UR3e 로봇", "UR5e 로봇", "UR10e 로봇", "UR16e 로봇", "6R 로봇"] {
+        harness.get_by_label(name);
+    }
+    if gpu {
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        harness.render().unwrap().save(out.join("review-21-library.png")).unwrap();
+    }
+    harness.get_by_label("UR10e 로봇").click();
+    harness.run();
+    let app = harness.state_mut();
+    let robot = app.session.doc().robots().iter().next().unwrap().0;
+    let loaded = app.session.robot_model(robot).unwrap();
+    assert!(loaded.missing.is_empty(), "{:?}", loaded.missing);
+    app.session.jog(robot, &[0.6, -1.9, 1.7, -1.4, -1.57, 0.3]);
+    app.session.end_jog();
+    // Reaching 1.3 m: the flange is farther out than a UR5e's would be.
+    let tcp = app.session.tcp_pose(robot).unwrap().translation;
+    assert!(tcp.truncate().length() > 0.5, "{tcp:?}");
+    harness.get_by_label("뷰").click();
+    harness.run();
+    harness.get_by_label("전체 보기").click();
+    harness.run();
+    if gpu {
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        harness.render().unwrap().save(out.join("review-22-ur10e.png")).unwrap();
+    }
 }

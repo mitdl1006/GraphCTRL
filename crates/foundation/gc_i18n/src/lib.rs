@@ -422,6 +422,7 @@ messages! {
     PropOnSketchPoint => ("스케치 점에 붙어 있음({0}): 스케치를 고치면 따라 움직입니다", "On a point of {0}: it moves when the sketch changes"),
     PropTcpLimit => ("직선 이동 TCP 속도 제한", "Limit tool speed on straight moves"),
     PlanPeakTcp => ("최대 TCP 속도: {0} mm/s", "Highest tool speed: {0} mm/s"),
+    CmdRobotLibrary => ("로봇 추가", "Add robot"),
     CmdExample => ("예제 열기 (UR5e 셀)", "Open example (UR5e cell)"),
     ExampleFailed => ("예제를 열 수 없습니다: {0}", "The example could not be opened: {0}"),
     PanelTool => ("툴", "Tool"),

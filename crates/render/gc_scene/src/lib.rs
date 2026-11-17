@@ -207,7 +207,8 @@ pub struct Scene {
 }
 
 const BODY: [f32; 4] = [0.55, 0.62, 0.70, 1.0];
-const LINK_LIGHT: [f32; 4] = [0.90, 0.47, 0.13, 1.0];
+/// Links without colours of their own: steel grey alternating with dark grey, like an industrial arm.
+const LINK_LIGHT: [f32; 4] = [0.60, 0.65, 0.72, 1.0];
 /// A ghost robot: light blue, see-through.
 const GHOST: [f32; 4] = [0.45, 0.70, 1.0, 0.35];
 /// A ghost robot in a pose with a problem.

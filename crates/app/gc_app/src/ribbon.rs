@@ -196,16 +196,19 @@ fn robot_tab(
     // Failures of these commands are shown in the status bar.
     ribbon_group(ui, tr!(lang, GroupAdd), |ui| {
         // One robot per cell for now: the panels show the first one.
-        for (name, urdf) in library {
-            let label = tr!(lang, CmdAddRobot, name);
-            if ribbon_button(ui, Icon::View, &label, false, robot.is_none()).clicked() {
-                let name = format!("{name}_{}", session.doc().robots().len() + 1);
-                if let Err(error) = session.add_robot(&name, urdf) {
-                    log::error!("the robot could not be added: {error}");
+        // The robot library in one list: UR3e, UR5e, UR10e, UR16e and the sample arm.
+        let add = ribbon_button(ui, Icon::View, tr!(lang, CmdRobotLibrary), false, robot.is_none());
+        egui::Popup::menu(&add).show(|ui| {
+            for (name, urdf) in library {
+                if ui.button(tr!(lang, CmdAddRobot, name)).clicked() {
+                    let name = format!("{name}_{}", session.doc().robots().len() + 1);
+                    if let Err(error) = session.add_robot(&name, urdf) {
+                        log::error!("the robot could not be added: {error}");
+                    }
+                    viewport.fit(session, [1000.0, 700.0]);
                 }
-                viewport.fit(session, [1000.0, 700.0]);
             }
-        }
+        });
         if ribbon_button(ui, Icon::View, tr!(lang, CmdImportRobot), false, robot.is_none()).clicked() {
             action = Some(RibbonAction::ImportRobot);
         }
