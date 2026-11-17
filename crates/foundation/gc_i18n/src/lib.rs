@@ -590,6 +590,27 @@ messages! {
     MenuPerfOverlay => ("성능 오버레이", "Performance overlay"),
     /// The overlay's text. `{0}` frame time in ms, `{1}` frames per second, `{2}` draw calls, `{3}` triangles.
     PerfStats => ("프레임 {0} ms ({1} fps) · 드로 {2} · 삼각형 {3}", "Frame {0} ms ({1} fps) · draws {2} · triangles {3}"),
+    // --- Measure (Inventor: Tools tab > Measure panel > Measure) ---
+    /// Tools menu and the panel title.
+    MenuMeasure => ("측정", "Measure"),
+    /// Measure: what to click. Shown until two items are selected.
+    MeasureHint => ("뷰포트나 브라우저에서 측정할 항목을 선택하십시오. 빈 곳을 클릭하면 다시 시작합니다.", "Select items to measure in the view or the browser. Click a blank area to restart."),
+    /// Measure: heading of selection 1 / 2.
+    MeasureFirst => ("선택 1", "Selection 1"),
+    MeasureSecond => ("선택 2", "Selection 2"),
+    /// Measure: position of an item's origin. `{0}`, `{1}`, `{2}` x, y, z in mm.
+    MeasurePosition => ("위치 X {0}  Y {1}  Z {2} mm", "Position X {0}  Y {1}  Z {2} mm"),
+    MeasureMinimum => ("최소 거리", "Minimum Distance"),
+    MeasureCentres => ("중심 간 거리", "Center to Center"),
+    /// Measure: the delta between the origins. `{0}`, `{1}`, `{2}` dx, dy, dz in mm.
+    MeasureDelta => ("Δ X {0}  Y {1}  Z {2} mm", "Δ X {0}  Y {1}  Z {2} mm"),
+    /// Measure: angle between the Z axes. `{0}` degrees.
+    MeasureAngle => ("Z축 사이 각도 {0}°", "Angle between Z axes {0}°"),
+    /// Measure: the minimum distance could not be measured (a path, or a missing mesh).
+    MeasureNoMinimum => ("최소 거리 측정 불가", "Minimum distance not available"),
+    MeasureCopyAll => ("모두 복사", "Copy All"),
+    MeasureRestart => ("다시 시작", "Restart"),
+    MeasureDone => ("완료", "Done"),
     // --- AI agent API ---
     /// Tools menu: the window that connects AI agents (MCP).
     MenuAgent => ("AI 에이전트 연결", "AI agent connection"),

@@ -461,6 +461,14 @@ impl RobotScene {
         world.clearance().unwrap_or(0.0)
     }
 
+    /// The robot's own shapes (links and tool) placed at `q`, for measuring.
+    pub fn geometry(&self, q: &[f64]) -> gc_collide::Geometry {
+        let mut world = self.world.clone();
+        self.place_in(&mut world, q);
+        let bodies: Vec<BodyId> = self.link_bodies.iter().flatten().copied().chain(self.tool_body).collect();
+        world.geometry(&bodies)
+    }
+
     /// The distance robot links keep from obstacles.
     pub fn padding(&self) -> f64 {
         self.padding

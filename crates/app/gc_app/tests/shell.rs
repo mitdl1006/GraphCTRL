@@ -2218,3 +2218,61 @@ fn slice_graphics_reveals_the_sketch_plane() {
     harness.run();
     assert!(!harness.state().viewport().slice);
 }
+
+/// Tools > Measure, as Inventor's Measure with component priority (Inventor 2026 help, "To Measure
+/// Distance, Length, Angle, Loop, or Area in Models or Drawings":
+/// https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-1805AB8F-F782-4B24-A332-B4F2E10A3D00.htm):
+/// the robot and the pillar give their minimum distance, Center to Center switches the value, clicking
+/// a blank area restarts and Done closes the panel.
+#[test]
+fn measure_gives_the_minimum_distance_between_two_components() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("파일").click();
+    harness.run();
+    harness.get_by_label("예제 열기 (UR5e 셀)").click();
+    harness.run();
+    harness.get_by_label("도구").click();
+    harness.run();
+    harness.get_by_label("측정").click();
+    harness.run();
+    harness.get_by_label_contains("측정할 항목을 선택");
+
+    let (robot, pillar) = {
+        let doc = harness.state().session.doc();
+        (doc.robots().iter().next().unwrap().0, doc.bodies().iter().next().unwrap().0)
+    };
+    harness.state_mut().session.select_item(Some(gc_session::CellItem::Robot(robot)));
+    harness.run();
+    harness.state_mut().session.select_item(Some(gc_session::CellItem::Body(pillar)));
+    harness.run();
+    let expected = harness
+        .state()
+        .session
+        .measure_pair(gc_session::CellItem::Robot(robot), gc_session::CellItem::Body(pillar))
+        .unwrap();
+    let gap = expected.minimum.unwrap().distance;
+    assert!(gap > 0.0);
+    harness.get_by_label(&format!("최소 거리: {:.3} mm", gap * 1000.0));
+    harness.get_by_label_contains("선택 1: UR5e");
+    harness.get_by_label_contains("선택 2:");
+    if gpu {
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        harness.render().unwrap().save(out.join("review-26-measure.png")).unwrap();
+    }
+
+    harness.get_by_label("중심 간 거리").click();
+    harness.run();
+    harness.get_by_label(&format!("중심 간 거리: {:.3} mm", expected.centre_to_centre * 1000.0));
+
+    // A click on a blank area (nothing selected) restarts.
+    harness.state_mut().session.select_item(None);
+    harness.run();
+    assert!(harness.query_by_label_contains("선택 1:").is_none());
+    harness.get_by_label("완료").click();
+    harness.run();
+    assert!(harness.query_by_label_contains("측정할 항목을 선택").is_none());
+}

@@ -421,7 +421,7 @@ pub(crate) struct CellState {
     /// Mesh files of bodies by path: the triangles as stored, or why the file could not be read.
     files: BTreeMap<String, Result<Arc<MeshData>, String>>,
     /// The same at the scale a body asks for, by path and scale.
-    meshes: BTreeMap<String, MeshRef>,
+    pub(crate) meshes: BTreeMap<String, MeshRef>,
 }
 
 impl Default for CellState {
@@ -560,7 +560,10 @@ impl CellState {
 
 /// The collision shapes of a robot's tool in its tip link's frame: a mesh as its convex parts. `None`
 /// when the tool's mesh is not available.
-fn tool_shapes(tool: Option<&Tool>, meshes: &BTreeMap<String, MeshRef>) -> Option<Vec<(DPose3, ShapeDesc)>> {
+pub(crate) fn tool_shapes(
+    tool: Option<&Tool>,
+    meshes: &BTreeMap<String, MeshRef>,
+) -> Option<Vec<(DPose3, ShapeDesc)>> {
     let Some(tool) = tool else { return Some(Vec::new()) };
     let pose = pose_of(&tool.placement);
     Some(match shape_of(&tool.solid, meshes)? {
@@ -570,7 +573,7 @@ fn tool_shapes(tool: Option<&Tool>, meshes: &BTreeMap<String, MeshRef>) -> Optio
 }
 
 /// The collision shape of a body's solid.
-fn shape_of(solid: &Solid, meshes: &BTreeMap<String, MeshRef>) -> Option<ShapeDesc> {
+pub(crate) fn shape_of(solid: &Solid, meshes: &BTreeMap<String, MeshRef>) -> Option<ShapeDesc> {
     Some(match solid {
         Solid::Box { size } => ShapeDesc::Box(*size),
         Solid::Cylinder { radius, length } => ShapeDesc::Cylinder { radius: *radius, length: *length },
@@ -649,7 +652,7 @@ fn load(
     Ok((loaded, base, tip))
 }
 
-fn pose_of(placement: &Placement) -> DPose3 {
+pub(crate) fn pose_of(placement: &Placement) -> DPose3 {
     pose_from_xyz_rpy(placement.xyz, placement.rpy)
 }
 
