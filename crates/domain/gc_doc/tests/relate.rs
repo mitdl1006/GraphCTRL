@@ -672,6 +672,15 @@ fn view_representations_restore_what_is_shown() {
         on: false,
     };
     apply(&mut bench.doc, &hide).unwrap();
+    let disable = Command::SetComponent {
+        occurrence: Occurrence::Item(table.erase()),
+        flag: ComponentFlag::Enabled,
+        on: false,
+    };
+    apply(&mut bench.doc, &disable).unwrap();
+    let mut look = bench.doc.get(table).unwrap().look;
+    look.transparency = 0.5;
+    bench.cell(CellOp::SetBodyLook { id: table, look }).unwrap();
     bench
         .cell(CellOp::AddViewRepresentation {
             name: "No box".into(),
@@ -685,8 +694,19 @@ fn view_representations_restore_what_is_shown() {
         on: true,
     };
     apply(&mut bench.doc, &show).unwrap();
+    let enable = Command::SetComponent {
+        occurrence: Occurrence::Item(table.erase()),
+        flag: ComponentFlag::Enabled,
+        on: true,
+    };
+    apply(&mut bench.doc, &enable).unwrap();
+    look.transparency = 0.0;
+    bench.cell(CellOp::SetBodyLook { id: table, look }).unwrap();
     assert!(bench.doc.component_flag(Occurrence::Item(block.erase()), ComponentFlag::Visible));
     bench.cell(CellOp::ActivateViewRepresentation(0)).unwrap();
+    // Enabled state and transparency come back with the view (About View Representations).
+    assert!(!bench.doc.component_flag(Occurrence::Item(table.erase()), ComponentFlag::Enabled));
+    assert!((bench.doc.get(table).unwrap().look.transparency - 0.5).abs() < 1e-12);
     assert!(!bench.doc.component_flag(Occurrence::Item(block.erase()), ComponentFlag::Visible));
     assert!(bench.doc.component_flag(Occurrence::Item(table.erase()), ComponentFlag::Visible));
     assert_eq!(bench.doc.representations().views[0].camera.as_deref(), Some("cam"));

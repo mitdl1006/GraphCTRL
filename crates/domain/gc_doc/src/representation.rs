@@ -15,14 +15,22 @@ use crate::design::{ComponentFlag, Occurrence};
 use crate::relate::Relationship;
 use crate::txn::Txn;
 
-/// A saved view: which components are hidden, and display state the viewport keeps (camera, section
-/// view) as text it reads back itself.
+/// A saved view: which components are hidden or not enabled, their transparency, and display state the
+/// viewport keeps (camera, section view) as text it reads back itself (Inventor 2026 help, About View
+/// Representations, GUID-9A49CDC1-4DC7-4462-81D7-E18B8339DE0F: visibility, enabled state, transparency,
+/// zoom and viewing angle).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ViewRepresentation {
     /// Name shown in the Representations folder.
     pub name: String,
     /// Components (parts and robot links included) hidden in this view; all others are shown.
     pub hidden: Vec<Occurrence>,
+    /// Components not enabled (shown in the background style, not selectable) in this view.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub disabled: Vec<Occurrence>,
+    /// Transparency of bodies, robots and assemblies that are not opaque in this view.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub transparency: Vec<(AnyId, f64)>,
     /// The camera as the viewport writes it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub camera: Option<String>,
@@ -107,6 +115,19 @@ pub(crate) fn add_view(
         .into_iter()
         .filter(|o| !doc.component_flag(*o, ComponentFlag::Visible))
         .collect();
+    let disabled: Vec<Occurrence> = doc
+        .all_occurrences()
+        .into_iter()
+        .filter(|o| !doc.component_flag(*o, ComponentFlag::Enabled))
+        .collect();
+    let transparency: Vec<(AnyId, f64)> = doc
+        .bodies()
+        .iter()
+        .map(|(id, b)| (id.erase(), b.look.transparency))
+        .chain(doc.robots().iter().map(|(id, r)| (id.erase(), r.look.transparency)))
+        .chain(doc.assemblies().iter().map(|(id, a)| (id.erase(), a.look.transparency)))
+        .filter(|(_, t)| *t > 0.0)
+        .collect();
     let mut reps = doc.representations();
     if name.trim().is_empty() || reps.views.iter().any(|v| v.name == name) {
         return Err(EditError::NameTaken);
@@ -114,6 +135,8 @@ pub(crate) fn add_view(
     reps.views.push(ViewRepresentation {
         name: name.trim().to_owned(),
         hidden,
+        disabled,
+        transparency,
         camera: camera.map(str::to_owned),
         section: section.map(str::to_owned),
     });
@@ -144,6 +167,23 @@ pub(crate) fn activate_view(
         if txn.doc().component_flag(occurrence, ComponentFlag::Visible) != visible {
             crate::tree::set_component(txn, occurrence, ComponentFlag::Visible, visible)?;
         }
+        let enabled = !view.disabled.contains(&occurrence);
+        if txn.doc().component_flag(occurrence, ComponentFlag::Enabled) != enabled {
+            crate::tree::set_component(txn, occurrence, ComponentFlag::Enabled, enabled)?;
+        }
+    }
+    // Transparency: as saved, opaque otherwise.
+    let doc = txn.doc();
+    let items: Vec<AnyId> = doc
+        .bodies()
+        .iter()
+        .map(|(id, _)| id.erase())
+        .chain(doc.robots().iter().map(|(id, _)| id.erase()))
+        .chain(doc.assemblies().iter().map(|(id, _)| id.erase()))
+        .collect();
+    for item in items {
+        let t = view.transparency.iter().find(|(i, _)| *i == item).map_or(0.0, |(_, t)| t.clamp(0.0, 0.95));
+        set_transparency(txn, item, t)?;
     }
     Ok((Vec::new(), "Activate view representation"))
 }
@@ -255,4 +295,31 @@ pub(crate) fn delete(
     }
     write(txn, reps)?;
     Ok((Vec::new(), "Delete representation"))
+}
+
+fn set_transparency(txn: &mut Txn<'_>, item: AnyId, transparency: f64) -> Result<(), EditError> {
+    use gc_core::Kind;
+    let differs = |now: f64| (now - transparency).abs() > 1e-12;
+    match item.kind {
+        Kind::Body => {
+            let id = Id::<crate::cell::Body>::from_raw(item.raw);
+            if txn.doc().get(id).is_some_and(|b| differs(b.look.transparency)) {
+                txn.modify(id, |b: &mut crate::cell::Body, _| b.look.transparency = transparency)?;
+            }
+        }
+        Kind::RobotInstance => {
+            let id = Id::<crate::cell::Robot>::from_raw(item.raw);
+            if txn.doc().get(id).is_some_and(|r| differs(r.look.transparency)) {
+                txn.modify(id, |r: &mut crate::cell::Robot, _| r.look.transparency = transparency)?;
+            }
+        }
+        Kind::Assembly => {
+            let id = Id::<crate::design::Assembly>::from_raw(item.raw);
+            if txn.doc().get(id).is_some_and(|a| differs(a.look.transparency)) {
+                txn.modify(id, |a: &mut crate::design::Assembly, _| a.look.transparency = transparency)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }

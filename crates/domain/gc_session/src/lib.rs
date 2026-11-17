@@ -681,6 +681,75 @@ impl Session {
         .map(|_| ())
     }
 
+    /// Runs a mirror, copy or replace and returns the names of the relationships it left suppressed
+    /// (made suppressed because their orientation was ambiguous, or because they could no longer be
+    /// satisfied), for the message Inventor shows.
+    fn replicate(&mut self, op: gc_doc::CellOp) -> Result<Vec<String>, EditError> {
+        let was: Vec<gc_core::AnyId> = self
+            .doc
+            .relationships()
+            .iter()
+            .map(|(id, _)| id.erase())
+            .filter(|id| self.doc.is_inactive(*id))
+            .collect();
+        self.execute(&Command::Cell(op))?;
+        Ok(self
+            .doc
+            .relationships()
+            .iter()
+            .filter(|(id, _)| self.doc.is_inactive(id.erase()) && !was.contains(&id.erase()))
+            .map(|(_, r)| r.name.clone())
+            .collect())
+    }
+
+    /// Mirror Components across a plane (a planar face, work plane or origin plane): with
+    /// `relationships`, those between the selected components are re-made for the copies. One undo step.
+    /// Returns the names of the relationships made suppressed.
+    pub fn mirror_components(
+        &mut self,
+        items: &[gc_core::AnyId],
+        plane: gc_doc::Selection,
+        relationships: bool,
+        ground: bool,
+    ) -> Result<Vec<String>, EditError> {
+        self.replicate(gc_doc::CellOp::MirrorComponents {
+            items: items.to_vec(),
+            plane,
+            relationships,
+            ground,
+        })
+    }
+
+    /// Copy Components, moved by `offset`. One undo step. Returns the names of the relationships made
+    /// suppressed.
+    pub fn copy_components(
+        &mut self,
+        items: &[gc_core::AnyId],
+        offset: gc_doc::Placement,
+        relationships: bool,
+        ground: bool,
+    ) -> Result<Vec<String>, EditError> {
+        self.replicate(gc_doc::CellOp::CopyComponents {
+            items: items.to_vec(),
+            offset,
+            relationships,
+            ground,
+        })
+    }
+
+    /// Replace (or, with `all`, Replace All: every component of the same source) a component with another
+    /// shape or file. Returns the names of the relationships that did not survive (suppressed, to be
+    /// applied again).
+    pub fn replace_component(
+        &mut self,
+        item: gc_core::AnyId,
+        with: gc_doc::Replacement,
+        all: bool,
+    ) -> Result<Vec<String>, EditError> {
+        let items = if all { self.doc.same_source(item) } else { vec![item] };
+        self.replicate(gc_doc::CellOp::ReplaceComponents { items, with })
+    }
+
     /// A component's origin folder in the world: centre point, axes and planes (assembly P1-2).
     pub fn component_origin(&self, occurrence: gc_doc::Occurrence) -> Option<gc_doc::ComponentOrigin> {
         self.doc.component_origin(occurrence)
