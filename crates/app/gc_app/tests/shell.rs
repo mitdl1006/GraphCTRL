@@ -3220,7 +3220,6 @@ fn free_move_and_free_rotate_drag_a_component() {
     assert!(harness.state().viewport().free_tool.is_none());
 }
 
-/// A constraint that can be driven offers Drive in its browser menu, and the ribbon's Drive button works
 /// without a robot once there is such a relationship.
 #[test]
 fn a_relationship_is_driven_from_the_browser() {

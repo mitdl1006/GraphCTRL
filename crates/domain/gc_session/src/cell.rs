@@ -1092,6 +1092,7 @@ impl Session {
     pub fn shown_body(&self, body: Id<Body>) -> Option<&Body> {
         match &self.cell.body {
             Some((id, preview)) if *id == body => Some(preview),
+            _ if self.doc.is_component_suppressed(body.erase()) => None,
             _ => self.cell.driven_bodies.get(&body).or_else(|| self.doc.get(body)),
         }
     }
@@ -1223,7 +1224,9 @@ impl Session {
         let tool = self.shown_tool(robot)?;
         let mut built_from =
             format!("{:?} {} {base:?} {tool:?} {:?}", robot, stored.urdf.len(), stored.acm_overrides);
-        for (id, _) in self.doc.bodies().iter() {
+        for (id, _) in
+            self.doc.bodies().iter().filter(|(id, _)| !self.doc.is_component_suppressed(id.erase()))
+        {
             let body = self.shown_body(id)?;
             // A body whose mesh is not there cannot be checked; it is left out here and stops planning.
             let Some(shape) = shape_of(&body.solid, &self.cell.meshes) else { continue };
@@ -1402,7 +1405,11 @@ impl Session {
     }
 
     /// World poses of all links of a robot as it is shown.
+    /// `None` for a suppressed robot: it is neither drawn nor planned for.
     pub fn link_poses(&self, robot: Id<Robot>) -> Option<Vec<DPose3>> {
+        if self.doc.is_component_suppressed(robot.erase()) {
+            return None;
+        }
         let loaded = self.robot_model(robot)?;
         let base = pose_of(&self.shown_base(robot)?);
         let mut poses = Vec::new();
@@ -1851,8 +1858,12 @@ impl Session {
         // What counts is how each waypoint is approached, not how the list happens to be stored.
         let linear: Vec<bool> =
             (0..path.waypoints.len()).map(|index| path.linear.get(index).copied().unwrap_or(false)).collect();
-        let bodies: Vec<(&Placement, &Solid)> =
-            doc.bodies().iter().map(|(_, b)| (&b.placement, &b.solid)).collect();
+        let bodies: Vec<(&Placement, &Solid)> = doc
+            .bodies()
+            .iter()
+            .filter(|(id, _)| !doc.is_component_suppressed(id.erase()))
+            .map(|(_, b)| (&b.placement, &b.solid))
+            .collect();
         Some(
             format!(
                 "{} {:?} {} {} {:?} {:?} {:?} {} {bodies:?} {targets:?} {:?} {} {} {:?}",
@@ -1926,6 +1937,10 @@ impl Session {
         self.cell.playback = None;
         self.cancel_planning();
         let Some(inputs) = self.plan_inputs(path) else { return PlanStatus::NotPlanned };
+        // A suppressed robot is not planned for.
+        if self.doc.get(path).is_some_and(|p| self.doc.is_component_suppressed(p.robot.erase())) {
+            return PlanStatus::NotPlanned;
+        }
         let loaded = self.doc.get(path).and_then(|p| self.robot_model(p.robot)).cloned();
         // The job works on its own copy of the document: edits made while it runs do not disturb it,
         // and the fingerprint tells afterwards whether its result is still current.
@@ -2172,7 +2187,7 @@ fn plan_path(
         }
     };
     let mut obstacles = Vec::new();
-    for (_, body) in doc.bodies().iter() {
+    for (_, body) in doc.bodies().iter().filter(|(id, _)| !doc.is_component_suppressed(id.erase())) {
         // An obstacle that cannot be checked must not be planned through as if it were not there.
         let shape = shape_of(&body.solid, meshes)
             .ok_or_else(|| format!("the mesh of `{}` is not available", body.name))?;

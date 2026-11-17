@@ -437,6 +437,17 @@ pub enum CellOp {
     },
     /// Deletes an assembly constraint; the components stay where they are.
     DeleteRelationship(Id<crate::relate::Relationship>),
+    /// Ground and Root, "Ground at origin": moves the components (bodies, robots, assemblies) to the
+    /// assembly's origin, aligned with it, and grounds them. Refused when constraints then cannot be met.
+    GroundAtOrigin(Vec<AnyId>),
+    /// Place at Component Origin: moves a component onto the origin of another (aligned and coincident)
+    /// and constrains it there with Flush constraints between their origin planes.
+    PlaceAtComponentOrigin {
+        /// The component that is placed (a body, robot or assembly).
+        item: AnyId,
+        /// The component whose origin it goes to (a part or robot link included).
+        target: crate::design::Occurrence,
+    },
     /// Moves a design item in the model tree to just before another (`None`: to the end). Refused when
     /// it would come before something it depends on, or after something that depends on it.
     MoveInTree {
@@ -1027,6 +1038,48 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
             txn.remove(*id)?;
             Ok((Vec::new(), "Delete constraint"))
         }
+        CellOp::GroundAtOrigin(items) => {
+            use crate::design::Occurrence;
+            if items.is_empty() || !items.iter().all(|i| txn.doc().owner_pose(*i).is_some()) {
+                return Err(EditError::BadValue);
+            }
+            for item in items {
+                set_owner_pose(txn, *item, gc_math::DPose3::IDENTITY)?;
+                if !txn.doc().component_flag(Occurrence::Item(*item), crate::design::ComponentFlag::Grounded)
+                {
+                    crate::tree::set_component(
+                        txn,
+                        Occurrence::Item(*item),
+                        crate::design::ComponentFlag::Grounded,
+                        true,
+                    )?;
+                }
+            }
+            settle(txn)?;
+            Ok((Vec::new(), "Ground and root"))
+        }
+        CellOp::PlaceAtComponentOrigin { item, target } => {
+            use crate::design::{Occurrence, OriginElement, OriginPlane};
+            use crate::relate::{Geometry, RelationKind, Relationship, Selection};
+            let pose = txn.doc().component_origin(*target).ok_or(EditError::BadValue)?.pose;
+            if txn.doc().owner_pose(*item).is_none() || target.owner() == *item {
+                return Err(EditError::BadValue);
+            }
+            set_owner_pose(txn, *item, pose)?;
+            let mut created = Vec::new();
+            for (plane, name) in [(OriginPlane::Xy, "XY"), (OriginPlane::Xz, "XZ"), (OriginPlane::Yz, "YZ")] {
+                let geometry = Geometry::origin(OriginElement::Plane(plane));
+                let relationship = Relationship {
+                    name: format!("Flush:{name}"),
+                    kind: RelationKind::Flush { offset: 0.0 },
+                    first: Selection { occurrence: Occurrence::Item(*item), geometry },
+                    second: Selection { occurrence: *target, geometry },
+                };
+                created.push(Created::Relationship(txn.insert(relationship)));
+            }
+            settle(txn)?;
+            Ok((created, "Place at component origin"))
+        }
         CellOp::MoveInTree { item, before } => {
             let doc = txn.doc();
             let mut order = doc.model_order();
@@ -1143,6 +1196,28 @@ pub(crate) fn settle_holding(txn: &mut Txn<'_>, held: &[AnyId]) -> Result<(), Ed
             )?,
             _ => {}
         }
+    }
+    Ok(())
+}
+
+/// Sets the world pose of a body, robot or assembly.
+fn set_owner_pose(txn: &mut Txn<'_>, item: AnyId, pose: gc_math::DPose3) -> Result<(), EditError> {
+    let placement =
+        Placement { xyz: pose.translation.to_array(), rpy: gc_math::rpy_from_quat(pose.rotation) };
+    match item.kind {
+        Kind::Body => {
+            txn.modify(Id::<Body>::from_raw(item.raw), |b: &mut Body, _| b.placement = placement)?
+        }
+        Kind::RobotInstance => {
+            txn.modify(Id::<Robot>::from_raw(item.raw), |r: &mut Robot, _| r.placement = placement)?
+        }
+        Kind::Assembly => txn.modify(
+            Id::<crate::design::Assembly>::from_raw(item.raw),
+            |a: &mut crate::design::Assembly, _| {
+                a.placement = placement;
+            },
+        )?,
+        _ => return Err(EditError::BadValue),
     }
     Ok(())
 }

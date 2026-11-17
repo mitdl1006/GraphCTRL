@@ -89,6 +89,9 @@ impl Constrain {
             }
             // Joints are placed with the Joint command, not this dialog.
             RelationKind::Rigid { .. } | RelationKind::Rotational { .. } => {}
+            // Kinds the backend adds later (angle, tangent, symmetry, more joints) predict nothing here.
+            #[allow(unreachable_patterns, reason = "room for relationship kinds still to come")]
+            _ => {}
         }
     }
 
@@ -233,6 +236,9 @@ fn describe(session: &Session, selection: &Selection, lang: Lang) -> String {
         Geometry::Point(_) => tr!(lang, ConstrainPoint),
         Geometry::Circle { .. } => tr!(lang, ConstrainCircle),
         Geometry::Frame { .. } => tr!(lang, ConstrainFrame),
+        // Geometry the backend adds later (cylinders, spheres) until it has its own words.
+        #[allow(unreachable_patterns, reason = "room for selection geometry still to come")]
+        _ => tr!(lang, ConstrainGeometry),
     };
     format!("{name} · {what}")
 }
