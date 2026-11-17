@@ -804,6 +804,9 @@ fn prompt_text(lang: Lang, prompt: Prompt) -> &'static str {
         Prompt::SlotWidth => Msg::PromptSlotWidth,
         Prompt::OffsetPick => Msg::PromptOffsetPick,
         Prompt::OffsetPlace => Msg::PromptOffsetPlace,
+        Prompt::PickGeometry => Msg::PromptPickGeometry,
+        Prompt::PickLine => Msg::PromptPickLine,
+        Prompt::PickPoint => Msg::PromptPickPoint,
     };
     message.text(lang)
 }

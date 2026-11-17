@@ -279,6 +279,12 @@ pub enum Prompt {
     OffsetPick,
     /// Offset: click where the offset goes, or type the distance.
     OffsetPlace,
+    /// A sketch dialog's Geometry selector is active.
+    PickGeometry,
+    /// A sketch dialog's line selector is active.
+    PickLine,
+    /// A sketch dialog's point (axis) selector is active.
+    PickPoint,
 }
 
 /// What a tool would draw right now, on top of the sketch.

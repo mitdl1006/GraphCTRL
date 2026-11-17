@@ -1034,19 +1034,19 @@ impl eframe::App for GraphCtrlApp {
             Some(ribbon::RibbonAction::StartSketchMirror) => {
                 self.sketch_dialog = Some(crate::sketch_dialogs::SketchDialog::new(
                     crate::sketch_dialogs::Kind::Mirror,
-                    &self.session,
+                    &mut self.session,
                 ));
             }
             Some(ribbon::RibbonAction::StartSketchRectPattern) => {
                 self.sketch_dialog = Some(crate::sketch_dialogs::SketchDialog::new(
                     crate::sketch_dialogs::Kind::Rectangular,
-                    &self.session,
+                    &mut self.session,
                 ));
             }
             Some(ribbon::RibbonAction::StartSketchCircPattern) => {
                 self.sketch_dialog = Some(crate::sketch_dialogs::SketchDialog::new(
                     crate::sketch_dialogs::Kind::Circular,
-                    &self.session,
+                    &mut self.session,
                 ));
             }
             Some(ribbon::RibbonAction::ToggleGround) => {
@@ -1145,9 +1145,6 @@ impl eframe::App for GraphCtrlApp {
         }
         if self.parameters.open {
             self.parameters.window(&ctx, &mut self.session, lang);
-        }
-        if self.session.active_sketch().is_none() {
-            self.sketch_dialog = None;
         }
         if let Some(dialog) = &mut self.sketch_dialog
             && !dialog.window(&ctx, &mut self.session, lang)

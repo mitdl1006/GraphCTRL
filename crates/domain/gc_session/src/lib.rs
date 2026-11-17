@@ -17,6 +17,7 @@ mod design;
 pub mod library;
 mod measure;
 mod project;
+mod sketch_pick;
 mod spatial;
 
 use std::collections::BTreeSet;
@@ -38,6 +39,7 @@ use gc_tools::{Preview, Prompt, Tool, ToolEvent, ToolKind, ToolOutput};
 pub use measure::{
     Feature, FeaturePair, InterferenceRow, ItemMeasure, PairMeasure, angle_at, measure_features,
 };
+pub use sketch_pick::SketchPick;
 
 /// A dimension that is about to be placed and needs its value from the user.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -72,6 +74,8 @@ pub struct Session {
     selection: BTreeSet<Item>,
     /// The selected items in the order they were picked (may hold items no longer selected).
     picked: Vec<Item>,
+    /// The active selector of an open sketch dialog.
+    pick_target: Option<SketchPick>,
     drag: Option<SketchDrag>,
     report: Option<SketchReport>,
     request: Option<ValueRequest>,
@@ -120,6 +124,7 @@ impl Session {
             construction: false,
             selection: BTreeSet::new(),
             picked: Vec::new(),
+            pick_target: None,
             drag: None,
             report: None,
             request: None,
@@ -256,6 +261,11 @@ impl Session {
 
     /// What the status bar should say about the tool.
     pub fn prompt(&self) -> Prompt {
+        if self.tool.kind() == ToolKind::Select
+            && let Some(prompt) = self.pick_prompt()
+        {
+            return prompt;
+        }
         self.tool.prompt()
     }
 
@@ -980,6 +990,7 @@ impl Session {
     /// Starts editing an existing sketch.
     pub fn enter_sketch(&mut self, sketch: Id<Sketch>) {
         if self.doc.get(sketch).is_some() {
+            self.pick_target = None;
             self.active = Some(sketch);
             self.selection.clear();
             self.set_tool(ToolKind::Select);
@@ -989,6 +1000,7 @@ impl Session {
 
     /// Stops editing the active sketch.
     pub fn finish_sketch(&mut self) {
+        self.pick_target = None;
         self.active = None;
         self.selection.clear();
         self.set_tool(ToolKind::Select);
@@ -999,6 +1011,10 @@ impl Session {
     pub fn set_tool(&mut self, kind: ToolKind) {
         // The tools' settings (Center Point, the Polygon dialog, the Offset toggles) outlive the tool.
         self.tool = self.tool.renewed(kind);
+        // Another command ends picking for an open sketch dialog.
+        if kind != ToolKind::Select {
+            self.pick_target = None;
+        }
         self.reset_interaction();
     }
 
@@ -1112,6 +1128,7 @@ impl Session {
                     self.offer = Some(ReferenceOffer { kind, text_pos, with });
                 }
             }
+            ToolOutput::Select { item, .. } if self.pick_select(item) => {}
             ToolOutput::Select { item, extend } => match (item, extend) {
                 (Some(item), true) => {
                     self.picked.retain(|p| *p != item);
@@ -1127,6 +1144,8 @@ impl Session {
                 (None, true) => {}
                 (None, false) => self.selection.clear(),
             },
+            // Picking for a sketch dialog neither drags nor deletes what it picks.
+            ToolOutput::BeginDrag { .. } | ToolOutput::DeleteSelection if self.pick_target.is_some() => {}
             ToolOutput::BeginDrag { grab, cursor } => {
                 self.drag = self.active_sketch().and_then(|(_, sketch)| sketch.begin_drag(grab, cursor).ok());
             }

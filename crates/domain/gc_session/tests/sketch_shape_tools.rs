@@ -137,3 +137,46 @@ fn the_offset_tool_picks_a_curve_then_offsets_the_loop_to_the_cursors_side() {
     session.tool_event(ToolEvent::Key(Key::Escape));
     assert_eq!(session.prompt(), Prompt::OffsetPick);
 }
+
+#[test]
+fn a_dialog_selector_takes_the_select_tools_clicks_by_its_own_rules() {
+    use gc_session::SketchPick;
+    use gc_sketch::Item;
+    let mut session = new_session();
+    session.set_tool(ToolKind::Line);
+    click(&mut session, mm(0.0, 0.0));
+    click(&mut session, mm(20.0, 0.0));
+    session.set_tool(ToolKind::Circle);
+    click(&mut session, mm(50.0, 0.0));
+    click(&mut session, mm(55.0, 0.0));
+    let plain = |session: &mut Session, at| {
+        session.tool_event(ToolEvent::Move { pos: at, px: PX, suppress_snap: true });
+        session.tool_event(ToolEvent::Click { pos: at, px: PX, modifier: false });
+    };
+
+    // Geometry: plain clicks toggle, a click on nothing keeps the picks.
+    session.set_sketch_pick(Some(SketchPick::Curves), Vec::new());
+    assert_eq!(session.tool(), ToolKind::Select);
+    assert_eq!(session.prompt(), Prompt::PickGeometry);
+    plain(&mut session, mm(10.0, 0.0));
+    plain(&mut session, mm(55.0, 0.0));
+    plain(&mut session, mm(30.0, 30.0));
+    assert_eq!(session.selected_curves().len(), 2);
+    plain(&mut session, mm(10.0, 0.0));
+    assert_eq!(session.selected_curves().len(), 1);
+
+    // A line selector ignores the circle; a point selector takes the circle's centre.
+    session.set_sketch_pick(Some(SketchPick::Line), Vec::new());
+    plain(&mut session, mm(55.0, 0.0));
+    assert!(session.selection().is_empty());
+    plain(&mut session, mm(10.0, 0.0));
+    assert_eq!(session.selected_curves().len(), 1);
+    session.set_sketch_pick(Some(SketchPick::Point), Vec::new());
+    plain(&mut session, mm(55.0, 0.0));
+    assert!(matches!(session.selection().iter().next(), Some(Item::Point(_))));
+    assert_eq!(session.selection().len(), 1);
+
+    // Another command ends picking.
+    session.set_tool(ToolKind::Line);
+    assert!(session.sketch_pick().is_none());
+}

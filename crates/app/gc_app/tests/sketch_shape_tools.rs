@@ -122,7 +122,7 @@ fn the_offset_button_offsets_a_picked_loop_and_shows_its_toggles() {
 }
 
 #[test]
-fn the_mirror_dialog_takes_the_selection_and_mirrors() {
+fn the_mirror_dialog_takes_clicks_in_the_viewport_while_it_is_open() {
     let mut harness = sketching();
     line(harness.state_mut(), mm(0.0, 0.0), mm(10.0, 10.0));
     line(harness.state_mut(), mm(20.0, -10.0), mm(20.0, 30.0));
@@ -131,54 +131,84 @@ fn the_mirror_dialog_takes_the_selection_and_mirrors() {
     harness.run();
     harness.get_by_label("미러 패턴");
     harness.get_by_label("형상: 곡선 1개");
+    harness.get_by_label("패턴할 형상을 클릭하십시오(다시 클릭하면 빠짐)");
+    // The Mirror Line selector, then the line in the graphics window.
+    harness.get_by_label("대칭선: 선택 안 됨").click();
+    harness.run();
+    harness.get_by_label("선을 클릭하십시오");
     click(harness.state_mut(), mm(20.0, 10.0), false);
     harness.run();
-    harness.get_by_label("대칭선 ← 선택").click();
-    harness.run();
+    harness.get_by_label("대칭선: 선택됨");
+    harness.get_by_label("형상: 곡선 1개");
     harness.get_by_label("적용").click();
     harness.run();
     assert_eq!(curves(&harness), 3);
     harness.get_by_label("완료").click();
     harness.run();
     assert!(harness.query_by_label("미러 패턴").is_none(), "Done closes the dialog");
+    assert!(harness.state().session.sketch_pick().is_none(), "and ends picking");
 }
 
 #[test]
-fn the_rectangular_pattern_dialog_copies_along_a_direction() {
+fn the_rectangular_pattern_dialog_collects_geometry_by_plain_clicks() {
     let mut harness = sketching();
     line(harness.state_mut(), mm(0.0, 0.0), mm(0.0, 10.0));
+    line(harness.state_mut(), mm(5.0, 0.0), mm(5.0, 10.0));
     line(harness.state_mut(), mm(0.0, -10.0), mm(40.0, -10.0));
-    click(harness.state_mut(), mm(0.0, 5.0), false);
     harness.get_by_label("직사각형").click();
     harness.run();
     harness.get_by_label("직사각형 패턴");
+    // Each click adds (no Ctrl), a click on nothing keeps the picks, a second click removes.
+    click(harness.state_mut(), mm(0.0, 5.0), false);
+    click(harness.state_mut(), mm(5.0, 5.0), false);
+    click(harness.state_mut(), mm(30.0, 30.0), false);
+    harness.run();
+    harness.get_by_label("형상: 곡선 2개");
+    click(harness.state_mut(), mm(5.0, 5.0), false);
+    harness.run();
+    harness.get_by_label("형상: 곡선 1개");
+    harness.get_by_label("방향 1: 선택 안 됨").click();
+    harness.run();
     click(harness.state_mut(), mm(20.0, -10.0), false);
     harness.run();
-    harness.get_by_label("방향 1 ← 선택").click();
-    harness.run();
+    harness.get_by_label("방향 1: 선택됨");
     harness.get_by_label("적용").click();
     harness.run();
-    assert_eq!(curves(&harness), 3, "count 2: one copy");
+    assert_eq!(curves(&harness), 4, "count 2: one copy of the one picked line");
 }
 
 #[test]
-fn the_circular_pattern_dialog_copies_around_a_point() {
+fn the_circular_pattern_dialog_takes_a_circle_click_as_its_centre_axis() {
     let mut harness = sketching();
-    harness.state_mut().session.set_tool(ToolKind::Point);
-    click(harness.state_mut(), mm(50.0, 50.0), false);
     harness.state_mut().session.set_tool(ToolKind::Circle);
+    click(harness.state_mut(), mm(50.0, 50.0), false);
+    click(harness.state_mut(), mm(52.0, 50.0), false);
     click(harness.state_mut(), mm(70.0, 50.0), false);
     click(harness.state_mut(), mm(75.0, 50.0), false);
     harness.state_mut().session.set_tool(ToolKind::Select);
-    click(harness.state_mut(), mm(75.0, 50.0), false);
     harness.get_by_label("원형").click();
     harness.run();
     harness.get_by_label("원형 패턴");
-    click(harness.state_mut(), mm(50.0, 50.0), false);
+    click(harness.state_mut(), mm(75.0, 50.0), false);
+    harness.get_by_label("축: 선택 안 됨").click();
     harness.run();
-    harness.get_by_label("축 ← 선택").click();
+    click(harness.state_mut(), mm(52.0, 50.0), false);
     harness.run();
+    harness.get_by_label("축: 선택됨");
+    harness.get_by_label("형상: 곡선 1개");
     harness.get_by_label("적용").click();
     harness.run();
-    assert_eq!(curves(&harness), 6, "six around the full circle");
+    assert_eq!(curves(&harness), 7, "the small circle and six around it");
+}
+
+#[test]
+fn another_command_closes_the_dialog() {
+    let mut harness = sketching();
+    harness.get_by_label("미러").click();
+    harness.run();
+    harness.get_by_label("미러 패턴");
+    harness.get_by_label("선").click();
+    harness.run();
+    harness.run();
+    assert!(harness.query_by_label("미러 패턴").is_none());
 }

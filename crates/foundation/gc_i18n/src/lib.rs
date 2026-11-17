@@ -985,6 +985,9 @@ messages! {
     PromptSlotWidth => ("슬롯 너비를 클릭하거나 입력하십시오", "Click or type the slot width"),
     PromptOffsetPick => ("간격띄우기할 곡선을 선택하십시오", "Select the curve to offset"),
     PromptOffsetPlace => ("간격띄우기 위치를 클릭하거나 거리를 입력하십시오", "Click where the offset goes, or type the distance"),
+    PromptPickGeometry => ("패턴할 형상을 클릭하십시오(다시 클릭하면 빠짐)", "Click the geometry to pattern (click again to remove)"),
+    PromptPickLine => ("선을 클릭하십시오", "Click a line"),
+    PromptPickPoint => ("점이나 원을 클릭하십시오(원은 중심)", "Click a point or a circle (its centre)"),
     /// Input box: offset distance.
     HudDistance => ("거리", "Distance"),
     /// Ribbon group (Inventor: Pattern panel).
@@ -1007,14 +1010,12 @@ messages! {
     /// Offset options (right-click toggles in Inventor).
     OffsetLoopSelect => ("루프 선택", "Loop Select"),
     OffsetConstrain => ("간격띄우기 구속", "Constrain Offset"),
-    /// Mirror / pattern dialogs: the geometry is the current selection. `{0}` how many curves.
+    /// Mirror / pattern dialogs: the Geometry selector. `{0}` how many curves.
     DialogGeometry => ("형상: 곡선 {0}개", "Geometry: {0} curves"),
-    /// Dialog buttons that take a field from the current sketch selection.
-    TakeGeometry => ("형상 ← 선택", "Geometry ← selection"),
-    TakeMirrorLine => ("대칭선 ← 선택", "Mirror line ← selection"),
-    TakeDirection1 => ("방향 1 ← 선택", "Direction 1 ← selection"),
-    TakeDirection2 => ("방향 2 ← 선택", "Direction 2 ← selection"),
-    TakeAxis => ("축 ← 선택", "Axis ← selection"),
+    DialogSelectorHint => (
+        "선택기(형상·선·축)를 누른 뒤 그래픽 창에서 클릭하십시오",
+        "Press a selector (geometry, line, axis), then click in the graphics window"
+    ),
     /// Mirror dialog: the mirror line. `{0}` its state.
     MirrorLine => ("대칭선: {0}", "Mirror line: {0}"),
     /// Pattern dialogs: a direction or axis is set / not set.

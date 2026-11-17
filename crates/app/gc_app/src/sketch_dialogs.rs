@@ -10,14 +10,15 @@
 //! - Polygon: Inscribed or Circumscribed and the number of edges, while the tool runs.
 //! - Offset: Loop Select and Constrain Offset (Inventor's right-click toggles), while the tool runs.
 //!
-//! Inventor picks the geometry and the line or axis inside the dialog; here each field takes the current
-//! sketch selection with its "← selection" button.
+//! As in Inventor the dialog stays open while geometry is picked in the graphics window: the pressed
+//! selector (Geometry, Mirror Line, Direction 1/2, Axis) takes the clicks (`Session::set_sketch_pick`).
+//! Geometry starts as the selection the dialog was opened with.
 
 use gc_core::Id;
 use gc_doc::{SketchOp, SketchPatternDirection};
 use gc_i18n::{Lang, tr};
-use gc_session::Session;
-use gc_sketch::{Curve, SkPoint};
+use gc_session::{Session, SketchPick};
+use gc_sketch::{Curve, Item, SkPoint};
 use gc_tools::ToolKind;
 
 /// Which dialog.
@@ -28,9 +29,29 @@ pub(crate) enum Kind {
     Circular,
 }
 
+/// A selector of the dialog.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Field {
+    Geometry,
+    Line,
+    Line2,
+    Axis,
+}
+
+impl Field {
+    fn pick(self) -> SketchPick {
+        match self {
+            Field::Geometry => SketchPick::Curves,
+            Field::Line | Field::Line2 => SketchPick::Line,
+            Field::Axis => SketchPick::Point,
+        }
+    }
+}
+
 /// A sketch Mirror or Pattern dialog.
 pub(crate) struct SketchDialog {
     kind: Kind,
+    active: Field,
     geometry: Vec<Id<Curve>>,
     line: Option<Id<Curve>>,
     line2: Option<Id<Curve>>,
@@ -47,10 +68,11 @@ pub(crate) struct SketchDialog {
 }
 
 impl SketchDialog {
-    /// A dialog that starts with the current selection as its geometry.
-    pub(crate) fn new(kind: Kind, session: &Session) -> Self {
-        Self {
+    /// A dialog whose Geometry selector is active and holds the current selection.
+    pub(crate) fn new(kind: Kind, session: &mut Session) -> Self {
+        let mut dialog = Self {
             kind,
+            active: Field::Geometry,
             geometry: session.selected_curves(),
             line: None,
             line2: None,
@@ -64,6 +86,39 @@ impl SketchDialog {
             flip2: false,
             fitted: kind == Kind::Circular,
             error: None,
+        };
+        dialog.activate(Field::Geometry, session);
+        dialog
+    }
+
+    /// What `field` holds, as selection items.
+    fn items(&self, field: Field) -> Vec<Item> {
+        match field {
+            Field::Geometry => self.geometry.iter().map(|c| Item::Curve(*c)).collect(),
+            Field::Line => self.line.map(Item::Curve).into_iter().collect(),
+            Field::Line2 => self.line2.map(Item::Curve).into_iter().collect(),
+            Field::Axis => self.axis.map(Item::Point).into_iter().collect(),
+        }
+    }
+
+    /// Presses a selector: the viewport's clicks go to it from now on.
+    fn activate(&mut self, field: Field, session: &mut Session) {
+        self.active = field;
+        session.set_sketch_pick(Some(field.pick()), self.items(field));
+    }
+
+    /// Reads the active selector's picks back from the session.
+    fn take_picks(&mut self, session: &Session) {
+        match self.active {
+            Field::Geometry => self.geometry = session.selected_curves(),
+            Field::Line => self.line = session.selected_curves().first().copied(),
+            Field::Line2 => {
+                self.line2 = session.selected_curves().first().copied();
+                if self.line2.is_some() {
+                    self.count2 = self.count2.max(2);
+                }
+            }
+            Field::Axis => self.axis = session.selected_points().first().copied(),
         }
     }
 
@@ -97,8 +152,19 @@ impl SketchDialog {
         })
     }
 
-    /// Shows the dialog. Returns false when it closes.
+    /// A selector button: pressed while it takes the clicks.
+    fn selector(&mut self, ui: &mut egui::Ui, session: &mut Session, field: Field, text: String) {
+        if ui.selectable_label(self.active == field, text).clicked() && self.active != field {
+            self.activate(field, session);
+        }
+    }
+
+    /// Shows the dialog. Returns false when it closes (picking ends then too); another command closes it.
     pub(crate) fn window(&mut self, ctx: &egui::Context, session: &mut Session, lang: Lang) -> bool {
+        if session.sketch_pick().is_none() {
+            return false;
+        }
+        self.take_picks(session);
         let title = match self.kind {
             Kind::Mirror => tr!(lang, SkMirrorTitle),
             Kind::Rectangular => tr!(lang, SkRectTitle),
@@ -108,36 +174,20 @@ impl SketchDialog {
         let mut done = false;
         let state = |set: bool| if set { tr!(lang, DialogPicked) } else { tr!(lang, DialogNotPicked) };
         egui::Window::new(title).open(&mut open).resizable(false).show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(tr!(lang, DialogGeometry, self.geometry.len()));
-                if ui.button(tr!(lang, TakeGeometry)).clicked() {
-                    self.geometry = session.selected_curves();
-                }
-            });
-            let first_line = |session: &Session| {
-                let lines: Vec<Id<Curve>> = session
-                    .selected_curves()
-                    .into_iter()
-                    .filter(|c| session.active_sketch().is_some_and(|(_, s)| s.line(*c).is_some()))
-                    .collect();
-                lines.first().copied()
-            };
+            ui.weak(tr!(lang, DialogSelectorHint));
+            self.selector(ui, session, Field::Geometry, tr!(lang, DialogGeometry, self.geometry.len()));
             match self.kind {
                 Kind::Mirror => {
-                    ui.horizontal(|ui| {
-                        ui.label(tr!(lang, MirrorLine, state(self.line.is_some())));
-                        if ui.button(tr!(lang, TakeMirrorLine)).clicked() {
-                            self.line = first_line(session);
-                        }
-                    });
+                    self.selector(
+                        ui,
+                        session,
+                        Field::Line,
+                        tr!(lang, MirrorLine, state(self.line.is_some())),
+                    );
                 }
                 Kind::Rectangular => {
-                    ui.horizontal(|ui| {
-                        ui.label(tr!(lang, PatternDirection1, state(self.line.is_some())));
-                        if ui.button(tr!(lang, TakeDirection1)).clicked() {
-                            self.line = first_line(session);
-                        }
-                    });
+                    let text = tr!(lang, PatternDirection1, state(self.line.is_some()));
+                    self.selector(ui, session, Field::Line, text);
                     ui.horizontal(|ui| {
                         let label = ui.label(tr!(lang, PatternCount)).id;
                         ui.add(egui::DragValue::new(&mut self.count).range(2..=500)).labelled_by(label);
@@ -145,13 +195,8 @@ impl SketchDialog {
                         ui.text_edit_singleline(&mut self.spacing).labelled_by(label);
                         ui.checkbox(&mut self.flip, tr!(lang, PatternFlip));
                     });
-                    ui.horizontal(|ui| {
-                        ui.label(tr!(lang, PatternDirection2, state(self.line2.is_some())));
-                        if ui.button(tr!(lang, TakeDirection2)).clicked() {
-                            self.line2 = first_line(session);
-                            self.count2 = self.count2.max(2);
-                        }
-                    });
+                    let text = tr!(lang, PatternDirection2, state(self.line2.is_some()));
+                    self.selector(ui, session, Field::Line2, text);
                     ui.horizontal(|ui| {
                         let label = ui.label(tr!(lang, SkPatternCount2)).id;
                         ui.add(egui::DragValue::new(&mut self.count2).range(1..=500)).labelled_by(label);
@@ -162,12 +207,12 @@ impl SketchDialog {
                     ui.checkbox(&mut self.fitted, tr!(lang, PatternFitted));
                 }
                 Kind::Circular => {
-                    ui.horizontal(|ui| {
-                        ui.label(tr!(lang, SkPatternAxis, state(self.axis.is_some())));
-                        if ui.button(tr!(lang, TakeAxis)).clicked() {
-                            self.axis = session.selected_points().first().copied();
-                        }
-                    });
+                    self.selector(
+                        ui,
+                        session,
+                        Field::Axis,
+                        tr!(lang, SkPatternAxis, state(self.axis.is_some())),
+                    );
                     ui.horizontal(|ui| {
                         let label = ui.label(tr!(lang, PatternCount)).id;
                         ui.add(egui::DragValue::new(&mut self.count).range(2..=500)).labelled_by(label);
@@ -193,6 +238,7 @@ impl SketchDialog {
                             self.error = None;
                             // Apply continues with new geometry (Inventor's Apply).
                             self.geometry.clear();
+                            self.activate(Field::Geometry, session);
                         }
                         Err(error) => self.error = Some(error.to_string()),
                     }
@@ -200,7 +246,11 @@ impl SketchDialog {
                 done = finish;
             });
         });
-        open && !done
+        if !open || done {
+            session.set_sketch_pick(None, Vec::new());
+            return false;
+        }
+        true
     }
 }
 
