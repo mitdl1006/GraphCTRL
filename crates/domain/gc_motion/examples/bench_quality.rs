@@ -131,13 +131,14 @@ fn read_fixture(path: &Path) -> Fixture {
 }
 
 fn build_scene(fixture: &Fixture) -> RobotScene {
-    let assets = root().join("assets/ur");
-    let text = std::fs::read_to_string(assets.join("urdf/ur5e.urdf")).unwrap();
+    // The robot library (`robots/ur5e/`); the package name of a mesh URI is a folder of the library.
+    let library = root().join("robots");
+    let text = std::fs::read_to_string(library.join("ur5e/ur5e.urdf")).unwrap();
     let (model, _) = import(&text).unwrap_or_else(|findings| panic!("{findings:?}"));
     let chain = model.chain("base_link", "tool0").unwrap();
     let meshes = |uri: &str| {
-        let relative = uri.strip_prefix("package://ur_description/")?;
-        let bytes = std::fs::read(assets.join(relative)).ok()?;
+        let relative = uri.strip_prefix("package://")?;
+        let bytes = std::fs::read(library.join(relative)).ok()?;
         gc_mesh::stl::parse(&bytes).ok().map(Arc::new)
     };
     let tool: Vec<(DPose3, ShapeDesc)> = fixture

@@ -1053,3 +1053,78 @@ fn link_pairs_can_be_listed_and_switched_and_plans_carry_a_guarantee() {
     assert_eq!(session.plan_status(path), PlanStatus::Stale);
     assert!(session.allow_contact(path, 5, "tool0", body).is_err(), "no waypoint at position 5");
 }
+
+#[test]
+fn a_planner_from_a_plugin_is_found_by_its_id() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use gc_robotics_api::{
+        MotionPlanner, PlanControl, PlanFailure, PlanOutput, PlanRequest, PlannerCaps, PlannerDescriptor,
+        StateChecker,
+    };
+
+    /// Goes straight to the first goal through a midpoint, and counts its calls.
+    struct Midpoint(PlannerDescriptor, AtomicUsize);
+    impl MotionPlanner for Midpoint {
+        fn descriptor(&self) -> &PlannerDescriptor {
+            &self.0
+        }
+        fn plan(
+            &self,
+            req: &PlanRequest<'_>,
+            checker: &dyn StateChecker,
+            _control: &dyn PlanControl,
+        ) -> Result<PlanOutput, PlanFailure> {
+            self.1.fetch_add(1, Ordering::Relaxed);
+            let dof = req.start.len();
+            let goal = &req.goals[..dof];
+            let middle: Vec<f64> = req.start.iter().zip(goal).map(|(a, b)| (a + b) / 2.0).collect();
+            if !(checker.motion_valid(req.start, &middle) && checker.motion_valid(&middle, goal)) {
+                return Err(PlanFailure::NoValidGoal);
+            }
+            let path = [req.start, middle.as_slice(), goal].concat();
+            Ok(PlanOutput { path, goal_index: 0, cost: 0.0, stats: Default::default() })
+        }
+    }
+    let planner = Arc::new(Midpoint(
+        PlannerDescriptor {
+            id: "test.midpoint".to_owned(),
+            name: gc_plugin_api::Text::new("중점", "Midpoint"),
+            version: 1,
+            params: Default::default(),
+            caps: PlannerCaps::default(),
+        },
+        AtomicUsize::new(0),
+    ));
+    let mut session = Session::new();
+    session.set_planners(vec![planner.clone() as Arc<dyn MotionPlanner>]);
+    assert!(session.planner_choices().iter().any(|(id, _, en)| id == "test.midpoint" && en == "Midpoint"));
+    assert_eq!(session.planner_choices()[0].0, "rrt_connect");
+
+    let robot = session.add_robot("Robot1", &six_axis()).unwrap();
+    session.jog(robot, &RIGHT);
+    session.end_jog();
+    let there = session.add_waypoint_here(robot).unwrap();
+    session.jog(robot, &LEFT);
+    session.end_jog();
+    // A small block on the straight joint line, so that the planner is asked.
+    let path = session.add_path(robot, vec![there]).unwrap();
+    session
+        .execute(&Command::Cell(CellOp::SetPlanner { id: path, planner: "test.midpoint".into(), seed: 0 }))
+        .unwrap();
+    assert_eq!(session.plan(path), PlanStatus::Ready, "{:?}", session.plan_error(path));
+    // The straight line was free: no planner needed.
+    assert_eq!(planner.1.load(Ordering::Relaxed), 0);
+    session
+        .add_body(Solid::Box { size: [0.1, 0.1, 1.4] }, Placement { xyz: [0.55, 0.0, 0.7], rpy: [0.0; 3] })
+        .unwrap();
+    session.plan(path);
+    assert!(planner.1.load(Ordering::Relaxed) > 0, "the plugin planner was asked");
+    // An id nobody offers is refused with the id.
+    session
+        .execute(&Command::Cell(CellOp::SetPlanner { id: path, planner: "nobody".into(), seed: 0 }))
+        .unwrap();
+    assert_eq!(session.plan(path), PlanStatus::Failed);
+    assert!(session.plan_error(path).unwrap().contains("nobody"));
+}

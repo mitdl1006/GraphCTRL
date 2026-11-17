@@ -21,7 +21,10 @@ use gc_plan::{
     validate,
 };
 use gc_robot::{IkOptions, NumericIk};
-use gc_robotics_api::IkFailureReason;
+use gc_robotics_api::{
+    IkFailureReason, MotionPlanner, PlanBudget, PlanControl, PlanFailure, PlanRequest, PlanStats, SpaceSpec,
+    StateChecker,
+};
 use gc_traj::{Limits, TimingError, Trajectory, Validated, ValidationError};
 
 pub use scene::{
@@ -190,8 +193,20 @@ pub fn plan_motion(
     request: &MotionRequest,
     control: &dyn Control,
 ) -> Result<MotionPlan, MotionError> {
+    plan_motion_using(scene, request, None, control)
+}
+
+/// [`plan_motion`] with a planner from the plugin registry (`MOTION_PLANNERS`) in place of
+/// [`MotionRequest::algorithm`], when one is given. It runs with its default parameters and the request's
+/// budget.
+pub fn plan_motion_using(
+    scene: &RobotScene,
+    request: &MotionRequest,
+    planner: Option<&dyn MotionPlanner>,
+    control: &dyn Control,
+) -> Result<MotionPlan, MotionError> {
     let scoped = with_contacts(scene, request);
-    plan_preferring(scoped.as_ref().unwrap_or(scene), request, None, control)
+    plan_preferring(scoped.as_ref().unwrap_or(scene), request, None, planner, control)
 }
 
 /// The scene with the request's contact allowances in force, when it has any: they apply near the start
@@ -229,6 +244,17 @@ pub fn replan(
     previous: &MotionPlan,
     control: &dyn Control,
 ) -> Result<MotionPlan, MotionError> {
+    replan_using(scene, request, previous, None, control)
+}
+
+/// [`replan`] with a planner from the plugin registry, as for [`plan_motion_using`].
+pub fn replan_using(
+    scene: &RobotScene,
+    request: &MotionRequest,
+    previous: &MotionPlan,
+    planner: Option<&dyn MotionPlanner>,
+    control: &dyn Control,
+) -> Result<MotionPlan, MotionError> {
     let scoped = with_contacts(scene, request);
     let scene = scoped.as_ref().unwrap_or(scene);
     let (space, limits) = setup(scene, request)?;
@@ -237,7 +263,7 @@ pub fn replan(
     {
         return Ok(plan);
     }
-    plan_preferring(scene, request, previous.path.last().map(Vec::as_slice), control)
+    plan_preferring(scene, request, previous.path.last().map(Vec::as_slice), planner, control)
 }
 
 /// The planning space and the limits of a request, after checking that it fits the robot.
@@ -319,6 +345,7 @@ fn plan_preferring(
     scene: &RobotScene,
     request: &MotionRequest,
     prefer: Option<&[f64]>,
+    planner: Option<&dyn MotionPlanner>,
     control: &dyn Control,
 ) -> Result<MotionPlan, MotionError> {
     let (space, limits) = setup(scene, request)?;
@@ -334,7 +361,7 @@ fn plan_preferring(
     // needs less extra room and costs more checks.
     let mut last = MotionError::NoPath { stats: Stats::default(), nearest_goal_distance: f64::INFINITY };
     for fineness in [1.0, 0.25, 0.0625] {
-        match attempt(scene, request, &space, &goals, &limits, fineness, control) {
+        match attempt(scene, request, &space, &goals, &limits, fineness, planner, control) {
             Ok(plan) => return Ok(plan),
             Err(MotionError::Cancelled) => return Err(MotionError::Cancelled),
             Err(error) => last = error,
@@ -344,6 +371,7 @@ fn plan_preferring(
 }
 
 /// One pass of the pipeline at a given checking fineness.
+#[allow(clippy::too_many_arguments, reason = "the pipeline's state; a struct would only rename it")]
 fn attempt(
     scene: &RobotScene,
     request: &MotionRequest,
@@ -351,6 +379,7 @@ fn attempt(
     goals: &[Vec<f64>],
     limits: &Limits,
     fineness: f64,
+    planner: Option<&dyn MotionPlanner>,
     control: &dyn Control,
 ) -> Result<MotionPlan, MotionError> {
     let mut stats = Stats::default();
@@ -381,7 +410,7 @@ fn attempt(
                 options: request.options,
                 seed,
             };
-            match plan(&planned, &checker, control) {
+            match run_planner(&planned, planner, &checker, control) {
                 Ok(solution) => {
                     add(&mut stats, &solution.stats);
                     let mut path = solution.path;
@@ -627,6 +656,91 @@ fn cap_tcp_speed(mut plan: MotionPlan, cap: Option<f64>) -> MotionPlan {
         plan.peak_tcp_speed = cap;
     }
     plan
+}
+
+/// Runs the built-in planner of the request, or the registered `planner` when one is given.
+fn run_planner(
+    request: &Request<'_>,
+    planner: Option<&dyn MotionPlanner>,
+    checker: &scene::Checker<'_>,
+    control: &dyn Control,
+) -> Result<gc_plan::Solution, Failure> {
+    let Some(planner) = planner else { return plan(request, checker, control) };
+    let dof = request.space.dof();
+    let space = SpaceSpec {
+        lo: request.space.lo.clone(),
+        hi: request.space.hi.clone(),
+        weights: request.space.weights.clone(),
+        wrapping: vec![false; dof],
+    };
+    let goals: Vec<f64> = request.goals.concat();
+    let params = planner.descriptor().params.defaults();
+    let api_request = PlanRequest {
+        space: &space,
+        start: request.start,
+        goals: &goals,
+        params: &params,
+        seed: request.seed,
+        budget: PlanBudget {
+            max_iterations: request.options.max_iterations,
+            max_state_checks: request.options.max_state_checks,
+        },
+    };
+    let stats = |s: PlanStats| Stats {
+        iterations: s.iterations,
+        state_checks: s.state_checks,
+        motion_checks: s.motion_checks,
+        nodes: s.nodes,
+    };
+    let shared = SharedChecker(checker);
+    match planner.plan(&api_request, &shared, &ControlAdapter(control)) {
+        Ok(output) if dof > 0 && output.path.len() % dof == 0 && !output.path.is_empty() => {
+            let path: Vec<Vec<f64>> = output.path.chunks(dof).map(<[f64]>::to_vec).collect();
+            // Whatever a plugin returns is checked again by the pipeline; the cost is recomputed here.
+            Ok(gc_plan::Solution {
+                cost: path_cost(request.space, &path),
+                path,
+                goal_index: output.goal_index,
+                stats: stats(output.stats),
+            })
+        }
+        Ok(_) => Err(Failure::InvalidRequest(format!(
+            "planner `{}` returned a malformed path",
+            planner.descriptor().id
+        ))),
+        Err(PlanFailure::InvalidRequest(reason)) => Err(Failure::InvalidRequest(reason)),
+        Err(PlanFailure::StartInvalid) => Err(Failure::StartInvalid),
+        Err(PlanFailure::NoValidGoal) => Err(Failure::NoValidGoal),
+        Err(PlanFailure::NoPathWithinBudget { stats: s, nearest_goal_distance }) => {
+            Err(Failure::NoPath { stats: stats(s), nearest_goal_distance })
+        }
+        Err(PlanFailure::Cancelled) => Err(Failure::Cancelled),
+    }
+}
+
+/// The pipeline's checker for a plugin planner, which may call it from any thread.
+struct SharedChecker<'a, 'b>(&'a scene::Checker<'b>);
+
+impl StateChecker for SharedChecker<'_, '_> {
+    fn state_valid(&self, q: &[f64]) -> bool {
+        self.0.state_valid(q)
+    }
+
+    fn motion_valid(&self, a: &[f64], b: &[f64]) -> bool {
+        self.0.motion_valid(a, b)
+    }
+
+    fn clearance(&self, _q: &[f64]) -> Option<f64> {
+        None
+    }
+}
+
+struct ControlAdapter<'a>(&'a dyn Control);
+
+impl PlanControl for ControlAdapter<'_> {
+    fn is_cancelled(&self) -> bool {
+        self.0.cancelled()
+    }
 }
 
 fn add(total: &mut Stats, run: &Stats) {

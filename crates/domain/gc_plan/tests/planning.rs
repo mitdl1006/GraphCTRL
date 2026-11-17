@@ -7,7 +7,7 @@
     reason = "test code: exact values are compared and failures should panic"
 )]
 
-use std::cell::Cell;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use gc_plan::{
     Algorithm, Control, Failure, NeverCancel, Options, Request, Rng, Solution, Space, Validity, densify,
@@ -177,11 +177,11 @@ fn with_several_goals_a_reachable_one_is_chosen() {
 
 #[test]
 fn cancelling_stops_the_search_at_once() {
-    struct After(Cell<u32>);
+    struct After(AtomicU32);
     impl Control for After {
         fn cancelled(&self) -> bool {
-            let left = self.0.get();
-            self.0.set(left.saturating_sub(1));
+            let left = self.0.load(Ordering::Relaxed);
+            self.0.store(left.saturating_sub(1), Ordering::Relaxed);
             left == 0
         }
     }
@@ -197,7 +197,11 @@ fn cancelling_stops_the_search_at_once() {
             options: options(),
             seed: 1,
         };
-        assert_eq!(plan(&request, &sealed, &After(Cell::new(10))), Err(Failure::Cancelled), "{algorithm:?}");
+        assert_eq!(
+            plan(&request, &sealed, &After(AtomicU32::new(10))),
+            Err(Failure::Cancelled),
+            "{algorithm:?}"
+        );
     }
 }
 

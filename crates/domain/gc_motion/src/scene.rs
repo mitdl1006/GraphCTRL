@@ -1,6 +1,5 @@
 //! A robot in its cell: the collision model and the validity checks built on it.
 
-use std::cell::RefCell;
 use std::sync::Arc;
 
 use gc_collide::{BodyId, CollideError, Proximity, ShapeDesc, World, hulls_of};
@@ -584,14 +583,14 @@ impl RobotScene {
         for body in self.link_bodies.iter().flatten() {
             world.set_padding(*body, self.padding + margin);
         }
-        Checker { scene: self, world: RefCell::new(world), margin, resolution }
+        Checker { scene: self, world: std::sync::Mutex::new(world), margin, resolution }
     }
 }
 
 /// Answers the planners' validity questions for a [`RobotScene`].
 pub struct Checker<'a> {
     scene: &'a RobotScene,
-    world: RefCell<World>,
+    world: std::sync::Mutex<World>,
     margin: f64,
     /// Largest joint step between checked states of a motion.
     resolution: f64,
@@ -606,7 +605,8 @@ impl Checker<'_> {
 
 impl Validity for Checker<'_> {
     fn state_valid(&self, q: &[f64]) -> bool {
-        self.scene.problem_in(&mut self.world.borrow_mut(), q).is_none()
+        // A poisoned lock means a check panicked: nothing is valid then.
+        self.world.lock().is_ok_and(|mut world| self.scene.problem_in(&mut world, q).is_none())
     }
 
     fn motion_valid(&self, a: &[f64], b: &[f64]) -> bool {

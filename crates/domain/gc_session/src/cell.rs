@@ -18,7 +18,6 @@ use gc_math::{DPose3, DQuat, DVec3, pose_from_xyz_rpy, rpy_from_quat};
 use gc_mesh::MeshData;
 use gc_motion::{
     Goal, Guarantee, LinkPair, MotionPlan, MotionRequest, Obstacle, PairReason, RobotScene, StateProblem,
-    plan_motion, replan,
 };
 use gc_plan::{Algorithm, Control, Options};
 use gc_robot::{Chain, RobotModel, Shape};
@@ -404,6 +403,8 @@ pub(crate) struct CellState {
     resources: Option<Resources>,
     /// Plugins that offer closed-form inverse kinematics.
     kinematics: Vec<Arc<dyn gc_robotics_api::KinematicsFactory>>,
+    /// Planners from plugins (`MOTION_PLANNERS`), used for ids the built-in table does not have.
+    planners: Vec<Arc<dyn gc_robotics_api::MotionPlanner>>,
     /// The robot library folder, where `library://` resource folders point.
     library: Option<std::path::PathBuf>,
     /// The collision scene of the cell as it is shown, with what it was built from, and the last
@@ -441,6 +442,7 @@ impl Default for CellState {
             playback: None,
             resources: None,
             kinematics: Vec::new(),
+            planners: Vec::new(),
             library: None,
             files: BTreeMap::new(),
             meshes: BTreeMap::new(),
@@ -729,6 +731,27 @@ pub enum Reference {
 impl Session {
     fn cell_op(&mut self, op: CellOp) -> Result<Vec<Created>, EditError> {
         self.execute(&Command::Cell(op))
+    }
+
+    /// Gives the session the planners plugins offer (`MOTION_PLANNERS`). A path whose planner id is not
+    /// one of the built-in [`PLANNERS`] is planned with the registered planner of that id. (The built-in
+    /// ids keep running `gc_plan` directly: same paths, and budgets that count the states a motion check
+    /// examines, which the plugin API cannot tell a planner yet.)
+    pub fn set_planners(&mut self, planners: Vec<Arc<dyn gc_robotics_api::MotionPlanner>>) {
+        self.cell.planners = planners;
+    }
+
+    /// Ids and names (Korean, English) of the planners a path can use: the built-in ones, then those of
+    /// plugins with other ids.
+    pub fn planner_choices(&self) -> Vec<(String, String, String)> {
+        let mut choices: Vec<(String, String, String)> = gc_plugin_planners_names();
+        for planner in &self.cell.planners {
+            let d = planner.descriptor();
+            if !choices.iter().any(|(id, ..)| *id == d.id) {
+                choices.push((d.id.clone(), d.name.ko.clone(), d.name.en.clone()));
+            }
+        }
+        choices
     }
 
     /// Sets the plugins that offer closed-form inverse kinematics, and reloads the robots.
@@ -1719,10 +1742,13 @@ impl Session {
         // planner or seed asks for a new plan, so the old one is not offered then.
         let strategy = self.doc.get(path).map(|p| (p.planner.clone(), p.seed));
         let previous = self.planned(path).filter(|old| Some(&old.strategy) == strategy.as_ref()).cloned();
+        let planners = self.cell.planners.clone();
         let job = self.cell.executor.spawn("plan", move |ctx| {
             let control = JobControl(ctx.cancel.clone());
             let result = match &loaded {
-                Some(loaded) => plan_path(&doc, loaded, &meshes, path, None, previous.as_ref(), &control),
+                Some(loaded) => {
+                    plan_path(&doc, loaded, &meshes, path, None, previous.as_ref(), &planners, &control)
+                }
                 None => Err("the robot description could not be read".to_owned()),
             };
             (!ctx.cancel.is_cancelled()).then_some(result)
@@ -1762,7 +1788,9 @@ impl Session {
                 let (mut durations, mut costs, mut checks) = (Vec::new(), Vec::new(), Vec::new());
                 for seed in 0..seeds.max(1) {
                     let strategy = Some((*algorithm, seed as u64, 1));
-                    if let Ok(planned) = plan_path(&doc, &loaded, &meshes, path, strategy, None, &control) {
+                    if let Ok(planned) =
+                        plan_path(&doc, &loaded, &meshes, path, strategy, None, &[], &control)
+                    {
                         durations.push(planned.duration());
                         costs.push(planned.segments.iter().map(|s| s.cost).sum());
                         checks.push(planned.state_checks() as f64);
@@ -1880,6 +1908,22 @@ fn contacts_of(doc: &Document, path: &MotionPath, index: usize) -> Vec<gc_motion
         .collect()
 }
 
+/// The built-in planners' ids with their names (Korean, English).
+fn gc_plugin_planners_names() -> Vec<(String, String, String)> {
+    let names = [
+        ("RRT-Connect", "RRT-Connect"),
+        ("RRT", "RRT"),
+        ("RRT*", "RRT*"),
+        ("Informed RRT*", "Informed RRT*"),
+        ("PRM", "PRM"),
+    ];
+    PLANNERS
+        .iter()
+        .zip(names)
+        .map(|((id, _), (ko, en))| ((*id).to_owned(), ko.to_owned(), en.to_owned()))
+        .collect()
+}
+
 fn plan_path(
     doc: &Document,
     loaded: &LoadedRobot,
@@ -1887,17 +1931,22 @@ fn plan_path(
     path_id: Id<MotionPath>,
     strategy: Option<(Algorithm, u64, usize)>,
     previous: Option<&PlannedPath>,
+    registered: &[Arc<dyn gc_robotics_api::MotionPlanner>],
     control: &dyn Control,
 ) -> Result<PlannedPath, String> {
     let path = doc.get(path_id).ok_or("the path no longer exists")?;
     let robot = doc.get(path.robot).ok_or("the robot no longer exists")?;
+    let mut plugin: Option<&dyn gc_robotics_api::MotionPlanner> = None;
     let (algorithm, seed, runs) = match strategy {
         Some(strategy) => strategy,
         None => {
-            let algorithm = PLANNERS
-                .iter()
-                .find(|(id, _)| *id == path.planner)
-                .map(|(_, algorithm)| *algorithm)
+            let builtin =
+                PLANNERS.iter().find(|(id, _)| *id == path.planner).map(|(_, algorithm)| *algorithm);
+            if builtin.is_none() {
+                plugin = registered.iter().find(|p| p.descriptor().id == path.planner).map(|p| p.as_ref());
+            }
+            let algorithm = builtin
+                .or(plugin.map(|_| Algorithm::RrtConnect))
                 .ok_or_else(|| format!("unknown planner `{}`", path.planner))?;
             (algorithm, path.seed, 4)
         }
@@ -1956,8 +2005,8 @@ fn plan_path(
             contacts: contacts_of(doc, path, index),
         };
         let planned = match previous.and_then(|p| p.segments.get(index)) {
-            Some(old) => replan(&scene, &request, old, control),
-            None => plan_motion(&scene, &request, control),
+            Some(old) => gc_motion::replan_using(&scene, &request, old, plugin, control),
+            None => gc_motion::plan_motion_using(&scene, &request, plugin, control),
         };
         let plan = planned.map_err(|e| format!("{}: {e}", waypoint.name))?;
         if let Some(end) = plan.path.last() {
