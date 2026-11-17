@@ -77,6 +77,7 @@ fn mate_puts_the_box_face_to_face_on_the_table_and_flush_flips_it() {
     let table_pose = bench.pose(table);
     let depth = bench.history.undo_depth();
     let mate = Relationship {
+        limits: None,
         name: "Mate:1".into(),
         kind: RelationKind::Mate { offset: 0.0, sense: AxisSense::Opposed },
         first: on(block, bottom(0.2)),
@@ -121,6 +122,7 @@ fn a_constrained_box_follows_the_grounded_table_and_returns_when_dragged_off() {
     let (table, block) = table_and_box(&mut bench);
     bench
         .relate(Relationship {
+            limits: None,
             name: "Mate:1".into(),
             kind: RelationKind::Mate { offset: 0.0, sense: AxisSense::Opposed },
             first: on(block, bottom(0.2)),
@@ -152,6 +154,7 @@ fn insert_puts_a_pin_in_a_hole_and_leaves_its_turn_free() {
     let head = Geometry::Circle { centre: [0.0, 0.0, 0.03], normal: [0.0, 0.0, -1.0] };
     bench
         .relate(Relationship {
+            limits: None,
             name: "Insert:1".into(),
             kind: RelationKind::Insert { offset: 0.0, aligned: false },
             first: on(pin, head),
@@ -173,6 +176,7 @@ fn origin_planes_can_be_mated_and_impossible_constraints_are_refused() {
     // Flush the box's XY plane with the table's at 0.3 m: the box's origin 0.3 m above the table's.
     bench
         .relate(Relationship {
+            limits: None,
             name: "Flush:1".into(),
             kind: RelationKind::Flush { offset: 0.3 },
             first: on(block, xy),
@@ -191,6 +195,7 @@ fn origin_planes_can_be_mated_and_impossible_constraints_are_refused() {
     apply(&mut bench.doc, &grounded).unwrap();
     let before = bench.doc.clone();
     let result = bench.relate(Relationship {
+        limits: None,
         name: "Mate:2".into(),
         kind: RelationKind::Mate { offset: 0.0, sense: AxisSense::Opposed },
         first: on(block, bottom(0.2)),
@@ -204,6 +209,7 @@ fn origin_planes_can_be_mated_and_impossible_constraints_are_refused() {
 
     // Flush needs two planes, Insert two circles; a constraint on one component with itself is refused.
     let bad = Relationship {
+        limits: None,
         name: "Bad".into(),
         kind: RelationKind::Flush { offset: 0.0 },
         first: on(block, Geometry::Point([0.0; 3])),
@@ -240,6 +246,7 @@ fn a_constrained_component_cannot_be_deleted_while_constrained() {
     let (table, block) = table_and_box(&mut bench);
     bench
         .relate(Relationship {
+            limits: None,
             name: "Mate:1".into(),
             kind: RelationKind::Mate { offset: 0.0, sense: AxisSense::Opposed },
             first: on(block, bottom(0.2)),
@@ -262,6 +269,7 @@ fn a_rigid_joint_mounts_a_base_on_the_table_and_it_follows_the_table() {
     // The base's own origin on the table frame, Z the same way (flip): standing upright on it.
     bench
         .relate(Relationship {
+            limits: None,
             name: "Rigid:1".into(),
             kind: RelationKind::Rigid { flip: true },
             first: on(base, Geometry::origin_frame()),
@@ -300,6 +308,7 @@ fn a_rotational_joint_leaves_the_turn_about_its_axis_free() {
     let (table, base) = table_and_box(&mut bench);
     bench
         .relate(Relationship {
+            limits: None,
             name: "Rotational:1".into(),
             kind: RelationKind::Rotational { flip: true },
             first: on(base, Geometry::origin_frame()),
@@ -358,6 +367,7 @@ fn remaining_freedom_and_status_points_follow_the_relationships() {
     // A face mate leaves sliding on the table (2) and turning about its normal (1).
     let mate = bench
         .relate(Relationship {
+            limits: None,
             name: "Mate:1".into(),
             kind: RelationKind::Mate { offset: 0.0, sense: AxisSense::Opposed },
             first: on(block, bottom(0.2)),
@@ -369,6 +379,7 @@ fn remaining_freedom_and_status_points_follow_the_relationships() {
     assert_eq!(bench.doc.relationship_status(mate), Some(RelationStatus::Under));
     // Turned into a rotational joint, one turn is left; as a rigid joint nothing is, and the point is full.
     let rotational = Relationship {
+        limits: None,
         name: "Joint".into(),
         kind: RelationKind::Rotational { flip: true },
         first: on(block, Geometry::origin_frame()),
@@ -450,6 +461,7 @@ fn angle_constraints_turn_by_the_angle_with_the_chosen_sense() {
         assert_eq!(table.erase().raw.get(), 5, "the explicit reference above names the table");
         bench
             .relate(Relationship {
+                limits: None,
                 name: "Mate:1".into(),
                 kind: RelationKind::Mate { offset: 0.0, sense: AxisSense::Opposed },
                 first: on(block, bottom(0.2)),
@@ -458,6 +470,7 @@ fn angle_constraints_turn_by_the_angle_with_the_chosen_sense() {
             .unwrap();
         bench
             .relate(Relationship {
+                limits: None,
                 name: "Angle:1".into(),
                 kind: RelationKind::Angle { angle: deg30, solution },
                 first: on(block, xz()),
@@ -483,6 +496,7 @@ fn tangent_puts_a_ball_and_a_roller_on_the_table_inside_or_outside() {
     let sphere = Geometry::Sphere { centre: [0.0; 3], radius: 0.1 };
     bench
         .relate(Relationship {
+            limits: None,
             name: "Tangent:1".into(),
             kind: RelationKind::Tangent { offset: 0.0, inside: false },
             first: on(ball, sphere),
@@ -493,6 +507,7 @@ fn tangent_puts_a_ball_and_a_roller_on_the_table_inside_or_outside() {
     let cylinder = Geometry::Cylinder { point: [0.0; 3], direction: [1.0, 0.0, 0.0], radius: 0.05 };
     bench
         .relate(Relationship {
+            limits: None,
             name: "Tangent:2".into(),
             kind: RelationKind::Tangent { offset: 0.0, inside: false },
             first: on(roller, cylinder),
@@ -505,6 +520,7 @@ fn tangent_puts_a_ball_and_a_roller_on_the_table_inside_or_outside() {
     // Inside: the ball under the table top plane.
     let id = bench.doc.relationships().iter().next().unwrap().0;
     let inside = Relationship {
+        limits: None,
         name: "Tangent:1".into(),
         kind: RelationKind::Tangent { offset: 0.0, inside: true },
         first: on(ball, sphere),
@@ -528,6 +544,7 @@ fn symmetry_mirrors_one_component_across_a_plane() {
     apply(&mut bench.doc, &ground).unwrap();
     bench
         .relate(Relationship {
+            limits: None,
             name: "Symmetry:1".into(),
             kind: RelationKind::Symmetry {
                 plane: on(table, Geometry::origin(OriginElement::Plane(OriginPlane::Yz))),
@@ -557,6 +574,7 @@ fn slider_cylindrical_and_ball_joints_leave_their_freedoms() {
         let (table, block) = table_and_box(&mut bench);
         bench
             .relate(Relationship {
+                limits: None,
                 name: "Joint".into(),
                 kind,
                 first: on(block, Geometry::origin_frame()),
@@ -574,4 +592,72 @@ fn slider_cylindrical_and_ball_joints_leave_their_freedoms() {
             }
         }
     }
+}
+
+#[test]
+fn limits_let_the_offset_move_within_them_and_drive_stays_inside() {
+    use gc_doc::Limits;
+    let mut bench = Bench::new();
+    let (table, block) = table_and_box(&mut bench);
+    let mut mate = Relationship::new(
+        "Mate:1",
+        RelationKind::Mate { offset: 0.0, sense: AxisSense::Opposed },
+        on(block, bottom(0.2)),
+        on(table, top(1.0)),
+    );
+    mate.limits = Some(Limits { min: Some(0.0), max: Some(0.3), resting: false });
+    let id = bench.relate(mate.clone()).unwrap();
+    // Without a resting position the box stays at any height within the limits: it was 0.3 m above the
+    // top, the nearest allowed (it starts tilted at 1.4, its face ends at 0.3 above the top after turning).
+    let gap = |bench: &Bench| bench.pose(block).translation.z - 0.1 - 1.0;
+    assert!((0.0..=0.3 + 1e-7).contains(&gap(&bench)), "{}", gap(&bench));
+    // Dragged a little within the limits, it stays; dragged beyond, it stops at the limit.
+    for (z, expected) in [(1.25, 0.15), (2.0, 0.3)] {
+        let mut moved = bench.doc.get(block).unwrap().clone();
+        moved.placement.xyz[2] = z;
+        bench.cell(CellOp::SetBody { id: block, body: moved }).unwrap();
+        assert!((gap(&bench) - expected).abs() < 1e-6, "{z}: {}", gap(&bench));
+    }
+    // Drive cannot leave the limits.
+    let driven = bench.doc.driven(id, 0.5).unwrap();
+    let (_, pose) = driven
+        .iter()
+        .find(|(item, _)| *item == block.erase())
+        .copied()
+        .unwrap_or((block.erase(), bench.pose(block)));
+    assert!((pose.translation.z - 1.1 - 0.3).abs() < 1e-6, "{}", pose.translation.z);
+    // With a resting position the offset holds.
+    mate.limits = Some(Limits { min: Some(0.0), max: Some(0.3), resting: true });
+    bench.cell(CellOp::SetRelationship { id, relationship: mate.clone() }).unwrap();
+    assert!(gap(&bench).abs() < 1e-7);
+    // Limits on a joint, or upside down, are refused.
+    mate.limits = Some(Limits { min: Some(0.3), max: Some(0.0), resting: false });
+    assert!(bench.cell(CellOp::SetRelationship { id, relationship: mate }).is_err());
+}
+
+#[test]
+fn a_conflict_names_the_relationship_in_the_way_and_suppressing_it_recovers() {
+    let mut bench = Bench::new();
+    let (table, block) = table_and_box(&mut bench);
+    let mate = bench
+        .relate(Relationship::new(
+            "Mate:1",
+            RelationKind::Mate { offset: 0.0, sense: AxisSense::Opposed },
+            on(block, bottom(0.2)),
+            on(table, top(1.0)),
+        ))
+        .unwrap();
+    let xy = Geometry::origin(OriginElement::Plane(OriginPlane::Xy));
+    let flush =
+        Relationship::new("Flush:1", RelationKind::Flush { offset: 0.3 }, on(block, xy), on(table, xy));
+    assert!(matches!(bench.relate(flush.clone()), Err(EditError::Unsolvable { .. })));
+    assert_eq!(bench.doc.conflicting_relationships(Some(&flush)), vec![mate]);
+    assert!(bench.doc.conflicting_relationships(None).is_empty(), "as they are, all is well");
+    // Suppress the mate: the flush fits, and the mate is kept for later.
+    bench.cell(CellOp::SetSuppressed { item: mate.erase(), suppressed: true }).unwrap();
+    bench.relate(flush).unwrap();
+    assert!((bench.pose(block).translation.z - 0.8).abs() < 1e-7);
+    assert!(bench.doc.get(mate).is_some());
+    // Bringing the mate back conflicts again and is refused.
+    assert!(bench.cell(CellOp::SetSuppressed { item: mate.erase(), suppressed: false }).is_err());
 }

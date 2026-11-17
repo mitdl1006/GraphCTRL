@@ -626,6 +626,25 @@ impl Session {
         self.execute(&Command::Cell(gc_doc::CellOp::PlaceAtComponentOrigin { item, target })).map(|_| ())
     }
 
+    /// The constraint error dialog: which relationships stand in the way of `candidate` (or of the
+    /// relationships as they are), each of which alone, suppressed, would let everything be satisfied.
+    pub fn conflicting_relationships(
+        &self,
+        candidate: Option<&gc_doc::Relationship>,
+    ) -> Vec<Id<gc_doc::Relationship>> {
+        self.doc.conflicting_relationships(candidate)
+    }
+
+    /// Suppresses an assembly relationship (or brings it back) and solves again: the recovery the
+    /// constraint error dialog offers. One undo step.
+    pub fn set_relationship_suppressed(
+        &mut self,
+        id: Id<gc_doc::Relationship>,
+        suppressed: bool,
+    ) -> Result<(), EditError> {
+        self.set_suppressed(id.erase(), suppressed)
+    }
+
     /// A component's origin folder in the world: centre point, axes and planes (assembly P1-2).
     pub fn component_origin(&self, occurrence: gc_doc::Occurrence) -> Option<gc_doc::ComponentOrigin> {
         self.doc.component_origin(occurrence)

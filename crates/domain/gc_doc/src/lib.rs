@@ -41,8 +41,8 @@ pub use history::History;
 pub use placement::{ComponentOrigin, WorkShape};
 pub use project::ProjectSource;
 pub use relate::{
-    AngleSolution, AxisSense, ComponentStatus, Dof, Geometry, RelationKind, RelationStatus, Relationship,
-    Selection, Unsolved,
+    AngleSolution, AxisSense, ComponentStatus, Dof, Geometry, Limits, RelationKind, RelationStatus,
+    Relationship, Selection, Unsolved,
 };
 pub use tree::ComponentNode;
 pub use txn::{DocError, Txn};

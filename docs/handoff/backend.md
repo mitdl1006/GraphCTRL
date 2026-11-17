@@ -1,5 +1,17 @@
 # 백엔드 인계 (2026-11-17)
 
+## 2026-11-18 — 구속 한계(Limits) · 구속 오류 회복
+
+- `Relationship.limits: Option<Limits{min, max, resting}>`(+`Relationship::new(name, kind, first, second)` — app·테스트 리터럴을 생성자로 바꿈,
+  리드 허락). 대상: Mate·Flush·Insert·Tangent(오프셋 m)·Angle(rad). 의미(원문 To Place Mate or Flush의 Maximum/Minimum/Use Offset As
+  Resting Position): `resting=false` → 값이 한계 안 어디든 머무름(밖으로 끌면 한계에서 멈춤), `resting=true` → 관계 값에 고정(구동만 한계 안에서
+  움직임). `drive_relationship`은 항상 한계로 자른다. 순서가 뒤집힌 한계·값 없는 종류(조인트·대칭)의 한계는 거부.
+  구동 대화상자: Start/End를 min/max로 쓰면 된다(조인트 각 한계는 아직 — Rotational에 각도 기준이 없어서).
+- 구속 오류: `session.conflicting_relationships(candidate: Option<&Relationship>) -> Vec<Id<Relationship>>` — 새 관계(또는 지금 상태)를
+  막는 관계 중 **하나만 억제하면** 모두 풀리는 것들. `session.set_relationship_suppressed(id, bool)`(한 undo 단계, 다시 풀이; 되살렸을 때
+  충돌하면 거부). 억제된 관계는 풀이에서 빠진다. 대화상자는 `Unsolvable{names}` + 이 목록 + 억제 버튼이면 Design Doctor 흐름이 된다.
+- 테스트 `gc_doc/tests/relate.rs`(limits_…, a_conflict_names_…).
+
 ## 에이전트 도구 후보(리드 요청, PLAN 9.8 2단계) — 백엔드 세션 API 정리
 
 모두 `gc_session::Session` 메서드, 문서를 바꾸는 것은 한 undo 단계. 인자 타입은 `gc_doc`의 평범한 자료(serde 가능).

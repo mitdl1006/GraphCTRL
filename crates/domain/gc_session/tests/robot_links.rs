@@ -64,6 +64,7 @@ fn a_body_jointed_to_the_last_link_follows_the_arm_and_a_sketch_on_a_link_plane_
     // The part's origin on the last link's origin, Z the same way.
     session
         .add_relationship(Relationship {
+            limits: None,
             name: "Rigid:1".into(),
             kind: RelationKind::Rigid { flip: true },
             first: Selection {
@@ -126,6 +127,7 @@ fn drive_plays_a_relationship_through_values_without_changing_the_document() {
     };
     let mate = session
         .add_relationship(Relationship {
+            limits: None,
             name: "Mate:1".into(),
             kind: RelationKind::Mate { offset: 0.0, sense: gc_doc::AxisSense::Opposed },
             first: on(lid, plane(-0.1, -1.0)),
@@ -147,6 +149,7 @@ fn drive_plays_a_relationship_through_values_without_changing_the_document() {
     session.delete_relationship(mate).unwrap();
     let hinge = session
         .add_relationship(Relationship {
+            limits: None,
             name: "Rotational:1".into(),
             kind: RelationKind::Rotational { flip: true },
             first: on(lid, Geometry::origin_frame()),
@@ -157,6 +160,7 @@ fn drive_plays_a_relationship_through_values_without_changing_the_document() {
     let shown = session.driven_placement(lid.erase()).unwrap();
     assert!((shown.rpy[2] - std::f64::consts::FRAC_PI_2).abs() < 1e-6, "{:?}", shown.rpy);
     let rigid = Relationship {
+        limits: None,
         name: "Rigid:1".into(),
         kind: RelationKind::Rigid { flip: true },
         first: on(lid, Geometry::origin_frame()),

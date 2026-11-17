@@ -114,7 +114,7 @@ impl Constrain {
         } else {
             self.name.trim().to_owned()
         };
-        Some(Relationship { name, kind, first, second })
+        Some(Relationship::new(name, kind, first, second))
     }
 
     /// Whether the view is picking for the dialog.
@@ -318,7 +318,7 @@ impl Joint {
         } else {
             self.name.trim().to_owned()
         };
-        Some(Relationship { name, kind, first, second })
+        Some(Relationship::new(name, kind, first, second))
     }
 
     /// The dialog window.

@@ -49,6 +49,7 @@ fn base_bottom() -> Geometry {
 
 fn mate(first: Selection, second: Selection, offset: f64) -> Relationship {
     Relationship {
+        limits: None,
         name: "Mate".into(),
         kind: RelationKind::Mate { offset, sense: AxisSense::Opposed },
         first,

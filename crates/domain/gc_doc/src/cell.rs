@@ -1070,6 +1070,7 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
             for (plane, name) in [(OriginPlane::Xy, "XY"), (OriginPlane::Xz, "XZ"), (OriginPlane::Yz, "YZ")] {
                 let geometry = Geometry::origin(OriginElement::Plane(plane));
                 let relationship = Relationship {
+                    limits: None,
                     name: format!("Flush:{name}"),
                     kind: RelationKind::Flush { offset: 0.0 },
                     first: Selection { occurrence: Occurrence::Item(*item), geometry },
@@ -1102,8 +1103,10 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
             Ok((Vec::new(), "Reorder"))
         }
         CellOp::SetSuppressed { item, suppressed } => {
-            let motion = matches!(item.kind, Kind::Waypoint | Kind::Path) && txn.doc().contains(*item);
-            if !motion && !txn.doc().model_order().contains(item) {
+            // Waypoints, paths and assembly relationships are not in the model order but can be suppressed.
+            let outside = matches!(item.kind, Kind::Waypoint | Kind::Path | Kind::Relationship)
+                && txn.doc().contains(*item);
+            if !outside && !txn.doc().model_order().contains(item) {
                 return Err(EditError::BadValue);
             }
             set_timeline(txn, |t| {
@@ -1112,6 +1115,9 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
                     t.suppressed.push(*item);
                 }
             })?;
+            if item.kind == Kind::Relationship {
+                settle(txn)?;
+            }
             Ok((Vec::new(), if *suppressed { "Suppress" } else { "Unsuppress" }))
         }
         CellOp::SetRollback { after } => {

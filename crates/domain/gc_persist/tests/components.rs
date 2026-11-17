@@ -60,6 +60,7 @@ fn assembly_constraints_are_saved_and_opened() {
     let (base, block) = (add("Base", 0.0), add("Block", 1.0));
     let plane = |z: f64, n: f64| Geometry::Plane { point: [0.0, 0.0, z], normal: [0.0, 0.0, n] };
     let mate = Relationship {
+        limits: None,
         name: "Mate:1".into(),
         kind: RelationKind::Mate { offset: 0.0, sense: AxisSense::Opposed },
         first: Selection { occurrence: Occurrence::Item(block.erase()), geometry: plane(-0.1, -1.0) },

@@ -3117,12 +3117,12 @@ fn drive_moves_a_mated_block_and_stops_at_a_collision() {
         geometry: Geometry::Plane { point: [0.0, 0.0, z], normal: [0.0, 0.0, nz] },
     };
     let mate = session
-        .add_relationship(Relationship {
-            name: "Mate:1".into(),
-            kind: RelationKind::Mate { offset: 0.0, sense: AxisSense::Opposed },
-            first: face(block, -0.05, -1.0),
-            second: face(base, 0.1, 1.0),
-        })
+        .add_relationship(Relationship::new(
+            "Mate:1",
+            RelationKind::Mate { offset: 0.0, sense: AxisSense::Opposed },
+            face(block, -0.05, -1.0),
+            face(base, 0.1, 1.0),
+        ))
         .unwrap();
     let rest = harness.state().session.shown_body(block).unwrap().placement;
     assert!((rest.xyz[2] - 0.25).abs() < 1e-6, "mated on top: {rest:?}");
@@ -3238,12 +3238,12 @@ fn a_relationship_is_driven_from_the_browser() {
         occurrence: gc_doc::Occurrence::Item(body.erase()),
         geometry: plane,
     };
-    let relationship = gc_doc::Relationship {
-        name: "Mate:1".to_owned(),
-        kind: gc_doc::RelationKind::Mate { offset: 0.0, sense: gc_doc::AxisSense::Opposed },
-        first: select(moving),
-        second: select(fixed),
-    };
+    let relationship = gc_doc::Relationship::new(
+        "Mate:1",
+        gc_doc::RelationKind::Mate { offset: 0.0, sense: gc_doc::AxisSense::Opposed },
+        select(moving),
+        select(fixed),
+    );
     app.session.add_relationship(relationship).unwrap();
     harness.run();
 

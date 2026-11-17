@@ -275,6 +275,41 @@ pub struct Relationship {
     pub first: Selection,
     /// Second selection.
     pub second: Selection,
+    /// Limits on the offset or angle (Maximum, Minimum, Use Offset As Resting Position).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limits: Option<Limits>,
+}
+
+/// Limits of a constraint's offset (metres) or angle (radians): within them the components may move;
+/// the constraint's own value is where they rest when `resting` is set (Inventor 2026 help, To Place Mate
+/// or Flush Constraints: "Check Maximum … Minimum … Use Offset As Resting Position").
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Limits {
+    /// The smallest value allowed.
+    pub min: Option<f64>,
+    /// The largest value allowed.
+    pub max: Option<f64>,
+    /// The constraint's value is its resting position: the solver holds it there, and Drive may move it
+    /// within the limits. Without it the value may be anywhere within the limits.
+    pub resting: bool,
+}
+
+impl Limits {
+    /// The value kept within the limits.
+    pub fn clamp(&self, value: f64) -> f64 {
+        let low = self.min.map_or(value, |m| value.max(m));
+        self.max.map_or(low, |m| low.min(m))
+    }
+
+    /// True when the limits are finite and in order.
+    pub fn is_valid(&self) -> bool {
+        self.min.is_none_or(f64::is_finite)
+            && self.max.is_none_or(f64::is_finite)
+            && match (self.min, self.max) {
+                (Some(a), Some(b)) => a <= b,
+                _ => true,
+            }
+    }
 }
 
 impl Entity for Relationship {
@@ -289,6 +324,11 @@ impl Entity for Relationship {
 }
 
 impl Relationship {
+    /// A relationship without limits.
+    pub fn new(name: impl Into<String>, kind: RelationKind, first: Selection, second: Selection) -> Self {
+        Self { name: name.into(), kind, first, second, limits: None }
+    }
+
     /// A third selection some kinds carry: the symmetry plane, an angle's explicit reference.
     pub fn third(&self) -> Option<&Selection> {
         match &self.kind {
@@ -326,7 +366,9 @@ impl Relationship {
         };
         let joint = is_joint(&self.kind);
         let frames = matches!(g1, Geometry::Frame { .. }) || matches!(g2, Geometry::Frame { .. });
-        fits && (joint || !frames)
+        let limits_fit = self.limits.is_none_or(|l| l.is_valid() && value_of(&self.kind).is_some());
+        fits && limits_fit
+            && (joint || !frames)
             && g1.is_finite()
             && g2.is_finite()
             && self.first.occurrence.owner() != self.second.occurrence.owner()
@@ -506,6 +548,8 @@ struct Term {
     third: Option<(usize, Geometry)>,
     /// A directed angle's axis, read from how the selections lay when solving started.
     axis: DVec3,
+    /// Limits of the value; without `resting` the value may be anywhere within them.
+    limits: Option<Limits>,
 }
 
 impl Document {
@@ -606,6 +650,43 @@ impl Document {
             .collect())
     }
 
+    /// Which active relationships stand in the way: for a new relationship `candidate` (or, without one,
+    /// the relationships as they are), those whose suppression alone would let everything be satisfied.
+    /// Empty when nothing conflicts, or when no single relationship is to blame. The constraint error
+    /// dialog lists these and offers to suppress them (Inventor's Design Doctor).
+    pub fn conflicting_relationships(&self, candidate: Option<&Relationship>) -> Vec<Id<Relationship>> {
+        let solvable = |doc: &Document| doc.solve_relationships().is_ok();
+        let mut trial = self.clone();
+        if let Some(candidate) = candidate {
+            // Without its own solve, so that an unsatisfiable candidate is kept for the trials.
+            let mut txn = crate::txn::Txn::new(&mut trial);
+            txn.insert(candidate.clone());
+            if txn.commit().is_err() {
+                return Vec::new();
+            }
+        }
+        if solvable(&trial) {
+            return Vec::new();
+        }
+        let active: Vec<Id<Relationship>> = self
+            .relationships()
+            .iter()
+            .map(|(id, _)| id)
+            .filter(|id| !self.is_inactive(id.erase()))
+            .collect();
+        active
+            .into_iter()
+            .filter(|id| {
+                let mut without = trial.clone();
+                let mut txn = crate::txn::Txn::new(&mut without);
+                if txn.remove(*id).is_err() || txn.commit().is_err() {
+                    return false;
+                }
+                solvable(&without)
+            })
+            .collect()
+    }
+
     /// The components the active relationships touch and the relationships ready to evaluate.
     fn gather(&self) -> Result<(Vec<Owner>, Vec<Term>), Unsolved> {
         let mut owners: Vec<Owner> = Vec::new();
@@ -676,6 +757,7 @@ impl Document {
                 sign: sense_sign(&relationship.kind, now),
                 third,
                 axis,
+                limits: relationship.limits,
             });
         }
         Ok((owners, terms))
@@ -689,6 +771,69 @@ fn joint_world(pose: &DPose3, geometry: &Geometry) -> (DVec3, DVec3, DVec3) {
 }
 
 fn term_residuals(term: &Term, poses: &[DPose3]) -> Vec<f64> {
+    // Limits without a resting position: the value may be anywhere within them, so the constraint asks
+    // only for the nearest value inside.
+    if let Some(limits) = term.limits.filter(|l| !l.resting)
+        && let Some(actual) = measured(term, poses)
+    {
+        let kind = with_value(&term.kind, limits.clamp(actual));
+        return plain_residuals(&Term { kind, limits: None, ..*term }, poses);
+    }
+    plain_residuals(term, poses)
+}
+
+/// The value (offset or angle) a constraint has where the components stand now.
+fn measured(term: &Term, poses: &[DPose3]) -> Option<f64> {
+    if let RelationKind::Angle { solution, .. } = term.kind {
+        let d = |pose: &DPose3, g: &Geometry| {
+            (pose.rotation * DVec3::from_array(direction_of(g).unwrap_or([0.0, 0.0, 1.0])))
+                .normalize_or_zero()
+        };
+        let (a1, a2) =
+            (d(&poses[term.owners[0]], &term.geometry[0]), d(&poses[term.owners[1]], &term.geometry[1]));
+        let cos = a1.dot(a2).clamp(-1.0, 1.0);
+        let z = match (solution, term.third) {
+            (AngleSolution::Undirected, _) => return Some(gc_math::fm::acos(cos)),
+            (AngleSolution::Explicit(_), Some((c, g3))) => d(&poses[c], &g3),
+            _ => term.axis,
+        };
+        return Some(gc_math::fm::atan2(a1.cross(a2).dot(z), cos));
+    }
+    // Offsets: the last residual is affine in the offset; solve it for zero.
+    let at = |value: f64| {
+        let probe = Term { kind: with_value(&term.kind, value), limits: None, ..*term };
+        plain_residuals(&probe, poses).last().copied()
+    };
+    let (r0, r1) = (at(0.0)?, at(1.0)?);
+    let slope = r1 - r0;
+    (slope.abs() > 1e-12).then(|| -r0 / slope)
+}
+
+/// The kind's value: an offset or an angle; `None` for kinds without one.
+fn value_of(kind: &RelationKind) -> Option<f64> {
+    match *kind {
+        RelationKind::Mate { offset, .. }
+        | RelationKind::Flush { offset }
+        | RelationKind::Insert { offset, .. }
+        | RelationKind::Tangent { offset, .. } => Some(offset),
+        RelationKind::Angle { angle, .. } => Some(angle),
+        _ => None,
+    }
+}
+
+/// The kind with another value (offset or angle).
+fn with_value(kind: &RelationKind, value: f64) -> RelationKind {
+    match *kind {
+        RelationKind::Mate { sense, .. } => RelationKind::Mate { offset: value, sense },
+        RelationKind::Flush { .. } => RelationKind::Flush { offset: value },
+        RelationKind::Insert { aligned, .. } => RelationKind::Insert { offset: value, aligned },
+        RelationKind::Tangent { inside, .. } => RelationKind::Tangent { offset: value, inside },
+        RelationKind::Angle { solution, .. } => RelationKind::Angle { angle: value, solution },
+        other => other,
+    }
+}
+
+fn plain_residuals(term: &Term, poses: &[DPose3]) -> Vec<f64> {
     let mut out = Vec::with_capacity(9);
     let push3 = |out: &mut Vec<f64>, v: DVec3| out.extend([v.x, v.y, v.z]);
     let (pose1, pose2) = (&poses[term.owners[0]], &poses[term.owners[1]]);
@@ -1103,9 +1248,14 @@ impl Document {
     /// components that move.
     pub fn driven(&self, id: Id<Relationship>, value: f64) -> Result<Vec<(AnyId, DPose3)>, crate::EditError> {
         use crate::{CellOp, Command, EditError};
-        let relationship = self.get(id).ok_or(EditError::BadValue)?.clone();
+        let mut relationship = self.get(id).ok_or(EditError::BadValue)?.clone();
         if !value.is_finite() {
             return Err(EditError::BadValue);
+        }
+        // Drive stays within the limits, and holds the driven value there.
+        let value = relationship.limits.map_or(value, |l| l.clamp(value));
+        if let Some(limits) = &mut relationship.limits {
+            limits.resting = true;
         }
         let mut preview = self.clone();
         match relationship.kind {
