@@ -2001,3 +2001,82 @@ fn a_3d_sketch_point_is_dragged() {
     // The axis constraint of the line holds: the point stays on the X axis through the origin.
     assert!(after[1].abs() < 1e-6 && after[2].abs() < 1e-6, "{after:?}");
 }
+
+/// Basic sketch handling: a new sketch starts with the line tool, F8/F9 show and hide the constraint
+/// glyphs, a window drag selects what lies wholly inside, a crossing drag what it touches, and the
+/// right-click menu ends the sketch.
+#[test]
+fn sketch_basics_follow_the_cad_conventions() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("XY 스케치").click();
+    harness.run();
+    assert_eq!(harness.state().session.tool(), ToolKind::Line);
+
+    harness.key_press(egui::Key::F9);
+    harness.run();
+    assert!(!harness.state().viewport().show_constraints);
+    harness.key_press(egui::Key::F8);
+    harness.run();
+    assert!(harness.state().viewport().show_constraints);
+
+    draw_sample(harness.state_mut());
+    harness.state_mut().session.set_tool(ToolKind::Select);
+    harness.run();
+    let drag = |harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, from: egui::Pos2, to: egui::Pos2| {
+        harness.event(egui::Event::PointerMoved(from));
+        harness.run();
+        harness.event(egui::Event::PointerButton {
+            pos: from,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run();
+        for step in 1..=4 {
+            harness.event(egui::Event::PointerMoved(from + (to - from) * (step as f32 / 4.0)));
+            harness.run_steps(2);
+        }
+        harness.event(egui::Event::PointerButton {
+            pos: to,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run();
+    };
+    // From the top left to the bottom right of the free area: everything is wholly inside.
+    drag(&mut harness, egui::pos2(236.0, 150.0), egui::pos2(930.0, 760.0));
+    let all = harness.state().session.selection().len();
+    assert!(all >= 6, "{all} items selected by the window");
+    // A tiny crossing box (right to left) over empty space selects nothing and clears the selection.
+    drag(&mut harness, egui::pos2(932.0, 762.0), egui::pos2(925.0, 755.0));
+    assert!(harness.state().session.selection().is_empty());
+    // Right to left over everything is a crossing selection: it takes at least as much.
+    drag(&mut harness, egui::pos2(930.0, 760.0), egui::pos2(236.0, 150.0));
+    assert!(harness.state().session.selection().len() >= all);
+
+    // The right-click menu finishes the sketch.
+    harness.event(egui::Event::PointerMoved(egui::pos2(600.0, 700.0)));
+    harness.run();
+    harness.event(egui::Event::PointerButton {
+        pos: egui::pos2(600.0, 700.0),
+        button: egui::PointerButton::Secondary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.event(egui::Event::PointerButton {
+        pos: egui::pos2(600.0, 700.0),
+        button: egui::PointerButton::Secondary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run();
+    harness.get_by_label("완료");
+    harness.query_all_by_label("스케치 마무리").last().unwrap().click();
+    harness.run();
+    assert!(harness.state().session.active_sketch().is_none());
+}

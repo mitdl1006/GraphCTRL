@@ -92,12 +92,17 @@ pub(crate) fn show(
                         let label = tr!(lang, CmdSketchOn, plane);
                         if ribbon_button(ui, Icon::Sketch, &label, false, !sketching).clicked() {
                             // A failure is shown in the status bar.
-                            drop(session.create_sketch(plane));
+                            // A new sketch starts with the line tool, as drawing is what comes first.
+                            if session.create_sketch(plane).is_ok() {
+                                session.set_tool(ToolKind::Line);
+                            }
                             *tab = Tab::Sketch;
                         }
                     }
                     if ribbon_button(ui, Icon::Line, tr!(lang, CmdSketch3d), false, !sketching).clicked() {
-                        drop(session.create_sketch_3d());
+                        if session.create_sketch_3d().is_ok() {
+                            session.set_tool(ToolKind::Line);
+                        }
                         *tab = Tab::Sketch;
                     }
                 });

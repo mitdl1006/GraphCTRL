@@ -34,6 +34,8 @@ struct View<'a> {
     rect: Rect,
     camera: &'a Camera,
     size: [f64; 2],
+    /// Whether constraint glyphs are drawn.
+    show_constraints: bool,
 }
 
 impl View<'_> {
@@ -67,6 +69,7 @@ fn view_of<'a>(ui: &egui::Ui, rect: Rect, camera: &'a Camera) -> View<'a> {
         rect,
         camera,
         size: [f64::from(rect.width()), f64::from(rect.height())],
+        show_constraints: true,
     }
 }
 
@@ -108,8 +111,17 @@ pub(crate) fn under(ui: &egui::Ui, rect: Rect, camera: &Camera, session: &Sessio
 }
 
 /// Paints what lies over the solids: axes, sketches, traces, waypoints and tool previews.
-pub(crate) fn over(ui: &egui::Ui, rect: Rect, camera: &Camera, session: &Session, scene: &Scene, gpu: bool) {
-    let view = view_of(ui, rect, camera);
+pub(crate) fn over(
+    ui: &egui::Ui,
+    rect: Rect,
+    camera: &Camera,
+    session: &Session,
+    scene: &Scene,
+    gpu: bool,
+    show_constraints: bool,
+) {
+    let mut view = view_of(ui, rect, camera);
+    view.show_constraints = show_constraints;
     let active = session.active_sketch();
     axes(&view);
     for (id, sketch) in session.doc().sketches().iter() {
@@ -492,6 +504,9 @@ pub(crate) fn glyph_spots(
 
 /// Small letters next to the geometry that say which constraints apply.
 fn glyphs(view: &View<'_>, plane: &SketchPlane, sketch: &Sketch, session: &Session) {
+    if !view.show_constraints {
+        return;
+    }
     for spot in glyph_spots(plane, sketch, session, |w| view.screen(w)) {
         let selected = session.selection().contains(&Item::Constraint(spot.id));
         let color = if selected { colors::SELECTED } else { colors::GLYPH };

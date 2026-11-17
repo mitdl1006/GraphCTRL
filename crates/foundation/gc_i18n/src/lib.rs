@@ -520,6 +520,8 @@ messages! {
     /// Plan metric: the move was possible in a straight joint-space line.
     PlanStraight => ("직선 이동(플래너 불필요)", "Straight move (no planner needed)"),
     // --- frontend ---
+    /// Sketch context menu: end the command in progress.
+    CmdDone => ("완료", "Done"),
     /// Browser menu: rename in place.
     CmdRename => ("이름 바꾸기", "Rename"),
     /// Browser menu: suppress an item (kept, not computed).

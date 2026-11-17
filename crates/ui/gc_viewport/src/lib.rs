@@ -16,8 +16,9 @@ use gc_i18n::{Lang, tr};
 use gc_math::{Aabb, DPose3, DVec3, Plane};
 use gc_scene::Scene;
 use gc_session::Session;
+use gc_sketch::CurveGeom;
 use gc_sketch::Space;
-use gc_tools::{Key as ToolKey, ToolEvent};
+use gc_tools::{Key as ToolKey, ToolEvent, ToolKind};
 use gc_ui::colors;
 
 pub use paint::{format_angle, format_length};
@@ -69,6 +70,10 @@ pub(crate) fn plane_of(session: &Session, sketch: &Sketch) -> SketchPlane {
 pub struct Viewport {
     /// Whether the frame time and draw statistics are shown in the corner.
     pub perf_overlay: bool,
+    /// Whether the constraint glyphs are drawn (F8 shows them, F9 hides them).
+    pub show_constraints: bool,
+    /// A selection box being dragged in a sketch: where the mouse went down.
+    box_select: Option<egui::Pos2>,
     /// A point of a 3D sketch being dragged: the working plane's normal axis and the level it keeps.
     spatial_drag: Option<(usize, f64)>,
     /// The part of the window that no floating panel covers. The view cube and the statistics sit in its
@@ -104,6 +109,8 @@ impl Viewport {
             perf_overlay: false,
             clear: None,
             spatial_drag: None,
+            show_constraints: true,
+            box_select: None,
             frame_time: 0.0,
             background: Background::new(render_state),
             camera: Camera { distance: 0.35, ..Camera::default() },
@@ -212,6 +219,42 @@ impl Viewport {
                     && let Some(pos) = ui.input(|i| i.pointer.press_origin()).and_then(on_sketch)
                 {
                     session.tool_event(ToolEvent::DragStart { pos, px });
+                    // A drag that grabbed nothing with the select tool draws a selection box.
+                    if !session.is_dragging() && session.tool() == ToolKind::Select {
+                        self.box_select = ui.input(|i| i.pointer.press_origin());
+                    }
+                }
+                if let (Some(start), Some(now)) = (self.box_select, cursor) {
+                    let crossing = now.x < start.x;
+                    let rect_box = egui::Rect::from_two_pos(start, now);
+                    let color = colors::SELECTED;
+                    let painter = ui.painter();
+                    painter.rect_filled(rect_box, 0.0, color.gamma_multiply(0.12));
+                    // Window (left to right): solid; crossing (right to left): dashed.
+                    let stroke = egui::Stroke::new(1.0, color);
+                    if crossing {
+                        painter.add(egui::Shape::dashed_line(
+                            &[
+                                rect_box.left_top(),
+                                rect_box.right_top(),
+                                rect_box.right_bottom(),
+                                rect_box.left_bottom(),
+                                rect_box.left_top(),
+                            ],
+                            stroke,
+                            5.0,
+                            3.0,
+                        ));
+                    } else {
+                        painter.rect_stroke(rect_box, 0.0, stroke, egui::StrokeKind::Inside);
+                    }
+                    ui.ctx().request_repaint();
+                }
+                if response.drag_stopped_by(PointerButton::Primary)
+                    && let Some(start) = self.box_select.take()
+                    && let (Some(a), Some(b)) = (on_sketch(start), cursor.and_then(on_sketch))
+                {
+                    select_in_box(session, a, b, b[0] < a[0], ctrl || ui.input(|i| i.modifiers.shift));
                 }
                 if response.dragged_by(PointerButton::Primary) {
                     if let Some(pos) = cursor.and_then(on_sketch) {
@@ -255,10 +298,32 @@ impl Viewport {
             self.cell_input(ui, &response, rect, session, lang);
         }
 
+        // Right click in a sketch: finish the command in progress, or the sketch.
+        if active.is_some() && self.navigating.is_none() {
+            response.context_menu(|ui| {
+                if ui.button(tr!(lang, CmdDone)).clicked() {
+                    session.tool_event(ToolEvent::Key(ToolKey::Escape));
+                    ui.close();
+                }
+                if ui.button(tr!(lang, CmdFinishSketch)).clicked() {
+                    session.finish_sketch();
+                    ui.close();
+                }
+            });
+        }
+
         let scene = Scene::of(session);
         paint::under(ui, rect, &self.camera, session);
         self.background.paint(ui, rect, &self.camera, &scene);
-        paint::over(ui, rect, &self.camera, session, &scene, self.background.has_gpu());
+        paint::over(
+            ui,
+            rect,
+            &self.camera,
+            session,
+            &scene,
+            self.background.has_gpu(),
+            self.show_constraints,
+        );
         self.view_cube(ui, rect, lang);
         if self.perf_overlay {
             self.perf(ui, rect, lang);
@@ -621,6 +686,9 @@ impl Viewport {
             };
             // A glyph is picked by its letters, before the geometry under them.
             let glyph = paint::glyph_spots(plane, sketch, session, |w| {
+                if !self.show_constraints {
+                    return None;
+                }
                 let p = camera.project(w, size)?;
                 #[allow(clippy::cast_possible_truncation, reason = "screen coordinates fit f32")]
                 Some(egui::pos2(rect.left() + p[0] as f32, rect.top() + p[1] as f32))
@@ -778,6 +846,12 @@ impl Viewport {
         if session.sketch_is_spatial() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Tab)) {
             session.cycle_spatial_plane();
         }
+        if ctx.input(|i| i.key_pressed(Key::F8)) {
+            self.show_constraints = true;
+        }
+        if ctx.input(|i| i.key_pressed(Key::F9)) {
+            self.show_constraints = false;
+        }
         let (escape, delete) = ctx.input(|i| (i.key_pressed(Key::Escape), i.key_pressed(Key::Delete)));
         // Outside sketches the keys are about the selected item of the cell.
         if session.active_sketch().is_none() {
@@ -840,4 +914,81 @@ fn segment_distance(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
     };
     let q = [a[0] + t * d[0] - p[0], a[1] + t * d[1] - p[1]];
     (q[0] * q[0] + q[1] * q[1]).sqrt()
+}
+
+/// Selects what a selection box takes: dragged from left to right only what lies wholly inside (window),
+/// from right to left also what the box touches (crossing). With Ctrl or Shift the selection is kept and
+/// each item found is toggled; otherwise it is replaced.
+fn select_in_box(session: &mut Session, a: [f64; 2], b: [f64; 2], crossing: bool, keep: bool) {
+    let (lo, hi) = ([a[0].min(b[0]), a[1].min(b[1])], [a[0].max(b[0]), a[1].max(b[1])]);
+    let inside = |p: [f64; 3]| p[0] >= lo[0] && p[0] <= hi[0] && p[1] >= lo[1] && p[1] <= hi[1];
+    let overlaps = |min: [f64; 2], max: [f64; 2]| {
+        max[0] >= lo[0] && min[0] <= hi[0] && max[1] >= lo[1] && min[1] <= hi[1]
+    };
+    let wholly = |min: [f64; 2], max: [f64; 2]| {
+        min[0] >= lo[0] && max[0] <= hi[0] && min[1] >= lo[1] && max[1] <= hi[1]
+    };
+    let Some((_, sketch)) = session.active_sketch() else { return };
+    let mut found: Vec<gc_sketch::Item> = Vec::new();
+    for id in sketch.points.keys() {
+        if session.point_pos(*id).is_some_and(inside) {
+            found.push(gc_sketch::Item::Point(*id));
+        }
+    }
+    for (id, curve) in &sketch.curves {
+        let pos = |p| session.point_pos(p);
+        let bounds = match curve.geom {
+            CurveGeom::Line { a, b } => pos(a).zip(pos(b)).map(|(p, q)| {
+                ([p[0].min(q[0]), p[1].min(q[1])], [p[0].max(q[0]), p[1].max(q[1])], Some((p, q)))
+            }),
+            CurveGeom::Circle { c, .. } | CurveGeom::Arc { c, .. } => {
+                let r = session.radius(*id).unwrap_or(0.0);
+                pos(c).map(|c| ([c[0] - r, c[1] - r], [c[0] + r, c[1] + r], None))
+            }
+        };
+        let Some((min, max, ends)) = bounds else { continue };
+        let hit = if crossing {
+            // A line is taken when an end is inside or it crosses the box; a round curve by its bounds.
+            match ends {
+                Some((p, q)) => inside(p) || inside(q) || segment_crosses_box(p, q, lo, hi),
+                None => overlaps(min, max),
+            }
+        } else {
+            wholly(min, max)
+        };
+        if hit {
+            found.push(gc_sketch::Item::Curve(*id));
+        }
+    }
+    if !keep {
+        session.tool_event(ToolEvent::ClickItem { item: None, pos: [0.0; 2], modifier: false });
+    }
+    for item in found {
+        session.tool_event(ToolEvent::ClickItem { item: Some(item), pos: [0.0; 2], modifier: true });
+    }
+}
+
+/// Whether the segment `p`–`q` passes through the box `lo`–`hi` (Liang–Barsky).
+fn segment_crosses_box(p: [f64; 3], q: [f64; 3], lo: [f64; 2], hi: [f64; 2]) -> bool {
+    let (mut t0, mut t1) = (0.0_f64, 1.0_f64);
+    let delta = [q[0] - p[0], q[1] - p[1]];
+    for axis in 0..2 {
+        let (origin, d) = (p[axis], delta[axis]);
+        if d.abs() < 1e-15 {
+            if origin < lo[axis] || origin > hi[axis] {
+                return false;
+            }
+        } else {
+            let (mut a, mut b) = ((lo[axis] - origin) / d, (hi[axis] - origin) / d);
+            if a > b {
+                std::mem::swap(&mut a, &mut b);
+            }
+            t0 = t0.max(a);
+            t1 = t1.min(b);
+            if t0 > t1 {
+                return false;
+            }
+        }
+    }
+    true
 }
