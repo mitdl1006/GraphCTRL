@@ -460,7 +460,6 @@ fn an_absurd_placement_does_not_crash_what_follows() {
 /// A base position of 1e300 mm is far outside any cell. Agents cannot tell it is a mistake unless the
 /// tool refuses it.
 #[test]
-#[ignore = "BUG: place_robot accepts absurd finite positions (1e300 mm); see docs/handoff/qa.md"]
 fn an_absurd_placement_is_refused() {
     let (mut session, packages, robot) = cell();
     let before = session.doc().clone();

@@ -230,7 +230,6 @@ fn interference_ignores_empty_sets_gone_items_and_self_pairs() {
 /// The same component listed twice in one set (an agent or a script can do this; the picker cannot) is
 /// paired with itself, and a body "interferes" with itself over its whole volume.
 #[test]
-#[ignore = "BUG: Session::interference pairs a component listed twice in one set with itself; see docs/handoff/qa.md"]
 fn a_component_listed_twice_does_not_interfere_with_itself() {
     let mut s = Session::new();
     let a = CellItem::Body(body(&mut s, 0.0));

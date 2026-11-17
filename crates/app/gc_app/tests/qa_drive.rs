@@ -121,7 +121,6 @@ fn absurd_counts_and_values_stay_bounded_and_finite() {
 /// stops at 0.1) is accepted and the drive silently stays at Start (or produces NaN joint
 /// values): a sequence from Start to End must always reach End, whatever the increment box holds.
 #[test]
-#[ignore = "BUG: Drive sequence with increment 0 / NaN / inf / tiny (1e-6 over 10 stops at 0.1) never reaches End; see docs/handoff/qa.md"]
 fn an_unusable_increment_still_reaches_end() {
     for step in [0.0, -0.0, f64::NAN, f64::INFINITY, 1e-300, 1e-6] {
         let v = sequence(0.0, 10.0, Increment::Amount, step, Repeat::StartEnd, 1);
@@ -132,7 +131,6 @@ fn an_unusable_increment_still_reaches_end() {
 
 /// A NaN or infinite Start or End (typed as "nan" or "inf" into a number box) panics inside `f64::clamp`.
 #[test]
-#[ignore = "BUG: Drive sequence panics (f64::clamp NaN bounds) when Start or End is NaN or infinite; see docs/handoff/qa.md"]
 fn a_nan_start_or_end_does_not_panic() {
     for (start, end) in [
         (f64::NAN, 1.0),

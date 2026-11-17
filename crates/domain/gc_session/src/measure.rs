@@ -426,6 +426,13 @@ impl Session {
     pub fn interference(&self, first: &[CellItem], second: &[CellItem]) -> Vec<InterferenceRow> {
         let geometry: std::collections::BTreeMap<CellItem, Geometry> =
             first.iter().chain(second).filter_map(|item| Some((*item, self.item_geometry(*item)?))).collect();
+        // A component listed twice counts once; it never interferes with itself.
+        let unique = |set: &[CellItem]| {
+            let mut seen = std::collections::BTreeSet::new();
+            set.iter().copied().filter(|item| seen.insert(*item)).collect::<Vec<_>>()
+        };
+        let (first, second) = (unique(first), unique(second));
+        let (first, second) = (first.as_slice(), second.as_slice());
         let mut pairs = Vec::new();
         if second.is_empty() {
             for (i, a) in first.iter().enumerate() {
