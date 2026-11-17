@@ -763,6 +763,10 @@ impl StateChecker for SharedChecker<'_, '_> {
         self.0.motion_valid(a, b)
     }
 
+    fn motion_cost(&self, a: &[f64], b: &[f64]) -> u64 {
+        self.0.motion_cost(a, b)
+    }
+
     fn clearance(&self, _q: &[f64]) -> Option<f64> {
         None
     }

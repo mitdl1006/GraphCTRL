@@ -744,8 +744,7 @@ impl Session {
 
     /// Gives the session the planners plugins offer (`MOTION_PLANNERS`). A path whose planner id is not
     /// one of the built-in [`PLANNERS`] is planned with the registered planner of that id. (The built-in
-    /// ids keep running `gc_plan` directly: same paths, and budgets that count the states a motion check
-    /// examines, which the plugin API cannot tell a planner yet.)
+    /// ids run `gc_plan` directly, which gives the same paths as their registered versions.)
     pub fn set_planners(&mut self, planners: Vec<Arc<dyn gc_robotics_api::MotionPlanner>>) {
         self.cell.planners = planners;
     }
