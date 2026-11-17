@@ -233,6 +233,13 @@ pub enum CellOp {
         /// The new placement.
         placement: Placement,
     },
+    /// Changes the folder a robot's mesh files are looked for in.
+    SetRobotFiles {
+        /// The robot.
+        id: Id<Robot>,
+        /// The folder.
+        resource_dir: String,
+    },
     /// Sets a robot's tool centre point.
     SetTcp {
         /// The robot.
@@ -371,6 +378,10 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
             placed(placement)?;
             txn.modify(*id, |r: &mut Robot, _| r.placement = *placement)?;
             Ok((Vec::new(), "Place robot"))
+        }
+        CellOp::SetRobotFiles { id, resource_dir } => {
+            txn.modify(*id, |r: &mut Robot, _| r.resource_dir.clone_from(resource_dir))?;
+            Ok((Vec::new(), "Move robot files"))
         }
         CellOp::SetTcp { id, tcp } => {
             placed(tcp)?;

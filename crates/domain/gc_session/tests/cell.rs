@@ -650,3 +650,63 @@ fn a_work_frame_turns_with_its_axis_points() {
     session.set_frame_axes(slope, None, None).unwrap();
     assert!((session.work_frame_pose(slope).unwrap().rotation * DVec3::X - DVec3::X).length() < 1e-9);
 }
+
+/// A project keeps its mesh files: saved, moved elsewhere with the original files gone, it opens whole.
+#[test]
+fn a_project_carries_its_mesh_files() {
+    let directory = tempfile::tempdir().unwrap();
+    let elsewhere = directory.path().join("downloads");
+    // Equipment from a CAD export, and a robot package with a mesh, both outside the project.
+    std::fs::create_dir_all(elsewhere.join("arm/urdf")).unwrap();
+    std::fs::create_dir_all(elsewhere.join("arm/meshes")).unwrap();
+    let table = gc_mesh::primitives::cuboid([800.0, 600.0, 50.0]).unwrap();
+    std::fs::write(elsewhere.join("table.stl"), gc_mesh::stl::to_binary(&table)).unwrap();
+    let column = gc_mesh::primitives::cylinder(0.05, 0.4, 16).unwrap();
+    std::fs::write(elsewhere.join("arm/meshes/column.stl"), gc_mesh::stl::to_binary(&column)).unwrap();
+    let urdf = r#"<?xml version="1.0"?>
+<robot name="arm">
+  <link name="base_link">
+    <visual><geometry><mesh filename="package://arm/meshes/column.stl"/></geometry></visual>
+    <collision><geometry><mesh filename="package://arm/meshes/column.stl"/></geometry></collision>
+  </link>
+  <link name="tip"><collision><geometry><box size="0.1 0.1 0.1"/></geometry></collision></link>
+  <joint name="swing" type="revolute">
+    <parent link="base_link"/><child link="tip"/><origin xyz="0 0 0.3"/><axis xyz="0 0 1"/>
+    <limit lower="-3" upper="3" velocity="2" effort="10"/>
+  </joint>
+</robot>"#;
+    std::fs::write(elsewhere.join("arm/urdf/arm.urdf"), urdf).unwrap();
+
+    let mut session = Session::new();
+    let robot = session.add_robot_file(&elsewhere.join("arm/urdf/arm.urdf")).unwrap();
+    let body = session.add_mesh_body(&elsewhere.join("table.stl")).unwrap();
+    let project = directory.path().join("cell");
+    std::fs::create_dir_all(&project).unwrap();
+    let file = project.join("Line 1.gctrl");
+    session.save_as(&file).unwrap();
+    assert!(!session.is_dirty(), "saving does not change the document");
+
+    // The files went into the project's folder and the file refers to them relative to itself.
+    assert!(project.join("Line_1_files/table.stl").is_file());
+    assert!(project.join("Line_1_files/arm/meshes/column.stl").is_file());
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(text.contains("\"Line_1_files/table.stl\"") && text.contains("\"Line_1_files/arm\""), "{text}");
+    assert!(!text.contains(&*directory.path().to_string_lossy()), "no absolute paths in the file");
+
+    // Moved to another place, the originals gone: everything is still there.
+    let moved = directory.path().join("moved");
+    std::fs::rename(&project, &moved).unwrap();
+    std::fs::remove_dir_all(&elsewhere).unwrap();
+    let mut reopened = Session::new();
+    reopened.open(&moved.join("Line 1.gctrl")).unwrap();
+    assert!(!reopened.is_dirty());
+    let stored = reopened.doc().get(body).unwrap();
+    assert_eq!(reopened.body_mesh(&stored.solid).unwrap().data.triangle_count(), 12);
+    let loaded = reopened.robot_model(robot).unwrap();
+    assert!(loaded.missing.is_empty(), "{:?}", loaded.missing);
+    assert_eq!(loaded.mesh("package://arm/meshes/column.stl", [1.0; 3]).len(), 1);
+
+    // Saving it again where it is copies nothing new and keeps the same paths.
+    reopened.save().unwrap();
+    assert_eq!(std::fs::read_to_string(moved.join("Line 1.gctrl")).unwrap(), text);
+}

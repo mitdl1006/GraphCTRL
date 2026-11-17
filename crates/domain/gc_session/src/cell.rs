@@ -374,6 +374,11 @@ fn shape_of(solid: &Solid, meshes: &BTreeMap<String, MeshRef>) -> Option<ShapeDe
 /// from: `file://` and plain paths as they are, `package://name/rest` under that folder and up to four
 /// folders above it, with and without the package name.
 fn read_near(resource_dir: &str, uri: &str) -> Option<Vec<u8>> {
+    std::fs::read(find_near(resource_dir, uri)?).ok()
+}
+
+/// Where a file a robot description refers to is, looked for as [`read_near`] does.
+pub(crate) fn find_near(resource_dir: &str, uri: &str) -> Option<std::path::PathBuf> {
     use std::path::{Path, PathBuf};
     let dir = Path::new(resource_dir);
     let mut candidates: Vec<PathBuf> = Vec::new();
@@ -387,7 +392,7 @@ fn read_near(resource_dir: &str, uri: &str) -> Option<Vec<u8>> {
         let plain = Path::new(uri.strip_prefix("file://").unwrap_or(uri));
         candidates.push(if plain.is_absolute() { plain.to_path_buf() } else { dir.join(plain) });
     }
-    candidates.iter().find_map(|path| std::fs::read(path).ok())
+    candidates.into_iter().find(|path| path.is_file())
 }
 
 /// Reads a robot description and picks its planning chain. Returns the tip link's name with it.

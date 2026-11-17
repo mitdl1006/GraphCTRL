@@ -12,6 +12,7 @@
 #![cfg_attr(test, allow(clippy::float_cmp, reason = "tests compare exactly representable values"))]
 
 mod cell;
+mod project;
 mod spatial;
 
 use std::collections::BTreeSet;
@@ -130,8 +131,13 @@ impl Session {
     }
 
     /// Saves the document to `path` and remembers the path.
+    ///
+    /// The file is a project: mesh files the document refers to (equipment, robots read from URDF files)
+    /// are copied into a folder next to it, `<name>_files`, and referred to relative to the project, so
+    /// that the project can be moved or sent as that file and folder.
     pub fn save_as(&mut self, path: &Path) -> Result<(), PersistError> {
-        gc_persist::save(&self.doc, path)?;
+        let packed = self.packed_for(path)?;
+        gc_persist::save(&packed, path)?;
         self.path = Some(path.to_path_buf());
         self.saved_revision = self.doc.revision();
         Ok(())
@@ -149,7 +155,8 @@ impl Session {
     /// their constraints; they are shown as stored.
     pub fn open(&mut self, path: &Path) -> Result<Vec<Id<Sketch>>, PersistError> {
         let loaded = gc_persist::load(path)?;
-        self.replace_document(loaded.doc, Some(path.to_path_buf()));
+        let doc = project::unpacked(loaded.doc, path);
+        self.replace_document(doc, Some(path.to_path_buf()));
         Ok(loaded.needs_repair)
     }
 

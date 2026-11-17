@@ -54,11 +54,14 @@ struct NativeDialogs;
 
 impl FileDialogs for NativeDialogs {
     fn open(&mut self) -> Option<PathBuf> {
-        rfd::FileDialog::new().add_filter("GraphCTRL", &["gctrl"]).pick_file()
+        rfd::FileDialog::new().add_filter("GraphCTRL project", &["gctrl"]).pick_file()
     }
 
     fn save(&mut self, suggested_name: &str) -> Option<PathBuf> {
-        rfd::FileDialog::new().add_filter("GraphCTRL", &["gctrl"]).set_file_name(suggested_name).save_file()
+        rfd::FileDialog::new()
+            .add_filter("GraphCTRL project", &["gctrl"])
+            .set_file_name(suggested_name)
+            .save_file()
     }
 
     fn open_mesh(&mut self) -> Option<PathBuf> {
