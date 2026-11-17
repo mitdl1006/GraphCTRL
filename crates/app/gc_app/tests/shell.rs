@@ -2971,3 +2971,45 @@ fn the_marking_menu_picks_by_mark_and_by_menu() {
         assert!(harness.query_all_by_label(name).next().is_some(), "{name}");
     }
 }
+
+/// Sketch tab > Project Cut Edges (Inventor 2026 help, "To Project Geometry into a 2D Sketch":
+/// https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-B8D8B07B-86F2-4CB7-AB21-3131D94AD1CC.htm):
+/// with the pillar selected, the XY sketch gets the four edges where its plane cuts the pillar, as fixed
+/// lines in one undo step.
+#[test]
+fn project_cut_edges_adds_the_cut_of_the_selected_part() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("파일").click();
+    harness.run();
+    harness.get_by_label("예제 열기 (UR5e 셀)").click();
+    harness.run();
+    // The XY sketch's plane cuts the pillar (80 × 80 mm, standing on the floor at 450, 100 mm) at its foot.
+    let (sketch, pillar) = {
+        let doc = harness.state().session.doc();
+        (doc.sketches().iter().next().unwrap().0, doc.bodies().iter().next().unwrap().0)
+    };
+    let before = harness.state().session.doc().get(sketch).unwrap().curves.len();
+    harness.state_mut().session.enter_sketch(sketch);
+    harness.state_mut().session.select_item(Some(gc_session::CellItem::Body(pillar)));
+    harness.run();
+    // The ribbon's Sketch tab (the browser has a "스케치" folder too; the tab comes first).
+    harness.query_all_by_label("스케치").next().unwrap().click();
+    harness.run();
+    let depth = harness.state().session.history().undo_depth();
+    harness.get_by_label("절단 모서리 투영").click();
+    harness.run();
+    harness.get_by_label("절단 모서리 4개를 투영했습니다.");
+    let after = harness.state().session.doc().get(sketch).unwrap().clone();
+    assert_eq!(after.curves.len(), before + 4);
+    assert_eq!(harness.state().session.history().undo_depth(), depth + 1);
+    // The square is 80 mm on a side around (450, 100).
+    let xs: Vec<f64> = after.points.values().map(|p| p.pos[0]).filter(|x| (x - 0.45).abs() < 0.05).collect();
+    assert!(
+        xs.iter().any(|x| (x - 0.41).abs() < 1e-6) && xs.iter().any(|x| (x - 0.49).abs() < 1e-6),
+        "{xs:?}"
+    );
+}

@@ -24,6 +24,34 @@ pub fn ribbon_tab(ui: &mut Ui, label: &str, selected: bool) -> bool {
     response.clicked()
 }
 
+/// A small ribbon button: the icon alone, the name as a tooltip and as its accessible name. Inventor packs
+/// panels such as Constrain with these, in rows of small icons.
+pub fn ribbon_small_button(ui: &mut Ui, icon: Icon, label: &str, selected: bool, enabled: bool) -> Response {
+    let sense = if enabled { Sense::click() } else { Sense::hover() };
+    let (rect, response) = ui.allocate_exact_size(vec2(30.0, 30.0), sense);
+    response.widget_info(|| WidgetInfo::selected(Role::Button, enabled, selected, label));
+    if ui.is_rect_visible(rect) {
+        let visuals = ui.visuals();
+        let fill = if selected {
+            visuals.selection.bg_fill
+        } else if response.hovered() && enabled {
+            visuals.widgets.hovered.weak_bg_fill
+        } else {
+            egui::Color32::TRANSPARENT
+        };
+        let color = if selected {
+            colors::ACCENT
+        } else if enabled {
+            colors::text()
+        } else {
+            egui::Color32::from_rgb(0xA3, 0xA9, 0xB2)
+        };
+        ui.painter().rect_filled(rect, 4.0, fill);
+        icon.paint(ui.painter(), rect.shrink(5.0), color);
+    }
+    response.on_hover_text(label)
+}
+
 /// A large button: icon above, label below. `selected` marks the active tool.
 pub fn ribbon_button(ui: &mut Ui, icon: Icon, label: &str, selected: bool, enabled: bool) -> Response {
     let sense = if enabled { Sense::click() } else { Sense::hover() };

@@ -68,6 +68,8 @@ pub(crate) enum RibbonAction {
     StartConstrain,
     /// Open the parameters dialog.
     StartParameters,
+    /// Project the edges the sketch plane cuts into the active sketch.
+    ProjectCutEdges,
 }
 
 pub(crate) fn show(
@@ -139,6 +141,18 @@ pub(crate) fn show(
                             session.set_tool(kind);
                         }
                     }
+                    // Project Cut Edges: a 2D sketch only.
+                    if ribbon_button(
+                        ui,
+                        Icon::Text("⊟"),
+                        tr!(lang, ToolCutEdges),
+                        false,
+                        sketching && !spatial,
+                    )
+                    .clicked()
+                    {
+                        action = Some(RibbonAction::ProjectCutEdges);
+                    }
                 });
                 ribbon_group(ui, tr!(lang, GroupConstrain), |ui| {
                     let dimension = ToolKind::Dimension;
@@ -153,16 +167,29 @@ pub(crate) fn show(
                     {
                         session.set_tool(dimension);
                     }
+                    // The geometric constraints as small icons in two rows, as Inventor's Constrain panel.
                     let constraints: &[(ConstraintKind, &str, Msg)] =
                         if spatial { &CONSTRAINTS_3D } else { &CONSTRAINTS };
-                    for (kind, symbol, label) in constraints.iter().copied() {
-                        let tool = ToolKind::Constraint(kind);
-                        if ribbon_button(ui, Icon::Text(symbol), label.text(lang), current == tool, sketching)
-                            .clicked()
-                        {
-                            session.set_tool(tool);
+                    let per_row = constraints.len().div_ceil(2);
+                    ui.vertical(|ui| {
+                        for row in constraints.chunks(per_row.max(1)) {
+                            ui.horizontal(|ui| {
+                                for (kind, symbol, label) in row.iter().copied() {
+                                    let tool = ToolKind::Constraint(kind);
+                                    let button = gc_ui::ribbon_small_button(
+                                        ui,
+                                        Icon::Text(symbol),
+                                        label.text(lang),
+                                        current == tool,
+                                        sketching,
+                                    );
+                                    if button.clicked() {
+                                        session.set_tool(tool);
+                                    }
+                                }
+                            });
                         }
-                    }
+                    });
                 });
                 ribbon_group(ui, tr!(lang, GroupExit), |ui| {
                     if ribbon_button(ui, Icon::Finish, tr!(lang, CmdFinishSketch), false, sketching).clicked()
