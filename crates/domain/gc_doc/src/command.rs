@@ -50,6 +50,18 @@ pub enum DimSlot {
     Height,
 }
 
+/// How the first two clicks of a straight slot are read (Inventor 2026 help, To Create 2D Shape Geometry,
+/// GUID-D489CE6D-7299-4211-A43A-F3580A4BA357, Slots).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SlotKind {
+    /// Center to Center Slot: the two arc centres.
+    CenterToCenter,
+    /// Overall Slot: the start and end of the slot's centre line, ends included.
+    Overall,
+    /// Center Point Slot: the slot's centre, then one arc centre.
+    CenterPoint,
+}
+
 /// An edit of one sketch.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum SketchOp {
@@ -82,6 +94,19 @@ pub enum SketchOp {
         sides: u32,
         /// Circumscribed (edges touch the circle) rather than inscribed (corners on it).
         circumscribed: bool,
+    },
+    /// A straight slot (Center to Center, Overall or Center Point): a construction centre line between
+    /// the arc centres, two sides and two half-round ends tangent to them, ends of equal radius. It keeps
+    /// five degrees of freedom (the two arc centres and the width).
+    AddSlot {
+        /// First click.
+        a: [f64; 3],
+        /// Second click.
+        b: [f64; 3],
+        /// Width (the third click), metres.
+        width: f64,
+        /// How the clicks are read.
+        kind: SlotKind,
     },
     /// The Center Point toggle on selected standalone points (curve ends and centres are refused).
     SetCenterPoint {
@@ -972,6 +997,65 @@ fn sketch_op(
                 }
             }
             "Polygon"
+        }
+        SketchOp::AddSlot { a, b, width, kind } => {
+            if !a.iter().chain(b).all(|v| v.is_finite()) || !(width.is_finite() && *width > 0.0) {
+                return Err(SketchError::InvalidValue.into());
+            }
+            let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+            let span = gc_math::fm::hypot(dx, dy);
+            let h = width / 2.0;
+            let (d, n) = if span > 1e-12 {
+                ([dx / span, dy / span], [-dy / span, dx / span])
+            } else {
+                ([1.0, 0.0], [0.0, 1.0])
+            };
+            let (c1, c2) = match kind {
+                SlotKind::CenterToCenter => ([a[0], a[1]], [b[0], b[1]]),
+                SlotKind::Overall => {
+                    if span <= 2.0 * h {
+                        return Err(SketchError::InvalidValue.into());
+                    }
+                    ([a[0] + d[0] * h, a[1] + d[1] * h], [b[0] - d[0] * h, b[1] - d[1] * h])
+                }
+                SlotKind::CenterPoint => ([2.0 * a[0] - b[0], 2.0 * a[1] - b[1]], [b[0], b[1]]),
+            };
+            if gc_math::fm::hypot(c2[0] - c1[0], c2[1] - c1[1]) < 1e-9 {
+                return Err(SketchError::InvalidValue.into());
+            }
+            let p = |c: [f64; 2], s: f64| [c[0] + n[0] * h * s, c[1] + n[1] * h * s, 0.0];
+            let centre_line = sketch.add_line(ids, [c1[0], c1[1], 0.0], [c2[0], c2[1], 0.0]);
+            if let Some(c) = sketch.curves.get_mut(&centre_line) {
+                c.construction = true;
+            }
+            let bottom = sketch.add_line(ids, p(c1, -1.0), p(c2, -1.0));
+            let top = sketch.add_line(ids, p(c2, 1.0), p(c1, 1.0));
+            // Counter-clockwise: round the far end from the bottom side to the top, and back at the start.
+            let far = sketch.add_arc(ids, [c2[0], c2[1], 0.0], p(c2, -1.0), p(c2, 1.0))?;
+            let near = sketch.add_arc(ids, [c1[0], c1[1], 0.0], p(c1, 1.0), p(c1, -1.0))?;
+            created.extend([bottom, far, top, near, centre_line].map(Created::Curve));
+            let arc_points = |sketch: &Sketch, arc: Id<Curve>| match sketch.curves.get(&arc).map(|c| c.geom) {
+                Some(gc_sketch::CurveGeom::Arc { c, s, e }) => Some((c, s, e)),
+                _ => None,
+            };
+            let (Some((fc, fs, fe)), Some((nc, ns, ne)), Some((la, lb)), Some((ba, bb)), Some((ta, tb))) = (
+                arc_points(sketch, far),
+                arc_points(sketch, near),
+                sketch.line(centre_line),
+                sketch.line(bottom),
+                sketch.line(top),
+            ) else {
+                return Err(SketchError::InvalidValue.into());
+            };
+            for (p, q) in [(la, nc), (lb, fc), (bb, fs), (fe, ta), (tb, ns), (ne, ba)] {
+                require(sketch, ids, GeoConstraint::Coincident(p, q), &mut created)?;
+            }
+            for (line, arc) in [(bottom, far), (top, far), (top, near), (bottom, near)] {
+                let tangent = tangency(sketch, line, arc).ok_or(SketchError::InvalidValue)?;
+                require(sketch, ids, tangent, &mut created)?;
+            }
+            require(sketch, ids, GeoConstraint::Equal(far, near), &mut created)?;
+            "Slot"
         }
         SketchOp::SetCenterPoint { points, center } => {
             let owned: std::collections::BTreeSet<Id<SkPoint>> =

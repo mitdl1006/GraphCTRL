@@ -171,3 +171,54 @@ fn polygons_are_regular_with_four_degrees_of_freedom_inscribed_or_circumscribed(
         .unwrap();
     assert_eq!(Bench::curves(&created).len(), 122, "120 sides, the circle and the radius");
 }
+
+/// Inventor 2026 help, To Create 2D Shape Geometry (GUID-D489CE6D-7299-4211-A43A-F3580A4BA357), Slots:
+/// Center to Center (arc centres, then width), Overall (start and end of the centre line, then width),
+/// Center Point (slot centre, an arc centre, then width).
+#[test]
+fn straight_slots_keep_their_centres_and_width_with_five_degrees_of_freedom() {
+    use gc_doc::SlotKind;
+    for (kind, a, b) in [
+        (SlotKind::CenterToCenter, [0.0, 0.0], [0.2, 0.1]),
+        (
+            SlotKind::Overall,
+            [-0.05 * 0.894_427_190_999_915_9, -0.05 * 0.447_213_595_499_957_9],
+            [0.2 + 0.05 * 0.894_427_190_999_915_9, 0.1 + 0.05 * 0.447_213_595_499_957_9],
+        ),
+        (SlotKind::CenterPoint, [0.1, 0.05], [0.2, 0.1]),
+    ] {
+        let mut bench = Bench::new();
+        let dof = bench.dof();
+        let created = bench
+            .op(SketchOp::AddSlot { a: [a[0], a[1], 0.0], b: [b[0], b[1], 0.0], width: 0.1, kind })
+            .unwrap();
+        assert_eq!(bench.dof(), dof + 5, "{kind:?}: two centres and the width");
+        let curves = Bench::curves(&created);
+        assert_eq!(curves.len(), 5);
+        let mut solved = bench.sketch().clone();
+        solved.solve().unwrap();
+        // The arc centres at (0, 0) and (0.2, 0.1) whichever way they were given; radius = width / 2.
+        let centres: Vec<[f64; 3]> =
+            curves.iter().filter_map(|c| solved.round(*c)).map(|(c, _)| solved.pos(c).unwrap()).collect();
+        let near = |p: [f64; 3], q: [f64; 2]| (p[0] - q[0]).hypot(p[1] - q[1]) < 1e-9;
+        assert!(
+            centres.iter().any(|c| near(*c, [0.0, 0.0])) && centres.iter().any(|c| near(*c, [0.2, 0.1])),
+            "{kind:?} {centres:?}"
+        );
+        assert!(curves.iter().filter_map(|c| solved.round(*c)).all(|(_, r)| (r - 0.05).abs() < 1e-9));
+        // The sides are the centre line's length, and the centre line is construction.
+        let sides: Vec<f64> = curves
+            .iter()
+            .filter(|c| !solved.curves[c].construction)
+            .filter_map(|c| solved.line(*c).map(|_| length(&solved, *c)))
+            .collect();
+        assert_eq!(sides.len(), 2);
+        assert!(sides.iter().all(|l| (l - 0.05f64.hypot(0.1) * 2.0).abs() < 1e-9), "{sides:?}");
+    }
+    let mut bench = Bench::new();
+    let bad = |kind, a: [f64; 3], b: [f64; 3], width| SketchOp::AddSlot { a, b, width, kind };
+    assert!(bench.op(bad(SlotKind::CenterToCenter, [0.0; 3], [0.0; 3], 0.1)).is_err(), "no length");
+    assert!(bench.op(bad(SlotKind::CenterToCenter, [0.0; 3], [0.1, 0.0, 0.0], 0.0)).is_err(), "no width");
+    assert!(bench.op(bad(SlotKind::Overall, [0.0; 3], [0.1, 0.0, 0.0], 0.1)).is_err(), "shorter than wide");
+    assert!(bench.op(bad(SlotKind::CenterPoint, [0.0; 3], [f64::NAN, 0.0, 0.0], 0.1)).is_err());
+}
