@@ -1177,16 +1177,23 @@ impl Document {
     /// Grounded: none; untouched by relationships: all six. `None` when it is not a component that moves.
     pub fn component_dof(&self, item: AnyId) -> Option<Dof> {
         self.owner_pose(item)?;
+        let gathered = self.gather().ok();
+        Some(self.dof_in(gathered.as_ref(), item))
+    }
+
+    /// [`Document::component_dof`] from relationships gathered once.
+    fn dof_in(&self, gathered: Option<&(Vec<Owner>, Vec<Term>)>, item: AnyId) -> Dof {
         if self.component_flag(Occurrence::Item(item), ComponentFlag::Grounded) {
-            return Some(Dof { total: 0, translation: 0 });
+            return Dof { total: 0, translation: 0 };
         }
-        let Ok((owners, terms)) = self.gather() else { return Some(Dof { total: 6, translation: 3 }) };
-        let Some(index) = owners.iter().position(|o| o.item == item) else {
-            return Some(Dof { total: 6, translation: 3 });
-        };
-        let terms: Vec<Term> = terms.into_iter().filter(|t| t.owners.contains(&index)).collect();
+        let free = Dof { total: 6, translation: 3 };
+        let Some((owners, terms)) = gathered else { return free };
+        let Some(index) = owners.iter().position(|o| o.item == item) else { return free };
+        let terms: Vec<&Term> = terms.iter().filter(|t| t.owners.contains(&index)).collect();
         let mut poses: Vec<DPose3> = owners.iter().map(|o| o.pose).collect();
-        let base = all_residuals(&terms, &poses);
+        let residuals =
+            |poses: &[DPose3]| -> Vec<f64> { terms.iter().flat_map(|t| term_residuals(t, poses)).collect() };
+        let base = residuals(&poses);
         let m = base.len();
         let h = 1e-7;
         let mut jac = vec![0.0; m * 6];
@@ -1195,7 +1202,7 @@ impl Document {
             step[p] = h;
             let saved = poses[index];
             poses[index] = stepped(&saved, &step);
-            let moved = all_residuals(&terms, &poses);
+            let moved = residuals(&poses);
             poses[index] = saved;
             for row in 0..m {
                 jac[row * 6 + p] = (moved[row] - base[row]) / h;
@@ -1204,23 +1211,58 @@ impl Document {
         let fixed = rank(&jac, m, 6, &[0, 1, 2, 3, 4, 5]);
         let fixed_translation = rank(&jac, m, 6, &[0, 1, 2]);
         #[allow(clippy::cast_possible_truncation, reason = "ranks are at most 6")]
-        Some(Dof { total: (6 - fixed) as u8, translation: (3 - fixed_translation) as u8 })
+        Dof { total: (6 - fixed) as u8, translation: (3 - fixed_translation) as u8 }
     }
 
     /// The constraint status dot of a component.
     pub fn component_status(&self, item: AnyId) -> Option<ComponentStatus> {
-        let dof = self.component_dof(item)?;
-        let sick = self.relationships().iter().any(|(id, r)| {
-            (r.first.occurrence.owner() == item || r.second.occurrence.owner() == item)
-                && self.relationship_status(id) == Some(RelationStatus::Sick)
+        self.owner_pose(item)?;
+        let gathered = self.gather().ok();
+        Some(self.status_in(gathered.as_ref(), item))
+    }
+
+    /// The constraint status dots of all bodies, robots and assemblies at once (what the browser shows
+    /// every frame): the relationships are gathered once.
+    pub fn component_statuses(&self) -> std::collections::BTreeMap<AnyId, ComponentStatus> {
+        let gathered = self.gather().ok();
+        self.bodies()
+            .iter()
+            .map(|(id, _)| id.erase())
+            .chain(self.robots().iter().map(|(id, _)| id.erase()))
+            .chain(self.assemblies().iter().map(|(id, _)| id.erase()))
+            .map(|item| (item, self.status_in(gathered.as_ref(), item)))
+            .collect()
+    }
+
+    fn status_in(&self, gathered: Option<&(Vec<Owner>, Vec<Term>)>, item: AnyId) -> ComponentStatus {
+        let Some(found) = gathered else {
+            // A relationship refers to something missing: nothing can be said.
+            return if self
+                .relationships()
+                .iter()
+                .any(|(_, r)| r.first.occurrence.owner() == item || r.second.occurrence.owner() == item)
+            {
+                ComponentStatus::Unknown
+            } else {
+                ComponentStatus::Under
+            };
+        };
+        let (owners, terms) = found;
+        let poses: Vec<DPose3> = owners.iter().map(|o| o.pose).collect();
+        let index = owners.iter().position(|o| o.item == item);
+        let sick = index.is_some_and(|index| {
+            terms
+                .iter()
+                .filter(|t| t.owners.contains(&index))
+                .any(|t| term_residuals(t, &poses).iter().any(|r| r.abs() > 1e-7))
         });
-        Some(if sick {
+        if sick {
             ComponentStatus::Unknown
-        } else if dof.total == 0 {
+        } else if self.dof_in(gathered, item).total == 0 {
             ComponentStatus::Full
         } else {
             ComponentStatus::Under
-        })
+        }
     }
 
     /// The status of a relationship: sick when it is not satisfied, full when the components it

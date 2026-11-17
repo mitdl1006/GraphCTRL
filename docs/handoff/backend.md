@@ -1,5 +1,14 @@
 # 백엔드 인계 (2026-11-17)
 
+## 2026-11-18 — 대형 장면: 프레임당 세션 질의 벤치(리드 순서 ③)
+
+- `cargo run --release -p gc_session --example bench_scene [-- --components N --frames N --append FILE]`; `cargo xtask bench-quality`가
+  계획 벤치 뒤에 실행해 보고서에 표를 덧붙인다. 측정 범위: 한 프레임에 장면·브라우저가 세션에 묻는 것(바디 표시, 로봇 링크 자세, 충돌 상태
+  (캐시), TCP, 모든 컴포넌트의 구속 상태 점). 렌더러의 드로 리스트·BVH 자체는 리드의 gc_scene 쪽에서 따로 재야 한다.
+- 결과(이 샌드박스, release): 50개 p95 0.105 ms(예산 2 ms 통과), 200개 p95 0.565 ms.
+- 고친 것: 구속 상태 점 계산이 컴포넌트마다 관계를 여러 번 다시 모아 200개에서 4.7 ms(이차)였다 → 한 번 모아 재사용. 브라우저는 매 프레임
+  **`session.component_statuses()`**(한 번에 전부)를 쓰면 된다(행마다 `component_status` 대신).
+
 ## 구속 오류 대화상자(Design Doctor식) — 프론트엔드용 사용 예
 
 관계 추가·수정·배치 변경이 `EditError::Unsolvable{ids, names}`로 거부되면:

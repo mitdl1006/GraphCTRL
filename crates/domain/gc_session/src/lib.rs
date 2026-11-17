@@ -592,6 +592,12 @@ impl Session {
         self.doc.component_status(item)
     }
 
+    /// The constraint status dots of every body, robot and assembly at once — use this for the browser
+    /// each frame rather than one `component_status` per row.
+    pub fn component_statuses(&self) -> std::collections::BTreeMap<gc_core::AnyId, gc_doc::ComponentStatus> {
+        self.doc.component_statuses()
+    }
+
     /// The status of an assembly relationship: full, under-constrained or sick.
     pub fn relationship_status(&self, id: Id<gc_doc::Relationship>) -> Option<gc_doc::RelationStatus> {
         self.doc.relationship_status(id)
