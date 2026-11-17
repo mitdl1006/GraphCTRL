@@ -13,22 +13,26 @@
 //! 3. What remains is a planar two-link arm for θ2 and θ3: elbow up or down. θ4 completes the sum.
 //!
 //! Every solution is checked with the forward kinematics before it is returned.
+//!
+//! Nothing here knows particular models. A chain is recognised by fitting the six lengths to its
+//! forward kinematics: with the joint angles fixed the tip position is linear in the lengths, so a least
+//! squares fit over sample configurations finds them, and the chain is of this family when the fitted
+//! model reproduces it.
 
 use gc_math::{DPose3, DQuat, DVec3, fm};
 use gc_robotics_api::{
     ChainSpec, Fit, IkFailure, IkFailureReason, KinError, KinematicsFactory, KinematicsSolver, Pose,
 };
 
-/// The DH parameters of one model: d1, a2, a3, d4, d5, d6 (metres).
-pub type Dh = [f64; 6];
-
-/// The models whose kinematics are recognised, with their published DH parameters.
-pub const MODELS: [(&str, Dh); 4] = [
-    ("UR3e", [0.15185, -0.24355, -0.2132, 0.13105, 0.08535, 0.0921]),
-    ("UR5e", [0.1625, -0.425, -0.3922, 0.1333, 0.0997, 0.0996]),
-    ("UR10e", [0.1807, -0.6127, -0.57155, 0.17415, 0.11985, 0.11655]),
-    ("UR16e", [0.1807, -0.4784, -0.36, 0.17415, 0.11985, 0.11655]),
-];
+/// The kinematics of one arm: the DH lengths d1, a2, a3, d4, d5, d6 (metres) and whether the chain's
+/// base is the DH base turned half a turn about Z (as `base_link` is on UR arms).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Dh {
+    /// d1, a2, a3, d4, d5, d6.
+    pub lengths: [f64; 6],
+    /// The chain's base is the DH base turned half a turn about Z.
+    pub turned: bool,
+}
 
 /// Largest deviation of a chain from a model that still counts as that model, calibrated (5 mm, 0.5°).
 const NEAR: (f64, f64) = (0.005, 0.0087);
@@ -55,22 +59,25 @@ const ALPHA: [f64; 6] =
     [std::f64::consts::FRAC_PI_2, 0.0, 0.0, std::f64::consts::FRAC_PI_2, -std::f64::consts::FRAC_PI_2, 0.0];
 
 fn dh_a(dh: &Dh) -> [f64; 6] {
-    [0.0, dh[1], dh[2], 0.0, 0.0, 0.0]
+    let l = dh.lengths;
+    [0.0, l[1], l[2], 0.0, 0.0, 0.0]
 }
 
 fn dh_d(dh: &Dh) -> [f64; 6] {
-    [dh[0], 0.0, 0.0, dh[3], dh[4], dh[5]]
+    let l = dh.lengths;
+    [l[0], 0.0, 0.0, l[3], l[4], l[5]]
 }
 
-/// `base_link` in the DH base frame's terms: half a turn about Z.
-fn pre() -> DPose3 {
-    DPose3::from_parts(DVec3::ZERO, DQuat::from_rotation_z(std::f64::consts::PI))
+/// The chain's base in the DH base frame's terms.
+fn pre(dh: &Dh) -> DPose3 {
+    let turn = if dh.turned { std::f64::consts::PI } else { 0.0 };
+    DPose3::from_parts(DVec3::ZERO, DQuat::from_rotation_z(turn))
 }
 
-/// The pose of `tool0` in `base_link` for joint values `q`.
+/// The pose of the tip (DH frame 6) in the chain's base frame for joint values `q`.
 pub fn forward(dh: &Dh, q: &[f64]) -> DPose3 {
     let (a, d) = (dh_a(dh), dh_d(dh));
-    let mut pose = pre();
+    let mut pose = pre(dh);
     for j in 0..6 {
         pose *= link(q.get(j).copied().unwrap_or(0.0), d[j], a[j], ALPHA[j]);
     }
@@ -100,23 +107,77 @@ fn samples() -> impl Iterator<Item = [f64; 6]> {
     })
 }
 
-/// The model a chain is, and how closely: the best of the known models within [`NEAR`].
+/// Solves the 6x6 system `m x = v` by Gaussian elimination with partial pivoting; `None` when singular.
+fn solve6(mut m: [[f64; 6]; 6], mut v: [f64; 6]) -> Option<[f64; 6]> {
+    for col in 0..6 {
+        let pivot = (col..6).max_by(|a, b| m[*a][col].abs().total_cmp(&m[*b][col].abs()))?;
+        if m[pivot][col].abs() < 1e-12 {
+            return None;
+        }
+        m.swap(col, pivot);
+        v.swap(col, pivot);
+        for row in col + 1..6 {
+            let f = m[row][col] / m[col][col];
+            for k in col..6 {
+                m[row][k] -= f * m[col][k];
+            }
+            v[row] -= f * v[col];
+        }
+    }
+    let mut x = [0.0; 6];
+    for row in (0..6).rev() {
+        let tail: f64 = (row + 1..6).map(|k| m[row][k] * x[k]).sum();
+        x[row] = (v[row] - tail) / m[row][row];
+    }
+    Some(x)
+}
+
+/// The DH lengths that best reproduce a chain's tip positions, for one base orientation, with the
+/// largest position and orientation deviation that remains.
+fn fit(chain: &ChainSpec, turned: bool) -> Option<(Dh, f64, f64)> {
+    let tips: Vec<([f64; 6], DPose3)> =
+        samples().map(|q| Some((q, from_pose(&chain.fk(&q)?)))).collect::<Option<_>>()?;
+    // Normal equations of the linear least squares problem: the tip is the sum of each length times
+    // where a unit of it alone puts the tip.
+    let (mut m, mut v) = ([[0.0; 6]; 6], [0.0; 6]);
+    for (q, tip) in &tips {
+        let columns: Vec<DVec3> = (0..6)
+            .map(|k| {
+                let mut lengths = [0.0; 6];
+                lengths[k] = 1.0;
+                forward(&Dh { lengths, turned }, q).translation
+            })
+            .collect();
+        for r in 0..6 {
+            v[r] += columns[r].dot(tip.translation);
+            for c in 0..6 {
+                m[r][c] += columns[r].dot(columns[c]);
+            }
+        }
+    }
+    let dh = Dh { lengths: solve6(m, v)?, turned };
+    if dh.lengths[1].abs() < 1e-6 || dh.lengths[2].abs() < 1e-6 {
+        return None; // not an arm with an upper arm and a forearm
+    }
+    let (mut position, mut turn) = (0.0_f64, 0.0_f64);
+    for (q, tip) in &tips {
+        let (p, r) = deviation(tip, &forward(&dh, q));
+        position = position.max(p);
+        turn = turn.max(r);
+    }
+    Some((dh, position, turn))
+}
+
+/// The kinematics of a chain when it is of this family, and how closely it fits: exactly (to 1e-9), or
+/// near-nominal within [`NEAR`] (a calibrated arm).
 pub fn recognise(chain: &ChainSpec) -> Option<(Dh, Fit)> {
     if chain.dof() != 6 {
         return None;
     }
-    MODELS
-        .iter()
-        .filter_map(|(_, dh)| {
-            let (mut position, mut turn) = (0.0_f64, 0.0_f64);
-            for q in samples() {
-                let tip = from_pose(&chain.fk(&q)?);
-                let (p, r) = deviation(&tip, &forward(dh, &q));
-                position = position.max(p);
-                turn = turn.max(r);
-            }
-            (position <= NEAR.0 && turn <= NEAR.1).then_some((*dh, position, turn))
-        })
+    [true, false]
+        .into_iter()
+        .filter_map(|turned| fit(chain, turned))
+        .filter(|(_, position, turn)| *position <= NEAR.0 && *turn <= NEAR.1)
         .min_by(|a, b| (a.1 + a.2).total_cmp(&(b.1 + b.2)))
         .map(|(dh, position, turn)| {
             let fit = if position <= EXACT && turn <= EXACT {
@@ -136,8 +197,8 @@ fn at(rotation: &gc_math::DMat3, i: usize, j: usize) -> f64 {
 /// All solutions of the closed-form inverse kinematics for `tool0` at `target` (in `base_link`), each
 /// with its branch number. Angles are in (-π, π]; joint limits are not applied.
 pub fn solve(dh: &Dh, target: &DPose3, seed: Option<&[f64]>) -> Vec<([f64; 6], u32)> {
-    let [d1, a2, a3, d4, d5, d6] = *dh;
-    let goal = pre().inverse() * *target;
+    let [d1, a2, a3, d4, d5, d6] = dh.lengths;
+    let goal = pre(dh).inverse() * *target;
     let z6 = goal.rotation * DVec3::Z;
     let wrist = goal.translation - z6 * d6;
     let reach = fm::hypot(wrist.x, wrist.y);
@@ -209,7 +270,7 @@ impl KinematicsFactory for UrKinematics {
 
     fn build(&self, chain: &ChainSpec) -> Result<Box<dyn KinematicsSolver>, KinError> {
         let (dh, _) =
-            recognise(chain).ok_or_else(|| KinError::Unsupported("not a UR e-Series arm".to_owned()))?;
+            recognise(chain).ok_or_else(|| KinError::Unsupported("not a UR-type arm".to_owned()))?;
         // The chain's base and tip may differ from base_link and tool0 by fixed transforms.
         let zero = [0.0; 6];
         let tip = from_pose(&chain.fk(&zero).ok_or_else(|| KinError::Unsupported("bad chain".to_owned()))?);

@@ -25,6 +25,8 @@ gc_mesh.workspace = true
 gc_tools.workspace = true
 gc_plugin_api.workspace = true
 gc_robotics_api.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 log.workspace = true
 thiserror.workspace = true
 

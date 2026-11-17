@@ -99,8 +99,9 @@ impl Session {
         }
 
         for (id, robot) in self.doc.robots().iter() {
-            if robot.resource_dir.is_empty() {
-                continue; // a robot from the library brings its own files
+            if robot.resource_dir.is_empty() || robot.resource_dir.starts_with(crate::library::LIBRARY_SCHEME)
+            {
+                continue; // a robot from a plugin or the library brings its own files
             }
             let dir = PathBuf::from(&robot.resource_dir);
             let stored = match relative(&dir, base) {
@@ -166,7 +167,10 @@ pub(crate) fn unpacked(mut doc: Document, path: &Path) -> Document {
             let solid = Solid::Mesh { file, scale: *scale };
             ops.push(CellOp::SetTool { id, tool: Some(Tool { solid, placement: tool.placement }) });
         }
-        if !robot.resource_dir.is_empty() && !Path::new(&robot.resource_dir).is_absolute() {
+        if !robot.resource_dir.is_empty()
+            && !robot.resource_dir.starts_with(crate::library::LIBRARY_SCHEME)
+            && !Path::new(&robot.resource_dir).is_absolute()
+        {
             let resource_dir = absolute(&robot.resource_dir, base).to_string_lossy().into_owned();
             ops.push(CellOp::SetRobotFiles { id, resource_dir });
         }

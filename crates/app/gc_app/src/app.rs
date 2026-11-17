@@ -25,6 +25,9 @@ pub struct RunOptions {
     /// The application's own folder (recent projects, automatic saves). `None` keeps nothing, which is
     /// what tests want; the application passes the system's settings folder.
     pub settings_dir: Option<PathBuf>,
+    /// The robot library folder. `None` looks for a `robots` folder beside the executable or the working
+    /// folder, or up to four folders above them.
+    pub robot_dir: Option<PathBuf>,
 }
 
 /// Wakes the window when a background job has finished.
@@ -88,18 +91,33 @@ enum Pending {
     Quit,
 }
 
-/// What ships with the application and under which licence, shown in Help > Licences.
-const NOTICES: [(&str, &str); 3] = [
+/// What is built into the program and under which licence. The robot library's packages add their own
+/// licences at run time.
+const BUILT_IN_NOTICES: [(&str, &str); 2] = [
     ("GraphCTRL (MIT)", include_str!("../../../../LICENSE")),
     (
         "Jetendard font (SIL Open Font License 1.1)",
         include_str!("../../../../assets/fonts/LICENSE-Jetendard.txt"),
     ),
-    (
-        "Universal Robots ROS2 Description (BSD-3-Clause): Universal Robots A/S and contributors",
-        include_str!("../../../../assets/ur/upstream/LICENSE"),
-    ),
 ];
+
+/// The notices shown in Help > Licences: what is built in, then each licence the library's packages
+/// carry (once per text).
+fn notices(packages: &[gc_session::library::Package]) -> Vec<(String, String)> {
+    let mut all: Vec<(String, String)> =
+        BUILT_IN_NOTICES.iter().map(|(title, text)| ((*title).to_owned(), (*text).to_owned())).collect();
+    for package in packages {
+        let Some(text) = package.license_text() else { continue };
+        if all.iter().any(|(_, known)| *known == text) {
+            continue;
+        }
+        let info = &package.info;
+        let who = info.attribution.clone().unwrap_or_else(|| info.vendor.clone());
+        let licence = info.license_name.clone().unwrap_or_default();
+        all.push((format!("{who} ({licence})"), text));
+    }
+    all
+}
 
 /// Unsaved work is saved automatically this often, in seconds.
 const AUTOSAVE_SECONDS: f64 = 60.0;
@@ -119,15 +137,64 @@ fn builtin_plugins() -> Vec<Box<dyn gc_plugin_api::Plugin>> {
     vec![Box::new(gc_plugin_ur::UrPlugin)]
 }
 
-/// The bundled sample robot: a six-axis arm described with basic solids.
-const SAMPLE_ROBOT: &str = include_str!("../../../../fixtures/urdf/six_axis.urdf");
-
 /// The closed-form inverse kinematics plugins offer.
 type Kinematics = Vec<std::sync::Arc<dyn gc_robotics_api::KinematicsFactory>>;
 
-/// The robots plugins offer (name and description), a resolver for the files they refer to, and the
-/// closed-form inverse kinematics they offer.
-fn robot_library() -> (Vec<(String, String)>, gc_session::Resources, Kinematics) {
+/// A robot the user can add: a package of the robot library, or one a plugin offers.
+pub(crate) enum LibraryRobot {
+    /// A package folder of the robot library.
+    Package(gc_session::library::Package),
+    /// A robot a plugin offers, with its description.
+    Plugin {
+        /// The name in the list.
+        name: String,
+        /// Its description.
+        urdf: String,
+    },
+}
+
+impl LibraryRobot {
+    /// The name in the list.
+    pub(crate) fn name(&self) -> &str {
+        match self {
+            Self::Package(package) => &package.info.name,
+            Self::Plugin { name, .. } => name,
+        }
+    }
+
+    /// Adds the robot to the session's cell.
+    pub(crate) fn add(&self, session: &mut Session) -> Result<gc_core::Id<gc_doc::Robot>, String> {
+        match self {
+            Self::Package(package) => session.add_library_robot(package),
+            Self::Plugin { name, urdf } => {
+                let name = format!("{name}_{}", session.doc().robots().len() + 1);
+                session.add_robot(&name, urdf)
+            }
+        }
+    }
+}
+
+/// The robot library folder: the given one, else a `robots` folder found from the working folder or
+/// the executable's folder.
+fn library_dir(given: Option<&std::path::Path>) -> Option<PathBuf> {
+    if let Some(dir) = given {
+        return Some(dir.to_path_buf());
+    }
+    let starts: Vec<PathBuf> = [
+        std::env::current_dir().ok(),
+        std::env::current_exe().ok().and_then(|exe| exe.parent().map(std::path::Path::to_path_buf)),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    gc_session::library::find(&starts)
+}
+
+/// The robots the user can add (the library's packages, then what plugins offer), a resolver for the
+/// files plugin robots refer to, and the closed-form inverse kinematics plugins offer.
+fn robot_library(
+    packages: &[gc_session::library::Package],
+) -> (Vec<LibraryRobot>, gc_session::Resources, Kinematics) {
     let mut registry = gc_plugin_api::Registry::default();
     for plugin in builtin_plugins() {
         if let Err(error) = registry.load(plugin.as_ref()) {
@@ -136,20 +203,19 @@ fn robot_library() -> (Vec<(String, String)>, gc_session::Resources, Kinematics)
     }
     let kinematics = registry.get(gc_robotics_api::KINEMATICS_FACTORIES);
     let providers = registry.get(gc_robotics_api::ROBOT_MODEL_PROVIDERS);
-    let mut library = Vec::new();
+    let mut library: Vec<LibraryRobot> = packages.iter().cloned().map(LibraryRobot::Package).collect();
     let mut models = Vec::new();
     for provider in &providers {
         for info in provider.catalog() {
             match provider.urdf(&info.id) {
                 Ok(urdf) => {
-                    library.push((info.name.clone(), urdf));
+                    library.push(LibraryRobot::Plugin { name: info.name.clone(), urdf });
                     models.push((std::sync::Arc::clone(provider), info.id));
                 }
                 Err(error) => log::error!("robot `{}` is not available: {error}", info.id),
             }
         }
     }
-    library.push(("6R".to_owned(), SAMPLE_ROBOT.to_owned()));
     let resources: gc_session::Resources = std::sync::Arc::new(move |uri: &str| {
         models.iter().find_map(|(provider, model)| provider.resource(model, uri).ok())
     });
@@ -168,7 +234,9 @@ pub struct GraphCtrlApp {
     cell: gc_panels::CellUi,
     params: gc_panels::ParamsUi,
     /// The robots that can be added: name and description.
-    library: Vec<(String, String)>,
+    library: Vec<LibraryRobot>,
+    /// What Help > Licences shows.
+    licences: Vec<(String, String)>,
     expression: String,
     ime: ImeTest,
     /// Whether the licence notices window is open.
@@ -195,7 +263,10 @@ impl GraphCtrlApp {
     pub fn new(cc: &eframe::CreationContext<'_>, options: RunOptions) -> Self {
         gc_ui::fonts::install(&cc.egui_ctx);
         gc_ui::install_theme(&cc.egui_ctx);
-        let (library, resources, kinematics) = robot_library();
+        let robot_dir = library_dir(options.robot_dir.as_deref());
+        let packages = robot_dir.as_deref().map(gc_session::library::scan).unwrap_or_default();
+        let licences = notices(&packages);
+        let (library, resources, kinematics) = robot_library(&packages);
         let recent = options.settings_dir.as_deref().map(gc_persist::places::load_recent).unwrap_or_default();
         let recovery = options.settings_dir.as_deref().and_then(gc_persist::places::pending_autosave);
         // The language chosen last time, when there are saved settings.
@@ -208,6 +279,7 @@ impl GraphCtrlApp {
         let mut session = Session::new();
         session.set_resources(resources);
         session.set_kinematics(kinematics);
+        session.set_robot_library(robot_dir);
         if options.background_jobs {
             let notifier = std::sync::Arc::new(Repaint(cc.egui_ctx.clone()));
             session.set_executor(gc_jobs::Executor::thread().with_notifier(notifier));
@@ -222,6 +294,7 @@ impl GraphCtrlApp {
             cell: gc_panels::CellUi::default(),
             params: gc_panels::ParamsUi::default(),
             library,
+            licences,
             expression: String::new(),
             ime: ImeTest { dimension: "25 mm".to_owned(), ..ImeTest::default() },
             notices: false,
@@ -372,11 +445,10 @@ impl GraphCtrlApp {
                 self.notice = None;
             }
             Pending::Example => {
-                let urdf =
-                    self.library.iter().find(|(name, _)| name.contains("UR5e")).map(|(_, urdf)| urdf.clone());
-                let opened = urdf
-                    .ok_or_else(|| "UR5e".to_owned())
-                    .and_then(|urdf| crate::example::open(&mut self.session, &urdf));
+                let opened = match self.library.iter().find(|robot| robot.name() == crate::example::ROBOT) {
+                    Some(robot) => crate::example::open(&mut self.session, robot),
+                    None => Err(tr!(lang, ExampleNeedsRobot, crate::example::ROBOT)),
+                };
                 self.tab = Tab::Robot;
                 self.notice = opened.err().map(|error| tr!(lang, ExampleFailed, error));
                 self.viewport.look(StandardView::Iso);
@@ -660,7 +732,7 @@ impl GraphCtrlApp {
             ctx,
             |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    for (title, text) in NOTICES {
+                    for (title, text) in &self.licences {
                         egui::CollapsingHeader::new(title).show(ui, |ui| {
                             ui.label(egui::RichText::new(text).monospace().size(11.0));
                         });

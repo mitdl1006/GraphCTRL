@@ -1573,7 +1573,8 @@ fn the_example_cell_opens_planned() {
     harness.run();
     harness.run_steps(3);
     harness.get_by_label("Jetendard font (SIL Open Font License 1.1)");
-    assert!(harness.query_by_label_contains("Universal Robots ROS2 Description").is_some());
+    // The UR packages bring their licence from the robot library.
+    assert!(harness.query_by_label_contains("Universal_Robots_ROS2_Description").is_some());
 }
 
 /// The robot library lists the four UR e-Series models and the sample arm; a UR10e is drawn with its

@@ -63,7 +63,7 @@ pub(crate) fn show(
     session: &mut Session,
     viewport: &mut Viewport,
     cell: &mut CellUi,
-    library: &[(String, String)],
+    library: &[crate::app::LibraryRobot],
     lang: Lang,
 ) -> Option<RibbonAction> {
     let mut action = None;
@@ -189,7 +189,7 @@ fn robot_tab(
     session: &mut Session,
     viewport: &mut Viewport,
     cell: &mut CellUi,
-    library: &[(String, String)],
+    library: &[crate::app::LibraryRobot],
     lang: Lang,
 ) -> Option<RibbonAction> {
     let mut action = None;
@@ -198,13 +198,15 @@ fn robot_tab(
     // Failures of these commands are shown in the status bar.
     ribbon_group(ui, tr!(lang, GroupAdd), |ui| {
         // One robot per cell for now: the panels show the first one.
-        // The robot library in one list: UR3e, UR5e, UR10e, UR16e and the sample arm.
+        // The robot library in one list: the packages of the library folder and what plugins offer.
         let add = ribbon_button(ui, Icon::Robot, tr!(lang, CmdRobotLibrary), false, robot.is_none());
         egui::Popup::menu(&add).show(|ui| {
-            for (name, urdf) in library {
-                if ui.button(tr!(lang, CmdAddRobot, name)).clicked() {
-                    let name = format!("{name}_{}", session.doc().robots().len() + 1);
-                    if let Err(error) = session.add_robot(&name, urdf) {
+            if library.is_empty() {
+                ui.label(tr!(lang, LibraryEmpty));
+            }
+            for entry in library {
+                if ui.button(tr!(lang, CmdAddRobot, entry.name())).clicked() {
+                    if let Err(error) = entry.add(session) {
                         log::error!("the robot could not be added: {error}");
                     }
                     viewport.fit(session, [1000.0, 700.0]);
