@@ -67,6 +67,61 @@ pub fn shortcut(
     taken
 }
 
+/// Tries `attempts` times to straighten one joint over a stretch of the path: between two random
+/// waypoints, the chosen joint moves evenly (in proportion to the path length covered) while the other
+/// joints keep their values. Removes detours a whole-state shortcut cannot, where one joint wanders while
+/// the others are needed to clear an obstacle. Returns how many were taken. The path stays valid and
+/// never gets longer.
+pub fn partial_shortcut(
+    space: &Space,
+    path: &mut [Vec<f64>],
+    validity: &dyn Validity,
+    rng: &mut Rng,
+    attempts: usize,
+) -> usize {
+    let mut taken = 0;
+    let dof = space.dof();
+    for _ in 0..attempts {
+        if path.len() < 3 || dof == 0 {
+            break;
+        }
+        let mut i = rng.below(path.len());
+        let mut j = rng.below(path.len());
+        if i > j {
+            std::mem::swap(&mut i, &mut j);
+        }
+        let joint = rng.below(dof);
+        if j < i + 2 {
+            continue;
+        }
+        // Where each waypoint lies along the stretch, by path length.
+        let mut along = vec![0.0; j - i + 1];
+        for m in i + 1..=j {
+            along[m - i] = along[m - i - 1] + space.distance(&path[m - 1], &path[m]);
+        }
+        let total = along[j - i];
+        if total <= 0.0 {
+            continue;
+        }
+        let (start, end) = (path[i][joint], path[j][joint]);
+        let mut trial: Vec<Vec<f64>> = path[i..=j].to_vec();
+        for (m, state) in trial.iter_mut().enumerate().take(j - i).skip(1) {
+            state[joint] = start + (end - start) * along[m] / total;
+        }
+        let old = path_cost(space, &path[i..=j]);
+        if path_cost(space, &trial) >= old - 1e-12
+            || !trial.iter().all(|q| space.contains(q))
+            || !trial[1..trial.len() - 1].iter().all(|q| validity.state_valid(q))
+            || !trial.windows(2).all(|pair| validity.motion_valid(&pair[0], &pair[1]))
+        {
+            continue;
+        }
+        path[i..=j].clone_from_slice(&trial);
+        taken += 1;
+    }
+    taken
+}
+
 /// Rounds corners: each interior state is replaced by two states a quarter of the way along its two
 /// segments, where the cut is valid. `passes` repetitions make the path progressively rounder.
 pub fn smooth_corners(space: &Space, path: &mut Vec<Vec<f64>>, validity: &dyn Validity, passes: usize) {
