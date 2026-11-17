@@ -520,6 +520,26 @@ messages! {
     /// Plan metric: the move was possible in a straight joint-space line.
     PlanStraight => ("직선 이동(플래너 불필요)", "Straight move (no planner needed)"),
     // --- frontend ---
+    /// View tab group of appearance commands (section views).
+    GroupAppearance => ("외형", "Appearance"),
+    /// Section view types and mini-toolbar.
+    SectionHalf => ("1/2 단면", "Half section"),
+    /// Section view type.
+    SectionQuarter => ("1/4 단면", "Quarter section"),
+    /// Section view type.
+    SectionThreeQuarter => ("3/4 단면", "Three-quarter section"),
+    /// Section view: remove it.
+    SectionDelete => ("단면 삭제", "Delete section view"),
+    /// Section mini-toolbar: the position of the cutting plane.
+    SectionDistance => ("위치", "Position"),
+    /// Section mini-toolbar: flip the cut direction.
+    SectionFlip => ("뒤집기", "Flip"),
+    /// Section mini-toolbar: go on to the second plane.
+    SectionContinue => ("계속", "Continue"),
+    /// Section mini-toolbar: apply.
+    SectionOk => ("확인", "OK"),
+    /// Section mini-toolbar: cancel.
+    SectionCancel => ("취소", "Cancel"),
     /// Ribbon: the Constrain command; the dialog's title.
     ConstrainTitle => ("구속", "Constrain"),
     /// Constrain dialog: the Mate type.

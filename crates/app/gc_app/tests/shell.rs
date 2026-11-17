@@ -2782,3 +2782,52 @@ fn the_constrain_dialog_mates_two_components() {
     assert!(sideways.abs() < 1e-6, "the axes coincide now: {sideways}");
     let _ = fixed;
 }
+
+/// Section views (View tab > Appearance): a half section cuts the model by a plane; a quarter section
+/// takes a second plane after Continue; Delete brings the model back.
+#[test]
+fn section_views_cut_the_model() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.4, 0.4, 0.4] };
+    let placement = gc_doc::Placement { xyz: [0.0, 0.0, 0.2], rpy: [0.0; 3] };
+    harness.state_mut().session.add_body(solid, placement).unwrap();
+    harness.state_mut().fit_view();
+    harness.get_by_label("뷰").click();
+    harness.run();
+    let whole = gpu.then(|| harness.render().unwrap());
+
+    harness.get_by_label("1/2 단면").click();
+    harness.run_steps(3);
+    let section = harness.state().viewport().section.clone().unwrap();
+    assert_eq!(section.planes.len(), 1);
+    assert!(section.editing.is_some());
+    if let Some(whole) = whole {
+        let cut = harness.render().unwrap();
+        let different = whole.pixels().zip(cut.pixels()).filter(|(a, b)| a != b).count();
+        assert!(different > 5000, "{different} pixels changed");
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        cut.save(out.join("review-34-half-section.png")).unwrap();
+    }
+    // OK applies it; the toolbar goes away and the cut stays.
+    harness.get_by_label("확인").click();
+    harness.run_steps(3);
+    assert!(harness.state().viewport().section.as_ref().unwrap().editing.is_none());
+
+    // A quarter section goes on to a second plane.
+    harness.get_by_label("1/4 단면").click();
+    harness.run_steps(3);
+    harness.get_by_label("계속").click();
+    harness.run_steps(3);
+    assert_eq!(harness.state().viewport().section.as_ref().unwrap().planes.len(), 2);
+    harness.get_by_label("확인").click();
+    harness.run_steps(3);
+
+    harness.get_by_label("단면 삭제").click();
+    harness.run_steps(3);
+    assert!(harness.state().viewport().section.is_none());
+}

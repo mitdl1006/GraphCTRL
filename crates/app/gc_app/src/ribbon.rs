@@ -219,6 +219,29 @@ pub(crate) fn show(
                         viewport.camera.ortho = false;
                     }
                 });
+                ribbon_group(ui, tr!(lang, GroupAppearance), |ui| {
+                    for (kind, label) in [
+                        (gc_viewport::SectionKind::Half, Msg::SectionHalf),
+                        (gc_viewport::SectionKind::Quarter, Msg::SectionQuarter),
+                        (gc_viewport::SectionKind::ThreeQuarter, Msg::SectionThreeQuarter),
+                    ] {
+                        let active = viewport.section.as_ref().is_some_and(|s| s.kind == kind);
+                        if ribbon_button(ui, Icon::LookAt, label.text(lang), active, true).clicked() {
+                            viewport.section = Some(gc_viewport::Section::new(kind));
+                        }
+                    }
+                    if ribbon_button(
+                        ui,
+                        Icon::Finish,
+                        tr!(lang, SectionDelete),
+                        false,
+                        viewport.section.is_some(),
+                    )
+                    .clicked()
+                    {
+                        viewport.section = None;
+                    }
+                });
                 ribbon_group(ui, tr!(lang, GroupPanels), |ui| {
                     if ribbon_button(ui, Icon::View, tr!(lang, ViewPanelsSeeThrough), *translucent, true)
                         .clicked()

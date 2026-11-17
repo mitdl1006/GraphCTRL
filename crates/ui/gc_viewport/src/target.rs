@@ -57,7 +57,7 @@ impl Background {
         rect: egui::Rect,
         camera: &Camera,
         scene: &Scene,
-        slice: Option<(gc_math::DVec3, f64)>,
+        slice: Slicing,
     ) {
         let Some(rs) = self.render_state.as_ref() else { return };
         let ppp = ui.pixels_per_point();
@@ -147,21 +147,12 @@ impl Background {
                 clip_from_relative: narrow(camera.clip_from_eye_relative(size, extent)),
                 light: vec3(light),
                 forward: vec3(forward),
-                // Slicing: what lies in front of the sketch plane (towards the eye) is cut away.
-                slice: slice.map(|(normal, offset)| {
-                    #[allow(clippy::cast_possible_truncation, reason = "GPU data is f32")]
-                    let plane = [
-                        normal.x as f32,
-                        normal.y as f32,
-                        normal.z as f32,
-                        (normal.dot(eye) - offset - SLICE_TOLERANCE) as f32,
-                    ];
-                    plane
-                }),
+                // Slicing: what lies on the cut side of the plane(s) is cut away.
+                slice: slice.planes.first().map(|plane| relative_plane(*plane, eye)),
+                slice2: slice.planes.get(1).map(|plane| relative_plane(*plane, eye)),
+                slice_union: slice.union,
             };
-            let removed = |p: gc_math::DVec3| {
-                slice.is_some_and(|(normal, offset)| normal.dot(p) - offset > SLICE_TOLERANCE)
-            };
+            let removed = |p: gc_math::DVec3| slice.removes(p);
             // Transparent where nothing is drawn, so that the grid painted underneath shows through.
             let clear = [0.0; 4];
             // Traces of planned paths: lines in the 3D picture, hidden where a solid is in front of them.
@@ -202,4 +193,42 @@ impl Background {
             ui.painter().image(*id, rect, uv, egui::Color32::WHITE);
         }
     }
+}
+
+/// What is cut away: up to two planes `(normal, offset)` in the world (the side the normal points to is
+/// cut), and with two planes whether the cut is of either side (union) or of both (intersection).
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Slicing {
+    pub(crate) planes: Vec<(gc_math::DVec3, f64)>,
+    pub(crate) union: bool,
+}
+
+impl Slicing {
+    /// Whether a world point is cut away.
+    fn removes(&self, p: gc_math::DVec3) -> bool {
+        let beyond = |(normal, offset): &(gc_math::DVec3, f64)| normal.dot(p) - offset > SLICE_TOLERANCE;
+        match self.planes.as_slice() {
+            [] => false,
+            [a] => beyond(a),
+            [a, b, ..] => {
+                if self.union {
+                    beyond(a) || beyond(b)
+                } else {
+                    beyond(a) && beyond(b)
+                }
+            }
+        }
+    }
+}
+
+/// A world plane as the renderer takes it: relative to the eye.
+fn relative_plane((normal, offset): (gc_math::DVec3, f64), eye: gc_math::DVec3) -> [f32; 4] {
+    #[allow(clippy::cast_possible_truncation, reason = "GPU data is f32")]
+    let plane = [
+        normal.x as f32,
+        normal.y as f32,
+        normal.z as f32,
+        (normal.dot(eye) - offset - SLICE_TOLERANCE) as f32,
+    ];
+    plane
 }

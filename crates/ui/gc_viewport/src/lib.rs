@@ -8,6 +8,7 @@ mod gizmo;
 mod hud;
 mod origin;
 mod paint;
+mod section;
 mod target;
 
 use egui::{Key, PointerButton, Sense, vec2};
@@ -25,6 +26,7 @@ use gc_ui::colors;
 
 pub use origin::ALL as ORIGIN_ELEMENTS;
 pub use paint::{format_angle, format_length};
+pub use section::{Section, SectionKind, SectionPlane};
 pub use target::Background;
 
 /// The plane a sketch lies in, with its in-plane axes.
@@ -95,6 +97,8 @@ pub struct Viewport {
     hud: hud::Hud,
     /// Whether the heads-up display (dynamic input) is on.
     pub hud_on: bool,
+    /// The section view, in progress or applied.
+    pub section: Option<Section>,
     /// Slice Graphics (F7): the part of the model in front of the sketch plane is cut away while a 2D
     /// sketch is edited.
     pub slice: bool,
@@ -149,6 +153,7 @@ impl Viewport {
             origin_menu: None,
             hud: hud::Hud::default(),
             hud_on: true,
+            section: None,
             slice: false,
             show_constraints: true,
             box_select: None,
@@ -361,12 +366,17 @@ impl Viewport {
         if active.is_none() || session.sketch_is_spatial() {
             self.slice = false;
         }
-        let slice = active.filter(|_| self.slice).map(|(_, plane)| {
-            // The side of the plane the eye is on is cut away.
-            let toward_eye =
-                if plane.normal.dot(self.camera.forward()) < 0.0 { plane.normal } else { -plane.normal };
-            (toward_eye, toward_eye.dot(plane.origin))
-        });
+        let slice = if let Some(section) = &self.section {
+            section.slicing()
+        } else {
+            let one = active.filter(|_| self.slice).map(|(_, plane)| {
+                // The side of the plane the eye is on is cut away.
+                let toward_eye =
+                    if plane.normal.dot(self.camera.forward()) < 0.0 { plane.normal } else { -plane.normal };
+                (toward_eye, toward_eye.dot(plane.origin))
+            });
+            target::Slicing { planes: one.into_iter().collect(), union: false }
+        };
         self.background.paint(ui, rect, &self.camera, &scene, slice);
         paint::over(
             ui,
@@ -385,6 +395,21 @@ impl Viewport {
                 Some(egui::pos2(rect.left() + p[0] as f32, rect.top() + p[1] as f32))
             };
             origin::paint(&ui.painter_at(rect), &screen, session, self.origin_selected, self.constrain_mode);
+        }
+        if let Some(section) = &self.section {
+            let camera = self.camera;
+            let screen = |world: DVec3| {
+                let p = camera.project(world, size)?;
+                #[allow(clippy::cast_possible_truncation, reason = "screen coordinates fit f32")]
+                Some(egui::pos2(rect.left() + p[0] as f32, rect.top() + p[1] as f32))
+            };
+            section.paint_plane(&ui.painter_at(rect), &screen, session);
+        }
+        if let Some(section) = &mut self.section
+            && section::toolbar(ui.ctx(), section, self.clear.unwrap_or(rect), lang)
+                == section::ToolbarAction::Cancel
+        {
+            self.section = None;
         }
         if self.hud_on && active.is_some() && !session.sketch_is_spatial() {
             self.hud.show(ui.ctx(), session, cursor, lang);
