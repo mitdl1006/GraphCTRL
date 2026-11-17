@@ -56,7 +56,7 @@
 | Three Point Rectangle (3점) [S3] | 1=모서리, 2=한 변의 방향·길이, 3=인접 변 길이. 임의 방향. HUD 지원 [S4] | | 없음 | 신규 | P1 | BE |
 | Two Point Center / Three Point Center Rectangle [S3] | 2점 중심: 1=중심, 2=모서리. 3점 중심: 1=중심, 2=한 변 방향·거리, 3=인접 변 거리 | | 없음 | 신규 | P2 | BE |
 | Slot (슬롯) 5종 [S3] | Center to Center: 호 중심 2점 클릭 후 3번째로 너비. Overall: 중심선 시작·끝 2점 후 너비. Center Point: 슬롯 중심, 호 중심 1점, 너비. Three Point Arc Slot(호 슬롯): 중심 호의 시작·끝 2점, 3번째 = 호 중심, 마지막 = 너비. Center Point Arc Slot: 중심점, 중심 호의 시작·끝, 너비(4클릭). 값은 입력창·우클릭으로 직접 입력 가능 [S3] | (미확인) | 없음 | 신규 5종 | P2 | BE |
-| Polygon (다각형) [S3] | 대화상자: Inscribed(꼭짓점 기준)/Circumscribed(변 중점 기준), 변 수(최대 120). 중심 클릭 후 드래그. Esc·다른 명령·대화상자 Done으로 종료 | (미확인) | 없음 | 신규 | P2 | BE+FE |
+| Polygon (다각형) [S3] | 대화상자: Inscribed(꼭짓점 기준)/Circumscribed(변 중점 기준), 변 수(최대 120). 중심 클릭 후 드래그. Esc·다른 명령·대화상자 Done으로 종료 | (미확인) | **BE 완료**: `SketchOp::AddPolygon{centre, at, sides(3–120), circumscribed}` — 선 n개 + 구성 원(내접: 꼭짓점이 원 위, 외접: 변이 원에 접함), 꼭짓점 일치, 변 같음(짝수 외접은 첫 변 중점으로 가는 구성 반지름이 그 변과 직각). 남는 자유도 4(중심·크기·회전). 원문에 구속 목록은 없어 구성은 자체 결정 | 대화상자(내접/외접·변 수)·중심 클릭 후 드래그 도구는 FE | P2 | BE+FE |
 | Ellipse (타원) [S3] | 1=중심, 2=첫 축의 방향·길이(중심선 표시), 3=두 번째 축 길이 | (미확인) | 없음 | 신규(타원 기하 자체가 `CurveGeom`에 없음) | P3 | BE |
 | Interpolation Spline (보간) [S11] | 클릭마다 맞춤점. 끝점은 사각형, 맞춤점은 마름모. 시작점 우클릭 "Close Curve". 핸들 편집(Activate Handle), Insert Point, Split Spline, Spline Tension 등 [S11] | (미확인) | 없음 | 신규 | P3 | BE |
 | Control Vertex Spline (제어점) [S11] | 클릭마다 제어점(제어 프레임은 구성선, 제어점은 원). 완료는 OK, 계속은 Apply | | 없음 | 신규 | P3 | BE |

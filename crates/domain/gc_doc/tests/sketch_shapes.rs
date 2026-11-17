@@ -106,3 +106,68 @@ fn points_are_placed_without_constraints_as_centre_or_sketch_points() {
     assert!(bench.op(SketchOp::SetCenterPoint { points: vec![end], center: true }).is_err());
     assert!(bench.op(SketchOp::PlacePoint { pos: [f64::NAN, 0.0, 0.0], center: true }).is_err());
 }
+
+fn length(sketch: &Sketch, line: Id<Curve>) -> f64 {
+    let (a, b) = sketch.line(line).unwrap();
+    let (p, q) = (sketch.pos(a).unwrap(), sketch.pos(b).unwrap());
+    (p[0] - q[0]).hypot(p[1] - q[1])
+}
+
+/// Inventor 2026 help, To Create 2D Shape Geometry (GUID-D489CE6D-7299-4211-A43A-F3580A4BA357), Polygons:
+/// up to 120 sides; Inscribed uses a vertex for size and orientation, Circumscribed the midpoint of an edge;
+/// click the centre, then drag.
+#[test]
+fn polygons_are_regular_with_four_degrees_of_freedom_inscribed_or_circumscribed() {
+    for circumscribed in [false, true] {
+        for sides in [3u32, 4, 5, 6, 7, 8, 12] {
+            let mut bench = Bench::new();
+            let dof = bench.dof();
+            let created = bench
+                .op(SketchOp::AddPolygon {
+                    centre: [0.1, 0.2, 0.0],
+                    at: [0.1, 0.3, 0.0],
+                    sides,
+                    circumscribed,
+                })
+                .unwrap_or_else(|e| panic!("{sides} {circumscribed}: {e}"));
+            let curves = Bench::curves(&created);
+            let (lines, construction) = curves.split_at(sides as usize);
+            assert!(!construction.is_empty());
+            assert!(construction.iter().all(|c| bench.sketch().curves[c].construction));
+            assert_eq!(bench.dof(), dof + 4, "{sides} {circumscribed}: centre, size and turn");
+            let mut solved = bench.sketch().clone();
+            solved.solve().unwrap();
+            let first = length(&solved, lines[0]);
+            assert!(lines.iter().all(|l| (length(&solved, *l) - first).abs() < 1e-9), "equal sides");
+            // Size: the corner (inscribed) or the edge midpoint (circumscribed) is 0.1 from the centre.
+            let expected = if circumscribed {
+                0.2 * (std::f64::consts::PI / f64::from(sides)).tan()
+            } else {
+                0.2 * (std::f64::consts::PI / f64::from(sides)).sin()
+            };
+            assert!((first - expected).abs() < 1e-9, "{sides} {circumscribed}: {first} vs {expected}");
+        }
+    }
+    let mut bench = Bench::new();
+    for bad in [2, 121] {
+        assert!(
+            bench
+                .op(SketchOp::AddPolygon {
+                    centre: [0.0; 3],
+                    at: [0.1, 0.0, 0.0],
+                    sides: bad,
+                    circumscribed: false
+                })
+                .is_err()
+        );
+    }
+    assert!(
+        bench
+            .op(SketchOp::AddPolygon { centre: [0.0; 3], at: [0.0; 3], sides: 6, circumscribed: false })
+            .is_err()
+    );
+    let created = bench
+        .op(SketchOp::AddPolygon { centre: [0.0; 3], at: [0.1, 0.0, 0.0], sides: 120, circumscribed: true })
+        .unwrap();
+    assert_eq!(Bench::curves(&created).len(), 122, "120 sides, the circle and the radius");
+}

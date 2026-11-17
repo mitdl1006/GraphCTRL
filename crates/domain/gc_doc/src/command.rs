@@ -67,6 +67,22 @@ pub enum SketchOp {
         /// A centre point rather than a sketch point.
         center: bool,
     },
+    /// The Polygon command (Inventor 2026 help, To Create 2D Shape Geometry,
+    /// GUID-D489CE6D-7299-4211-A43A-F3580A4BA357: up to 120 sides, Inscribed — "the vertex ... determines
+    /// the size and orientation" — or Circumscribed — "the midpoint of an edge"): a regular polygon round
+    /// `centre` with a corner (inscribed) or an edge midpoint (circumscribed) at `at`. A construction
+    /// circle through the corners, or touching the edges, carries its size; the polygon keeps four degrees
+    /// of freedom (centre, size, turn).
+    AddPolygon {
+        /// Centre.
+        centre: [f64; 3],
+        /// A corner (inscribed) or the midpoint of an edge (circumscribed).
+        at: [f64; 3],
+        /// Number of sides, 3 to 120.
+        sides: u32,
+        /// Circumscribed (edges touch the circle) rather than inscribed (corners on it).
+        circumscribed: bool,
+    },
     /// The Center Point toggle on selected standalone points (curve ends and centres are refused).
     SetCenterPoint {
         /// The points.
@@ -872,6 +888,90 @@ fn sketch_op(
             }
             created.push(Created::Point(point));
             if *center { "Center point" } else { "Point" }
+        }
+        SketchOp::AddPolygon { centre, at, sides, circumscribed } => {
+            if !(3..=120).contains(sides) || !centre.iter().chain(at).all(|v| v.is_finite()) {
+                return Err(SketchError::InvalidValue.into());
+            }
+            let (dx, dy) = (at[0] - centre[0], at[1] - centre[1]);
+            let reach = gc_math::fm::hypot(dx, dy);
+            if reach < 1e-9 {
+                return Err(SketchError::InvalidValue.into());
+            }
+            let n = *sides as usize;
+            let step = std::f64::consts::TAU / f64::from(*sides);
+            let start = gc_math::fm::atan2(dy, dx);
+            // Corners: on the circle (inscribed), or half a step either side of the clicked edge midpoint,
+            // farther out (circumscribed).
+            let (radius, first) = if *circumscribed {
+                (reach / gc_math::fm::cos(step / 2.0), start - step / 2.0)
+            } else {
+                (reach, start)
+            };
+            #[allow(clippy::cast_precision_loss, reason = "at most 120 sides")]
+            let corners: Vec<[f64; 3]> = (0..n)
+                .map(|i| {
+                    let angle = first + step * i as f64;
+                    [
+                        centre[0] + radius * gc_math::fm::cos(angle),
+                        centre[1] + radius * gc_math::fm::sin(angle),
+                        0.0,
+                    ]
+                })
+                .collect();
+            let lines: Vec<Id<Curve>> =
+                (0..n).map(|i| sketch.add_line(ids, corners[i], corners[(i + 1) % n])).collect();
+            let ends: Vec<(Id<SkPoint>, Id<SkPoint>)> =
+                lines.iter().filter_map(|l| sketch.line(*l)).collect();
+            let circle = sketch.add_circle(ids, *centre, reach)?;
+            if let Some(c) = sketch.curves.get_mut(&circle) {
+                c.construction = true;
+            }
+            created.extend(lines.iter().map(|l| Created::Curve(*l)));
+            created.push(Created::Curve(circle));
+            for i in 0..n {
+                require(
+                    sketch,
+                    ids,
+                    GeoConstraint::Coincident(ends[i].1, ends[(i + 1) % n].0),
+                    &mut created,
+                )?;
+            }
+            if *circumscribed {
+                for line in &lines {
+                    let tangent = tangency(sketch, *line, circle).ok_or(SketchError::InvalidValue)?;
+                    require(sketch, ids, tangent, &mut created)?;
+                }
+                // Equal sides: with every edge touching the circle, an odd polygon is then regular; an
+                // even one only up to alternating tangent lengths (a rhombus), which one edge touching
+                // at its midpoint settles (and the last equality then follows).
+                let equal = if n.is_multiple_of(2) { n - 2 } else { n - 1 };
+                for i in 0..equal {
+                    require(sketch, ids, GeoConstraint::Equal(lines[i], lines[i + 1]), &mut created)?;
+                }
+                if n.is_multiple_of(2) {
+                    // A construction radius to the first edge's midpoint, square to it: the edge touches
+                    // at its midpoint (a point merely on the circle would hold only to second order).
+                    let radius_line = sketch.add_line(ids, *centre, *at);
+                    if let Some(c) = sketch.curves.get_mut(&radius_line) {
+                        c.construction = true;
+                    }
+                    created.push(Created::Curve(radius_line));
+                    let (from, to) = sketch.line(radius_line).ok_or(SketchError::InvalidValue)?;
+                    let middle = sketch.round(circle).map(|(c, _)| c).ok_or(SketchError::InvalidValue)?;
+                    require(sketch, ids, GeoConstraint::Coincident(from, middle), &mut created)?;
+                    require(sketch, ids, GeoConstraint::Midpoint(to, lines[0]), &mut created)?;
+                    require(sketch, ids, GeoConstraint::Perpendicular(radius_line, lines[0]), &mut created)?;
+                }
+            } else {
+                for (corner, _) in &ends {
+                    require(sketch, ids, GeoConstraint::PointOnCurve(*corner, circle), &mut created)?;
+                }
+                for i in 0..n - 1 {
+                    require(sketch, ids, GeoConstraint::Equal(lines[i], lines[i + 1]), &mut created)?;
+                }
+            }
+            "Polygon"
         }
         SketchOp::SetCenterPoint { points, center } => {
             let owned: std::collections::BTreeSet<Id<SkPoint>> =
