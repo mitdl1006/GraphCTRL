@@ -30,7 +30,7 @@ use std::time::Instant;
 use gc_collide::ShapeDesc;
 use gc_math::{DPose3, DVec3, quat_from_rpy};
 use gc_motion::{Obstacle, RobotScene};
-use gc_plan::{Algorithm, NeverCancel, Options, Request, Rng, Space, Validity, path_cost, plan, shortcut};
+use gc_plan::{Algorithm, NeverCancel, Options, Request, Rng, Space, Validity, path_cost, plan};
 use gc_robot::{IkOptions, NumericIk, import};
 
 const ALGORITHMS: [(Algorithm, &str); 5] = [
@@ -41,8 +41,6 @@ const ALGORITHMS: [(Algorithm, &str); 5] = [
     (Algorithm::Prm, "PRM"),
 ];
 
-/// Shortcut attempts after planning, as in the motion pipeline.
-const SHORTCUTS: usize = 150;
 /// Seeds that are planned twice to check repeatability.
 const REPEATED_SEEDS: u64 = 10;
 
@@ -285,7 +283,7 @@ fn run_once(
             Ok(solution) => {
                 let checks = solution.stats.state_checks + straight_checks;
                 let mut path = solution.path;
-                shortcut(space, &mut path, &checker, &mut Rng::new(seed), SHORTCUTS);
+                gc_motion::simplify_path(space, &mut path, &checker, seed);
                 match &straight {
                     Some(line) if path_cost(space, line) <= path_cost(space, &path) => {
                         Ok((line.clone(), checks))
@@ -470,7 +468,7 @@ fn main() {
 
     let mut report = String::new();
     let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
-    writeln!(report, "Robot UR5e (collision meshes as convex hulls), {seeds} seeds per planner (0..{seeds}), single-threaded planner runs spread over {threads} threads. Each run: `gc_plan::plan` at the motion pipeline's checking step and planning margin → {SHORTCUTS} shortcut attempts → independent re-validation against the required padding. Budget = state checks (motion checks count the states they examine).\n").unwrap();
+    writeln!(report, "Robot UR5e (collision meshes as convex hulls), {seeds} seeds per planner (0..{seeds}), single-threaded planner runs spread over {threads} threads. Each run: `gc_plan::plan` at the motion pipeline's checking step and planning margin → the motion pipeline's path simplification (shortcuts, per-joint shortcuts) → independent re-validation against the required padding. Budget = state checks (motion checks count the states they examine).\n").unwrap();
     let total = Instant::now();
     for file in &files {
         let fixture = read_fixture(file);

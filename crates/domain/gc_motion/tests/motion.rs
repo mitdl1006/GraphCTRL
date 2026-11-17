@@ -479,3 +479,51 @@ fn a_sphere_is_planned_around_a_wall_without_a_robot() {
     request.goal = DVec3::new(0.0, 0.0, 0.5);
     assert!(matches!(plan_sphere(&walls, &request, &NeverCancel), Err(MotionError::GoalInvalid(_))));
 }
+
+#[test]
+fn the_planning_margin_applies_to_the_tool_too() {
+    use gc_plan::Validity;
+    // A 0.3 m tool along the flange's Z; a ball just beyond the required padding from its tip.
+    let tool = [(
+        DPose3::from_translation(DVec3::new(0.0, 0.0, 0.15)),
+        ShapeDesc::Cylinder { radius: 0.02, length: 0.3 },
+    )];
+    let path = format!("{}/../../../fixtures/urdf/six_axis.urdf", env!("CARGO_MANIFEST_DIR"));
+    let (model, _) = import(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let chain = model.chain("base_link", "tool0").unwrap();
+    let q = [0.0, 0.2, 0.3, 0.0, 0.5, 0.0];
+    let probe = RobotScene::new(
+        Arc::new(model.clone()),
+        chain.clone(),
+        "tool0",
+        DPose3::IDENTITY,
+        &[],
+        PADDING,
+        &|_| None,
+        &tool,
+    )
+    .unwrap()
+    .0;
+    let flange = probe.tip_in_world(&q);
+    let tip = flange * DVec3::new(0.0, 0.0, 0.3);
+    let outward = flange.rotation * DVec3::Z;
+    let ball = Obstacle {
+        name: "ball".to_owned(),
+        pose: DPose3::from_translation(tip + outward * (0.05 + PADDING + 0.002)),
+        shape: ShapeDesc::Ball(0.05),
+    };
+    let (scene, _) = RobotScene::new(
+        Arc::new(model),
+        chain,
+        "tool0",
+        DPose3::IDENTITY,
+        &[ball],
+        PADDING,
+        &|_| None,
+        &tool,
+    )
+    .unwrap();
+    assert!(scene.strict_checker().state_valid(&q), "2 mm beyond the padding");
+    assert!(!scene.checker(1.0).state_valid(&q), "inside the planning margin, which covers the tool");
+    assert!(scene.checker(1.0).margin() > 0.002);
+}

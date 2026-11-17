@@ -71,7 +71,11 @@ pub fn scan(dir: &Path) -> Vec<Package> {
             let folder = entry.path();
             let text = std::fs::read_to_string(folder.join("robot.json")).ok()?;
             let info: PackageInfo = serde_json::from_str(&text).ok()?;
-            if info.name.is_empty() || !folder.join(&info.description).is_file() {
+            // The description must lie inside the package: a relative path without `..`.
+            let inside = std::path::Path::new(&info.description)
+                .components()
+                .all(|c| matches!(c, std::path::Component::Normal(_) | std::path::Component::CurDir));
+            if info.name.is_empty() || !inside || !folder.join(&info.description).is_file() {
                 return None;
             }
             let id = folder.file_name()?.to_string_lossy().into_owned();

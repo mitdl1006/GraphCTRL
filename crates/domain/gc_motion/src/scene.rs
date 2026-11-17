@@ -124,6 +124,8 @@ pub struct RobotScene {
     link_radius: Vec<f64>,
     /// Per chain coordinate: the model joint, whether it slides, and the links (with bodies) it moves.
     movers: Vec<(usize, bool, Vec<usize>)>,
+    /// The tool's body (placed with the tip link), when there is a tool.
+    tool_body: Option<BodyId>,
     /// Contact allowances in force.
     contacts: Vec<Contact>,
     /// Link pairs excluded from checking by default, and why.
@@ -183,10 +185,6 @@ impl RobotScene {
         let mut link_radius = Vec::with_capacity(model.links.len());
         for (index, link) in model.links.iter().enumerate() {
             let mut shapes = Vec::new();
-            // A tool is part of the link that carries it.
-            if index == tip_link {
-                shapes.extend(tool.iter().cloned());
-            }
             for geometry in &link.collisions {
                 match &geometry.shape {
                     Shape::Box(size) => shapes.push((geometry.pose, ShapeDesc::Box(*size))),
@@ -218,9 +216,12 @@ impl RobotScene {
                     },
                 }
             }
+            // The tool moves with the link that carries it: it counts for how far the link sweeps.
+            let carried = if index == tip_link { tool } else { &[] };
             link_radius.push(
                 shapes
                     .iter()
+                    .chain(carried)
                     .map(|(pose, shape)| pose.translation.length() + shape.radius())
                     .fold(0.0, f64::max),
             );
@@ -237,6 +238,31 @@ impl RobotScene {
                 exclusions.push((a, b, PairReason::Adjacent));
             }
         }
+        // The tool is a body of its own, carried by the tip link. It is never checked against the tip
+        // link and the nearest link with geometry above it (it is mounted there), and checked against
+        // every other link: a tool that reaches back along the arm collides with it.
+        let tool_body = if tool.is_empty() {
+            None
+        } else {
+            let body = world.add_body("tool", true, padding, tool)?;
+            let mut at = Some(tip_link);
+            let mut mounted = Vec::new();
+            for _ in 0..=model.joints.len() {
+                let Some(link) = at else { break };
+                if let Some(carrier) = link_bodies[link] {
+                    mounted.push(carrier);
+                    if link != tip_link || mounted.len() == 2 {
+                        break;
+                    }
+                }
+                at = model.joints.iter().find(|j| j.child == link).map(|j| j.parent);
+            }
+            for carrier in mounted {
+                world.allow(body, carrier);
+                exclusions.push((body, carrier, PairReason::Adjacent));
+            }
+            Some(body)
+        };
         // Links that no chain joint moves (the base, typically) keep their distance to every obstacle
         // whatever the configuration: checking them tells nothing about a motion, and a base standing on
         // a table would otherwise make every configuration invalid.
@@ -268,7 +294,7 @@ impl RobotScene {
             .iter()
             .map(|&joint| {
                 let below = (0..model.links.len())
-                    .filter(|&link| link_bodies[link].is_some())
+                    .filter(|&link| link_bodies[link].is_some() || (link == tip_link && tool_body.is_some()))
                     .filter(|&link| {
                         let mut at = link;
                         // Walk up the tree (at most once per joint, so a malformed tree cannot loop).
@@ -300,6 +326,7 @@ impl RobotScene {
             movers,
             contacts: Vec::new(),
             exclusions,
+            tool_body,
         };
         // Links that touch in the zero configuration are designed to: they are not checked either.
         scene.place(&vec![0.0; scene.chain.dof()]);
@@ -357,10 +384,18 @@ impl RobotScene {
     }
 
     fn place_in(&self, world: &mut World, q: &[f64]) {
-        for (pose, body) in self.link_poses(q).iter().zip(&self.link_bodies) {
+        let poses = self.link_poses(q);
+        self.place_poses(world, &poses);
+    }
+
+    fn place_poses(&self, world: &mut World, poses: &[DPose3]) {
+        for (pose, body) in poses.iter().zip(&self.link_bodies) {
             if let Some(body) = body {
                 world.set_pose(*body, *pose);
             }
+        }
+        if let (Some(tool), Some(carrier)) = (self.tool_body, poses.get(self.tip_link)) {
+            world.set_pose(tool, *carrier);
         }
     }
 
@@ -381,11 +416,7 @@ impl RobotScene {
             return Some(StateProblem::JointLimit { joint: self.chain.joint_names()[joint].clone() });
         }
         let poses = self.link_poses(q);
-        for (pose, body) in poses.iter().zip(&self.link_bodies) {
-            if let Some(body) = body {
-                world.set_pose(*body, *pose);
-            }
-        }
+        self.place_poses(world, &poses);
         if !self.contacts.is_empty() {
             let tip = (poses[self.tip_link] * self.tool).translation;
             for contact in &self.contacts {
@@ -447,9 +478,9 @@ impl RobotScene {
         let mut unknown = Vec::new();
         self.contacts.clear();
         for allowance in allowances {
-            let link = self.world.find(&allowance.body).filter(|b| self.link_bodies.contains(&Some(*b)));
-            let obstacle =
-                self.world.find(&allowance.obstacle).filter(|b| !self.link_bodies.contains(&Some(*b)));
+            let robot = |b: &BodyId| self.link_bodies.contains(&Some(*b)) || self.tool_body == Some(*b);
+            let link = self.world.find(&allowance.body).filter(robot);
+            let obstacle = self.world.find(&allowance.obstacle).filter(|b| !robot(b));
             let (Some(link), Some(obstacle)) = (link, obstacle) else {
                 unknown.push(allowance.clone());
                 continue;
@@ -458,14 +489,20 @@ impl RobotScene {
                 ContactScope::Segment => None,
                 ContactScope::Waypoint => Some((waypoints.to_vec(), allowance.radius.max(0.0))),
             };
-            let excluded = self.world.is_allowed(link, obstacle);
-            self.contacts.push(Contact {
-                link,
-                obstacle,
-                near,
-                allow_touch: allowance.allow_touch,
-                excluded,
-            });
+            // The tip link's allowance covers the tool it carries.
+            let carried = (self.link_bodies.get(self.tip_link) == Some(&Some(link)))
+                .then_some(self.tool_body)
+                .flatten();
+            for body in std::iter::once(link).chain(carried) {
+                let excluded = self.world.is_allowed(body, obstacle);
+                self.contacts.push(Contact {
+                    link: body,
+                    obstacle,
+                    near: near.clone(),
+                    allow_touch: allowance.allow_touch,
+                    excluded,
+                });
+            }
         }
         (self, unknown)
     }
@@ -570,7 +607,9 @@ impl RobotScene {
     /// checked, and a finer checker needs less extra room.
     pub fn checker(&self, fineness: f64) -> Checker<'_> {
         let resolution = self.resolution * fineness;
-        self.checker_with(resolution * self.chain.reach(), resolution)
+        // The farthest a robot point can be from a joint: the chain plus what the tip link carries.
+        let reach = self.chain.reach() + self.link_radius.get(self.tip_link).copied().unwrap_or(0.0);
+        self.checker_with(resolution * reach, resolution)
     }
 
     /// A checker for the required padding alone, used for the final check of a timed motion.
@@ -580,7 +619,7 @@ impl RobotScene {
 
     fn checker_with(&self, margin: f64, resolution: f64) -> Checker<'_> {
         let mut world = self.world.clone();
-        for body in self.link_bodies.iter().flatten() {
+        for body in self.link_bodies.iter().flatten().chain(&self.tool_body) {
             world.set_padding(*body, self.padding + margin);
         }
         Checker { scene: self, world: std::sync::Mutex::new(world), margin, resolution }

@@ -447,7 +447,7 @@ fn attempt(
                 Ok(solution) => {
                     add(&mut stats, &solution.stats);
                     let mut path = solution.path;
-                    shortcut(space, &mut path, &checker, &mut Rng::new(seed), 150);
+                    simplify_path(space, &mut path, &checker, seed);
                     // Nothing a planner or a simplifier returns is trusted without this check.
                     let shorter = best.as_ref().is_none_or(|b| path_cost(space, &path) < path_cost(space, b));
                     if shorter && validate(&path, &checker) {
@@ -763,6 +763,10 @@ impl StateChecker for SharedChecker<'_, '_> {
         self.0.motion_valid(a, b)
     }
 
+    fn motion_cost(&self, a: &[f64], b: &[f64]) -> u64 {
+        self.0.motion_cost(a, b)
+    }
+
     fn clearance(&self, _q: &[f64]) -> Option<f64> {
         None
     }
@@ -781,6 +785,16 @@ fn add(total: &mut Stats, run: &Stats) {
     total.state_checks += run.state_checks;
     total.motion_checks += run.motion_checks;
     total.nodes += run.nodes;
+}
+
+/// Shortens a planned path as the pipeline does (plan 5.8): whole-state shortcuts, then per-joint
+/// shortcuts, then whole-state shortcuts again. Deterministic for a seed; the path stays valid for
+/// `validity` and never gets longer. Used by the motion pipeline and the quality bench.
+pub fn simplify_path(space: &Space, path: &mut Vec<Vec<f64>>, validity: &dyn Validity, seed: u64) {
+    let mut rng = Rng::new(seed);
+    shortcut(space, path, validity, &mut rng, 150);
+    gc_plan::partial_shortcut(space, path, validity, &mut rng, 150);
+    shortcut(space, path, validity, &mut rng, 50);
 }
 
 /// Orders goal configurations as plan 5.8 asks: per IK branch (configurations that differ only by whole

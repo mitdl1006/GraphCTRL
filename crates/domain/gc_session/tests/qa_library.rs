@@ -169,11 +169,13 @@ fn package_folder_names_with_spaces_and_hangul_work() {
 /// A description file name that climbs out of the package folder must not read outside it. Low severity
 /// (the library is a local add-on folder), but a downloaded package should not read arbitrary files.
 #[test]
-#[ignore = "BUG: robot.json `description` may point outside its package folder (../..); see docs/handoff/qa.md"]
 fn a_description_path_cannot_leave_the_package() {
     let d = tempfile::tempdir().unwrap();
     let lib = d.path().join("robots");
     std::fs::write(d.path().join("secret.urdf"), six_axis()).unwrap();
     package(&lib, "evil", r#"{ "name": "Evil", "description": "../../secret.urdf" }"#, None);
     assert!(library::scan(&lib).is_empty(), "a description outside its package is not a package");
+    let absolute = d.path().join("secret.urdf").to_string_lossy().replace('\\', "/");
+    package(&lib, "evil2", &format!(r#"{{ "name": "Evil2", "description": "{absolute}" }}"#), None);
+    assert!(library::scan(&lib).is_empty(), "an absolute description path is not a package either");
 }

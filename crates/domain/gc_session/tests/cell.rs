@@ -1128,3 +1128,203 @@ fn a_planner_from_a_plugin_is_found_by_its_id() {
     assert_eq!(session.plan(path), PlanStatus::Failed);
     assert!(session.plan_error(path).unwrap().contains("nobody"));
 }
+
+#[test]
+fn imported_equipment_is_an_obstacle_that_can_be_suppressed_and_reloaded() {
+    use std::sync::Arc;
+
+    /// A closed box mesh, `size` edge lengths, centred on its origin.
+    fn box_mesh(size: [f32; 3]) -> gc_mesh::MeshData {
+        let h = size.map(|s| s / 2.0);
+        let positions = (0..8)
+            .map(|i| {
+                [
+                    if i & 1 == 0 { -h[0] } else { h[0] },
+                    if i & 2 == 0 { -h[1] } else { h[1] },
+                    if i & 4 == 0 { -h[2] } else { h[2] },
+                ]
+            })
+            .collect();
+        #[rustfmt::skip]
+        let indices = vec![0,2,1, 1,2,3, 4,5,6, 5,7,6, 0,1,4, 1,5,4, 2,6,3, 3,6,7, 0,4,2, 2,4,6, 1,3,5, 3,7,5];
+        gc_mesh::MeshData::new(positions, indices).unwrap()
+    }
+    let assembly = |file: &str| gc_doc::Assembly {
+        name: "Machine".into(),
+        file: file.into(),
+        placement: Placement { xyz: [0.55, 0.0, 0.0], rpy: [0.0; 3] },
+        parts: vec![gc_doc::AssemblyPart {
+            name: "Column".into(),
+            parent: None,
+            // Stands 0.7 m up, like the pillar of the other tests.
+            matrix: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.7, 1.0]],
+            meshes: vec![0],
+        }],
+        meshes: vec![gc_doc::AssemblyMesh {
+            name: "Column".into(),
+            color: [0.3, 0.3, 0.3, 1.0],
+            triangles: 12,
+        }],
+        look: Default::default(),
+    };
+    let mut session = Session::new();
+    let robot = session.add_robot("Robot1", &six_axis()).unwrap();
+    session.jog(robot, &RIGHT);
+    session.end_jog();
+    let there = session.add_waypoint_here(robot).unwrap();
+    session.jog(robot, &LEFT);
+    session.end_jog();
+    let path = session.add_path(robot, vec![there]).unwrap();
+    assert_eq!(session.plan(path), PlanStatus::Ready);
+    assert!(session.planned(path).unwrap().segments[0].straight);
+
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join("machine.glb").to_string_lossy().into_owned();
+    let id = session.add_assembly(assembly(&file), vec![box_mesh([0.1, 0.1, 1.4])]).unwrap();
+    let shown = session.assembly_parts(id).unwrap();
+    assert_eq!(shown.len(), 1);
+    assert_eq!([shown[0].matrix[3][0], shown[0].matrix[3][2]], [0.55, 0.7]);
+    // The equipment makes the plan stale and stands in the way.
+    assert_eq!(session.plan_status(path), PlanStatus::Stale);
+    assert_eq!(session.plan(path), PlanStatus::Ready, "{:?}", session.plan_error(path));
+    assert!(!session.planned(path).unwrap().segments[0].straight, "around the column");
+    // Suppressed, it is ignored again.
+    session.execute(&Command::Cell(CellOp::SetSuppressed { item: id.erase(), suppressed: true })).unwrap();
+    assert_eq!(session.plan(path), PlanStatus::Ready);
+    assert!(session.planned(path).unwrap().segments[0].straight);
+    session.execute(&Command::Cell(CellOp::SetSuppressed { item: id.erase(), suppressed: false })).unwrap();
+
+    // Reopened without a reader, planning refuses to ignore the equipment; with one, it plans around it.
+    let project = directory.path().join("cell.gctrl");
+    session.save_as(&project).unwrap();
+    let mut reopened = Session::new();
+    reopened.open(&project).unwrap();
+    assert_eq!(reopened.plan(path), PlanStatus::Failed);
+    assert!(reopened.plan_error(path).unwrap().contains("machine.glb"), "{:?}", reopened.plan_error(path));
+    reopened.set_assembly_reader(Arc::new(|_file: &str| Ok(vec![box_mesh([0.1, 0.1, 1.4])])));
+    assert_eq!(reopened.plan(path), PlanStatus::Ready, "{:?}", reopened.plan_error(path));
+    assert!(!reopened.planned(path).unwrap().segments[0].straight);
+    // A file that changed (another number of meshes) is reported, not guessed at.
+    let mut changed = Session::new();
+    changed.set_assembly_reader(Arc::new(|_file: &str| Ok(Vec::new())));
+    changed.open(&project).unwrap();
+    assert!(changed.assembly_parts(id).unwrap_err().contains("changed"));
+}
+
+#[test]
+fn an_assembly_is_imported_by_a_job_and_failures_are_reported() {
+    use std::sync::Arc;
+    let mut session = Session::new();
+    assert!(session.import_status().is_none());
+    let triangle =
+        || gc_mesh::MeshData::new(vec![[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], vec![0, 1, 2]).unwrap();
+    session.import_assembly(
+        "cell.glb",
+        Arc::new(move |file: &str| {
+            let assembly = gc_doc::Assembly {
+                name: "Cell".into(),
+                file: file.into(),
+                placement: Placement::default(),
+                parts: vec![gc_doc::AssemblyPart {
+                    name: "Plate".into(),
+                    parent: None,
+                    matrix: [
+                        [1.0, 0.0, 0.0, 0.0],
+                        [0.0, 1.0, 0.0, 0.0],
+                        [0.0, 0.0, 1.0, 0.0],
+                        [0.0, 0.0, 0.0, 1.0],
+                    ],
+                    meshes: vec![0],
+                }],
+                meshes: vec![gc_doc::AssemblyMesh { name: "Plate".into(), color: [1.0; 4], triangles: 1 }],
+                look: Default::default(),
+            };
+            Ok((assembly, vec![triangle()]))
+        }),
+    );
+    let id = *session.import_status().unwrap().as_ref().unwrap();
+    assert_eq!(session.doc().get(id).unwrap().file, "cell.glb");
+    assert_eq!(session.assembly_parts(id).unwrap().len(), 1);
+    assert!(session.undo(), "the import is one undo step");
+    assert!(session.doc().get(id).is_none());
+
+    session.import_assembly("broken.glb", Arc::new(|file: &str| Err(format!("{file}: not a glTF file"))));
+    assert!(session.import_status().unwrap().as_ref().unwrap_err().contains("broken.glb"));
+}
+
+#[test]
+fn work_features_are_placed_in_the_world() {
+    use gc_doc::{OriginPlane, PlaneRef, PointRef, WorkFeature, WorkGeometry};
+    use gc_session::WorkShape;
+    let mut session = Session::new();
+    let add = |session: &mut Session, geometry| {
+        let feature = WorkFeature { name: "W".into(), geometry, visible: true };
+        match session.execute(&Command::Cell(CellOp::AddWorkFeature(feature))).unwrap()[0] {
+            gc_doc::Created::WorkFeature(id) => id,
+            _ => panic!(),
+        }
+    };
+    // XZ (normal −Y) moved 0.2 m along its normal.
+    let plane = add(
+        &mut session,
+        WorkGeometry::PlaneOffset { base: PlaneRef::Origin(OriginPlane::Xz), distance: 0.2 },
+    );
+    let Some(WorkShape::Plane(pose)) = session.work_shape(plane) else { panic!() };
+    assert!((pose.translation - gc_math::DVec3::new(0.0, -0.2, 0.0)).length() < 1e-12);
+    // A point, and the axis through it normal to that plane.
+    let point = add(&mut session, WorkGeometry::Point { at: PointRef::Fixed([0.1, 0.0, 0.3]) });
+    let axis = add(
+        &mut session,
+        WorkGeometry::AxisNormalToPlane { plane: PlaneRef::Work(plane), through: PointRef::Work(point) },
+    );
+    let Some(WorkShape::Axis { point: p, direction }) = session.work_shape(axis) else { panic!() };
+    assert!((p - gc_math::DVec3::new(0.1, 0.0, 0.3)).length() < 1e-12);
+    assert!((direction - gc_math::DVec3::new(0.0, -1.0, 0.0)).length() < 1e-12);
+    // A plane through three points has its normal along the right-hand rule; points on a line give none.
+    let tilted = add(
+        &mut session,
+        WorkGeometry::PlaneThroughPoints {
+            points: [PointRef::Origin, PointRef::Fixed([1.0, 0.0, 0.0]), PointRef::Fixed([0.0, 1.0, 0.0])],
+        },
+    );
+    let Some(WorkShape::Plane(pose)) = session.work_shape(tilted) else { panic!() };
+    assert!((pose.rotation * gc_math::DVec3::Z - gc_math::DVec3::Z).length() < 1e-12);
+    let line = add(
+        &mut session,
+        WorkGeometry::PlaneThroughPoints {
+            points: [PointRef::Origin, PointRef::Fixed([1.0, 0.0, 0.0]), PointRef::Fixed([2.0, 0.0, 0.0])],
+        },
+    );
+    assert_eq!(session.work_shape(line), None);
+}
+
+#[test]
+fn suppressed_waypoints_are_skipped_and_a_suppressed_path_is_not_planned() {
+    let mut session = Session::new();
+    let robot = session.add_robot("Robot1", &six_axis()).unwrap();
+    session.jog(robot, &RIGHT);
+    session.end_jog();
+    let right = session.add_waypoint_here(robot).unwrap();
+    session.jog(robot, &[0.0, 0.3, 0.3, 0.0, 0.5, 0.0]);
+    session.end_jog();
+    let middle = session.add_waypoint_here(robot).unwrap();
+    session.jog(robot, &LEFT);
+    session.end_jog();
+    let path = session.add_path(robot, vec![middle, right]).unwrap();
+    assert_eq!(session.plan(path), PlanStatus::Ready);
+    assert_eq!(session.planned(path).unwrap().segments.len(), 2);
+
+    let suppress = |session: &mut Session, item: gc_core::AnyId, suppressed: bool| {
+        session.execute(&Command::Cell(CellOp::SetSuppressed { item, suppressed })).unwrap();
+    };
+    suppress(&mut session, middle.erase(), true);
+    assert_eq!(session.plan_status(path), PlanStatus::Stale);
+    assert_eq!(session.plan(path), PlanStatus::Ready, "{:?}", session.plan_error(path));
+    let planned = session.planned(path).unwrap();
+    assert_eq!(planned.segments.len(), 1, "straight on to the next waypoint");
+    assert_eq!(planned.sample(1e9), RIGHT.to_vec());
+
+    suppress(&mut session, path.erase(), true);
+    assert_eq!(session.plan(path), PlanStatus::Failed);
+    assert!(session.plan_error(path).unwrap().contains("suppressed"));
+}

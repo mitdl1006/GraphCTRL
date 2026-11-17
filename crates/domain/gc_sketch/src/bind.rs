@@ -50,6 +50,70 @@ impl Binding {
         Ok(Round { c: self.p2(centre)?, r })
     }
 
+    /// Tangency of two curves that meet at an end (a shared point or two coincident end points): the
+    /// joint form, or `None` when they do not meet at an end.
+    fn end_tangent(
+        &self,
+        sketch: &Sketch,
+        a: Id<Curve>,
+        b: Id<Curve>,
+    ) -> Result<Option<Constraint>, SketchError> {
+        let ends = |curve: Id<Curve>| -> Vec<Id<SkPoint>> {
+            match sketch.curves.get(&curve).map(|c| c.geom) {
+                Some(CurveGeom::Line { a, b }) => vec![a, b],
+                Some(CurveGeom::Arc { s, e, .. }) => vec![s, e],
+                _ => Vec::new(),
+            }
+        };
+        let joined = |p: Id<SkPoint>, q: Id<SkPoint>| {
+            p == q
+                || sketch.constraints.values().any(|c| {
+                    matches!(*c, GeoConstraint::Coincident(x, y) if (x == p && y == q) || (x == q && y == p))
+                })
+        };
+        let Some((pa, pb)) = ends(a)
+            .into_iter()
+            .flat_map(|p| ends(b).into_iter().map(move |q| (p, q)))
+            .find(|(p, q)| joined(*p, *q))
+        else {
+            return Ok(None);
+        };
+        let arc_end = |curve: Id<Curve>, at: Id<SkPoint>| match sketch.curves.get(&curve).map(|c| c.geom) {
+            Some(CurveGeom::Arc { c, s, .. }) => Some((c, if at == s { 1.0 } else { -1.0 })),
+            _ => None,
+        };
+        Ok(match (self.line(sketch, a), self.line(sketch, b)) {
+            (Ok(line), Err(_)) => {
+                let Some((_, leaving)) = arc_end(b, pb) else { return Ok(None) };
+                Some(Constraint::EndTangent {
+                    line,
+                    round: self.round(sketch, b)?,
+                    at: self.p2(pb)?,
+                    smooth: true,
+                    leaving,
+                })
+            }
+            (Err(_), Ok(line)) => {
+                let Some((_, leaving)) = arc_end(a, pa) else { return Ok(None) };
+                Some(Constraint::EndTangent {
+                    line,
+                    round: self.round(sketch, a)?,
+                    at: self.p2(pa)?,
+                    smooth: true,
+                    leaving,
+                })
+            }
+            (Err(_), Err(_)) => match (arc_end(a, pa), arc_end(b, pb)) {
+                (Some((ca, _)), Some((cb, _))) => Some(Constraint::Parallel(
+                    Line2 { a: self.p2(ca)?, b: self.p2(pa)? },
+                    Line2 { a: self.p2(cb)?, b: self.p2(pb)? },
+                )),
+                _ => None,
+            },
+            (Ok(_), Ok(_)) => None,
+        })
+    }
+
     pub fn lower_constraint(&self, sketch: &Sketch, c: &GeoConstraint) -> Result<Constraint, SketchError> {
         let spatial = sketch.is_spatial();
         Ok(match *c {
@@ -72,6 +136,13 @@ impl Binding {
                 Constraint::Collinear(self.line(sketch, a)?, self.line(sketch, b)?)
             }
             GeoConstraint::Tangent { a, b, side, external } => {
+                // Curves that meet at an end are tangent *there*: written as "the radius at the joint is
+                // square to the line" (or "the radii are in line" for two arcs). The general form, the
+                // centre's distance from the line, has a zero derivative at a shared point, so it would
+                // remove no freedom there.
+                if let Some(joined) = self.end_tangent(sketch, a, b)? {
+                    return Ok(joined);
+                }
                 match (self.line(sketch, a), self.line(sketch, b)) {
                     (Ok(line), Err(_)) => {
                         Constraint::TangentLineCircle { line, round: self.round(sketch, b)?, side }
