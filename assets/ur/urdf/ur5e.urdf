@@ -1,12 +1,12 @@
 <?xml version="1.0"?>
 <!-- UR5e: joint origins, limits and collision meshes as published in Universal_Robots_ROS2_Description 4.4.1
-     (BSD-3-Clause, see assets/ur/upstream/LICENSE). The collision meshes are also what is drawn. -->
+     (BSD-3-Clause, see assets/ur/upstream/LICENSE). Visual meshes are drawn; the simpler collision meshes are checked. -->
 <robot name="ur5e">
   <link name="base_link"/>
   <link name="base_link_inertia">
     <visual>
       <origin xyz="0 0 0" rpy="0 0 3.141592653589793"/>
-      <geometry><mesh filename="package://ur_description/meshes/ur5e/collision/base.stl"/></geometry>
+      <geometry><mesh filename="package://ur_description/meshes/ur5e/visual/base.dae"/></geometry>
     </visual>
     <collision>
       <origin xyz="0 0 0" rpy="0 0 3.141592653589793"/>
@@ -17,7 +17,7 @@
   <link name="shoulder_link">
     <visual>
       <origin xyz="0 0 0" rpy="0 0 3.141592653589793"/>
-      <geometry><mesh filename="package://ur_description/meshes/ur5e/collision/shoulder.stl"/></geometry>
+      <geometry><mesh filename="package://ur_description/meshes/ur5e/visual/shoulder.dae"/></geometry>
     </visual>
     <collision>
       <origin xyz="0 0 0" rpy="0 0 3.141592653589793"/>
@@ -27,7 +27,7 @@
   <link name="upper_arm_link">
     <visual>
       <origin xyz="0 0 0.138" rpy="1.5707963267948966 0 -1.5707963267948966"/>
-      <geometry><mesh filename="package://ur_description/meshes/ur5e/collision/upperarm.stl"/></geometry>
+      <geometry><mesh filename="package://ur_description/meshes/ur5e/visual/upperarm.dae"/></geometry>
     </visual>
     <collision>
       <origin xyz="0 0 0.138" rpy="1.5707963267948966 0 -1.5707963267948966"/>
@@ -37,7 +37,7 @@
   <link name="forearm_link">
     <visual>
       <origin xyz="0 0 0.007" rpy="1.5707963267948966 0 -1.5707963267948966"/>
-      <geometry><mesh filename="package://ur_description/meshes/ur5e/collision/forearm.stl"/></geometry>
+      <geometry><mesh filename="package://ur_description/meshes/ur5e/visual/forearm.dae"/></geometry>
     </visual>
     <collision>
       <origin xyz="0 0 0.007" rpy="1.5707963267948966 0 -1.5707963267948966"/>
@@ -47,7 +47,7 @@
   <link name="wrist_1_link">
     <visual>
       <origin xyz="0 0 -0.127" rpy="1.5707963267948966 0 0"/>
-      <geometry><mesh filename="package://ur_description/meshes/ur5e/collision/wrist1.stl"/></geometry>
+      <geometry><mesh filename="package://ur_description/meshes/ur5e/visual/wrist1.dae"/></geometry>
     </visual>
     <collision>
       <origin xyz="0 0 -0.127" rpy="1.5707963267948966 0 0"/>
@@ -57,7 +57,7 @@
   <link name="wrist_2_link">
     <visual>
       <origin xyz="0 0 -0.0997" rpy="0 0 0"/>
-      <geometry><mesh filename="package://ur_description/meshes/ur5e/collision/wrist2.stl"/></geometry>
+      <geometry><mesh filename="package://ur_description/meshes/ur5e/visual/wrist2.dae"/></geometry>
     </visual>
     <collision>
       <origin xyz="0 0 -0.0997" rpy="0 0 0"/>
@@ -67,7 +67,7 @@
   <link name="wrist_3_link">
     <visual>
       <origin xyz="0 -0.0005 -0.0989" rpy="1.5707963267948966 0 0"/>
-      <geometry><mesh filename="package://ur_description/meshes/ur5e/collision/wrist3.stl"/></geometry>
+      <geometry><mesh filename="package://ur_description/meshes/ur5e/visual/wrist3.dae"/></geometry>
     </visual>
     <collision>
       <origin xyz="0 -0.0005 -0.0989" rpy="1.5707963267948966 0 0"/>

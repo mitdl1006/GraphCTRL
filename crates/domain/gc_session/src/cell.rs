@@ -45,9 +45,14 @@ pub struct MeshRef {
     pub key: u64,
     /// The radius of a sphere around the mesh's origin that contains it.
     pub radius: f64,
+    /// The box around the mesh in its own frame.
+    pub bounds: gc_math::Aabb,
     /// The triangles.
     pub data: Arc<MeshData>,
 }
+
+/// A part of a mesh file as it is drawn: the mesh and the colour the file gives it, if any.
+pub type ShownPart = (MeshRef, Option<[f32; 4]>);
 
 /// A robot description that was read successfully.
 #[derive(Debug)]
@@ -57,10 +62,11 @@ pub struct LoadedRobot {
     pub model: Arc<RobotModel>,
     /// The chain that is jogged and planned for.
     pub chain: Chain,
-    /// Mesh files as stored, by the name the description uses.
-    files: BTreeMap<String, Arc<MeshData>>,
-    /// Meshes at the scale a geometry asks for, by name and scale.
-    scaled: BTreeMap<String, MeshRef>,
+    /// Mesh files as stored, by the name the description uses: the parts with their colours, and all
+    /// parts as one mesh for collision checking.
+    files: BTreeMap<String, (Vec<gc_mesh::collada::Part>, Arc<MeshData>)>,
+    /// The parts at the scale a geometry asks for, by name and scale, with each part's own colour.
+    scaled: BTreeMap<String, Vec<ShownPart>>,
     /// Mesh files the description refers to that could not be supplied or read.
     pub missing: Vec<String>,
 }
@@ -74,7 +80,7 @@ fn scaled(file: &MeshData, scale: [f64; 3]) -> Option<MeshRef> {
     let data = MeshData::new(positions, file.indices().to_vec()).ok()?;
     let bounds = data.aabb();
     let radius = bounds.min.abs().max(bounds.max.abs()).length();
-    Some(MeshRef { key: data.content_hash(), radius, data: Arc::new(data) })
+    Some(MeshRef { key: data.content_hash(), radius, bounds, data: Arc::new(data) })
 }
 
 fn scaled_key(uri: &str, scale: [f64; 3]) -> String {
@@ -82,14 +88,14 @@ fn scaled_key(uri: &str, scale: [f64; 3]) -> String {
 }
 
 impl LoadedRobot {
-    /// A mesh file as stored.
+    /// A mesh file as stored, all its parts as one mesh.
     pub fn file(&self, uri: &str) -> Option<Arc<MeshData>> {
-        self.files.get(uri).cloned()
+        self.files.get(uri).map(|(_, merged)| Arc::clone(merged))
     }
 
-    /// A mesh at the scale a geometry asks for.
-    pub fn mesh(&self, uri: &str, scale: [f64; 3]) -> Option<&MeshRef> {
-        self.scaled.get(&scaled_key(uri, scale))
+    /// The parts of a mesh file at the scale a geometry asks for, each with the colour the file gives it.
+    pub fn mesh(&self, uri: &str, scale: [f64; 3]) -> &[ShownPart] {
+        self.scaled.get(&scaled_key(uri, scale)).map_or(&[], Vec::as_slice)
     }
 
     fn read_meshes(&mut self, resources: Option<&Resources>) {
@@ -100,23 +106,25 @@ impl LoadedRobot {
             if self.missing.contains(uri) || self.scaled.contains_key(&scaled_key(uri, *scale)) {
                 continue;
             }
-            let file = match self.files.get(uri) {
-                Some(file) => Some(Arc::clone(file)),
-                None => resources
+            if !self.files.contains_key(uri) {
+                let read = resources
                     .and_then(|resolve| resolve(uri))
-                    .and_then(|bytes| gc_mesh::stl::parse(&bytes).ok())
-                    .map(Arc::new),
-            };
-            let Some(file) = file else {
-                self.missing.push(uri.clone());
-                continue;
-            };
-            self.files.insert(uri.clone(), Arc::clone(&file));
-            let Some(mesh) = scaled(&file, *scale) else {
-                self.missing.push(uri.clone());
-                continue;
-            };
-            self.scaled.insert(scaled_key(uri, *scale), mesh);
+                    .and_then(|bytes| gc_mesh::read_parts(&bytes).ok())
+                    .and_then(|parts| Some((gc_mesh::merge(&parts).ok()?, parts)));
+                match read {
+                    Some((merged, parts)) => {
+                        self.files.insert(uri.clone(), (parts, Arc::new(merged)));
+                    }
+                    None => {
+                        self.missing.push(uri.clone());
+                        continue;
+                    }
+                }
+            }
+            let Some((parts, _)) = self.files.get(uri) else { continue };
+            let shown: Vec<ShownPart> =
+                parts.iter().filter_map(|part| Some((scaled(&part.mesh, *scale)?, part.color))).collect();
+            self.scaled.insert(scaled_key(uri, *scale), shown);
         }
     }
 }
@@ -290,7 +298,8 @@ impl CellState {
 
 fn read_mesh_file(path: &str) -> Result<Arc<MeshData>, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("{path}: {e}"))?;
-    gc_mesh::stl::parse(&bytes).map(Arc::new).map_err(|e| format!("{path}: {e}"))
+    let parts = gc_mesh::read_parts(&bytes).map_err(|e| format!("{path}: {e}"))?;
+    gc_mesh::merge(&parts).map(Arc::new).map_err(|e| format!("{path}: {e}"))
 }
 
 impl CellState {

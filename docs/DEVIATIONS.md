@@ -38,3 +38,9 @@
 - 변경: UR5e 하나만, 검증된 기구학 픽스처에 `visual_parameters.yaml`의 메시 오프셋을 붙인 URDF(`assets/ur/urdf/ur5e.urdf`)를 커밋했다. STL은 `gc_mesh::stl`의 자체 리더로 읽는다(의존성 없음).
 - 근거: 사용자의 첫 대상인 UR을 화면에서 계획·재생까지 먼저 확인하기 위해서다. 메시 배치는 테스트가 기하로 검증한다. 나머지 기종과 생성기는 그대로 할 일로 남는다.
 
+## 2026-11-17 — UR5e 시각 메시(DAE)를 P1으로 당김
+
+- 이전: 로봇은 충돌 STL로 표시하고, 시각 메시(DAE)는 P2.
+- 변경: 사용자 요청으로 UR5e를 제조사 시각 메시로 그린다. DAE 7개(9.3 MB, BSD-3-Clause)를 `assets/ur/meshes/ur5e/visual/`에 커밋하고 `SOURCES.toml`에 출처·해시를 적었다. `gc_mesh`가 `roxmltree`로 COLLADA를 직접 읽는다(다른 URDF의 `.dae`도 같은 경로로 읽힌다).
+- 영향: 저장소와 실행 파일이 약 9 MB 커진다.
+

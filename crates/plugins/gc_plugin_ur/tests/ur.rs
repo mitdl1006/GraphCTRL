@@ -1,6 +1,14 @@
 //! The packaged UR5e: its description reads cleanly, its meshes are all there and fit the kinematics.
 
-#![allow(clippy::float_cmp, clippy::unwrap_used, clippy::panic, reason = "test code")]
+#![allow(
+    clippy::float_cmp,
+    clippy::unwrap_used,
+    clippy::panic,
+    clippy::print_stdout,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "test code"
+)]
 
 use gc_math::DVec3;
 use gc_plugin_api::Registry;
@@ -53,6 +61,38 @@ fn the_ur5e_reads_cleanly_and_its_meshes_follow_the_arm() {
         }
     }
     assert_eq!(meshes, 7);
+
+    // The same for what is drawn: the visual meshes, read part by part with the colours of the real arm.
+    let started = std::time::Instant::now();
+    let (mut parts, mut triangles) = (0, 0);
+    let mut colors = std::collections::BTreeSet::new();
+    for (link, pose) in model.links.iter().zip(&poses) {
+        for geometry in &link.visuals {
+            let Shape::Mesh { uri, .. } = &geometry.shape else { panic!("{}: not a mesh", link.name) };
+            assert!(uri.ends_with(".dae"), "{uri}");
+            for part in gc_mesh::read_parts(&provider.resource("ur5e", uri).unwrap()).unwrap() {
+                parts += 1;
+                triangles += part.mesh.triangle_count();
+                colors.insert(part.color.unwrap().map(|c| (c * 255.0).round() as u8));
+                for corner in part.mesh.positions() {
+                    let local = DVec3::new(f64::from(corner[0]), f64::from(corner[1]), f64::from(corner[2]));
+                    let world = *pose * (geometry.pose * local);
+                    assert!(
+                        world.x.abs() < 0.12 && world.y > -0.1 && world.y < 0.3,
+                        "{}: {world:?}",
+                        link.name
+                    );
+                    assert!(world.z > -0.005 && world.z < 1.2, "{}: {world:?}", link.name);
+                }
+            }
+        }
+    }
+    println!("visual meshes: {parts} parts, {triangles} triangles, read in {:?}", started.elapsed());
+    assert_eq!(parts, 20);
+    assert!(triangles > 120_000, "{triangles}");
+    // Light grey tubes, dark grey joints, black seals and the blue caps.
+    let expected = [[8, 8, 8, 255], [71, 71, 71, 255], [125, 173, 204, 255], [209, 209, 209, 255]];
+    assert_eq!(colors.into_iter().collect::<Vec<_>>(), expected);
     assert!(lowest > -0.005 && lowest < 0.005, "the base stands on the floor: {lowest}");
     assert!(highest > 1.05 && highest < 1.2, "the wrist tops out just above the tool: {highest}");
 }

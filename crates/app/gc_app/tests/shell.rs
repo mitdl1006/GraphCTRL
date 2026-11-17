@@ -320,16 +320,55 @@ fn ur5e_cell_renders_with_gpu() {
     let path = session.doc().paths().iter().next().unwrap().0;
     assert_eq!(session.plan_status(path), gc_session::PlanStatus::Ready, "{:?}", session.plan_error(path));
     assert!(!session.planned(path).unwrap().segments[0].straight, "the pillar is in the way");
-    // The seven link meshes and the pillar: eight draw calls, thousands of triangles.
+    // The arm as it really looks: twenty coloured parts of the seven links, and the pillar.
     let stats = harness.state().viewport().background().stats();
-    assert_eq!(stats.draw_calls, 8);
-    assert!(stats.triangles > 7000, "{stats:?}");
+    assert_eq!(stats.draw_calls, 21);
+    assert!(stats.triangles > 120_000, "{stats:?}");
     harness.render().unwrap().save(out.join("review-7-ur5e-path.png")).unwrap();
     let app = harness.state_mut();
     let duration = app.session.planned(path).unwrap().duration();
     app.session.set_playback(Some((path, duration * 0.5)));
     harness.run();
     harness.render().unwrap().save(out.join("review-8-ur5e-playback.png")).unwrap();
+}
+
+/// A close look at the packaged UR5e as it is drawn: the manufacturer's visual meshes in their own colours.
+#[test]
+fn ur5e_close_up_renders_with_gpu() {
+    if gc_test_support::gpu_or_skip("ur5e_close_up_renders_with_gpu").is_none() {
+        return;
+    }
+    let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+    std::fs::create_dir_all(&out).unwrap();
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .wgpu()
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("로봇").click();
+    harness.run();
+    harness.get_by_label("UR5e 로봇").click();
+    harness.run();
+    let app = harness.state_mut();
+    let robot = app.session.doc().robots().iter().next().unwrap().0;
+    app.session.jog(robot, &[0.6, -1.9, 1.7, -1.4, -1.57, 0.3]);
+    app.session.end_jog();
+    harness.get_by_label("뷰").click();
+    harness.run();
+    harness.get_by_label("전체 보기").click();
+    harness.run();
+    let image = harness.render().unwrap();
+    image.save(out.join("review-9-ur5e-close-up.png")).unwrap();
+    // The blue caps of the real arm are visible in the viewport.
+    let blue = (220..1000)
+        .flat_map(|x| (130..760).map(move |y| (x, y)))
+        .filter(|(x, y)| {
+            let px = image.get_pixel(*x, *y);
+            px[2] > 120 && px[2] > px[0].saturating_add(40) && px[1] > px[0]
+        })
+        .count();
+    assert!(blue > 200, "{blue} blue pixels");
 }
 
 /// With worker threads, planning does not finish inside the click: the window shows "planning" and picks

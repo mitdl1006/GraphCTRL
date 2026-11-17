@@ -1433,6 +1433,7 @@ version = "0.1.0"
 dependencies = [
  "gc_core",
  "gc_math",
+ "roxmltree",
  "thiserror 2.0.21",
 ]
 

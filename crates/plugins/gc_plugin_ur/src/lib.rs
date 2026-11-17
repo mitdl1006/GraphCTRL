@@ -15,23 +15,31 @@ use gc_robotics_api::{
 const UR5E_URDF: &str = include_str!("../../../../assets/ur/urdf/ur5e.urdf");
 
 macro_rules! ur5e_mesh {
-    ($name:literal) => {
+    ($kind:literal, $name:literal, $extension:literal) => {
         (
-            concat!("package://ur_description/meshes/ur5e/collision/", $name, ".stl"),
-            include_bytes!(concat!("../../../../assets/ur/meshes/ur5e/collision/", $name, ".stl")).as_slice(),
+            concat!("package://ur_description/meshes/ur5e/", $kind, "/", $name, ".", $extension),
+            include_bytes!(concat!("../../../../assets/ur/meshes/ur5e/", $kind, "/", $name, ".", $extension))
+                .as_slice(),
         )
     };
 }
 
-/// The files the UR5e description refers to.
-const UR5E_RESOURCES: [(&str, &[u8]); 7] = [
-    ur5e_mesh!("base"),
-    ur5e_mesh!("shoulder"),
-    ur5e_mesh!("upperarm"),
-    ur5e_mesh!("forearm"),
-    ur5e_mesh!("wrist1"),
-    ur5e_mesh!("wrist2"),
-    ur5e_mesh!("wrist3"),
+/// The files the UR5e description refers to: what is drawn and what is checked for collisions.
+const UR5E_RESOURCES: [(&str, &[u8]); 14] = [
+    ur5e_mesh!("visual", "base", "dae"),
+    ur5e_mesh!("visual", "shoulder", "dae"),
+    ur5e_mesh!("visual", "upperarm", "dae"),
+    ur5e_mesh!("visual", "forearm", "dae"),
+    ur5e_mesh!("visual", "wrist1", "dae"),
+    ur5e_mesh!("visual", "wrist2", "dae"),
+    ur5e_mesh!("visual", "wrist3", "dae"),
+    ur5e_mesh!("collision", "base", "stl"),
+    ur5e_mesh!("collision", "shoulder", "stl"),
+    ur5e_mesh!("collision", "upperarm", "stl"),
+    ur5e_mesh!("collision", "forearm", "stl"),
+    ur5e_mesh!("collision", "wrist1", "stl"),
+    ur5e_mesh!("collision", "wrist2", "stl"),
+    ur5e_mesh!("collision", "wrist3", "stl"),
 ];
 
 /// Offers the UR models.

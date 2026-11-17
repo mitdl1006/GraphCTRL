@@ -98,6 +98,19 @@ impl Shape3 {
             Self::Mesh(mesh) => mesh.radius,
         }
     }
+
+    /// A box around the shape in its own frame.
+    pub fn local_bounds(&self) -> Aabb {
+        let around = |half: DVec3| Aabb::from_points([-half, half]);
+        match self {
+            Self::Primitive(Primitive::Box(size)) => around(DVec3::from_array(*size) * 0.5),
+            Self::Primitive(Primitive::Cylinder { radius, length }) => {
+                around(DVec3::new(*radius, *radius, length * 0.5))
+            }
+            Self::Primitive(Primitive::Sphere(radius)) => around(DVec3::splat(*radius)),
+            Self::Mesh(mesh) => mesh.bounds,
+        }
+    }
 }
 
 /// One solid to draw.
@@ -174,19 +187,24 @@ impl Scene {
                 let geometries = if link.visuals.is_empty() { &link.collisions } else { &link.visuals };
                 let color = if index % 2 == 0 { LINK_DARK } else { LINK_LIGHT };
                 for geometry in geometries {
+                    let pose = *link_pose * geometry.pose;
                     let shape = match &geometry.shape {
                         Shape::Box(size) => Shape3::Primitive(Primitive::Box(*size)),
                         Shape::Cylinder { radius, length } => {
                             Shape3::Primitive(Primitive::Cylinder { radius: *radius, length: *length })
                         }
                         Shape::Sphere(radius) => Shape3::Primitive(Primitive::Sphere(*radius)),
-                        // A mesh file that could not be supplied is listed as missing and not drawn.
-                        Shape::Mesh { uri, scale } => match loaded.mesh(uri, *scale) {
-                            Some(mesh) => Shape3::Mesh(mesh.clone()),
-                            None => continue,
-                        },
+                        // A mesh file is drawn part by part in the colours it gives; a file that could not
+                        // be supplied is listed as missing and not drawn.
+                        Shape::Mesh { uri, scale } => {
+                            for (mesh, part_color) in loaded.mesh(uri, *scale) {
+                                let color = part_color.unwrap_or(color);
+                                scene.solids.push(Solid3 { shape: Shape3::Mesh(mesh.clone()), pose, color });
+                            }
+                            continue;
+                        }
                     };
-                    scene.solids.push(Solid3 { shape, pose: *link_pose * geometry.pose, color });
+                    scene.solids.push(Solid3 { shape, pose, color });
                 }
             }
         }
@@ -210,9 +228,20 @@ impl Scene {
     pub fn bounds(&self) -> Aabb {
         let mut bounds = Aabb::EMPTY;
         for solid in &self.solids {
-            let reach = DVec3::splat(solid.shape.radius());
-            bounds =
-                bounds.including(solid.pose.translation - reach).including(solid.pose.translation + reach);
+            // The eight corners of the solid's own box, placed in the world.
+            let local = solid.shape.local_bounds();
+            if local.is_empty() {
+                continue;
+            }
+            for corner in 0..8 {
+                let pick = |bit: usize, lo: f64, hi: f64| if corner >> bit & 1 == 0 { lo } else { hi };
+                let point = DVec3::new(
+                    pick(0, local.min.x, local.max.x),
+                    pick(1, local.min.y, local.max.y),
+                    pick(2, local.min.z, local.max.z),
+                );
+                bounds = bounds.including(solid.pose * point);
+            }
         }
         for point in
             self.traces.iter().flat_map(|t| &t.points).chain(self.waypoints.iter().map(|w| &w.position))

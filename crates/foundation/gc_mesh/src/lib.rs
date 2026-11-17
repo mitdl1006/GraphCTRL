@@ -7,6 +7,7 @@
 #![cfg_attr(test, allow(clippy::float_cmp, reason = "tests compare exactly representable values"))]
 
 mod bvh;
+pub mod collada;
 mod data;
 pub mod primitives;
 pub mod stl;
@@ -15,6 +16,28 @@ mod store;
 pub use bvh::{MeshBvh, RayHit};
 pub use data::{MeshData, MeshError};
 pub use store::{AssetStore, MeshAsset, MeshKey};
+
+/// Reads a mesh file of any supported format (STL, COLLADA) into parts. An STL file is one part without
+/// a colour.
+pub fn read_parts(bytes: &[u8]) -> Result<Vec<collada::Part>, MeshError> {
+    if collada::is_collada(bytes) {
+        collada::parse(bytes)
+    } else {
+        Ok(vec![collada::Part { material: String::new(), color: None, mesh: stl::parse(bytes)? }])
+    }
+}
+
+/// All parts as one mesh, e.g. for collision checking, where colours do not matter.
+pub fn merge(parts: &[collada::Part]) -> Result<MeshData, MeshError> {
+    let mut positions = Vec::new();
+    let mut indices = Vec::new();
+    for part in parts {
+        let offset = u32::try_from(positions.len()).map_err(|_overflow| MeshError::TooManyVertices)?;
+        positions.extend_from_slice(part.mesh.positions());
+        indices.extend(part.mesh.indices().iter().map(|index| index + offset));
+    }
+    MeshData::new(positions, indices)
+}
 
 #[cfg(test)]
 pub(crate) mod test_util {
