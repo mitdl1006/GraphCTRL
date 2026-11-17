@@ -524,6 +524,15 @@ impl Viewport {
         if let Some((_, (id, _))) = frame {
             return Some(CellItem::Frame(*id));
         }
+        // A path by its trace: within a few pixels of the line on screen.
+        let on_trace = |trace: &gc_scene::Trace| {
+            let screen: Vec<[f64; 2]> =
+                trace.points.iter().filter_map(|p| self.camera.project(*p, size)).collect();
+            screen.windows(2).any(|pair| segment_distance(at, pair[0], pair[1]) <= 6.0)
+        };
+        if let Some(trace) = scene.traces.iter().find(|t| on_trace(t)) {
+            return Some(CellItem::Path(trace.id));
+        }
         self.picker.pick(&scene, &self.camera.ray(at, size)).map(|(_, item)| item)
     }
 
@@ -670,4 +679,17 @@ pub fn item_menu(ui: &mut egui::Ui, session: &mut Session, lang: Lang, item: gc_
         drop(session.delete_item(item));
         ui.close();
     }
+}
+
+/// The distance on screen from `p` to the segment from `a` to `b`, in pixels.
+fn segment_distance(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
+    let d = [b[0] - a[0], b[1] - a[1]];
+    let length = d[0] * d[0] + d[1] * d[1];
+    let t = if length > 0.0 {
+        (((p[0] - a[0]) * d[0] + (p[1] - a[1]) * d[1]) / length).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let q = [a[0] + t * d[0] - p[0], a[1] + t * d[1] - p[1]];
+    (q[0] * q[0] + q[1] * q[1]).sqrt()
 }

@@ -137,12 +137,22 @@ fn pose_axes(view: &View<'_>, pose: &gc_math::DPose3, length: f64, width: f32) {
     }
 }
 
+/// The colour and width of a path's trace: green when its plan is current, grey when out of date, and
+/// thicker in the highlight colour when the path is under the cursor or selected.
+pub(crate) fn trace_style(trace: &gc_scene::Trace) -> (Color32, f32) {
+    match highlight_colour(trace.highlight) {
+        Some(colour) => (colour, 4.5),
+        None if trace.current => (colors::TRACE, 2.5),
+        None => (colors::INACTIVE, 2.5),
+    }
+}
+
 /// Tool-tip traces of planned paths and the waypoints.
 fn cell(view: &View<'_>, scene: &Scene, gpu: bool) {
     // With a GPU the traces are part of the 3D picture; without one they are drawn here, on top.
     for trace in scene.traces.iter().filter(|_| !gpu) {
-        let color = if trace.current { colors::TRACE } else { colors::INACTIVE };
-        view.polyline(trace.points.iter().copied(), Stroke::new(2.0, color));
+        let (color, width) = trace_style(trace);
+        view.polyline(trace.points.iter().copied(), Stroke::new(width - 0.5, color));
     }
     // Work frames: larger axes with the frame's name.
     for (index, (name, frame)) in scene.frames.iter().enumerate() {

@@ -1465,6 +1465,47 @@ fn the_example_cell_opens_planned() {
         std::fs::create_dir_all(&out).unwrap();
         harness.render().unwrap().save(out.join("review-19-example.png")).unwrap();
     }
+    // Clicking the trace selects the path: drawn thicker, its waypoints numbered in order.
+    let session = &harness.state().session;
+    let points: Vec<_> = session.planned(path).unwrap().tip_path().collect();
+    let middle = gc_math::DVec3::from_array(points[points.len() * 3 / 4]);
+    let on_trace = harness.state().viewport().screen_of(middle).unwrap();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: on_trace,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run();
+    }
+    let session = &harness.state().session;
+    assert_eq!(session.selected_item(), Some(gc_session::CellItem::Path(path)));
+    let scene = gc_scene::Scene::of(session);
+    assert_eq!(scene.traces[0].highlight, gc_scene::Highlight::Selected);
+    let mut names: Vec<_> = scene.waypoints.iter().map(|w| w.name.clone()).collect();
+    names.sort();
+    assert_eq!(names, ["1·P1", "2·P2"]);
+    if gpu {
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        harness.render().unwrap().save(out.join("review-20-path-selected.png")).unwrap();
+    }
+
+    // A waypoint taught as the robot's pose: its joint values are edited in the panel, and it can be
+    // taught again from the robot's current pose.
+    let robot = harness.state().session.doc().robots().iter().next().unwrap().0;
+    let taught = harness.state_mut().session.add_waypoint_here(robot).unwrap();
+    harness.state_mut().session.select_item(Some(gc_session::CellItem::Waypoint(taught)));
+    harness.run();
+    harness.get_by_label("관절값 (현재 자세로 저장된 웨이포인트)");
+    let now = [0.3, -1.6, 1.5, -1.4, -1.57, 0.2];
+    harness.state_mut().session.jog(robot, &now);
+    harness.state_mut().session.end_jog();
+    harness.get_by_label("지금 로봇 자세로 다시 저장").click();
+    harness.run();
+    let target = harness.state().session.doc().get(taught).unwrap().target.clone();
+    assert_eq!(target, gc_doc::WaypointTarget::Joints(now.to_vec()));
+
     // Help > Licences lists what ships with the application.
     harness.get_by_label("도움말").click();
     harness.run();

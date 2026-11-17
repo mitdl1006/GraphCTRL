@@ -133,6 +133,10 @@ pub struct Trace {
     pub points: Vec<DVec3>,
     /// False when the plan is out of date.
     pub current: bool,
+    /// The path it belongs to.
+    pub id: gc_core::Id<gc_doc::MotionPath>,
+    /// Whether the path is under the cursor or selected.
+    pub highlight: Highlight,
 }
 
 /// A named place in the world.
@@ -291,17 +295,36 @@ impl Scene {
                 scene.traces.push(Trace {
                     points: planned.tip_path().map(DVec3::from_array).collect(),
                     current: session.plan_status(id) == PlanStatus::Ready,
+                    id,
+                    highlight: highlight(CellItem::Path(id)),
                 });
             }
         }
+        // The waypoints of the selected path are numbered in their order and shown selected with it.
+        let chosen = match session.selected_item() {
+            Some(CellItem::Path(path)) => doc.get(path).map(|p| p.waypoints.clone()),
+            _ => None,
+        };
         for (id, waypoint) in doc.waypoints().iter() {
             if let Some(pose) = session.waypoint_pose(id) {
+                let steps: Vec<String> = chosen
+                    .iter()
+                    .flatten()
+                    .enumerate()
+                    .filter(|(_, w)| **w == id)
+                    .map(|(index, _)| (index + 1).to_string())
+                    .collect();
+                let (name, highlight) = if steps.is_empty() {
+                    (waypoint.name.clone(), highlight(CellItem::Waypoint(id)))
+                } else {
+                    (format!("{}·{}", steps.join(","), waypoint.name), Highlight::Selected)
+                };
                 scene.waypoints.push(Marker {
-                    name: waypoint.name.clone(),
+                    name,
                     position: pose.translation,
                     rotation: pose.rotation,
                     id,
-                    highlight: highlight(CellItem::Waypoint(id)),
+                    highlight,
                 });
             }
         }

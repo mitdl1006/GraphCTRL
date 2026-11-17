@@ -80,6 +80,7 @@ pub fn cell(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) 
         frames(ui, session, lang, state, focus);
     }
     if let Some(CellItem::Waypoint(id)) = focus {
+        taught(ui, session, lang, id);
         reach(ui, session, lang, id);
     }
     if !pointer_down && !ui.memory(|m| m.focused().is_some()) {
@@ -135,6 +136,43 @@ fn jog(ui: &mut Ui, session: &mut Session, lang: Lang, robot: gc_core::Id<gc_doc
     // What is wrong with the pose as it is shown, if anything.
     if let Some(problem) = session.robot_problem(robot) {
         ui.colored_label(colors::ERROR, problem_text(lang, &problem));
+    }
+}
+
+/// A waypoint taught as joint values: the values in degrees, editable, and a button that stores the
+/// robot's current pose instead. A waypoint on a sketch point says so; it moves with the sketch.
+fn taught(ui: &mut Ui, session: &mut Session, lang: Lang, waypoint: gc_core::Id<gc_doc::Waypoint>) {
+    let Some(target) = session.shown_target(waypoint) else { return };
+    let Some(robot) = session.doc().get(waypoint).map(|w| w.robot) else { return };
+    match target {
+        gc_doc::WaypointTarget::Joints(mut q) => {
+            ui.add_space(8.0);
+            ui.label(RichText::new(tr!(lang, PropTaughtJoints)).strong());
+            let names: Vec<String> = session
+                .robot_model(robot)
+                .map(|loaded| loaded.chain.joint_names().to_vec())
+                .unwrap_or_default();
+            let mut changed = false;
+            for (index, value) in q.iter_mut().enumerate() {
+                let name = names.get(index).cloned().unwrap_or_else(|| format!("J{}", index + 1));
+                changed |= degrees(ui, value, &name);
+            }
+            if ui.button(tr!(lang, CmdTeachAgain)).clicked()
+                && let Some(now) = session.robot_joints(robot)
+            {
+                q = now;
+                changed = true;
+            }
+            if changed {
+                session.preview_target(waypoint, gc_doc::WaypointTarget::Joints(q));
+            }
+        }
+        gc_doc::WaypointTarget::SketchPoint { sketch, .. } => {
+            let name = session.doc().get(sketch).map(|s| s.name.clone()).unwrap_or_default();
+            ui.add_space(8.0);
+            ui.weak(tr!(lang, PropOnSketchPoint, name));
+        }
+        gc_doc::WaypointTarget::InFrame { .. } => {}
     }
 }
 

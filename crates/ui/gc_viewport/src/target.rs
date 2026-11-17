@@ -4,7 +4,8 @@ use gc_draw::Camera;
 use gc_math::DMat4;
 use gc_render::{DrawStats, EdgeVertex, Instance, Line, MeshRenderer, View, ViewTarget};
 use gc_scene::Scene;
-use gc_ui::colors;
+
+use crate::paint::trace_style;
 
 /// The most edges drawn for one mesh: past it a scanned or finely tessellated mesh would turn into a
 /// web of lines, so only its sharpest edges (70°) are kept, or none.
@@ -144,12 +145,13 @@ impl Background {
                 .traces
                 .iter()
                 .flat_map(|trace| {
-                    let color = color(if trace.current { colors::TRACE } else { colors::INACTIVE });
+                    let (shade, width) = trace_style(trace);
+                    let color = color(shade);
                     trace.points.windows(2).map(move |pair| Line {
                         a: vec3(pair[0] - eye),
                         b: vec3(pair[1] - eye),
                         color,
-                        width: 2.5,
+                        width,
                     })
                 })
                 .collect();
