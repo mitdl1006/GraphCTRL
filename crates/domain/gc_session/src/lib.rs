@@ -597,6 +597,19 @@ impl Session {
         self.doc.relationship_status(id)
     }
 
+    /// Project Geometry into the sketch being edited: reference geometry that follows its source. It is
+    /// construction geometry when the Construction toggle is on, the other way round with `shift` (Shift
+    /// held while clicking). One undo step.
+    pub fn project_geometry(
+        &mut self,
+        source: gc_doc::ProjectSource,
+        shift: bool,
+    ) -> Result<Vec<gc_doc::Created>, EditError> {
+        let sketch = self.active.ok_or(EditError::BadValue)?;
+        let construction = self.tool_construction() != shift;
+        self.execute(&Command::Sketch { sketch, op: gc_doc::SketchOp::Project { source, construction } })
+    }
+
     /// A component's origin folder in the world: centre point, axes and planes (assembly P1-2).
     pub fn component_origin(&self, occurrence: gc_doc::Occurrence) -> Option<gc_doc::ComponentOrigin> {
         self.doc.component_origin(occurrence)

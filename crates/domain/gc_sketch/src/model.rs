@@ -28,6 +28,18 @@ pub enum ExternalRef {
     },
     /// The source was deleted; the point stays where it last was.
     Broken,
+    /// Projected geometry (Project Geometry): a point fixed in the frame of something outside the sketch —
+    /// a component (`part` 0), a part or robot link of it (`part` = index + 1), or a work feature — at
+    /// `local_nm` (nanometres, in that frame), projected onto the sketch plane. The document repositions it
+    /// after every edit; when the source is deleted the point becomes an ordinary fixed point.
+    Projected {
+        /// The document item it follows.
+        owner: AnyId,
+        /// 0 for the item itself, otherwise the index of its part or link plus one.
+        part: u32,
+        /// Where in that frame, nanometres.
+        local_nm: [i64; 3],
+    },
 }
 
 /// Whether the solver may move a point.
@@ -286,7 +298,9 @@ impl Entity for Sketch {
             match point.kind {
                 PointKind::External(ExternalRef::FrameOrigin(frame)) => out.push(frame),
                 PointKind::External(ExternalRef::SketchPoint { sketch, .. }) => out.push(sketch),
-                PointKind::External(ExternalRef::Broken) | PointKind::Free => {}
+                // Projections do not hold their source: deleting it turns them into fixed points.
+                PointKind::External(ExternalRef::Broken | ExternalRef::Projected { .. })
+                | PointKind::Free => {}
             }
         }
     }
