@@ -467,6 +467,43 @@ pub enum CellOp {
         /// The occurrence (1, 2, …).
         element: u32,
     },
+    /// Saves the current visibility (and the viewport's camera and section, as it writes them) as a view
+    /// representation.
+    AddViewRepresentation {
+        /// Its name.
+        name: String,
+        /// The camera, as the viewport writes it.
+        camera: Option<String>,
+        /// The section view, as the viewport writes it.
+        section: Option<String>,
+    },
+    /// Replaces a view representation.
+    SetViewRepresentation {
+        /// Index into the views.
+        index: usize,
+        /// The new contents.
+        view: crate::representation::ViewRepresentation,
+    },
+    /// Shows and hides components as a view representation says.
+    ActivateViewRepresentation(usize),
+    /// Adds a positional representation (a copy of [Primary]).
+    AddPositionalRepresentation(String),
+    /// Replaces a positional representation's overrides.
+    SetPositionalRepresentation {
+        /// Index into the positions.
+        index: usize,
+        /// The overrides.
+        position: crate::representation::PositionalRepresentation,
+    },
+    /// Activates a positional representation (`None`: [Primary]).
+    ActivatePositionalRepresentation(Option<usize>),
+    /// Deletes a view and/or a positional representation.
+    DeleteRepresentation {
+        /// A view to delete.
+        view: Option<usize>,
+        /// A position to delete.
+        position: Option<usize>,
+    },
     /// Ground and Root, "Ground at origin": moves the components (bodies, robots, assemblies) to the
     /// assembly's origin, aligned with it, and grounds them. Refused when constraints then cannot be met.
     GroundAtOrigin(Vec<AnyId>),
@@ -1073,6 +1110,21 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
         CellOp::DeletePattern { index, keep_copies } => crate::pattern::delete(txn, *index, *keep_copies),
         CellOp::MakePatternElementIndependent { index, element } => {
             crate::pattern::make_independent(txn, *index, *element)
+        }
+        CellOp::AddViewRepresentation { name, camera, section } => {
+            crate::representation::add_view(txn, name, camera.as_deref(), section.as_deref())
+        }
+        CellOp::SetViewRepresentation { index, view } => crate::representation::set_view(txn, *index, view),
+        CellOp::ActivateViewRepresentation(index) => crate::representation::activate_view(txn, *index),
+        CellOp::AddPositionalRepresentation(name) => crate::representation::add_position(txn, name),
+        CellOp::SetPositionalRepresentation { index, position } => {
+            crate::representation::set_position(txn, *index, position)
+        }
+        CellOp::ActivatePositionalRepresentation(index) => {
+            crate::representation::activate_position(txn, *index)
+        }
+        CellOp::DeleteRepresentation { view, position } => {
+            crate::representation::delete(txn, *view, *position)
         }
         CellOp::GroundAtOrigin(items) => {
             use crate::design::Occurrence;

@@ -348,6 +348,9 @@ pub struct Timeline {
     /// Component patterns: copies of components arranged in rows and columns or round an axis.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub patterns: Vec<crate::pattern::ComponentPattern>,
+    /// View and positional representations.
+    #[serde(default, skip_serializing_if = "crate::representation::Representations::is_empty")]
+    pub representations: crate::representation::Representations,
 }
 
 /// An occurrence in the assembly tree (docs/ux/inventor-assembly-parity.md, P1-1): a component placed

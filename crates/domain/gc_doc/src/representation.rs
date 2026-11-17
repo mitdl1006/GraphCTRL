@@ -1,0 +1,258 @@
+//! Representations (docs/ux/inventor-assembly-parity.md, P2-20): saved views (what is shown) and saved
+//! positions (relationship values, suppression and component placement overriding the Primary one).
+//!
+//! Inventor 2026 help, To Create, Edit, or Copy Positional Representations
+//! (GUID-34C28C35-45CA-4476-9336-30146F7C9471): an assembly has a positional representation named
+//! [Primary], the default state, which new ones copy; overrides to relationships and components; one is
+//! active at a time. View representations save visibility and display state (spec A62, A64).
+
+use gc_core::{AnyId, Id};
+use serde::{Deserialize, Serialize};
+
+use crate::cell::Placement;
+use crate::command::{Created, EditError};
+use crate::design::{ComponentFlag, Occurrence};
+use crate::relate::Relationship;
+use crate::txn::Txn;
+
+/// A saved view: which components are hidden, and display state the viewport keeps (camera, section
+/// view) as text it reads back itself.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ViewRepresentation {
+    /// Name shown in the Representations folder.
+    pub name: String,
+    /// Components (parts and robot links included) hidden in this view; all others are shown.
+    pub hidden: Vec<Occurrence>,
+    /// The camera as the viewport writes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub camera: Option<String>,
+    /// The section view definition as the viewport writes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub section: Option<String>,
+}
+
+/// A saved position: overrides on top of the Primary state.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PositionalRepresentation {
+    /// Name shown in the Representations folder.
+    pub name: String,
+    /// Relationship values (offset in metres or angle in radians) in this position.
+    pub values: Vec<(Id<Relationship>, f64)>,
+    /// Relationships suppressed (`true`) or brought back (`false`) in this position.
+    pub suppression: Vec<(Id<Relationship>, bool)>,
+    /// Where components stand in this position (for ones no relationship holds).
+    pub placements: Vec<(AnyId, Placement)>,
+}
+
+/// All representations and which are active.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Representations {
+    /// Saved views.
+    #[serde(default)]
+    pub views: Vec<ViewRepresentation>,
+    /// Saved positions ([Primary] is not stored: it is the document itself).
+    #[serde(default)]
+    pub positions: Vec<PositionalRepresentation>,
+    /// The active position (`None`: [Primary]).
+    #[serde(default)]
+    pub active_position: Option<usize>,
+    /// Component placements of [Primary] while another position is active, to go back to.
+    #[serde(default)]
+    pub primary_placements: Vec<(AnyId, Placement)>,
+}
+
+impl Representations {
+    /// True when nothing is stored.
+    pub fn is_empty(&self) -> bool {
+        self.views.is_empty() && self.positions.is_empty() && self.active_position.is_none()
+    }
+}
+
+impl crate::document::Document {
+    /// The representations.
+    pub fn representations(&self) -> Representations {
+        self.timeline().map(|(_, t)| t.representations.clone()).unwrap_or_default()
+    }
+
+    /// The active positional representation's overrides, if one is active.
+    pub(crate) fn active_position(&self) -> Option<PositionalRepresentation> {
+        let reps = self.timeline().map(|(_, t)| &t.representations)?;
+        reps.active_position.and_then(|i| reps.positions.get(i)).cloned()
+    }
+
+    /// Every component that can be shown or hidden: bodies, robots, assemblies, their parts and links.
+    fn all_occurrences(&self) -> Vec<Occurrence> {
+        let mut out: Vec<Occurrence> = self.components().iter().map(|n| n.occurrence).collect();
+        for (id, _) in self.robots().iter() {
+            out.extend(self.robot_links(id).iter().map(|n| n.occurrence));
+        }
+        out
+    }
+}
+
+fn write(txn: &mut Txn<'_>, reps: Representations) -> Result<(), EditError> {
+    crate::cell::set_timeline(txn, |t| t.representations = reps)
+}
+
+/// Saves the current visibility as a new view representation.
+pub(crate) fn add_view(
+    txn: &mut Txn<'_>,
+    name: &str,
+    camera: Option<&str>,
+    section: Option<&str>,
+) -> Result<(Vec<Created>, &'static str), EditError> {
+    let doc = txn.doc();
+    let hidden: Vec<Occurrence> = doc
+        .all_occurrences()
+        .into_iter()
+        .filter(|o| !doc.component_flag(*o, ComponentFlag::Visible))
+        .collect();
+    let mut reps = doc.representations();
+    if name.trim().is_empty() || reps.views.iter().any(|v| v.name == name) {
+        return Err(EditError::NameTaken);
+    }
+    reps.views.push(ViewRepresentation {
+        name: name.trim().to_owned(),
+        hidden,
+        camera: camera.map(str::to_owned),
+        section: section.map(str::to_owned),
+    });
+    write(txn, reps)?;
+    Ok((Vec::new(), "New view representation"))
+}
+
+/// Replaces a view representation.
+pub(crate) fn set_view(
+    txn: &mut Txn<'_>,
+    index: usize,
+    view: &ViewRepresentation,
+) -> Result<(Vec<Created>, &'static str), EditError> {
+    let mut reps = txn.doc().representations();
+    *reps.views.get_mut(index).ok_or(EditError::BadValue)? = view.clone();
+    write(txn, reps)?;
+    Ok((Vec::new(), "Edit view representation"))
+}
+
+/// Shows and hides components as a view representation says (one undo step).
+pub(crate) fn activate_view(
+    txn: &mut Txn<'_>,
+    index: usize,
+) -> Result<(Vec<Created>, &'static str), EditError> {
+    let view = txn.doc().representations().views.get(index).cloned().ok_or(EditError::BadValue)?;
+    for occurrence in txn.doc().all_occurrences() {
+        let visible = !view.hidden.contains(&occurrence);
+        if txn.doc().component_flag(occurrence, ComponentFlag::Visible) != visible {
+            crate::tree::set_component(txn, occurrence, ComponentFlag::Visible, visible)?;
+        }
+    }
+    Ok((Vec::new(), "Activate view representation"))
+}
+
+/// Adds a positional representation (a copy of [Primary]: no overrides).
+pub(crate) fn add_position(txn: &mut Txn<'_>, name: &str) -> Result<(Vec<Created>, &'static str), EditError> {
+    let mut reps = txn.doc().representations();
+    let name = name.trim();
+    if name.is_empty() || name == "Primary" || reps.positions.iter().any(|p| p.name == name) {
+        return Err(EditError::NameTaken);
+    }
+    reps.positions.push(PositionalRepresentation { name: name.to_owned(), ..Default::default() });
+    write(txn, reps)?;
+    Ok((Vec::new(), "New positional representation"))
+}
+
+/// Replaces a positional representation's overrides (re-solved when it is the active one).
+pub(crate) fn set_position(
+    txn: &mut Txn<'_>,
+    index: usize,
+    position: &PositionalRepresentation,
+) -> Result<(Vec<Created>, &'static str), EditError> {
+    if !position.values.iter().all(|(_, v)| v.is_finite()) {
+        return Err(EditError::BadValue);
+    }
+    let mut reps = txn.doc().representations();
+    *reps.positions.get_mut(index).ok_or(EditError::BadValue)? = position.clone();
+    let active = reps.active_position == Some(index);
+    write(txn, reps)?;
+    if active {
+        apply_placements(txn, &position.placements)?;
+        crate::cell::settle(txn)?;
+    }
+    Ok((Vec::new(), "Edit positional representation"))
+}
+
+fn apply_placements(txn: &mut Txn<'_>, placements: &[(AnyId, Placement)]) -> Result<(), EditError> {
+    for (item, placement) in placements {
+        if txn.doc().owner_pose(*item).is_some() {
+            let pose = gc_math::pose_from_xyz_rpy(placement.xyz, placement.rpy);
+            crate::cell::set_owner_pose(txn, *item, pose)?;
+        }
+    }
+    Ok(())
+}
+
+/// Activates a positional representation (`None`: [Primary]): its overrides apply and the relationships
+/// are solved again; going back to [Primary] puts the components where [Primary] had them.
+pub(crate) fn activate_position(
+    txn: &mut Txn<'_>,
+    index: Option<usize>,
+) -> Result<(Vec<Created>, &'static str), EditError> {
+    let mut reps = txn.doc().representations();
+    if index.is_some_and(|i| i >= reps.positions.len()) {
+        return Err(EditError::BadValue);
+    }
+    if reps.active_position == index {
+        return Ok((Vec::new(), "Activate positional representation"));
+    }
+    // Leaving [Primary]: remember where its components stand.
+    if reps.active_position.is_none() {
+        let doc = txn.doc();
+        reps.primary_placements = doc
+            .bodies()
+            .iter()
+            .map(|(id, b)| (id.erase(), b.placement))
+            .chain(doc.robots().iter().map(|(id, r)| (id.erase(), r.placement)))
+            .chain(doc.assemblies().iter().map(|(id, a)| (id.erase(), a.placement)))
+            .collect();
+    }
+    let primary = reps.primary_placements.clone();
+    reps.active_position = index;
+    if index.is_none() {
+        reps.primary_placements.clear();
+    }
+    let overrides =
+        index.and_then(|i| reps.positions.get(i)).map(|p| p.placements.clone()).unwrap_or_default();
+    write(txn, reps)?;
+    apply_placements(txn, &primary)?;
+    apply_placements(txn, &overrides)?;
+    crate::cell::settle(txn)?;
+    Ok((Vec::new(), "Activate positional representation"))
+}
+
+/// Deletes a view or positional representation (the active position goes back to [Primary] first).
+pub(crate) fn delete(
+    txn: &mut Txn<'_>,
+    view: Option<usize>,
+    position: Option<usize>,
+) -> Result<(Vec<Created>, &'static str), EditError> {
+    if let Some(i) = position
+        && txn.doc().representations().active_position == Some(i)
+    {
+        activate_position(txn, None)?;
+    }
+    let mut reps = txn.doc().representations();
+    if let Some(i) = view {
+        if i >= reps.views.len() {
+            return Err(EditError::BadValue);
+        }
+        reps.views.remove(i);
+    }
+    if let Some(i) = position {
+        if i >= reps.positions.len() {
+            return Err(EditError::BadValue);
+        }
+        reps.positions.remove(i);
+        reps.active_position = reps.active_position.map(|a| if a > i { a - 1 } else { a });
+    }
+    write(txn, reps)?;
+    Ok((Vec::new(), "Delete representation"))
+}

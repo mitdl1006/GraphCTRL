@@ -661,3 +661,85 @@ fn a_conflict_names_the_relationship_in_the_way_and_suppressing_it_recovers() {
     // Bringing the mate back conflicts again and is refused.
     assert!(bench.cell(CellOp::SetSuppressed { item: mate.erase(), suppressed: false }).is_err());
 }
+
+#[test]
+fn view_representations_restore_what_is_shown() {
+    let mut bench = Bench::new();
+    let (table, block) = table_and_box(&mut bench);
+    let hide = Command::SetComponent {
+        occurrence: Occurrence::Item(block.erase()),
+        flag: ComponentFlag::Visible,
+        on: false,
+    };
+    apply(&mut bench.doc, &hide).unwrap();
+    bench
+        .cell(CellOp::AddViewRepresentation {
+            name: "No box".into(),
+            camera: Some("cam".into()),
+            section: None,
+        })
+        .unwrap();
+    let show = Command::SetComponent {
+        occurrence: Occurrence::Item(block.erase()),
+        flag: ComponentFlag::Visible,
+        on: true,
+    };
+    apply(&mut bench.doc, &show).unwrap();
+    assert!(bench.doc.component_flag(Occurrence::Item(block.erase()), ComponentFlag::Visible));
+    bench.cell(CellOp::ActivateViewRepresentation(0)).unwrap();
+    assert!(!bench.doc.component_flag(Occurrence::Item(block.erase()), ComponentFlag::Visible));
+    assert!(bench.doc.component_flag(Occurrence::Item(table.erase()), ComponentFlag::Visible));
+    assert_eq!(bench.doc.representations().views[0].camera.as_deref(), Some("cam"));
+    assert!(
+        bench
+            .cell(CellOp::AddViewRepresentation { name: "No box".into(), camera: None, section: None })
+            .is_err()
+    );
+}
+
+#[test]
+fn positional_representations_override_values_and_go_back_to_primary() {
+    use gc_doc::PositionalRepresentation;
+    let mut bench = Bench::new();
+    let (table, block) = table_and_box(&mut bench);
+    let mate = bench
+        .relate(Relationship::new(
+            "Mate:1",
+            RelationKind::Mate { offset: 0.0, sense: AxisSense::Opposed },
+            on(block, bottom(0.2)),
+            on(table, top(1.0)),
+        ))
+        .unwrap();
+    let primary_z = bench.pose(block).translation.z;
+    bench.cell(CellOp::AddPositionalRepresentation("Lifted".into())).unwrap();
+    let lifted =
+        PositionalRepresentation { name: "Lifted".into(), values: vec![(mate, 0.2)], ..Default::default() };
+    bench.cell(CellOp::SetPositionalRepresentation { index: 0, position: lifted }).unwrap();
+    bench.cell(CellOp::ActivatePositionalRepresentation(Some(0))).unwrap();
+    assert!((bench.pose(block).translation.z - primary_z - 0.2).abs() < 1e-7, "lifted in this position");
+    assert_eq!(
+        bench.doc.get(mate).unwrap().kind,
+        RelationKind::Mate { offset: 0.0, sense: AxisSense::Opposed },
+        "Primary unchanged"
+    );
+    bench.cell(CellOp::ActivatePositionalRepresentation(None)).unwrap();
+    assert!((bench.pose(block).translation.z - primary_z).abs() < 1e-7, "back where Primary has it");
+
+    // Suppressing the mate and placing the box elsewhere in another position.
+    bench.cell(CellOp::AddPositionalRepresentation("Aside".into())).unwrap();
+    let aside = PositionalRepresentation {
+        name: "Aside".into(),
+        suppression: vec![(mate, true)],
+        placements: vec![(block.erase(), Placement { xyz: [3.0, 0.0, 0.1], rpy: [0.0; 3] })],
+        ..Default::default()
+    };
+    bench.cell(CellOp::SetPositionalRepresentation { index: 1, position: aside }).unwrap();
+    bench.cell(CellOp::ActivatePositionalRepresentation(Some(1))).unwrap();
+    assert!(close(bench.pose(block).translation, DVec3::new(3.0, 0.0, 0.1)));
+    bench.cell(CellOp::ActivatePositionalRepresentation(None)).unwrap();
+    assert!((bench.pose(block).translation.z - primary_z).abs() < 1e-7);
+    assert!(
+        bench.cell(CellOp::AddPositionalRepresentation("Primary".into())).is_err(),
+        "[Primary] is reserved"
+    );
+}
