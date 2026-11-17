@@ -16,6 +16,23 @@ pub fn parse(bytes: &[u8]) -> Result<MeshData, MeshError> {
     Ok(MeshData::new(positions, (0..count).collect())?.welded(0.0))
 }
 
+/// The mesh as a binary STL file.
+pub fn to_binary(mesh: &MeshData) -> Vec<u8> {
+    let mut bytes = vec![0_u8; 80];
+    bytes.extend(u32::try_from(mesh.triangle_count()).unwrap_or(u32::MAX).to_le_bytes());
+    for triangle in mesh.indices().chunks_exact(3) {
+        bytes.extend([0_u8; 12]); // the normal: readers recompute it
+        for index in triangle {
+            let position = mesh.positions().get(*index as usize).copied().unwrap_or_default();
+            for value in position {
+                bytes.extend(value.to_le_bytes());
+            }
+        }
+        bytes.extend([0_u8; 2]);
+    }
+    bytes
+}
+
 /// A binary file: 80 bytes of header, the triangle count, then 50 bytes per triangle. The count must
 /// match the length exactly, which also tells binary files that start with `solid` from text files.
 fn binary(bytes: &[u8]) -> Option<Vec<[f32; 3]>> {
@@ -63,19 +80,10 @@ mod tests {
     use super::*;
     use crate::primitives;
 
+    /// A binary file that starts with `solid`, as some writers produce.
     fn binary_of(mesh: &MeshData) -> Vec<u8> {
-        let mut bytes = vec![0_u8; 80];
-        bytes[..5].copy_from_slice(b"solid"); // some writers start binary files like this
-        bytes.extend(u32::try_from(mesh.triangle_count()).unwrap().to_le_bytes());
-        for triangle in mesh.indices().chunks_exact(3) {
-            bytes.extend([0_u8; 12]);
-            for index in triangle {
-                for value in mesh.positions()[*index as usize] {
-                    bytes.extend(value.to_le_bytes());
-                }
-            }
-            bytes.extend([0_u8; 2]);
-        }
+        let mut bytes = to_binary(mesh);
+        bytes[..5].copy_from_slice(b"solid");
         bytes
     }
 

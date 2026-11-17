@@ -65,6 +65,18 @@ pub struct LoadedRobot {
     pub missing: Vec<String>,
 }
 
+/// A mesh file's triangles with its coordinates multiplied by `scale`.
+fn scaled(file: &MeshData, scale: [f64; 3]) -> Option<MeshRef> {
+    #[allow(clippy::cast_possible_truncation, reason = "mesh coordinates are f32")]
+    let factors = scale.map(|f| f as f32);
+    let positions: Vec<[f32; 3]> =
+        file.positions().iter().map(|p| [p[0] * factors[0], p[1] * factors[1], p[2] * factors[2]]).collect();
+    let data = MeshData::new(positions, file.indices().to_vec()).ok()?;
+    let bounds = data.aabb();
+    let radius = bounds.min.abs().max(bounds.max.abs()).length();
+    Some(MeshRef { key: data.content_hash(), radius, data: Arc::new(data) })
+}
+
 fn scaled_key(uri: &str, scale: [f64; 3]) -> String {
     format!("{uri}|{scale:?}")
 }
@@ -100,20 +112,10 @@ impl LoadedRobot {
                 continue;
             };
             self.files.insert(uri.clone(), Arc::clone(&file));
-            #[allow(clippy::cast_possible_truncation, reason = "mesh coordinates are f32")]
-            let factors = scale.map(|f| f as f32);
-            let positions: Vec<[f32; 3]> = file
-                .positions()
-                .iter()
-                .map(|p| [p[0] * factors[0], p[1] * factors[1], p[2] * factors[2]])
-                .collect();
-            let Ok(data) = MeshData::new(positions, file.indices().to_vec()) else {
+            let Some(mesh) = scaled(&file, *scale) else {
                 self.missing.push(uri.clone());
                 continue;
             };
-            let bounds = data.aabb();
-            let radius = bounds.min.abs().max(bounds.max.abs()).length();
-            let mesh = MeshRef { key: data.content_hash(), radius, data: Arc::new(data) };
             self.scaled.insert(scaled_key(uri, *scale), mesh);
         }
     }
@@ -204,6 +206,10 @@ pub(crate) struct CellState {
     plans: BTreeMap<Id<MotionPath>, Planned>,
     playback: Option<(Id<MotionPath>, f64)>,
     resources: Option<Resources>,
+    /// Mesh files of bodies by path: the triangles as stored, or why the file could not be read.
+    files: BTreeMap<String, Result<Arc<MeshData>, String>>,
+    /// The same at the scale a body asks for, by path and scale.
+    meshes: BTreeMap<String, MeshRef>,
 }
 
 impl Default for CellState {
@@ -218,6 +224,8 @@ impl Default for CellState {
             plans: BTreeMap::new(),
             playback: None,
             resources: None,
+            files: BTreeMap::new(),
+            meshes: BTreeMap::new(),
         }
     }
 }
@@ -234,6 +242,9 @@ impl CellState {
                 self.robots.insert(id, Arc::new(loaded.0));
             }
         }
+        for (_, body) in doc.bodies().iter() {
+            self.read_body_mesh(&body.solid);
+        }
         self.plans.retain(|id, _| doc.get(*id).is_some());
         if self.jog.as_ref().is_some_and(|(id, _)| doc.get(*id).is_none()) {
             self.jog = None;
@@ -245,6 +256,47 @@ impl CellState {
             self.playback = None;
         }
     }
+}
+
+fn read_mesh_file(path: &str) -> Result<Arc<MeshData>, String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("{path}: {e}"))?;
+    gc_mesh::stl::parse(&bytes).map(Arc::new).map_err(|e| format!("{path}: {e}"))
+}
+
+impl CellState {
+    /// Makes sure the mesh of a body's solid is loaded at its scale.
+    fn read_body_mesh(&mut self, solid: &Solid) {
+        let Solid::Mesh { file, scale } = solid else { return };
+        let key = scaled_key(file, [*scale; 3]);
+        if self.meshes.contains_key(&key) {
+            return;
+        }
+        let stored = self.files.entry(file.clone()).or_insert_with(|| read_mesh_file(file));
+        if let Ok(data) = stored
+            && let Some(mesh) = scaled(data, [*scale; 3])
+        {
+            self.meshes.insert(key, mesh);
+        }
+    }
+
+    fn body_mesh(&self, solid: &Solid) -> Option<&MeshRef> {
+        match solid {
+            Solid::Mesh { file, scale } => self.meshes.get(&scaled_key(file, [*scale; 3])),
+            _ => None,
+        }
+    }
+}
+
+/// The collision shape of a body's solid.
+fn shape_of(solid: &Solid, meshes: &BTreeMap<String, MeshRef>) -> Option<ShapeDesc> {
+    Some(match solid {
+        Solid::Box { size } => ShapeDesc::Box(*size),
+        Solid::Cylinder { radius, length } => ShapeDesc::Cylinder { radius: *radius, length: *length },
+        Solid::Sphere { radius } => ShapeDesc::Ball(*radius),
+        Solid::Mesh { file, scale } => {
+            ShapeDesc::Mesh(Arc::clone(&meshes.get(&scaled_key(file, [*scale; 3]))?.data))
+        }
+    })
 }
 
 /// Reads a robot description and picks its planning chain. Returns the tip link's name with it.
@@ -347,6 +399,34 @@ impl Session {
         }
     }
 
+    /// The mesh of a body whose solid is a mesh file; `None` for other solids and for files that could
+    /// not be read (see [`Session::mesh_error`]).
+    pub fn body_mesh(&self, solid: &Solid) -> Option<&MeshRef> {
+        self.cell.body_mesh(solid)
+    }
+
+    /// Why a mesh file could not be read.
+    pub fn mesh_error(&self, file: &str) -> Option<&str> {
+        self.cell.files.get(file).and_then(|stored| stored.as_ref().err()).map(String::as_str)
+    }
+
+    /// Adds a body from a mesh file (STL). A file whose size only makes sense in millimetres is scaled
+    /// to metres; the scale can be changed afterwards.
+    pub fn add_mesh_body(&mut self, path: &std::path::Path) -> Result<Id<Body>, String> {
+        let file = path.to_string_lossy().into_owned();
+        let data = read_mesh_file(&file)?;
+        // Nothing in a robot cell is twenty metres across.
+        let scale = if data.aabb().diagonal() > 20.0 { 0.001 } else { 1.0 };
+        self.cell.files.insert(file.clone(), Ok(data));
+        let name =
+            path.file_stem().map_or_else(|| "Mesh".to_owned(), |stem| stem.to_string_lossy().into_owned());
+        let body = Body { name, placement: Placement::default(), solid: Solid::Mesh { file, scale } };
+        match self.cell_op(CellOp::AddBody(body)).map_err(|e| e.to_string())?.first() {
+            Some(Created::Body(id)) => Ok(*id),
+            _ => Err("the body was not created".to_owned()),
+        }
+    }
+
     /// A body as it is shown: the preview while it is being edited, else the document's.
     pub fn shown_body(&self, body: Id<Body>) -> Option<&Body> {
         match &self.cell.body {
@@ -358,6 +438,7 @@ impl Session {
     /// Previews an edit of a body without touching the document.
     pub fn preview_body(&mut self, id: Id<Body>, body: Body) {
         if self.doc.get(id).is_some() && body.solid.is_valid() {
+            self.cell.read_body_mesh(&body.solid);
             self.cell.body = Some((id, body));
         }
     }
@@ -538,10 +619,11 @@ impl Session {
         // The job works on its own copy of the document: edits made while it runs do not disturb it,
         // and the fingerprint tells afterwards whether its result is still current.
         let doc = self.doc.clone();
+        let meshes = self.cell.meshes.clone();
         let job = self.cell.executor.spawn("plan", move |ctx| {
             let control = JobControl(ctx.cancel.clone());
             let result = match &loaded {
-                Some(loaded) => plan_path(&doc, loaded, path, &control),
+                Some(loaded) => plan_path(&doc, loaded, &meshes, path, &control),
                 None => Err("the robot description could not be read".to_owned()),
             };
             (!ctx.cancel.is_cancelled()).then_some(result)
@@ -596,6 +678,7 @@ impl Session {
 fn plan_path(
     doc: &Document,
     loaded: &LoadedRobot,
+    meshes: &BTreeMap<String, MeshRef>,
     path_id: Id<MotionPath>,
     control: &dyn Control,
 ) -> Result<PlannedPath, String> {
@@ -606,19 +689,13 @@ fn plan_path(
         .find(|(id, _)| *id == path.planner)
         .map(|(_, algorithm)| *algorithm)
         .ok_or_else(|| format!("unknown planner `{}`", path.planner))?;
-    let obstacles: Vec<Obstacle> = doc
-        .bodies()
-        .iter()
-        .map(|(_, body)| Obstacle {
-            name: body.name.clone(),
-            pose: pose_of(&body.placement),
-            shape: match body.solid {
-                Solid::Box { size } => ShapeDesc::Box(size),
-                Solid::Cylinder { radius, length } => ShapeDesc::Cylinder { radius, length },
-                Solid::Sphere { radius } => ShapeDesc::Ball(radius),
-            },
-        })
-        .collect();
+    let mut obstacles = Vec::new();
+    for (_, body) in doc.bodies().iter() {
+        // An obstacle that cannot be checked must not be planned through as if it were not there.
+        let shape = shape_of(&body.solid, meshes)
+            .ok_or_else(|| format!("the mesh of `{}` is not available", body.name))?;
+        obstacles.push(Obstacle { name: body.name.clone(), pose: pose_of(&body.placement), shape });
+    }
     let (scene, _) = RobotScene::new(
         Arc::clone(&loaded.model),
         loaded.chain.clone(),

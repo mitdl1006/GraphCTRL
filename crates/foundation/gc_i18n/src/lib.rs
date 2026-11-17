@@ -306,6 +306,12 @@ messages! {
     PropPosition => ("위치 (mm)", "Position (mm)"),
     /// Label: size in millimetres.
     PropSize => ("크기 (mm)", "Size (mm)"),
+    /// Label: rotation as roll, pitch, yaw in degrees.
+    PropRotation => ("회전 (도)", "Rotation (deg)"),
+    /// Label: factor from file units to metres.
+    PropScale => ("배율", "Scale"),
+    /// Command: add a body from a mesh file.
+    CmdImportMesh => ("메시 불러오기", "Import Mesh"),
     /// Label: planner choice.
     PropPlanner => ("플래너", "Planner"),
     /// Label: random seed.

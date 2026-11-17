@@ -16,9 +16,16 @@ pub struct Placement {
     pub rpy: [f64; 3],
 }
 
-/// The shape of a simple body, centred on its own origin.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+/// The shape of a body, in its own frame.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Solid {
+    /// A mesh file (STL). The document stores where the file is, not its triangles.
+    Mesh {
+        /// Path of the file.
+        file: String,
+        /// Factor applied to the file's coordinates to get metres (0.001 for a file in millimetres).
+        scale: f64,
+    },
     /// A box with these edge lengths.
     Box {
         /// Edge lengths along X, Y, Z.
@@ -42,10 +49,11 @@ impl Solid {
     /// True when every size is positive and finite.
     pub fn is_valid(&self) -> bool {
         let ok = |v: f64| v.is_finite() && v > 0.0;
-        match *self {
-            Self::Box { size } => size.into_iter().all(ok),
-            Self::Cylinder { radius, length } => ok(radius) && ok(length),
-            Self::Sphere { radius } => ok(radius),
+        match self {
+            Self::Mesh { file, scale } => !file.is_empty() && ok(*scale),
+            Self::Box { size } => size.iter().copied().all(ok),
+            Self::Cylinder { radius, length } => ok(*radius) && ok(*length),
+            Self::Sphere { radius } => ok(*radius),
         }
     }
 }

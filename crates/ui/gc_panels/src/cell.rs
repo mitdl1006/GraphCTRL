@@ -71,6 +71,17 @@ fn jog(ui: &mut Ui, session: &mut Session, lang: Lang) {
     }
 }
 
+/// A length shown and edited in millimetres. Returns true when the user changed it.
+fn millimetres(ui: &mut Ui, value: &mut f64, name: &str, least: f64) -> bool {
+    let mut mm = *value * 1000.0;
+    let drag = egui::DragValue::new(&mut mm).speed(1.0).range(least..=100_000.0).prefix(format!("{name} "));
+    let changed = ui.add(drag).changed();
+    if changed {
+        *value = mm / 1000.0;
+    }
+    changed
+}
+
 fn bodies(ui: &mut Ui, session: &mut Session, lang: Lang) {
     let ids: Vec<_> = session.doc().bodies().iter().map(|(id, _)| id).collect();
     if ids.is_empty() {
@@ -82,36 +93,54 @@ fn bodies(ui: &mut Ui, session: &mut Session, lang: Lang) {
         let Some(mut body) = session.shown_body(id).cloned() else { continue };
         let mut changed = false;
         egui::CollapsingHeader::new(&body.name).id_salt(("gc_body", id.raw())).show(ui, |ui| {
-            let mut millimetres = |ui: &mut Ui, value: &mut f64, name: &str, least: f64| {
-                let mut mm = *value * 1000.0;
-                let drag = egui::DragValue::new(&mut mm)
-                    .speed(1.0)
-                    .range(least..=100_000.0)
-                    .prefix(format!("{name} "));
-                if ui.add(drag).changed() {
-                    *value = mm / 1000.0;
-                    changed = true;
-                }
-            };
             ui.label(tr!(lang, PropPosition));
             ui.horizontal(|ui| {
                 for (value, name) in body.placement.xyz.iter_mut().zip(["X", "Y", "Z"]) {
-                    millimetres(ui, value, name, -100_000.0);
+                    changed |= millimetres(ui, value, name, -100_000.0);
                 }
             });
-            ui.label(tr!(lang, PropSize));
-            ui.horizontal(|ui| match &mut body.solid {
-                Solid::Box { size } => {
-                    for (value, name) in size.iter_mut().zip(["X", "Y", "Z"]) {
-                        millimetres(ui, value, name, 1.0);
+            ui.label(tr!(lang, PropRotation));
+            ui.horizontal(|ui| {
+                for (value, name) in body.placement.rpy.iter_mut().zip(["R", "P", "Y"]) {
+                    let mut degrees = value.to_degrees();
+                    let drag = egui::DragValue::new(&mut degrees).speed(1.0).prefix(format!("{name} "));
+                    if ui.add(drag).changed() {
+                        *value = degrees.to_radians();
+                        changed = true;
                     }
                 }
-                Solid::Cylinder { radius, length } => {
-                    millimetres(ui, radius, "R", 1.0);
-                    millimetres(ui, length, "L", 1.0);
-                }
-                Solid::Sphere { radius } => millimetres(ui, radius, "R", 1.0),
             });
+            match &mut body.solid {
+                Solid::Mesh { file, scale } => {
+                    ui.horizontal(|ui| {
+                        let label = ui.label(tr!(lang, PropScale));
+                        let drag = egui::DragValue::new(scale).speed(0.001).range(1e-6..=1000.0);
+                        changed |= ui.add(drag).labelled_by(label.id).changed();
+                    });
+                    if let Some(error) = session.mesh_error(file) {
+                        ui.colored_label(colors::ERROR, error);
+                    }
+                }
+                Solid::Box { size } => {
+                    ui.label(tr!(lang, PropSize));
+                    ui.horizontal(|ui| {
+                        for (value, name) in size.iter_mut().zip(["X", "Y", "Z"]) {
+                            changed |= millimetres(ui, value, name, 1.0);
+                        }
+                    });
+                }
+                Solid::Cylinder { radius, length } => {
+                    ui.label(tr!(lang, PropSize));
+                    ui.horizontal(|ui| {
+                        changed |= millimetres(ui, radius, "R", 1.0);
+                        changed |= millimetres(ui, length, "L", 1.0);
+                    });
+                }
+                Solid::Sphere { radius } => {
+                    ui.label(tr!(lang, PropSize));
+                    changed |= ui.horizontal(|ui| millimetres(ui, radius, "R", 1.0)).inner;
+                }
+            }
         });
         if changed {
             session.preview_body(id, body);

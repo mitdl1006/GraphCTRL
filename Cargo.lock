@@ -1334,6 +1334,7 @@ dependencies = [
  "gc_i18n",
  "gc_jobs",
  "gc_math",
+ "gc_mesh",
  "gc_panels",
  "gc_plugin_api",
  "gc_plugin_ur",
@@ -1606,6 +1607,7 @@ dependencies = [
  "gc_sketch",
  "gc_tools",
  "log",
+ "tempfile",
  "thiserror 2.0.21",
 ]
 

@@ -40,6 +40,10 @@ pub trait FileDialogs {
     fn open(&mut self) -> Option<PathBuf>;
     /// The file to save to, or `None` when the user cancelled.
     fn save(&mut self, suggested_name: &str) -> Option<PathBuf>;
+    /// The mesh file to import, or `None` when the user cancelled.
+    fn open_mesh(&mut self) -> Option<PathBuf> {
+        None
+    }
 }
 
 struct NativeDialogs;
@@ -51,6 +55,10 @@ impl FileDialogs for NativeDialogs {
 
     fn save(&mut self, suggested_name: &str) -> Option<PathBuf> {
         rfd::FileDialog::new().add_filter("GraphCTRL", &["gctrl"]).set_file_name(suggested_name).save_file()
+    }
+
+    fn open_mesh(&mut self) -> Option<PathBuf> {
+        rfd::FileDialog::new().add_filter("STL", &["stl", "STL"]).pick_file()
     }
 }
 
@@ -463,8 +471,9 @@ impl eframe::App for GraphCtrlApp {
         self.update_title(&ctx);
 
         egui::Panel::top("menu").show(ui, |ui| self.menu(ui));
+        let mut ribbon_action = None;
         egui::Panel::top("ribbon").show(ui, |ui| {
-            ribbon::show(
+            ribbon_action = ribbon::show(
                 ui,
                 &mut self.tab,
                 &mut self.session,
@@ -474,6 +483,17 @@ impl eframe::App for GraphCtrlApp {
                 lang,
             );
         });
+        if ribbon_action == Some(ribbon::RibbonAction::ImportMesh)
+            && let Some(path) = self.dialogs.open_mesh()
+        {
+            match self.session.add_mesh_body(&path) {
+                Ok(_) => {
+                    self.notice = None;
+                    self.viewport.fit(&self.session, [1000.0, 700.0]);
+                }
+                Err(error) => self.notice = Some(tr!(lang, FileError, error)),
+            }
+        }
         egui::Panel::bottom("status").show(ui, |ui| {
             gc_panels::status_bar(
                 ui,

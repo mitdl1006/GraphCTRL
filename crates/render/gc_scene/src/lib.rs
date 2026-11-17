@@ -151,13 +151,20 @@ impl Scene {
         let mut scene = Self::default();
         for (id, _) in doc.bodies().iter() {
             let Some(body) = session.shown_body(id) else { continue };
-            let shape = match body.solid {
-                Solid::Box { size } => Primitive::Box(size),
-                Solid::Cylinder { radius, length } => Primitive::Cylinder { radius, length },
-                Solid::Sphere { radius } => Primitive::Sphere(radius),
+            let shape = match &body.solid {
+                Solid::Box { size } => Shape3::Primitive(Primitive::Box(*size)),
+                Solid::Cylinder { radius, length } => {
+                    Shape3::Primitive(Primitive::Cylinder { radius: *radius, length: *length })
+                }
+                Solid::Sphere { radius } => Shape3::Primitive(Primitive::Sphere(*radius)),
+                // A file that could not be read is reported in the panel and not drawn.
+                Solid::Mesh { .. } => match session.body_mesh(&body.solid) {
+                    Some(mesh) => Shape3::Mesh(mesh.clone()),
+                    None => continue,
+                },
             };
             let pose = pose_from_xyz_rpy(body.placement.xyz, body.placement.rpy);
-            scene.solids.push(Solid3 { shape: Shape3::Primitive(shape), pose, color: BODY });
+            scene.solids.push(Solid3 { shape, pose, color: BODY });
         }
         for (id, _) in doc.robots().iter() {
             let (Some(loaded), Some(poses)) = (session.robot_model(id), session.link_poses(id)) else {

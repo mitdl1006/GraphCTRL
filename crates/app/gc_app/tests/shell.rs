@@ -375,6 +375,39 @@ impl gc_app::FileDialogs for Scripted {
     fn save(&mut self, _: &str) -> Option<std::path::PathBuf> {
         Some(self.0.clone())
     }
+    fn open_mesh(&mut self) -> Option<std::path::PathBuf> {
+        Some(self.0.clone())
+    }
+}
+
+/// "Import Mesh" asks for a file and adds it as a body; a file that cannot be read is reported.
+#[test]
+fn a_mesh_file_is_imported_through_the_ribbon() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("fixture.stl");
+    let mut harness =
+        egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0).build_eframe(|cc| {
+            GraphCtrlApp::new(cc, RunOptions::default()).with_dialogs(Box::new(Scripted(path.clone())))
+        });
+    harness.run();
+    harness.get_by_label("로봇").click();
+    harness.run();
+    // The file does not exist yet: the status bar says so and nothing is added.
+    harness.get_by_label("메시 불러오기").click();
+    harness.run();
+    assert!(harness.state().session.doc().bodies().is_empty());
+    assert!(harness.query_all_by_label_contains("fixture.stl").count() >= 1);
+
+    let mesh = gc_mesh::primitives::cylinder(0.2, 0.5, 24).unwrap();
+    std::fs::write(&path, gc_mesh::stl::to_binary(&mesh)).unwrap();
+    harness.get_by_label("메시 불러오기").click();
+    harness.run();
+    let session = &harness.state().session;
+    let (_, body) = session.doc().bodies().iter().next().unwrap();
+    assert_eq!(body.name, "fixture");
+    assert_eq!(session.body_mesh(&body.solid).unwrap().data.triangle_count(), 96);
+    // Listed in the browser and in the placement panel.
+    assert_eq!(harness.query_all_by_label("fixture").count(), 2);
 }
 
 /// Save, start a new document, open the file again: the sketch is back and the window is not "dirty".

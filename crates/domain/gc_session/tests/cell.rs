@@ -154,3 +154,42 @@ fn planning_in_the_background_can_be_watched_and_cancelled() {
     assert!(!session.poll_jobs());
     assert!(session.planned(path).unwrap().segments[0].straight);
 }
+
+#[test]
+fn equipment_from_a_mesh_file_is_an_obstacle() {
+    // A pillar modelled in millimetres, as CAD exports usually are.
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join("pillar.stl");
+    let pillar = gc_mesh::primitives::cuboid([100.0, 100.0, 1400.0]).unwrap();
+    std::fs::write(&file, gc_mesh::stl::to_binary(&pillar)).unwrap();
+
+    let mut session = Session::new();
+    let robot = session.add_robot("Robot1", &six_axis()).unwrap();
+    session.jog(robot, &RIGHT);
+    session.end_jog();
+    let right = session.add_waypoint_here(robot).unwrap();
+    session.jog(robot, &LEFT);
+    session.end_jog();
+    let body = session.add_mesh_body(&file).unwrap();
+    let stored = session.doc().get(body).unwrap().clone();
+    assert_eq!(stored.name, "pillar");
+    let Solid::Mesh { scale, .. } = stored.solid else { panic!("not a mesh") };
+    assert_eq!(scale, 0.001, "a 1.4 km pillar is taken to be in millimetres");
+    let mesh = session.body_mesh(&stored.solid).unwrap();
+    assert!((mesh.data.aabb().max.z - 0.7).abs() < 1e-6);
+
+    let placement = Placement { xyz: [0.55, 0.0, 0.7], rpy: [0.0; 3] };
+    session.preview_body(body, gc_doc::Body { placement, ..stored });
+    session.end_body_preview();
+    let path = session.add_path(robot, vec![right]).unwrap();
+    assert_eq!(session.plan(path), PlanStatus::Ready, "{:?}", session.plan_error(path));
+    let planned = session.planned(path).unwrap();
+    assert!(!planned.segments[0].straight, "the pillar is in the way");
+    assert!(planned.min_clearance() >= gc_session::PADDING);
+
+    // A file that is not there is refused with its name; nothing is added.
+    let missing = directory.path().join("nothing.stl");
+    let error = session.add_mesh_body(&missing).unwrap_err();
+    assert!(error.contains("nothing.stl"), "{error}");
+    assert_eq!(session.doc().bodies().len(), 1);
+}

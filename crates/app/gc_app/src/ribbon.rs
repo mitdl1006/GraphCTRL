@@ -36,6 +36,13 @@ const CONSTRAINTS: [(ConstraintKind, &str, Msg); 12] = [
     (ConstraintKind::Midpoint, "M", Msg::ConMidpoint),
 ];
 
+/// Something the ribbon asks the application to do because it needs more than the session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RibbonAction {
+    /// Ask for a mesh file and add it as a body.
+    ImportMesh,
+}
+
 pub(crate) fn show(
     ui: &mut egui::Ui,
     tab: &mut Tab,
@@ -44,7 +51,8 @@ pub(crate) fn show(
     cell: &mut CellUi,
     library: &[(String, String)],
     lang: Lang,
-) {
+) -> Option<RibbonAction> {
+    let mut action = None;
     let sketching = session.active_sketch().is_some();
     ui.horizontal(|ui| {
         for (this, label) in [
@@ -117,7 +125,7 @@ pub(crate) fn show(
                     }
                 });
             }
-            Tab::Robot => robot_tab(ui, session, viewport, cell, library, lang),
+            Tab::Robot => action = robot_tab(ui, session, viewport, cell, library, lang),
             Tab::View => {
                 ribbon_group(ui, tr!(lang, GroupViews), |ui| {
                     for (view, label) in [
@@ -146,6 +154,7 @@ pub(crate) fn show(
             }
         }
     });
+    action
 }
 
 fn robot_tab(
@@ -155,7 +164,8 @@ fn robot_tab(
     cell: &mut CellUi,
     library: &[(String, String)],
     lang: Lang,
-) {
+) -> Option<RibbonAction> {
+    let mut action = None;
     let robot = session.doc().robots().iter().next().map(|(id, _)| id);
     let path = session.doc().paths().iter().last().map(|(id, _)| id);
     // Failures of these commands are shown in the status bar.
@@ -170,6 +180,9 @@ fn robot_tab(
                 }
                 viewport.fit(session, [1000.0, 700.0]);
             }
+        }
+        if ribbon_button(ui, Icon::View, tr!(lang, CmdImportMesh), false, true).clicked() {
+            action = Some(RibbonAction::ImportMesh);
         }
         let at = |x: f64, z: f64| Placement { xyz: [x, 0.0, z], rpy: [0.0; 3] };
         for (icon, label, solid, placement) in [
@@ -244,4 +257,5 @@ fn robot_tab(
             }
         }
     });
+    action
 }
