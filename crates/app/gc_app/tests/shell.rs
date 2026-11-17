@@ -78,6 +78,8 @@ fn shell_runs_without_gpu() {
     harness.get_by_label("스케치 마무리").click();
     harness.run();
     assert!(harness.state().session.active_sketch().is_none());
+    // The tab that was open before the sketch (the model tab) is back.
+    harness.get_by_label("XY 스케치");
 }
 
 /// With a GPU the whole window is rendered; the PNG is the UI checkpoint shown to the user.
@@ -1859,4 +1861,36 @@ fn the_side_panels_float_over_the_view() {
     harness.run();
     harness.get_by_label("패널 반투명").click();
     harness.run();
+}
+
+/// The dark colour scheme is switched in the View tab and shows in the whole window.
+#[test]
+fn the_dark_theme_is_switched_in_the_view_tab() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("파일").click();
+    harness.run();
+    harness.get_by_label("예제 열기 (UR5e 셀)").click();
+    harness.run();
+    harness.get_by_label("뷰").click();
+    harness.run();
+    assert!(!gc_ui::colors::is_dark());
+    harness.get_by_label("어두운 테마").click();
+    harness.run_steps(3);
+    assert!(gc_ui::colors::is_dark());
+    if gpu {
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        let image = harness.render().unwrap();
+        image.save(out.join("review-30-dark.png")).unwrap();
+        // The window is dark: the status bar is not the light surface colour.
+        let px = image.get_pixel(640, 790);
+        assert!(px[0] < 100 && px[1] < 100, "{px:?}");
+    }
+    harness.get_by_label("어두운 테마").click();
+    harness.run_steps(3);
+    assert!(!gc_ui::colors::is_dark());
 }

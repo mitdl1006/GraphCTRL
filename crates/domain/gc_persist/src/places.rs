@@ -65,6 +65,8 @@ pub struct Settings {
     pub language: String,
     /// The side panels are opaque instead of letting the 3D scene show through (default: see-through).
     pub opaque_panels: bool,
+    /// The dark colour scheme (default: light).
+    pub dark: bool,
 }
 
 /// The settings file in the settings folder.

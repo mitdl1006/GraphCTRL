@@ -308,9 +308,9 @@ impl Viewport {
             |c: [f64; 2]| egui::pos2(centre.x + c[0] as f32 * HALF, centre.y - c[1] as f32 * HALF);
         let hovered = response.hover_pos().and_then(|p| viewcube::pick(&self.camera, to_cube(p)));
         let painter = ui.painter_at(rect);
-        let stroke = egui::Stroke::new(1.0, colors::CUBE_EDGE);
+        let stroke = egui::Stroke::new(1.0, colors::cube_edge());
         for face in viewcube::visible_faces(&self.camera) {
-            let fill = if hovered == Some(face.normal) { colors::CUBE_HOVER } else { colors::CUBE_FACE };
+            let fill = if hovered == Some(face.normal) { colors::cube_hover() } else { colors::cube_face() };
             let corners = face.corners;
             painter.add(egui::Shape::convex_polygon(corners.map(to_screen).to_vec(), fill, stroke));
             // A face seen nearly edge-on is too thin for its name.
@@ -337,7 +337,7 @@ impl Viewport {
                     egui::Align2::CENTER_CENTER,
                     name,
                     font,
-                    colors::CUBE_EDGE,
+                    colors::cube_edge(),
                 );
             }
         }
@@ -346,7 +346,7 @@ impl Viewport {
             painter.circle_filled(
                 to_screen(viewcube::screen_of(&self.camera, target)),
                 6.0,
-                colors::CUBE_HOVER,
+                colors::cube_hover(),
             );
             painter.circle_stroke(to_screen(viewcube::screen_of(&self.camera, target)), 6.0, stroke);
         }

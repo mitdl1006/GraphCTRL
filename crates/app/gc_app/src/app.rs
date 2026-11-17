@@ -251,6 +251,11 @@ pub struct GraphCtrlApp {
     log_open: bool,
     /// Whether the side panels let the 3D scene show through.
     translucent: bool,
+    /// Whether the dark colour scheme is in use.
+    dark: bool,
+    /// The ribbon tab that was open before the current sketch, and whether a sketch was open last frame.
+    tab_before_sketch: Tab,
+    was_sketching: bool,
     /// The widths of the floating panels, and whether they are open.
     left_width: f32,
     right_width: f32,
@@ -277,7 +282,12 @@ impl GraphCtrlApp {
     /// Creates the app: installs fonts and theme and captures the wgpu render state when there is one.
     pub fn new(cc: &eframe::CreationContext<'_>, options: RunOptions) -> Self {
         gc_ui::fonts::install(&cc.egui_ctx);
-        gc_ui::install_theme(&cc.egui_ctx);
+        let dark = options
+            .settings_dir
+            .as_deref()
+            .map(gc_persist::places::load_settings)
+            .is_some_and(|settings| settings.dark);
+        gc_ui::install_theme(&cc.egui_ctx, dark);
         let robot_dir = library_dir(options.robot_dir.as_deref());
         let packages = robot_dir.as_deref().map(gc_session::library::scan).unwrap_or_default();
         let licences = notices(&packages);
@@ -321,6 +331,9 @@ impl GraphCtrlApp {
             notices: false,
             log_open: false,
             translucent,
+            dark,
+            tab_before_sketch: Tab::Model,
+            was_sketching: false,
             left_width: 210.0,
             right_width: 330.0,
             left_open: true,
@@ -734,6 +747,7 @@ impl GraphCtrlApp {
         let settings = gc_persist::places::Settings {
             language: self.lang.code().to_owned(),
             opaque_panels: !self.translucent,
+            dark: self.dark,
             ..Default::default()
         };
         if let Err(error) = gc_persist::places::save_settings(dir, &settings) {
@@ -857,7 +871,21 @@ impl eframe::App for GraphCtrlApp {
             self.autosave();
         }
 
+        // Starting a sketch opens the sketch tab; finishing it brings back the tab that was open before.
+        let sketching = self.session.active_sketch().is_some();
+        if sketching != self.was_sketching {
+            // A tab the user went to on purpose (the robot tab, to make a frame from sketch points) stays.
+            if sketching && self.tab == Tab::Model {
+                self.tab = Tab::Sketch;
+            } else if !sketching && self.tab == Tab::Sketch {
+                self.tab = self.tab_before_sketch;
+            }
+            self.was_sketching = sketching;
+        } else if !sketching {
+            self.tab_before_sketch = self.tab;
+        }
         egui::Panel::top("menu").show(ui, |ui| self.menu(ui));
+        let looks = (self.translucent, self.dark);
         let mut ribbon_action = None;
         egui::Panel::top("ribbon").show(ui, |ui| {
             ribbon_action = ribbon::show(
@@ -868,9 +896,16 @@ impl eframe::App for GraphCtrlApp {
                 &mut self.cell,
                 &self.library,
                 &mut self.translucent,
+                &mut self.dark,
                 lang,
             );
         });
+        if looks != (self.translucent, self.dark) {
+            if looks.1 != self.dark {
+                gc_ui::install_theme(&ctx, self.dark);
+            }
+            self.save_settings();
+        }
         if ribbon_action == Some(ribbon::RibbonAction::ImportRobot)
             && let Some(path) = self.dialogs.open_urdf()
         {

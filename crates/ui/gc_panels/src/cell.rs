@@ -621,7 +621,7 @@ fn paths(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) {
     let color = match status {
         PlanStatus::Ready => colors::TRACE,
         PlanStatus::Failed => colors::ERROR,
-        PlanStatus::Stale | PlanStatus::NotPlanned | PlanStatus::Planning => colors::INACTIVE,
+        PlanStatus::Stale | PlanStatus::NotPlanned | PlanStatus::Planning => colors::inactive(),
     };
     gc_ui::panel::section(ui, tr!(lang, PropResult));
     gc_ui::panel::chip(ui, status_text(lang, status), color);
@@ -890,7 +890,7 @@ fn acm(ui: &mut Ui, session: &mut Session, lang: Lang, robot: gc_core::Id<gc_doc
                 if check.changed() {
                     toggled = Some((pair.a.clone(), pair.b.clone(), checked));
                 }
-                ui.label(RichText::new(reason).size(11.0).color(colors::MUTED));
+                ui.label(RichText::new(reason).size(11.0).color(colors::muted()));
             });
         }
     });

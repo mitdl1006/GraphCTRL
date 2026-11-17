@@ -18,10 +18,10 @@ pub fn title(ui: &mut Ui, kind: &str, name: &str) {
             egui::Align2::LEFT_CENTER,
             kind,
             egui::FontId::proportional(11.0),
-            colors::MUTED,
+            colors::muted(),
         );
     }
-    ui.label(RichText::new(name).size(18.0).strong().color(colors::TEXT));
+    ui.label(RichText::new(name).size(18.0).strong().color(colors::text()));
     ui.add_space(2.0);
 }
 
@@ -31,10 +31,10 @@ pub fn section(ui: &mut Ui, title: &str) {
     ui.horizontal(|ui| {
         let (bar, _) = ui.allocate_exact_size(vec2(3.0, 14.0), Sense::hover());
         ui.painter().rect_filled(bar, 1.5, colors::ACCENT);
-        ui.label(RichText::new(title).size(12.5).strong().color(colors::TEXT));
+        ui.label(RichText::new(title).size(12.5).strong().color(colors::text()));
     });
     let (line, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
-    ui.painter().rect_filled(line, 0.0, colors::BORDER);
+    ui.painter().rect_filled(line, 0.0, colors::border());
     ui.add_space(4.0);
 }
 
@@ -49,30 +49,30 @@ pub fn fixed_label(ui: &mut Ui, width: f32, text: &str) -> egui::Response {
     let layout = egui::Layout::left_to_right(egui::Align::Center);
     ui.allocate_ui_with_layout(size, layout, |ui| {
         ui.set_min_size(size);
-        ui.add(egui::Label::new(RichText::new(text).size(12.0).color(colors::MUTED)).truncate())
+        ui.add(egui::Label::new(RichText::new(text).size(12.0).color(colors::muted())).truncate())
     })
     .inner
 }
 
 /// A small muted note under a value.
 pub fn note(ui: &mut Ui, text: &str) {
-    ui.label(RichText::new(text).size(11.5).color(colors::MUTED));
+    ui.label(RichText::new(text).size(11.5).color(colors::muted()));
 }
 
 /// The header of a side panel: its name, and a hairline under it.
 pub fn header(ui: &mut Ui, text: &str) {
     ui.add_space(2.0);
-    ui.label(RichText::new(text).size(14.0).strong().color(colors::TEXT));
+    ui.label(RichText::new(text).size(14.0).strong().color(colors::text()));
     let (line, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
-    ui.painter().rect_filled(line, 0.0, colors::BORDER);
+    ui.painter().rect_filled(line, 0.0, colors::border());
     ui.add_space(2.0);
 }
 
 /// A card: a white, rounded box with a hairline border, for grouped read-outs such as plan results.
 pub fn card<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     egui::Frame::new()
-        .fill(colors::CARD)
-        .stroke(egui::Stroke::new(1.0, colors::BORDER))
+        .fill(colors::card())
+        .stroke(egui::Stroke::new(1.0, colors::border()))
         .corner_radius(8)
         .inner_margin(egui::Margin::symmetric(10, 8))
         .show(ui, |ui| {
@@ -128,7 +128,7 @@ pub fn tree_row(ui: &mut Ui, row: TreeRow<'_>) -> TreeRowResult {
     if row.selected {
         painter.rect_filled(rect, 4.0, with_alpha(colors::ACCENT, 34));
     } else if hovered {
-        painter.rect_filled(rect, 4.0, with_alpha(colors::TEXT, 14));
+        painter.rect_filled(rect, 4.0, with_alpha(colors::text(), 14));
     }
     let mut x = rect.left() + 4.0;
     let mut toggled = false;
@@ -139,7 +139,7 @@ pub fn tree_row(ui: &mut Ui, row: TreeRow<'_>) -> TreeRowResult {
         toggled = check.changed();
         x += HEIGHT + 2.0;
     }
-    let tint = if row.selected { colors::ACCENT } else { colors::MUTED };
+    let tint = if row.selected { colors::ACCENT } else { colors::muted() };
     let icon_rect = egui::Rect::from_center_size(egui::pos2(x + 8.0, rect.center().y), vec2(16.0, 16.0));
     row.icon.paint(ui.painter(), icon_rect, tint);
     x += 22.0;
@@ -150,7 +150,7 @@ pub fn tree_row(ui: &mut Ui, row: TreeRow<'_>) -> TreeRowResult {
         egui::Align2::LEFT_CENTER,
         row.text,
         egui::FontId::proportional(13.0),
-        colors::TEXT,
+        colors::text(),
     );
     response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, row.selected, row.text));
     let mut deleted = false;
@@ -160,7 +160,7 @@ pub fn tree_row(ui: &mut Ui, row: TreeRow<'_>) -> TreeRowResult {
             vec2(HEIGHT, HEIGHT),
         );
         let shown = hovered || row.selected;
-        let color = if shown { colors::MUTED } else { egui::Color32::TRANSPARENT };
+        let color = if shown { colors::muted() } else { egui::Color32::TRANSPARENT };
         let cross = egui::Button::new(RichText::new("×").size(14.0).color(color)).frame(false);
         let button = ui.put(cross_rect, cross);
         button.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, name));

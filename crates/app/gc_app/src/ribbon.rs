@@ -65,6 +65,7 @@ pub(crate) fn show(
     cell: &mut CellUi,
     library: &[crate::app::LibraryRobot],
     translucent: &mut bool,
+    dark: &mut bool,
     lang: Lang,
 ) -> Option<RibbonAction> {
     let mut action = None;
@@ -146,8 +147,8 @@ pub(crate) fn show(
                 ribbon_group(ui, tr!(lang, GroupExit), |ui| {
                     if ribbon_button(ui, Icon::Finish, tr!(lang, CmdFinishSketch), false, sketching).clicked()
                     {
+                        // The tab that was open before the sketch comes back on its own.
                         session.finish_sketch();
-                        *tab = Tab::Model;
                     }
                 });
                 // Planned tools, after the rest so that nothing else moves when they arrive.
@@ -196,6 +197,9 @@ pub(crate) fn show(
                         .clicked()
                     {
                         *translucent = !*translucent;
+                    }
+                    if ribbon_button(ui, Icon::View, tr!(lang, ViewDarkTheme), *dark, true).clicked() {
+                        *dark = !*dark;
                     }
                 });
             }

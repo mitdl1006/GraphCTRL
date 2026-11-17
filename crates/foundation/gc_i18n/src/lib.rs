@@ -520,6 +520,8 @@ messages! {
     /// Plan metric: the move was possible in a straight joint-space line.
     PlanStraight => ("직선 이동(플래너 불필요)", "Straight move (no planner needed)"),
     // --- frontend ---
+    /// View tab: the dark colour scheme.
+    ViewDarkTheme => ("어두운 테마", "Dark theme"),
     /// Ribbon group of the View tab that holds the panel options.
     GroupPanels => ("패널", "Panels"),
     /// Folds a floating side panel away. `{0}` is the panel's name.
