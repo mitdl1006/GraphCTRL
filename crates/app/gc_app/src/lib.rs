@@ -14,6 +14,7 @@ mod measure;
 mod parameters;
 mod pattern;
 mod ribbon;
+mod sketch_dialogs;
 
 pub use app::{FileDialogs, GraphCtrlApp, RunOptions, run};
 pub use diagnostics::{install_diagnostics, recent_log};

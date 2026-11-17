@@ -790,7 +790,6 @@ messages! {
     ContactAdd => ("접촉 허용 추가", "Allow contact"),
     /// Sketch tools that are planned and shown disabled until the document supports them.
     /// Ribbon group of sketch tools that are not available yet.
-    GroupPlanned => ("예정", "Planned"),
     ToolPoint => ("점", "Point"),
     ToolPolygon => ("다각형", "Polygon"),
     ToolSlot => ("슬롯", "Slot"),
@@ -967,6 +966,73 @@ messages! {
     AgentFailed => ("에이전트 서버를 시작하지 못했습니다: {0}", "The agent server could not start: {0}"),
     /// Status bar: an agent edited the cell. `{0}` what it did.
     AgentEdited => ("AI 에이전트: {0}", "AI agent: {0}"),
+    // --- backend: sketch Point, Polygon, Slot, Mirror, Patterns, Offset (Inventor: Sketch tab) ---
+    PromptPointPlace => ("점을 놓을 곳을 클릭하십시오", "Click to place a point"),
+    PromptPolygonCentre => ("다각형의 중심을 클릭하십시오", "Click the centre of the polygon"),
+    PromptPolygonCorner => ("꼭짓점(내접) 또는 변의 중점(외접)을 클릭하십시오", "Click a vertex (inscribed) or an edge midpoint (circumscribed)"),
+    PromptSlotFirst => ("슬롯의 첫 점을 클릭하십시오", "Click the first point of the slot"),
+    PromptSlotSecond => ("슬롯의 두 번째 점을 클릭하십시오", "Click the second point of the slot"),
+    PromptSlotWidth => ("슬롯 너비를 클릭하거나 입력하십시오", "Click or type the slot width"),
+    PromptOffsetPick => ("간격띄우기할 곡선을 선택하십시오", "Select the curve to offset"),
+    PromptOffsetPlace => ("간격띄우기 위치를 클릭하거나 거리를 입력하십시오", "Click where the offset goes, or type the distance"),
+    /// Input box: offset distance.
+    HudDistance => ("거리", "Distance"),
+    /// Ribbon group (Inventor: Pattern panel).
+    GroupPattern => ("패턴", "Pattern"),
+    /// Ribbon group (Inventor: Modify panel).
+    GroupModify => ("수정", "Modify"),
+    /// Format toggle: new points are centre points.
+    ToolCenterPoint => ("중심점", "Center Point"),
+    ToolSlotCenterToCenter => ("중심 대 중심 슬롯", "Center to Center Slot"),
+    ToolSlotOverall => ("전체 슬롯", "Overall Slot"),
+    ToolSlotCenterPoint => ("중심점 슬롯", "Center Point Slot"),
+    ToolMirror => ("미러", "Mirror"),
+    ToolRectPattern => ("직사각형", "Rectangular"),
+    ToolCircPattern => ("원형", "Circular"),
+    ToolOffset => ("간격띄우기", "Offset"),
+    /// Polygon dialog.
+    PolygonInscribed => ("내접", "Inscribed"),
+    PolygonCircumscribed => ("외접", "Circumscribed"),
+    PolygonSides => ("변 수", "Edges"),
+    /// Offset options (right-click toggles in Inventor).
+    OffsetLoopSelect => ("루프 선택", "Loop Select"),
+    OffsetConstrain => ("간격띄우기 구속", "Constrain Offset"),
+    /// Mirror / pattern dialogs: the geometry is the current selection. `{0}` how many curves.
+    DialogGeometry => ("형상: 곡선 {0}개", "Geometry: {0} curves"),
+    /// Dialog buttons that take a field from the current sketch selection.
+    TakeGeometry => ("형상 ← 선택", "Geometry ← selection"),
+    TakeMirrorLine => ("대칭선 ← 선택", "Mirror line ← selection"),
+    TakeDirection1 => ("방향 1 ← 선택", "Direction 1 ← selection"),
+    TakeDirection2 => ("방향 2 ← 선택", "Direction 2 ← selection"),
+    TakeAxis => ("축 ← 선택", "Axis ← selection"),
+    /// Mirror dialog: the mirror line. `{0}` its state.
+    MirrorLine => ("대칭선: {0}", "Mirror line: {0}"),
+    /// Pattern dialogs: a direction or axis is set / not set.
+    DialogPicked => ("선택됨", "selected"),
+    DialogNotPicked => ("선택 안 됨", "not selected"),
+    /// Pattern dialogs: direction 1 / 2. `{0}` its state.
+    PatternDirection1 => ("방향 1: {0}", "Direction 1: {0}"),
+    PatternDirection2 => ("방향 2: {0}", "Direction 2: {0}"),
+    /// Circular pattern: the axis point. `{0}` its state.
+    SkPatternAxis => ("축: {0}", "Axis: {0}"),
+    /// Sketch patterns: spacing and angle, as expressions with units.
+    SkPatternSpacing => ("간격", "Spacing"),
+    SkPatternAngle => ("각도", "Angle"),
+    /// Sketch pattern dialogs: the second direction's count and spacing.
+    SkPatternCount2 => ("개수 (방향 2)", "Count (direction 2)"),
+    SkPatternSpacing2 => ("간격 (방향 2)", "Spacing (direction 2)"),
+    SkPatternFlip2 => ("뒤집기 (방향 2)", "Flip (direction 2)"),
+    /// Window titles (Inventor's dialog names).
+    SkMirrorTitle => ("미러 패턴", "Mirror Pattern"),
+    SkRectTitle => ("직사각형 패턴", "Rectangular Pattern"),
+    SkCircTitle => ("원형 패턴", "Circular Pattern"),
+    SkPolygonTitle => ("다각형 옵션", "Polygon options"),
+    SkOffsetTitle => ("간격띄우기 옵션", "Offset options"),
+    /// Dialog buttons.
+    DialogApply => ("적용", "Apply"),
+    DialogDone => ("완료", "Done"),
+    /// Dialog: the edit was refused. `{0}` why.
+    DialogRefused => ("만들 수 없습니다: {0}", "Cannot create: {0}"),
 }
 
 impl Msg {

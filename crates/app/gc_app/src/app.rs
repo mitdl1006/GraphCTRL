@@ -266,6 +266,8 @@ pub struct GraphCtrlApp {
     pattern: crate::pattern::Pattern,
     /// The Parameters dialog.
     parameters: crate::parameters::Parameters,
+    /// The open sketch Mirror or Pattern dialog.
+    sketch_dialog: Option<crate::sketch_dialogs::SketchDialog>,
     /// An assembly import was started and its outcome not yet shown.
     importing: bool,
     /// The status bar says meshes are loading.
@@ -359,6 +361,7 @@ impl GraphCtrlApp {
             conflict: crate::conflict::ConstraintError::default(),
             joint: crate::constrain::Joint::default(),
             pattern: crate::pattern::Pattern::default(),
+            sketch_dialog: None,
             parameters: crate::parameters::Parameters::default(),
             importing: false,
             loading_shown: false,
@@ -1028,6 +1031,24 @@ impl eframe::App for GraphCtrlApp {
             Some(ribbon::RibbonAction::StartJoint) => self.joint.start(),
             Some(ribbon::RibbonAction::StartPattern) => self.pattern.start(Vec::new()),
             Some(ribbon::RibbonAction::StartParameters) => self.parameters.open = true,
+            Some(ribbon::RibbonAction::StartSketchMirror) => {
+                self.sketch_dialog = Some(crate::sketch_dialogs::SketchDialog::new(
+                    crate::sketch_dialogs::Kind::Mirror,
+                    &self.session,
+                ));
+            }
+            Some(ribbon::RibbonAction::StartSketchRectPattern) => {
+                self.sketch_dialog = Some(crate::sketch_dialogs::SketchDialog::new(
+                    crate::sketch_dialogs::Kind::Rectangular,
+                    &self.session,
+                ));
+            }
+            Some(ribbon::RibbonAction::StartSketchCircPattern) => {
+                self.sketch_dialog = Some(crate::sketch_dialogs::SketchDialog::new(
+                    crate::sketch_dialogs::Kind::Circular,
+                    &self.session,
+                ));
+            }
             Some(ribbon::RibbonAction::ToggleGround) => {
                 let name = self
                     .session
@@ -1124,6 +1145,21 @@ impl eframe::App for GraphCtrlApp {
         }
         if self.parameters.open {
             self.parameters.window(&ctx, &mut self.session, lang);
+        }
+        if self.session.active_sketch().is_none() {
+            self.sketch_dialog = None;
+        }
+        if let Some(dialog) = &mut self.sketch_dialog
+            && !dialog.window(&ctx, &mut self.session, lang)
+        {
+            self.sketch_dialog = None;
+        }
+        match self.session.tool() {
+            gc_tools::ToolKind::Polygon => {
+                crate::sketch_dialogs::polygon_window(&ctx, &mut self.session, lang)
+            }
+            gc_tools::ToolKind::Offset => crate::sketch_dialogs::offset_window(&ctx, &mut self.session, lang),
+            _ => {}
         }
         if self.drive.open {
             self.drive.tick(&ctx, &mut self.session);

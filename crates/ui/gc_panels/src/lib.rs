@@ -785,6 +785,14 @@ fn prompt_text(lang: Lang, prompt: Prompt) -> &'static str {
         Prompt::DimensionPlace => Msg::PromptDimPlace,
         Prompt::DimensionValue => Msg::PromptDimValue,
         Prompt::ConstraintPick => Msg::PromptConstraint,
+        Prompt::PointPlace => Msg::PromptPointPlace,
+        Prompt::PolygonCentre => Msg::PromptPolygonCentre,
+        Prompt::PolygonCorner => Msg::PromptPolygonCorner,
+        Prompt::SlotFirst => Msg::PromptSlotFirst,
+        Prompt::SlotSecond => Msg::PromptSlotSecond,
+        Prompt::SlotWidth => Msg::PromptSlotWidth,
+        Prompt::OffsetPick => Msg::PromptOffsetPick,
+        Prompt::OffsetPlace => Msg::PromptOffsetPlace,
     };
     message.text(lang)
 }

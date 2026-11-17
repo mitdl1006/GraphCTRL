@@ -8,6 +8,7 @@
 | 영역 | 무엇 | 세션/문서 API(대표) | 테스트 |
 |---|---|---|---|
 | 스케치 | Trim·Extend·Fillet, Project Geometry(연관), 치수 이름·매개변수(d0…, `NAME = 식`) | `SketchOp::{Trim, Extend, Fillet, Project, RenameDimension}`, `Command::RenameParam` | `gc_doc/tests/sketch_ops.rs`, `gc_session/tests/project_geometry.rs` |
+| 스케치 도형·패턴 | 점(중심점 토글)·다각형·직선 슬롯 3종·간격띄우기 도구, 미러·직사각형·원형 패턴 대화상자, 리본 작성·패턴·수정 패널 | `SketchOp::{PlacePoint, AddPolygon, AddSlot, Mirror, RectangularPattern, CircularPattern, Offset}`, `ToolKind::{Point, Polygon, Slot, Offset}`, `edit_active_sketch(op)` | `gc_doc/tests/sketch_shapes.rs`, `gc_session/tests/sketch_shape_tools.rs`, 앱 `sketch_shape_tools.rs` |
 | 컴포넌트 트리 | 접지·가시·활성·억제, 원점 폴더, 로봇 링크·툴을 하위 컴포넌트로 | `components()`, `robot_links(robot)`(링크 + `Occurrence::Tool`), `component_origin(occ)`, `set_component` | `robot_links.rs`, `qa_origin_folder.rs` |
 | 구속·조인트 | Mate·Flush·Insert·Angle·Tangent·Symmetry, Rigid·Rotational·Slider·Cylindrical·Ball, 한계, Predict, Assemble 유형 제한 | `add_relationship`, `predict_relationship`, `automatic_joint`, `possible_relations(a, b)` | `gc_doc/tests/relate.rs` |
 | 상태·DOF | 상태 점, 남은 자유도, DOF 기호(이동 방향·회전축·큐브), 충돌 관계 진단 | `component_statuses()`, `component_dof`, `dof_symbol(s)`, `conflicting_relationships` | `relate.rs`, `dof_symbol.rs` |
@@ -24,6 +25,7 @@
 | STEP B-rep(정확 형상) | 테셀레이션 없는 솔리드는 경고 후 건너뜀. 평면·원통부터 자체 테셀레이터 필요. 앱의 가져오기 배선(확장자 → `read_step`)은 리드/FE. 실제 대형 파일(NIST CTC 등) 확인은 네트워크 허용 후 |
 | 미러의 진짜 반사 | 파일을 만들지 않아 Mirror = Reuse(프리미티브만 정확). 메시 반사는 렌더/메시 쪽 배율 음수 지원 필요 |
 | 로봇 교체, 패턴·표현의 미러/복사 | 미지원 |
+| 스케치 호 슬롯 2종·패턴 개체 | 호 슬롯(Three Point Arc, Center Point Arc)은 2차 퇴화 때문에 다른 구성 필요. 스케치 패턴 편집(개수·Delete Pattern·Suppress)은 없음 — 다시 만들어야 함 |
 | 접촉 솔버 | 밀린 부품은 병진만(회전 없음), 배율 있는 어셈블리 부품 제외, Surface Complexity 없음 |
 | 메시 로드 | `add_mesh_body`는 mm/m 판정용 STL 파싱만 동기 |
 | DOF 기호 | 기호마다 관계를 모음(수백 개 동시 표시 시 캐시 필요) |
@@ -32,6 +34,37 @@
 | 모션(오래된 남은 일) | 맨 아래 "남은 일(백엔드)" 절 그대로 |
 
 # 작업 기록(최신 순)
+
+## 2026-11-18 — 스케치 도형·패턴 도구의 화면 연결(리드 허락, 프론트엔드 대신)
+
+근거(원문): To Work with Points `GUID-D4A4288F-32F1-4E23-A382-930EBA152E87.htm`, To Create 2D Shape Geometry
+`GUID-D489CE6D-7299-4211-A43A-F3580A4BA357.htm`, To Stretch, Scale, or Offset 2D Sketch Geometry
+`GUID-962CEE71-8BE4-4DA6-B51E-341319C64FA4.htm`, To Create and Edit Sketch Patterns `GUID-AAD3A699-FED8-4614-A31D-0A2316328CEE.htm`.
+
+- **도구(gc_tools `shapes.rs`)**: `ToolKind::{Point, Polygon, Slot(SlotKind), Offset}`.
+  - 점: 클릭마다 점(중심점 토글 기본 켬).
+  - 다각형: 중심 → 꼭짓점(내접)/변 중점(외접), 미리보기가 커서를 따라감.
+  - 슬롯: 종류대로 두 점 → 너비(입력창 `HudField::Width`).
+  - 간격띄우기: 곡선 클릭 → 커서 쪽·거리(입력창 `HudField::Distance`) → 클릭. 쪽은 ±거리 결과 중 커서에 가까운 쪽.
+  - `Prompt::{PointPlace, PolygonCentre, PolygonCorner, SlotFirst, SlotSecond, SlotWidth, OffsetPick, OffsetPlace}`.
+  - 설정(중심점·다각형·간격띄우기 토글)은 도구를 바꿔도 유지(`Tool::renewed`).
+- **세션**: `center_point()/set_center_point(on)`(선택된 독립 점도 바꿈), `polygon_settings()/set_polygon_settings(sides, circ)`,
+  `offset_options()/set_offset_options(loop, constrain)`, `edit_active_sketch(op)`, `selected_curves()`, `selected_points()`.
+- **리본 스케치 탭**(2D):
+  - 작성 패널: 점·다각형·슬롯(중심 대 중심) 큰 버튼 + 작은 버튼(전체 슬롯·중심점 슬롯 / 중심점 토글).
+  - '패턴' 패널: 직사각형·원형·미러 작은 버튼(두 줄, 1280 px에서 '스케치 마무리'가 밀리지 않게).
+  - '수정' 패널: 간격띄우기.
+  - '예정' 그룹과 `GroupPlanned` 문구는 삭제.
+- **창(gc_app `sketch_dialogs.rs`)**:
+  - '미러 패턴'·'직사각형 패턴'·'원형 패턴': 형상·대칭선·방향·축을 현재 선택에서 '← 선택' 버튼으로 받음, 적용(계속)/완료.
+  - '다각형 옵션'(내접/외접·변 수·완료 = 도구 끝), '간격띄우기 옵션'(Loop Select·Constrain Offset).
+  - 스케치를 나가면 패턴 창은 닫힘.
+- **원문과 다른 점**:
+  - 인벤터는 대화상자가 열린 채 화면에서 형상·선을 고르지만, 여기서는 고른 뒤 '← 선택'을 누른다.
+  - 간격띄우기 토글은 우클릭 메뉴 대신 창.
+  - 점 HUD(X/Y)는 없음.
+- **테스트**: 앱 `tests/sketch_shape_tools.rs` 7개(도구 4, 대화상자 3), 세션 `sketch_shape_tools.rs` 4개.
+- **남음**: 호 슬롯 2종, 스케치 패턴 개체(편집·삭제).
 
 ## 2026-11-18 — 컴포넌트(occurrence) 선택·접지 토글 · 표현 폴더 · 최대 거리(리드 ①②③)
 

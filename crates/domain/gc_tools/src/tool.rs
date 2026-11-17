@@ -1,5 +1,8 @@
 //! The tools.
 
+#[path = "shapes.rs"]
+mod shapes;
+
 use gc_core::Id;
 use gc_doc::{DimSlot, EndSnap, SketchOp, tangent_arc};
 use gc_math::fm;
@@ -46,6 +49,8 @@ pub enum HudField {
     Width,
     /// Height of a two-point rectangle.
     Height,
+    /// Offset distance.
+    Distance,
 }
 
 /// One input box as the display should show it now.
@@ -187,6 +192,14 @@ pub enum ToolKind {
     Dimension,
     /// Add a geometric constraint.
     Constraint(ConstraintKind),
+    /// Place points (centre points unless the Center Point toggle is off).
+    Point,
+    /// Draw a regular polygon: centre, then a corner or an edge midpoint.
+    Polygon,
+    /// Draw a straight slot of this kind: two points, then the width.
+    Slot(gc_doc::SlotKind),
+    /// Offset curves (whole loops by default): pick one, then where the offset goes.
+    Offset,
 }
 
 /// What a tool wants done.
@@ -250,6 +263,22 @@ pub enum Prompt {
     DimensionPlace,
     DimensionValue,
     ConstraintPick,
+    /// Point: click where it goes.
+    PointPlace,
+    /// Polygon: click the centre.
+    PolygonCentre,
+    /// Polygon: click a corner (inscribed) or an edge midpoint (circumscribed).
+    PolygonCorner,
+    /// Slot: the first point (an arc centre, the start of the centre line or the slot centre).
+    SlotFirst,
+    /// Slot: the second point.
+    SlotSecond,
+    /// Slot: the width.
+    SlotWidth,
+    /// Offset: pick a curve.
+    OffsetPick,
+    /// Offset: click where the offset goes, or type the distance.
+    OffsetPlace,
 }
 
 /// What a tool would draw right now, on top of the sketch.
@@ -311,6 +340,16 @@ pub struct Tool {
     fillet_first: Option<(Id<Curve>, [f64; 2])>,
     /// Fillet: the radius, kept from one fillet to the next.
     fillet_radius: String,
+    /// Point: the Center Point toggle.
+    center_point: bool,
+    /// Polygon: number of sides and circumscribed.
+    polygon_sides: u32,
+    polygon_circumscribed: bool,
+    /// Offset: Loop Select, Constrain Offset, the picked curve and the distance the cursor gives.
+    offset_loop: bool,
+    offset_constrain: bool,
+    offset_pick: Option<Id<Curve>>,
+    offset_measured: f64,
 }
 
 fn angle_about(centre: [f64; 2], point: [f64; 2]) -> f64 {
@@ -525,6 +564,13 @@ impl Tool {
             sweep_from: None,
             fillet_first: None,
             fillet_radius: DEFAULT_FILLET_RADIUS.to_owned(),
+            center_point: true,
+            polygon_sides: 6,
+            polygon_circumscribed: false,
+            offset_loop: true,
+            offset_constrain: true,
+            offset_pick: None,
+            offset_measured: 0.0,
         }
     }
 
@@ -545,6 +591,9 @@ impl Tool {
 
     /// What the status bar should say.
     pub fn prompt(&self) -> Prompt {
+        if shapes::is_shape_tool(self.kind) {
+            return self.shape_prompt();
+        }
         match (self.kind, self.anchor.is_some()) {
             (ToolKind::Select, _) => Prompt::Select,
             (ToolKind::Line, false) => Prompt::LineStart,
@@ -567,12 +616,19 @@ impl Tool {
             (ToolKind::Constraint(_) | ToolKind::Trim | ToolKind::Extend | ToolKind::Fillet, _) => {
                 Prompt::ConstraintPick
             }
+            // Answered by `shape_prompt` above.
+            (ToolKind::Point | ToolKind::Polygon | ToolKind::Slot(_) | ToolKind::Offset, _) => {
+                self.shape_prompt()
+            }
         }
     }
 
     /// The input boxes the display should show now (none when the tool takes no typed values at this
     /// step).
     pub fn hud(&self) -> Vec<HudSlot> {
+        if shapes::is_shape_tool(self.kind) {
+            return self.shape_hud();
+        }
         if self.kind == ToolKind::Fillet {
             let locked = self.locked(HudField::Radius).map(str::to_owned);
             let text = locked.as_deref().unwrap_or(&self.fillet_radius);
@@ -680,6 +736,13 @@ impl Tool {
     /// What to draw on top of the sketch.
     pub fn preview(&self, sketch: &Sketch) -> Preview {
         let mut preview = Preview { snap: self.cursor, picks: self.picks.clone(), ..Preview::default() };
+        if shapes::is_shape_tool(self.kind) {
+            if let Some(curve) = self.offset_pick {
+                preview.picks.push(Item::Curve(curve));
+            }
+            self.shape_preview(sketch, &mut preview);
+            return preview;
+        }
         if let Some((_, _, from)) = self.cursor.and_then(|c| c.aligned) {
             preview.alignments.push((from, self.cursor.map_or(from, |c| c.pos)));
         }
@@ -793,6 +856,7 @@ impl Tool {
         self.tangent_from = None;
         self.fillet_first = None;
         self.sweep_from = None;
+        self.offset_pick = None;
         if self.kind != ToolKind::Fillet {
             self.hud.clear(); // the fillet radius stays
         }
@@ -868,6 +932,20 @@ impl Tool {
     /// Feeds one event to the tool. `sketch` is the sketch as it is now (after earlier outputs were
     /// applied).
     pub fn handle(&mut self, sketch: &Sketch, event: ToolEvent) -> Vec<ToolOutput> {
+        if shapes::is_shape_tool(self.kind)
+            && let Some(out) = self.shape_event(sketch, &event)
+        {
+            return out;
+        }
+        let moved = matches!(event, ToolEvent::Move { .. });
+        let out = self.handle_event(sketch, event);
+        if moved && shapes::is_shape_tool(self.kind) {
+            self.shape_moved(sketch);
+        }
+        out
+    }
+
+    fn handle_event(&mut self, sketch: &Sketch, event: ToolEvent) -> Vec<ToolOutput> {
         match event {
             ToolEvent::Move { pos, px, suppress_snap } => {
                 let drawing = matches!(
@@ -879,6 +957,10 @@ impl Tool {
                         | ToolKind::ArcTangent
                         | ToolKind::Rectangle
                         | ToolKind::Rectangle3
+                        | ToolKind::Point
+                        | ToolKind::Polygon
+                        | ToolKind::Slot(_)
+                        | ToolKind::Offset
                 );
                 self.hover = matches!(self.kind, ToolKind::Trim | ToolKind::Extend | ToolKind::Fillet)
                     .then(|| nearest_curve(sketch, pos, px, &[]))
@@ -1062,6 +1144,7 @@ impl Tool {
                     || self.pending.is_some()
                     || self.tangent_from.is_some()
                     || self.fillet_first.is_some()
+                    || self.offset_pick.is_some()
                 {
                     self.reset();
                     Vec::new()
@@ -1114,6 +1197,8 @@ impl Tool {
     ) -> Vec<ToolOutput> {
         let pick = |sketch: &Sketch, pos: [f64; 2], px: f64| picked.unwrap_or_else(|| pick(sketch, pos, px));
         match self.kind {
+            // Their clicks are handled by `shape_event` before this.
+            ToolKind::Point | ToolKind::Polygon | ToolKind::Slot(_) | ToolKind::Offset => Vec::new(),
             ToolKind::Select => vec![ToolOutput::Select { item: pick(sketch, pos, px), extend: modifier }],
             ToolKind::Line => {
                 let here = self.place(sketch, pos, px, self.anchor, modifier);

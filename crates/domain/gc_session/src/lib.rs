@@ -382,7 +382,7 @@ impl Session {
         self.drag = None;
         self.request = None;
         self.offer = None;
-        self.tool = Tool::new(self.tool.kind());
+        self.tool = self.tool.renewed(self.tool.kind());
         self.tool.set_construction(self.construction);
     }
 
@@ -997,8 +997,83 @@ impl Session {
 
     /// Switches the tool.
     pub fn set_tool(&mut self, kind: ToolKind) {
-        self.tool = Tool::new(kind);
+        // The tools' settings (Center Point, the Polygon dialog, the Offset toggles) outlive the tool.
+        self.tool = self.tool.renewed(kind);
         self.reset_interaction();
+    }
+
+    /// The Format panel's Center Point toggle: the Point tool places centre points (Inventor's default).
+    pub fn center_point(&self) -> bool {
+        self.tool.center_point()
+    }
+
+    /// Sets the Center Point toggle; with standalone points selected, switches their style too (one undo
+    /// step), as Inventor's toggle does.
+    pub fn set_center_point(&mut self, on: bool) -> Result<(), EditError> {
+        self.tool.set_center_point(on);
+        let Some((_, sketch)) = self.active_sketch() else { return Ok(()) };
+        let owned: BTreeSet<Id<gc_sketch::SkPoint>> =
+            sketch.curves.values().flat_map(gc_sketch::Curve::points).collect();
+        let points: Vec<Id<gc_sketch::SkPoint>> = self
+            .selection
+            .iter()
+            .filter_map(|i| if let gc_sketch::Item::Point(p) = i { Some(*p) } else { None })
+            .filter(|p| !owned.contains(p))
+            .collect();
+        if points.is_empty() {
+            return Ok(());
+        }
+        self.sketch_op(SketchOp::SetCenterPoint { points, center: on }).map(|_| ())
+    }
+
+    /// The Polygon dialog: number of sides and circumscribed.
+    pub fn polygon_settings(&self) -> (u32, bool) {
+        self.tool.polygon()
+    }
+
+    /// Sets the Polygon dialog's values (sides clamped to 3–120).
+    pub fn set_polygon_settings(&mut self, sides: u32, circumscribed: bool) {
+        self.tool.set_polygon(sides, circumscribed);
+    }
+
+    /// Offset: Loop Select and Constrain Offset.
+    pub fn offset_options(&self) -> (bool, bool) {
+        self.tool.offset_options()
+    }
+
+    /// Sets Loop Select and Constrain Offset.
+    pub fn set_offset_options(&mut self, loop_select: bool, constrain: bool) {
+        self.tool.set_offset_options(loop_select, constrain);
+    }
+
+    /// Applies an edit to the sketch being edited (the Mirror and Pattern dialogs). One undo step.
+    pub fn edit_active_sketch(&mut self, op: SketchOp) -> Result<Vec<Created>, EditError> {
+        if self.active.is_none() {
+            return Err(gc_sketch::SketchError::MissingItem.into());
+        }
+        self.sketch_op(op)
+    }
+
+    /// The points selected in the sketch being edited, with the centres of selected circles and arcs (an
+    /// axis for a circular pattern).
+    pub fn selected_points(&self) -> Vec<Id<gc_sketch::SkPoint>> {
+        let sketch = self.active_sketch().map(|(_, s)| s);
+        self.selection
+            .iter()
+            .filter_map(|i| match i {
+                gc_sketch::Item::Point(p) => Some(*p),
+                gc_sketch::Item::Curve(c) => sketch.and_then(|s| s.round(*c)).map(|(centre, _)| centre),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The curves selected in the sketch being edited.
+    pub fn selected_curves(&self) -> Vec<Id<Curve>> {
+        self.selection
+            .iter()
+            .filter_map(|i| if let gc_sketch::Item::Curve(c) = i { Some(*c) } else { None })
+            .collect()
     }
 
     fn sketch_op(&mut self, op: SketchOp) -> Result<Vec<Created>, EditError> {

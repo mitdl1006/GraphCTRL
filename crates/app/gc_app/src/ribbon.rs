@@ -1,7 +1,7 @@
 //! The ribbon: tabs of command groups. Every button is a view of a session command.
 
 use eframe::egui;
-use gc_doc::{Placement, Solid, WaypointTarget};
+use gc_doc::{Placement, SlotKind, Solid, WaypointTarget};
 use gc_draw::StandardView;
 use gc_i18n::{Lang, Msg, tr};
 use gc_panels::CellUi;
@@ -78,6 +78,12 @@ pub(crate) enum RibbonAction {
     ProjectCutEdges,
     /// Ground or free the selected component.
     ToggleGround,
+    /// Open the sketch Mirror dialog.
+    StartSketchMirror,
+    /// Open the sketch Rectangular Pattern dialog.
+    StartSketchRectPattern,
+    /// Open the sketch Circular Pattern dialog.
+    StartSketchCircPattern,
 }
 
 pub(crate) fn show(
@@ -162,7 +168,97 @@ pub(crate) fn show(
                     {
                         action = Some(RibbonAction::ProjectCutEdges);
                     }
+                    // Point, Polygon and Slot (Inventor 2026 help, To Work with Points,
+                    // GUID-D4A4288F-32F1-4E23-A382-930EBA152E87; To Create 2D Shape Geometry,
+                    // GUID-D489CE6D-7299-4211-A43A-F3580A4BA357): 2D sketches.
+                    if !spatial {
+                        for (kind, icon, label) in [
+                            (ToolKind::Point, Icon::Text("+"), Msg::ToolPoint),
+                            (ToolKind::Polygon, Icon::Path, Msg::ToolPolygon),
+                            (ToolKind::Slot(SlotKind::CenterToCenter), Icon::Arc, Msg::ToolSlot),
+                        ] {
+                            if ribbon_button(ui, icon, label.text(lang), current == kind, sketching).clicked()
+                            {
+                                session.set_tool(kind);
+                            }
+                        }
+                        ui.vertical(|ui| {
+                            ui.horizontal(|ui| {
+                                for (kind, symbol, label) in [
+                                    (ToolKind::Slot(SlotKind::Overall), "(=)", Msg::ToolSlotOverall),
+                                    (ToolKind::Slot(SlotKind::CenterPoint), "(+)", Msg::ToolSlotCenterPoint),
+                                ] {
+                                    let button = gc_ui::ribbon_small_button(
+                                        ui,
+                                        Icon::Text(symbol),
+                                        label.text(lang),
+                                        current == kind,
+                                        sketching,
+                                    );
+                                    if button.clicked() {
+                                        session.set_tool(kind);
+                                    }
+                                }
+                            });
+                            // The Format panel's Center Point toggle.
+                            let on = session.center_point();
+                            let toggle = gc_ui::ribbon_small_button(
+                                ui,
+                                Icon::Text("+"),
+                                tr!(lang, ToolCenterPoint),
+                                on,
+                                sketching,
+                            );
+                            if toggle.clicked() {
+                                // A refusal (a selected end point) shows in the status bar.
+                                drop(session.set_center_point(!on));
+                            }
+                        });
+                    }
                 });
+                if !spatial {
+                    // Inventor's Pattern panel: Rectangular, Circular, Mirror.
+                    ribbon_group(ui, tr!(lang, GroupPattern), |ui| {
+                        let patterns = [
+                            (Icon::Text("#"), Msg::ToolRectPattern, RibbonAction::StartSketchRectPattern),
+                            (Icon::Circle, Msg::ToolCircPattern, RibbonAction::StartSketchCircPattern),
+                            (Icon::Text("|"), Msg::ToolMirror, RibbonAction::StartSketchMirror),
+                        ];
+                        ui.vertical(|ui| {
+                            for row in patterns.chunks(2) {
+                                ui.horizontal(|ui| {
+                                    for (icon, label, start) in row.iter().copied() {
+                                        let button = gc_ui::ribbon_small_button(
+                                            ui,
+                                            icon,
+                                            label.text(lang),
+                                            false,
+                                            sketching,
+                                        );
+                                        if button.clicked() {
+                                            action = Some(start);
+                                        }
+                                    }
+                                });
+                            }
+                        });
+                    });
+                    // Inventor's Modify panel: Offset (Trim, Extend and Fillet are tools of their own).
+                    ribbon_group(ui, tr!(lang, GroupModify), |ui| {
+                        let offset = ToolKind::Offset;
+                        if ribbon_button(
+                            ui,
+                            Icon::Text("="),
+                            tr!(lang, ToolOffset),
+                            current == offset,
+                            sketching,
+                        )
+                        .clicked()
+                        {
+                            session.set_tool(offset);
+                        }
+                    });
+                }
                 ribbon_group(ui, tr!(lang, GroupConstrain), |ui| {
                     let dimension = ToolKind::Dimension;
                     if ribbon_button(
@@ -207,18 +303,6 @@ pub(crate) fn show(
                         session.finish_sketch();
                     }
                 });
-                // Planned tools, after the rest so that nothing else moves when they arrive.
-                if !spatial {
-                    ribbon_group(ui, tr!(lang, GroupPlanned), |ui| {
-                        for (icon, label) in [
-                            (Icon::Text("+"), Msg::ToolPoint),
-                            (Icon::Path, Msg::ToolPolygon),
-                            (Icon::Line, Msg::ToolSlot),
-                        ] {
-                            ribbon_button(ui, icon, label.text(lang), false, false);
-                        }
-                    });
-                }
             }
             Tab::Assemble => action = assemble_tab(ui, session, viewport, lang),
             Tab::Robot => action = robot_tab(ui, session, viewport, cell, library, lang),

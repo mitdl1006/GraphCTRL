@@ -74,7 +74,7 @@ fn xy(sketch: &Sketch, point: Id<SkPoint>) -> Option<[f64; 2]> {
 }
 
 /// The point of a curve closest to `at`, where the curve is a segment, a circle or an arc.
-fn closest_on_curve(sketch: &Sketch, curve: &Curve, at: [f64; 2]) -> Option<[f64; 2]> {
+pub(crate) fn closest_on_curve(sketch: &Sketch, curve: &Curve, at: [f64; 2]) -> Option<[f64; 2]> {
     match curve.geom {
         CurveGeom::Line { a, b } => {
             let (a, b) = (xy(sketch, a)?, xy(sketch, b)?);

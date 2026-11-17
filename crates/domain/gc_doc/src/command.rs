@@ -1016,7 +1016,26 @@ fn push_cut(created: &mut Vec<Created>, cut: &gc_sketch::CutResult) {
     created.extend(cut.constraints.iter().map(|c| Created::Constraint(*c)));
 }
 
-/// Adds a constraint that the edit needs; refused or conflicting means the edit fails.
+/// What a sketch edit would make, worked out on a copy of the sketch (for a tool's preview): the copy
+/// and what was created. `None` when the edit is refused. Expressions see no model parameters.
+pub fn preview_sketch_op(sketch: &Sketch, op: &SketchOp) -> Option<(Sketch, Vec<Created>)> {
+    let mut copy = sketch.clone();
+    let highest = copy
+        .points
+        .keys()
+        .map(|p| p.raw())
+        .chain(copy.curves.keys().map(|c| c.raw()))
+        .chain(copy.constraints.keys().map(|c| c.raw()))
+        .chain(copy.dimensions.keys().map(|d| d.raw()))
+        .max();
+    let mut ids = IdAlloc::new();
+    if let Some(highest) = highest {
+        ids.reserve_through(highest);
+    }
+    let (created, _) = sketch_op(&mut copy, &mut ids, op, &gc_expr::NoParams).ok()?;
+    Some((copy, created))
+}
+
 /// Adds a constraint unless it is redundant or conflicting (then silently left out).
 pub(crate) fn try_constraint(
     sketch: &mut Sketch,
@@ -1032,6 +1051,7 @@ pub(crate) fn tangency_of(sketch: &Sketch, a: Id<Curve>, b: Id<Curve>) -> Option
     tangency(sketch, a, b)
 }
 
+/// Adds a constraint that the edit needs; refused or conflicting means the edit fails.
 pub(crate) fn require_constraint(
     sketch: &mut Sketch,
     ids: &mut IdAlloc,
