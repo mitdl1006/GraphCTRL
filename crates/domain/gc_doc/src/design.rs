@@ -360,6 +360,13 @@ pub enum Occurrence {
         /// Index into [`Assembly::parts`].
         index: u32,
     },
+    /// A link of a robot: its frame follows the robot's joint values.
+    Link {
+        /// The robot.
+        robot: Id<crate::cell::Robot>,
+        /// Index into [`crate::cell::Robot::links`].
+        index: u32,
+    },
 }
 
 impl Occurrence {
@@ -368,6 +375,7 @@ impl Occurrence {
         match *self {
             Occurrence::Item(item) => item,
             Occurrence::Part { assembly, .. } => assembly.erase(),
+            Occurrence::Link { robot, .. } => robot.erase(),
         }
     }
 }

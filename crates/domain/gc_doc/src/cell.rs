@@ -157,6 +157,86 @@ pub struct Robot {
     /// description (neighbouring links, links touching in the zero pose, ...).
     #[serde(default)]
     pub acm_overrides: Vec<AcmOverride>,
+    /// The link tree as plain data (from the description), so that the document can place every link's
+    /// frame for the robot's joint values without reading the description: links as sub-components with
+    /// their own origin folders. Filled when the robot is added or the project is opened.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub links: Vec<RobotLink>,
+}
+
+/// A link of a robot's tree, parents before children.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RobotLink {
+    /// Name from the description.
+    pub name: String,
+    /// The parent link (index into [`Robot::links`], always lower); `None` for the root, which stands at
+    /// the robot's placement.
+    pub parent: Option<u32>,
+    /// The joint frame in the parent link's frame.
+    pub origin: Placement,
+    /// Unit axis of the joint's motion in the joint frame.
+    pub axis: [f64; 3],
+    /// How the joint moves with the robot's joint values.
+    pub motion: LinkMotion,
+}
+
+/// How a link's joint follows the robot's joint values ([`Robot::joints`]).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum LinkMotion {
+    /// It does not move (fixed joints, and joints outside the planning chain, at zero).
+    Fixed,
+    /// It turns about the axis by `scale * joints[joint] + offset` radians.
+    Turn {
+        /// Index into [`Robot::joints`].
+        joint: u32,
+        /// Multiplier (1 unless the joint copies another).
+        scale: f64,
+        /// Offset.
+        offset: f64,
+    },
+    /// It slides along the axis by `scale * joints[joint] + offset` metres.
+    Slide {
+        /// Index into [`Robot::joints`].
+        joint: u32,
+        /// Multiplier.
+        scale: f64,
+        /// Offset.
+        offset: f64,
+    },
+}
+
+impl Robot {
+    /// The pose of every link in the robot's own frame (its placement) for the stored joint values;
+    /// empty when the link tree is not known.
+    pub fn link_frames(&self) -> Vec<gc_math::DPose3> {
+        use gc_math::{DPose3, DVec3};
+        let mut out: Vec<DPose3> = Vec::with_capacity(self.links.len());
+        for link in &self.links {
+            let value = |joint: u32, scale: f64, offset: f64| {
+                scale * self.joints.get(joint as usize).copied().unwrap_or(0.0) + offset
+            };
+            let axis = DVec3::from_array(self.axis_of(link));
+            let motion = match link.motion {
+                LinkMotion::Fixed => DPose3::IDENTITY,
+                LinkMotion::Turn { joint, scale, offset } => DPose3::from_parts(
+                    DVec3::ZERO,
+                    gc_math::quat_from_rotvec(axis * value(joint, scale, offset)),
+                ),
+                LinkMotion::Slide { joint, scale, offset } => {
+                    DPose3::from_parts(axis * value(joint, scale, offset), gc_math::DQuat::IDENTITY)
+                }
+            };
+            let local = gc_math::pose_from_xyz_rpy(link.origin.xyz, link.origin.rpy) * motion;
+            let parent = link.parent.and_then(|p| out.get(p as usize).copied());
+            out.push(parent.map_or(local, |p| p * local));
+        }
+        out
+    }
+
+    fn axis_of(&self, link: &RobotLink) -> [f64; 3] {
+        let a = gc_math::DVec3::from_array(link.axis);
+        if a.length() > 1e-12 { a.normalize().to_array() } else { [0.0, 0.0, 1.0] }
+    }
 }
 
 /// Something a robot carries on its tip link (a gripper, a torch): drawn with the robot and checked for
@@ -424,6 +504,13 @@ pub enum CellOp {
         id: Id<Robot>,
         /// The pose of the tool centre point in the tip link's frame.
         tcp: Placement,
+    },
+    /// Sets a robot's link tree (from its description; see [`Robot::links`]).
+    SetRobotLinks {
+        /// The robot.
+        id: Id<Robot>,
+        /// The links, parents before children.
+        links: Vec<RobotLink>,
     },
     /// Sets a robot's joint values.
     SetJoints {
@@ -739,12 +826,34 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
             txn.modify(*id, |r: &mut Robot, _| r.tcp = *tcp)?;
             Ok((Vec::new(), "Set tool centre point"))
         }
+        CellOp::SetRobotLinks { id, links } => {
+            let joints = txn.doc().get(*id).ok_or(DocError::Missing(id.erase()))?.joints.len();
+            let well_formed = links.iter().enumerate().all(|(i, l)| {
+                l.parent.is_none_or(|p| (p as usize) < i)
+                    && finite(&l.origin.xyz)
+                    && finite(&l.origin.rpy)
+                    && finite(&l.axis)
+                    && match l.motion {
+                        LinkMotion::Fixed => true,
+                        LinkMotion::Turn { joint, scale, offset }
+                        | LinkMotion::Slide { joint, scale, offset } => {
+                            (joint as usize) < joints && scale.is_finite() && offset.is_finite()
+                        }
+                    }
+            });
+            if !well_formed {
+                return Err(EditError::BadValue);
+            }
+            txn.modify(*id, |r: &mut Robot, _| r.links.clone_from(links))?;
+            Ok((Vec::new(), "Robot links"))
+        }
         CellOp::SetJoints { id, joints } => {
             let count = txn.doc().get(*id).ok_or(DocError::Missing(id.erase()))?.joints.len();
             if joints.len() != count || !finite(joints) {
                 return Err(EditError::BadValue);
             }
             txn.modify(*id, |r: &mut Robot, _| r.joints.clone_from(joints))?;
+            settle_holding(txn, &[id.erase()])?;
             Ok((Vec::new(), "Move joints"))
         }
         CellOp::DeleteRobot(id) => {
@@ -1003,10 +1112,15 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
 /// Moves the components that assembly constraints tie into place after an edit; refused when the
 /// constraints cannot all be satisfied.
 pub(crate) fn settle(txn: &mut Txn<'_>) -> Result<(), EditError> {
+    settle_holding(txn, &[])
+}
+
+/// [`settle`] with some components held still.
+pub(crate) fn settle_holding(txn: &mut Txn<'_>, held: &[AnyId]) -> Result<(), EditError> {
     if txn.doc().relationships().is_empty() {
         return Ok(());
     }
-    let moves = txn.doc().solve_relationships().map_err(|u| {
+    let moves = txn.doc().solve_relationships_holding(held).map_err(|u| {
         let names =
             u.sick.iter().map(|id| txn.doc().get(*id).map_or_else(String::new, |r| r.name.clone())).collect();
         EditError::Unsolvable { ids: u.sick, names }

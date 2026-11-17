@@ -356,6 +356,7 @@ mod tests {
             look: Default::default(),
             tool: None,
             acm_overrides: Vec::new(),
+            links: Vec::new(),
         };
         let Created::Robot(robot) = cell(&mut doc, CellOp::AddRobot(robot))[0] else { panic!("no robot") };
         let target = WaypointTarget::SketchPoint { sketch, point: a };

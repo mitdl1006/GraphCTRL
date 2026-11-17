@@ -23,8 +23,8 @@ mod txn;
 
 mod design;
 pub use cell::{
-    AcmOverride, Body, CellOp, ContactAllowance, Look, MotionPath, Placement, Robot, Solid, Tool, Waypoint,
-    WaypointTarget, WorkFrame,
+    AcmOverride, Body, CellOp, ContactAllowance, LinkMotion, Look, MotionPath, Placement, Robot, RobotLink,
+    Solid, Tool, Waypoint, WaypointTarget, WorkFrame,
 };
 pub use command::{
     Applied, Command, Created, DimSlot, EditError, EndSnap, SketchOp, TangentArc, apply, tangent_arc,
@@ -38,6 +38,9 @@ pub use document::{ChangeSet, Contents, DocDelta, Document, Frame, FrameKind, Pa
 pub use gc_sketch::Sketch;
 pub use history::History;
 pub use placement::{ComponentOrigin, WorkShape};
-pub use relate::{AxisSense, Geometry, RelationKind, Relationship, Selection, Unsolved};
+pub use relate::{
+    AxisSense, ComponentStatus, Dof, Geometry, RelationKind, RelationStatus, Relationship, Selection,
+    Unsolved,
+};
 pub use tree::ComponentNode;
 pub use txn::{DocError, Txn};
