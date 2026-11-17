@@ -804,6 +804,27 @@ impl Session {
         gc_doc::possible_relations(first, second)
     }
 
+    /// A work frame at the origin of a component's plane, in one undo step (a sketch on the plane holds
+    /// its origin). Waypoints in it follow the component, wherever it is moved or constrained to.
+    pub fn add_component_frame(
+        &mut self,
+        occurrence: gc_doc::Occurrence,
+        plane: gc_doc::OriginPlane,
+    ) -> Result<Id<gc_doc::WorkFrame>, EditError> {
+        let name = format!("Frame{}", self.doc.work_frames().len() + 1);
+        let sketch = format!("Sketch{}", self.doc.sketches().len() + 1);
+        let created = self.execute(&Command::Cell(gc_doc::CellOp::AddComponentFrame {
+            name,
+            sketch,
+            occurrence,
+            plane,
+        }))?;
+        created
+            .iter()
+            .find_map(|c| if let Created::Frame(id) = c { Some(*id) } else { None })
+            .ok_or(EditError::BadValue)
+    }
+
     /// A component's origin folder in the world: centre point, axes and planes (assembly P1-2).
     pub fn component_origin(&self, occurrence: gc_doc::Occurrence) -> Option<gc_doc::ComponentOrigin> {
         self.doc.component_origin(occurrence)
