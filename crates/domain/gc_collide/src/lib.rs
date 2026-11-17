@@ -229,6 +229,16 @@ pub struct Closest {
     pub on_second: [f64; 3],
 }
 
+/// How deep two geometries overlap, by [`Geometry::penetration`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Penetration {
+    /// How far they overlap along `normal` (metres, positive).
+    pub depth: f64,
+    /// The unit direction, out of the first geometry, that moving the second by `depth` would separate
+    /// them along (for that pair of shapes).
+    pub normal: [f64; 3],
+}
+
 /// Where two geometries overlap, as estimated by [`Geometry::interference`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct Interference {
@@ -330,6 +340,28 @@ impl Geometry {
         #[allow(clippy::cast_precision_loss, reason = "sample counts are small")]
         let count = points.len() as f64;
         Ok(Some(Interference { volume: count * cell_volume, centroid: (sum / count).to_array(), points }))
+    }
+
+    /// The deepest overlap between this geometry and another, beyond `tolerance`; `None` when they are
+    /// apart or only touch.
+    pub fn penetration(&self, other: &Geometry, tolerance: f64) -> Result<Option<Penetration>, CollideError> {
+        let mut deepest: Option<Penetration> = None;
+        for (pose_a, shape_a) in &self.parts {
+            for (pose_b, shape_b) in &other.parts {
+                let unsupported = |_e| CollideError::Unsupported;
+                let Some(contact) =
+                    query::contact(pose_a, &**shape_a, pose_b, &**shape_b, 0.0).map_err(unsupported)?
+                else {
+                    continue;
+                };
+                let depth = -contact.dist;
+                if depth > tolerance && deepest.is_none_or(|d| depth > d.depth) {
+                    let normal = contact.normal1.normalize_or_zero();
+                    deepest = Some(Penetration { depth, normal: normal.to_array() });
+                }
+            }
+        }
+        Ok(deepest)
     }
 
     /// Where this geometry and another come closest; `None` when either is empty.
@@ -646,6 +678,20 @@ mod tests {
         #[rustfmt::skip]
         let indices = vec![0,2,1, 0,3,2, 4,5,6, 4,6,7, 0,1,5, 0,5,4, 2,3,7, 2,7,6, 1,2,6, 1,6,5, 3,0,4, 3,4,7];
         Arc::new(MeshData::new(positions, indices).unwrap())
+    }
+
+    #[test]
+    fn penetration_gives_the_depth_and_the_way_out() {
+        let shapes = |x: f64, desc: ShapeDesc| Geometry::from_shapes(&[(at(x, 0.0, 0.0), desc)]).unwrap();
+        let a = shapes(0.0, ShapeDesc::Box([0.2; 3]));
+        let b = shapes(0.15, ShapeDesc::Box([0.2; 3]));
+        let hit = a.penetration(&b, 1e-9).unwrap().unwrap();
+        assert!((hit.depth - 0.05).abs() < 1e-9, "{hit:?}");
+        assert!((DVec3::from_array(hit.normal) - DVec3::X).length() < 1e-9);
+        // Touching or apart: nothing; a mesh obstacle works too.
+        assert_eq!(a.penetration(&shapes(0.2, ShapeDesc::Box([0.2; 3])), 1e-9).unwrap(), None);
+        let mesh = shapes(0.55, ShapeDesc::Mesh(cube_mesh()));
+        assert!(a.penetration(&mesh, 1e-9).unwrap().is_some_and(|h| (h.depth - 0.05).abs() < 1e-6));
     }
 
     #[test]

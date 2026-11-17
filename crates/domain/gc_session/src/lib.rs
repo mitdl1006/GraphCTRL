@@ -24,8 +24,8 @@ use std::path::{Path, PathBuf};
 
 pub use assembly::{AssemblyReader, Imported, Importer, ShownAssemblyPart};
 pub use cell::{
-    CellItem, CompareRow, Ghost, LoadedRobot, MeshRef, PADDING, PLANNERS, PlanStatus, PlannedPath, Reference,
-    Resources, Shown, ShownPart,
+    CellItem, CompareRow, ContactStop, Ghost, LoadedRobot, MeshRef, PADDING, PLANNERS, PlanStatus,
+    PlannedPath, Reference, Resources, Shown, ShownPart,
 };
 pub use design::WorkShape;
 pub use gc_collide::{Closest, Interference};
@@ -748,6 +748,17 @@ impl Session {
     ) -> Result<Vec<String>, EditError> {
         let items = if all { self.doc.same_source(item) } else { vec![item] };
         self.replicate(gc_doc::CellOp::ReplaceComponents { items, with })
+    }
+
+    /// Adds components to the contact set, or takes them out. One undo step.
+    pub fn set_contact_set(&mut self, items: &[gc_core::AnyId], on: bool) -> Result<(), EditError> {
+        self.execute(&Command::Cell(gc_doc::CellOp::SetContactSet { items: items.to_vec(), on })).map(|_| ())
+    }
+
+    /// Interactive Contact: Activate Contact Solver is `ContactSolver::ContactSet`; `All` analyses every
+    /// component; `Off` turns it off. One undo step.
+    pub fn set_contact_solver(&mut self, mode: gc_doc::ContactSolver) -> Result<(), EditError> {
+        self.execute(&Command::Cell(gc_doc::CellOp::SetContactSolver(mode))).map(|_| ())
     }
 
     /// A component's origin folder in the world: centre point, axes and planes (assembly P1-2).

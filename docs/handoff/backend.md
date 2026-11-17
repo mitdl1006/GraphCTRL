@@ -1,5 +1,22 @@
 # 백엔드 인계 (2026-11-17)
 
+## 2026-11-18 — 접촉 솔버(Contact Solver, 리드 ①)
+
+근거(원문): Detect contact between assembly components `GUID-FA1A8282-3A7E-45BE-8DB3-F637FB1C3292.htm`,
+About the Contact Solver and Component Collision `GUID-0BBD4ACE-7BD1-40BF-A011-74416B229035.htm`.
+- 저장: `Components.contact_set`(Occurrence), `Components.contact_solver: ContactSolver::{Off(기본), ContactSet, All}`(Interactive Contact).
+  `CellOp::SetContactSet{items, on}`, `CellOp::SetContactSolver(mode)`; 세션 `set_contact_set`, `set_contact_solver`.
+  문서 `contact_set()`, `contact_solver()`, `in_contact_set(item)`, `contact_participants()`(숨김·비활성·억제 제외 — 원문).
+- 구동: 솔버가 켜져 있고 참가자가 둘 이상이면 `drive_relationship`이 현재 값에서 목표까지 2 mm/1° 단계로 진행.
+  접촉 시 밀 수 있는 컴포넌트(바디, 접지 아님, 활성 관계 없음)는 침투 깊이만큼 법선 방향으로 밀고(연쇄 가능),
+  밀 수 없으면(접지·관계로 묶임·구동 중·로봇) 직전 값에서 멈춤. `session.contact_stop() -> Option<ContactStop{value, first, second}>`,
+  `contact_pushed()`. 원문: "contact can push another component … exception … cannot move (grounded) → stops".
+- 드래그: `preview_body`가 집합 안 바디면 같은 규칙(멈추면 미리보기 위치 유지), `end_body_preview`가 밀린 것까지 `CellOp::MoveComponents` 한 undo로 커밋.
+- gc_collide `Geometry::penetration(&other, tol) -> Option<Penetration{depth, normal}>`(parry contact).
+- 아직: 어셈블리 메시 참가(세션에 형상 없음), 밀린 부품의 회전(병진만), Surface Complexity 설정, 별도 Collision Detection 옵션(구동 시 충돌 정지 —
+  접촉 솔버 밖의 간섭으로 멈추기)은 프론트엔드 Drive 대화상자 설계 후.
+- 테스트 `gc_session/tests/contact.rs`(3), gc_collide `penetration_gives_the_depth_and_the_way_out`.
+
 ## 2026-11-18 — 컴포넌트 미러·복사·교체(리드 ②③)
 
 근거(원문, `https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/`):

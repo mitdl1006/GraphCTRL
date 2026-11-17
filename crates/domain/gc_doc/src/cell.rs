@@ -537,6 +537,17 @@ pub enum CellOp {
         /// What they become.
         with: crate::replicate::Replacement,
     },
+    /// Moves several components at once (a drag that pushed others through contact): one undo step.
+    MoveComponents(Vec<(AnyId, Placement)>),
+    /// Adds components to, or takes them out of, the contact set.
+    SetContactSet {
+        /// The components (bodies, robots, assemblies).
+        items: Vec<AnyId>,
+        /// In the set.
+        on: bool,
+    },
+    /// Interactive Contact: the contact solver off, for the contact set only, or for all components.
+    SetContactSolver(crate::design::ContactSolver),
     /// Ground and Root, "Ground at origin": moves the components (bodies, robots, assemblies) to the
     /// assembly's origin, aligned with it, and grounds them. Refused when constraints then cannot be met.
     GroundAtOrigin(Vec<AnyId>),
@@ -738,6 +749,7 @@ pub(crate) fn set_timeline(
                 .chain(&c.disabled)
                 .chain(&c.hidden)
                 .chain(&c.suppressed)
+                .chain(&c.contact_set)
                 .copied()
                 .chain(c.origins_shown.iter().map(|(o, _)| *o))
                 .filter(|o| !txn.doc().has_occurrence(*o))
@@ -751,6 +763,7 @@ pub(crate) fn set_timeline(
                 list.retain(|o| !gone.contains(o));
             }
             c.origins_shown.retain(|(o, _)| !gone.contains(o));
+            c.contact_set.retain(|o| !gone.contains(o));
         }
         edit(t);
     };
@@ -1166,6 +1179,36 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
             crate::replicate::copy(txn, items, offset, *relationships, *ground)
         }
         CellOp::ReplaceComponents { items, with } => crate::replicate::replace(txn, items, with),
+        CellOp::SetContactSet { items, on } => {
+            use crate::design::Occurrence;
+            if items.is_empty() || !items.iter().all(|i| txn.doc().owner_pose(*i).is_some()) {
+                return Err(EditError::BadValue);
+            }
+            set_timeline(txn, |t| {
+                let set = &mut t.components.contact_set;
+                set.retain(|o| !items.iter().any(|i| *o == Occurrence::Item(*i)));
+                if *on {
+                    set.extend(items.iter().map(|i| Occurrence::Item(*i)));
+                }
+            })?;
+            Ok((Vec::new(), if *on { "Contact set" } else { "Remove from contact set" }))
+        }
+        CellOp::MoveComponents(moves) => {
+            if moves.is_empty() {
+                return Err(EditError::BadValue);
+            }
+            for (item, placement) in moves {
+                placed(placement)?;
+                set_owner_pose(txn, *item, gc_math::pose_from_xyz_rpy(placement.xyz, placement.rpy))?;
+            }
+            let held: Vec<AnyId> = moves.iter().map(|(i, _)| *i).collect();
+            settle_holding(txn, &held)?;
+            Ok((Vec::new(), "Move components"))
+        }
+        CellOp::SetContactSolver(mode) => {
+            set_timeline(txn, |t| t.components.contact_solver = *mode)?;
+            Ok((Vec::new(), "Interactive contact"))
+        }
         CellOp::GroundAtOrigin(items) => {
             use crate::design::Occurrence;
             if items.is_empty() || !items.iter().all(|i| txn.doc().owner_pose(*i).is_some()) {

@@ -262,6 +262,52 @@ impl Document {
             && self.components_state().origins_shown.contains(&(occurrence, element))
     }
 
+    /// The contact set.
+    pub fn contact_set(&self) -> Vec<Occurrence> {
+        self.components_state().contact_set
+    }
+
+    /// The Interactive Contact setting.
+    pub fn contact_solver(&self) -> crate::design::ContactSolver {
+        self.components_state().contact_solver
+    }
+
+    /// True when a component (body, robot or assembly) is in the contact set.
+    pub fn in_contact_set(&self, item: AnyId) -> bool {
+        self.components_state().contact_set.contains(&Occurrence::Item(item))
+    }
+
+    /// The components the contact solver analyses: none when it is off; the contact set, or all
+    /// components, otherwise. Hidden, disabled and suppressed components take no part (Inventor 2026 help,
+    /// Detect contact between assembly components, GUID-FA1A8282-3A7E-45BE-8DB3-F637FB1C3292).
+    pub fn contact_participants(&self) -> Vec<AnyId> {
+        use crate::design::ContactSolver;
+        let state = self.components_state();
+        let all: Vec<AnyId> = self
+            .bodies()
+            .iter()
+            .map(|(id, _)| id.erase())
+            .chain(self.robots().iter().map(|(id, _)| id.erase()))
+            .chain(self.assemblies().iter().map(|(id, _)| id.erase()))
+            .collect();
+        let candidates: Vec<AnyId> = match state.contact_solver {
+            ContactSolver::Off => return Vec::new(),
+            ContactSolver::ContactSet => {
+                all.into_iter().filter(|i| state.contact_set.contains(&Occurrence::Item(*i))).collect()
+            }
+            ContactSolver::All => all,
+        };
+        candidates
+            .into_iter()
+            .filter(|i| {
+                let o = Occurrence::Item(*i);
+                self.component_flag(o, ComponentFlag::Visible)
+                    && self.component_flag(o, ComponentFlag::Enabled)
+                    && !self.is_component_suppressed(*i)
+            })
+            .collect()
+    }
+
     /// True when a body, robot or assembly is suppressed (kept but not computed).
     pub fn is_component_suppressed(&self, item: AnyId) -> bool {
         self.component_flag(Occurrence::Item(item), ComponentFlag::Suppressed)

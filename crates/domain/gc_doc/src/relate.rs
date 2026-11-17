@@ -1313,6 +1313,15 @@ impl Document {
 }
 
 impl Document {
+    /// The value Drive starts from for a relationship: its offset or angle as defined, and 0 for a
+    /// Rotational joint (whose drive value is a turn from where it stands).
+    pub fn drive_start(&self, id: Id<Relationship>) -> Option<f64> {
+        match self.get(id)?.kind {
+            RelationKind::Rotational { .. } => Some(0.0),
+            kind => value_of(&kind),
+        }
+    }
+
     /// Drive: where the components would stand with a relationship driven to `value`, without changing
     /// the document (Inventor's Drive dialog plays a constraint or joint through values). The value is the
     /// offset (metres) of a Mate, Flush or Insert, or the turn (radians, from where the moving component
