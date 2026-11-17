@@ -177,3 +177,32 @@ fn a_description_path_cannot_leave_the_package() {
     package(&lib, "evil", r#"{ "name": "Evil", "description": "../../secret.urdf" }"#, None);
     assert!(library::scan(&lib).is_empty(), "a description outside its package is not a package");
 }
+
+/// Rule from the lead: the project's own copy of the description (`Robot.urdf`) is the truth for the
+/// kinematics; only the meshes come from the library. A library package that has changed since (here: a
+/// different arm under the same name) must not change the saved robot, and a missing library must not
+/// stop it from having a model.
+#[test]
+fn the_projects_urdf_copy_decides_the_kinematics_not_the_library() {
+    let d = tempfile::tempdir().unwrap();
+    let lib = d.path().join("robots");
+    package(&lib, "arm", GOOD, Some(&six_axis()));
+    let mut session = Session::new();
+    session.set_robot_library(Some(lib.clone()));
+    let robot = session.add_library_robot(&library::scan(&lib)[0]).unwrap();
+    let dof = session.doc().get(robot).unwrap().joints.len();
+    let urdf = session.doc().get(robot).unwrap().urdf.clone();
+    let file = d.path().join("cell.gctrl");
+    session.save_as(&file).unwrap();
+
+    // The package is replaced by something else entirely.
+    std::fs::write(lib.join("arm/arm.urdf"), "<robot name=\"changed\"/>").unwrap();
+    for library in [Some(lib.clone()), None] {
+        let mut reopened = Session::new();
+        reopened.set_robot_library(library.clone());
+        reopened.open(&file).unwrap();
+        let saved = reopened.doc().get(robot).unwrap();
+        assert_eq!((saved.urdf.as_str(), saved.joints.len()), (urdf.as_str(), dof), "{library:?}");
+        assert!(reopened.robot_model(robot).is_some(), "the kinematics come from the copy: {library:?}");
+    }
+}
