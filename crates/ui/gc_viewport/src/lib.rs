@@ -215,7 +215,7 @@ impl Viewport {
         let scene = Scene::of(session);
         paint::under(ui, rect, &self.camera, session);
         self.background.paint(ui, rect, &self.camera, &scene);
-        paint::over(ui, rect, &self.camera, session, &scene, lang);
+        paint::over(ui, rect, &self.camera, session, &scene, self.background.has_gpu());
         self.view_cube(ui, rect, lang);
         self.value_box(ui, rect, session, size);
         self.dimension_box(ui, rect, session, size);

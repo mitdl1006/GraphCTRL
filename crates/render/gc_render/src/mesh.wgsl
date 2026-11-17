@@ -3,6 +3,8 @@ struct View {
     // Direction the light travels, and the direction the camera looks along.
     light: vec4<f32>,
     forward: vec4<f32>,
+    // Width and height of the target in pixels.
+    viewport: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> view: View;
 
@@ -40,4 +42,48 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let diffuse = max(dot(normal, -view.light.xyz), 0.0);
     let shade = 0.42 + 0.58 * diffuse;
     return vec4<f32>(in.color.rgb * shade, in.color.a);
+}
+
+// Lines of constant width on screen, tested against the same depth as the solids.
+
+struct LineOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) color: vec4<f32>,
+};
+
+@vertex
+fn vs_line(
+    @builtin(vertex_index) corner: u32,
+    @location(0) a: vec3<f32>,
+    @location(1) b: vec3<f32>,
+    @location(2) color: vec4<f32>,
+    @location(3) width: f32,
+) -> LineOut {
+    let clip_a = view.clip_from_relative * vec4<f32>(a, 1.0);
+    let clip_b = view.clip_from_relative * vec4<f32>(b, 1.0);
+    let half_view = view.viewport.xy * 0.5;
+    // The direction of the line on screen, in pixels.
+    var along = clip_b.xy / clip_b.w * half_view - clip_a.xy / clip_a.w * half_view;
+    let length_px = length(along);
+    if (length_px < 1e-5) {
+        along = vec2<f32>(1.0, 0.0);
+    } else {
+        along = along / length_px;
+    }
+    let across = vec2<f32>(-along.y, along.x);
+    // Two triangles: corners 0, 1, 2 and 3, 4, 5 of the quad round the segment.
+    var ends = array<f32, 6>(0.0, 1.0, 1.0, 0.0, 1.0, 0.0);
+    var sides = array<f32, 6>(-1.0, -1.0, 1.0, -1.0, 1.0, 1.0);
+    let centre = mix(clip_a, clip_b, ends[corner]);
+    let offset = across * sides[corner] * width * 0.5 / half_view;
+    var out: LineOut;
+    // Pulled a little towards the eye, so that a line lying on a surface is not swallowed by it.
+    out.clip = vec4<f32>(centre.xy + offset * centre.w, centre.z + 2e-4 * centre.w, centre.w);
+    out.color = color;
+    return out;
+}
+
+@fragment
+fn fs_line(in: LineOut) -> @location(0) vec4<f32> {
+    return in.color;
 }

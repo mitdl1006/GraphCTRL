@@ -21,6 +21,19 @@ pub struct Instance {
     pub color: [f32; 4],
 }
 
+/// A straight line of constant width on screen.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Line {
+    /// Its ends in eye-relative world coordinates.
+    pub a: [f32; 3],
+    /// See `a`.
+    pub b: [f32; 3],
+    /// Linear RGBA.
+    pub color: [f32; 4],
+    /// Width in pixels.
+    pub width: f32,
+}
+
 /// The camera and light of one frame.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct View {
@@ -47,6 +60,16 @@ struct ViewUniform {
     clip_from_relative: [[f32; 4]; 4],
     light: [f32; 4],
     forward: [f32; 4],
+    viewport: [f32; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct LineRaw {
+    a: [f32; 3],
+    b: [f32; 3],
+    color: [f32; 4],
+    width: f32,
 }
 
 #[repr(C)]
@@ -70,6 +93,8 @@ pub struct MeshRenderer {
     bind_group: wgpu::BindGroup,
     meshes: BTreeMap<u64, GpuMesh>,
     instances: Option<(wgpu::Buffer, u64)>,
+    lines: wgpu::RenderPipeline,
+    line_buffer: Option<(wgpu::Buffer, u64)>,
 }
 
 impl MeshRenderer {
@@ -154,7 +179,44 @@ impl MeshRenderer {
                 cache: None,
             })
         };
+        let lines = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("gc_render.lines"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_line"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: size_of::<LineRaw>() as u64,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x4, 3 => Float32],
+                })],
+            },
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState { count: MSAA_SAMPLES, ..Default::default() },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_line"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: COLOR_FORMAT,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
         Self {
+            lines,
+            line_buffer: None,
             opaque: pipeline("gc_render.mesh.opaque", None, true),
             translucent: pipeline(
                 "gc_render.mesh.translucent",
@@ -215,12 +277,30 @@ impl MeshRenderer {
         clear: [f64; 4],
         view: &View,
         instances: &[Instance],
+        lines: &[Line],
     ) -> DrawStats {
         let uniform = ViewUniform {
             clip_from_relative: view.clip_from_relative,
             light: [view.light[0], view.light[1], view.light[2], 0.0],
             forward: [view.forward[0], view.forward[1], view.forward[2], 0.0],
+            viewport: [target.size().0 as f32, target.size().1 as f32, 0.0, 0.0],
         };
+        // Lines: one small record each, drawn after the opaque solids and before the translucent ones.
+        let line_records: Vec<LineRaw> =
+            lines.iter().map(|l| LineRaw { a: l.a, b: l.b, color: l.color, width: l.width }).collect();
+        let line_bytes: &[u8] = bytemuck::cast_slice(&line_records);
+        if !line_bytes.is_empty()
+            && self.line_buffer.as_ref().is_none_or(|(_, capacity)| *capacity < line_bytes.len() as u64)
+        {
+            let capacity = (line_bytes.len() as u64).next_power_of_two().max(4096);
+            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("gc_render.lines"),
+                size: capacity,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            self.line_buffer = Some((buffer, capacity));
+        }
         queue.write_buffer(&self.view_buffer, 0, bytemuck::bytes_of(&uniform));
 
         // Opaque instances first, then translucent ones; within each, instances of a mesh are adjacent.
@@ -271,6 +351,16 @@ impl MeshRenderer {
                     }
                     first += count;
                 }
+            }
+            if let Some((buffer, _)) = self.line_buffer.as_ref()
+                && !line_records.is_empty()
+            {
+                queue.write_buffer(buffer, 0, line_bytes);
+                pass.set_pipeline(&self.lines);
+                pass.set_bind_group(0, &self.bind_group, &[]);
+                pass.set_vertex_buffer(0, buffer.slice(..));
+                pass.draw(0..6, 0..u32::try_from(line_records.len()).unwrap_or(u32::MAX));
+                stats.draw_calls += 1;
             }
         }
         queue.submit([encoder.finish()]);

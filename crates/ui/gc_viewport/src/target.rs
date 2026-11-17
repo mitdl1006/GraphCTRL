@@ -2,8 +2,9 @@
 
 use gc_draw::Camera;
 use gc_math::DMat4;
-use gc_render::{DrawStats, Instance, MeshRenderer, View, ViewTarget};
+use gc_render::{DrawStats, Instance, Line, MeshRenderer, View, ViewTarget};
 use gc_scene::Scene;
+use gc_ui::colors;
 
 /// Owns the offscreen render target and its registration with egui.
 pub struct Background {
@@ -109,7 +110,22 @@ impl Background {
             };
             // Transparent where nothing is drawn, so that the grid painted underneath shows through.
             let clear = [0.0; 4];
-            self.stats = renderer.draw(&rs.device, &rs.queue, target, clear, &view, &instances);
+            // Traces of planned paths: lines in the 3D picture, hidden where a solid is in front of them.
+            let color = |c: egui::Color32| [c.r(), c.g(), c.b(), 255].map(|v| f32::from(v) / 255.0);
+            let lines: Vec<Line> = scene
+                .traces
+                .iter()
+                .flat_map(|trace| {
+                    let color = color(if trace.current { colors::TRACE } else { colors::INACTIVE });
+                    trace.points.windows(2).map(move |pair| Line {
+                        a: vec3(pair[0] - eye),
+                        b: vec3(pair[1] - eye),
+                        color,
+                        width: 2.5,
+                    })
+                })
+                .collect();
+            self.stats = renderer.draw(&rs.device, &rs.queue, target, clear, &view, &instances, &lines);
         }
         if let Some((_, id)) = self.target.as_ref() {
             let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));

@@ -340,9 +340,10 @@ fn ur5e_cell_renders_with_gpu() {
     let path = session.doc().paths().iter().next().unwrap().0;
     assert_eq!(session.plan_status(path), gc_session::PlanStatus::Ready, "{:?}", session.plan_error(path));
     assert!(!session.planned(path).unwrap().segments[0].straight, "the pillar is in the way");
-    // The arm as it really looks: twenty coloured parts of the seven links, and the pillar.
+    // The arm as it really looks: twenty coloured parts of the seven links, the pillar, and one call
+    // for all the lines of the trace.
     let stats = harness.state().viewport().background().stats();
-    assert_eq!(stats.draw_calls, 21);
+    assert_eq!(stats.draw_calls, 22);
     assert!(stats.triangles > 120_000, "{stats:?}");
     harness.render().unwrap().save(out.join("review-7-ur5e-path.png")).unwrap();
     let app = harness.state_mut();

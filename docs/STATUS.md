@@ -48,5 +48,5 @@
 | gc_plugin_ur | UR5e 제공(URDF + 제조사 시각 메시 DAE + 충돌 STL, `RobotModelProvider`로 레지스트리 등록). UR3e/10e/16e, `gen-ur`, 해석적 IK는 이후 | 1 |
 | gc_viewport | 내비게이션, 스케치 입력, 그리드(솔리드 아래) → GPU 솔리드 → 스케치·궤적·웨이포인트(위), ViewCube(클릭) | (gc_app 테스트) |
 | gc_scene | 세션 → 솔리드·궤적·웨이포인트 | 1 |
-| gc_render | 오프스크린 타깃 + 인스턴스 메시 렌더러(자산별 1회 업로드, 메시별 배치, reverse-Z, 반투명). 선 파이프라인·ViewCube는 이후 | 2 (GPU) |
+| gc_render | 오프스크린 타깃 + 인스턴스 메시 렌더러(자산별 1회 업로드, 메시별 배치, reverse-Z, 반투명) + 화면 폭 일정한 선(깊이 판정) | 2 (GPU) |
 | 그 외 | 스텁 | |

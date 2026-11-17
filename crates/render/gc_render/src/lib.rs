@@ -7,7 +7,7 @@
 mod mesh;
 mod target;
 
-pub use mesh::{DrawStats, Instance, MeshRenderer, View};
+pub use mesh::{DrawStats, Instance, Line, MeshRenderer, View};
 pub use target::{RenderError, ViewTarget, clear, read_rgba};
 
 /// Sample count used for the multisampled colour and depth attachments.

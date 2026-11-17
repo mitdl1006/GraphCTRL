@@ -3,7 +3,6 @@
 
 use egui::{Align2, Color32, FontId, Painter, Pos2, Rect, Stroke, pos2, vec2};
 use gc_draw::Camera;
-use gc_i18n::Lang;
 use gc_math::{DVec3, fm};
 use gc_scene::Scene;
 use gc_session::Session;
@@ -96,14 +95,7 @@ pub(crate) fn under(ui: &egui::Ui, rect: Rect, camera: &Camera, session: &Sessio
 }
 
 /// Paints what lies over the solids: axes, sketches, traces, waypoints and tool previews.
-pub(crate) fn over(
-    ui: &egui::Ui,
-    rect: Rect,
-    camera: &Camera,
-    session: &Session,
-    scene: &Scene,
-    _lang: Lang,
-) {
+pub(crate) fn over(ui: &egui::Ui, rect: Rect, camera: &Camera, session: &Session, scene: &Scene, gpu: bool) {
     let view = view_of(ui, rect, camera);
     let active = session.active_sketch();
     axes(&view);
@@ -118,12 +110,13 @@ pub(crate) fn over(
             }
         }
     }
-    cell(&view, scene);
+    cell(&view, scene, gpu);
 }
 
 /// Tool-tip traces of planned paths and the waypoints.
-fn cell(view: &View<'_>, scene: &Scene) {
-    for trace in &scene.traces {
+fn cell(view: &View<'_>, scene: &Scene, gpu: bool) {
+    // With a GPU the traces are part of the 3D picture; without one they are drawn here, on top.
+    for trace in scene.traces.iter().filter(|_| !gpu) {
         let color = if trace.current { colors::TRACE } else { colors::INACTIVE };
         view.polyline(trace.points.iter().copied(), Stroke::new(2.0, color));
     }

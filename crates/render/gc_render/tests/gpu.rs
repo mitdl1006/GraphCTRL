@@ -23,7 +23,7 @@ mod meshes {
     use gc_draw::{Camera, StandardView};
     use gc_math::DVec3;
     use gc_mesh::primitives;
-    use gc_render::{Instance, MeshRenderer, View, ViewTarget, read_rgba};
+    use gc_render::{Instance, Line, MeshRenderer, View, ViewTarget, read_rgba};
 
     const SIZE: (u32, u32) = (64, 48);
 
@@ -75,8 +75,15 @@ mod meshes {
             let front = at(&camera, 1, DVec3::ZERO, RED);
             let back = at(&camera, 1, DVec3::new(0.25, 1.0, 0.0), GREEN);
             for instances in [[front, back], [back, front]] {
-                let stats =
-                    renderer.draw(&gpu.device, &gpu.queue, &target, [0.0, 0.0, 1.0, 1.0], &view, &instances);
+                let stats = renderer.draw(
+                    &gpu.device,
+                    &gpu.queue,
+                    &target,
+                    [0.0, 0.0, 1.0, 1.0],
+                    &view,
+                    &instances,
+                    &[],
+                );
                 assert_eq!(stats.draw_calls, 1, "two instances of one mesh are one call");
                 assert_eq!(stats.triangles, 24);
                 let pixels = read_rgba(&gpu.device, &gpu.queue, &target).unwrap();
@@ -91,12 +98,53 @@ mod meshes {
                     "the cube behind shows beside it, ortho {ortho}"
                 );
             }
+            // A white line 4 px wide across the view: in front of the cube it covers it, behind the cube
+            // it shows only beside it.
+            #[allow(clippy::cast_possible_truncation, reason = "GPU data is f32")]
+            let line = |y: f64| {
+                let end = |x: f64| {
+                    let r = DVec3::new(x, y, 0.0) - camera.eye();
+                    [r.x as f32, r.y as f32, r.z as f32]
+                };
+                Line { a: end(-0.6), b: end(0.6), color: [1.0; 4], width: 4.0 }
+            };
+            for (y, covers) in [(-0.5, true), (0.5, false)] {
+                renderer.draw(
+                    &gpu.device,
+                    &gpu.queue,
+                    &target,
+                    [0.0, 0.0, 1.0, 1.0],
+                    &view,
+                    &[front],
+                    &[line(y)],
+                );
+                let pixels = read_rgba(&gpu.device, &gpu.queue, &target).unwrap();
+                let centre = pixel(&pixels, SIZE.0 / 2, SIZE.1 / 2);
+                assert_eq!(
+                    centre == [255, 255, 255, 255],
+                    covers,
+                    "ortho {ortho}, line at y = {y}: {centre:?}"
+                );
+                if ortho {
+                    // Beside the cube the line is there either way, about four pixels thick.
+                    let column = SIZE.0 / 2 - 14;
+                    let white = (0..SIZE.1).filter(|row| pixel(&pixels, column, *row)[0] > 128).count();
+                    assert!((3..=5).contains(&white), "{white} px thick, line at y = {y}");
+                }
+            }
             // A translucent sphere in front of the red cube tints it (its front and its back both blend
             // over the cube: a quarter of the red remains); an unknown mesh is skipped.
             let glass = at(&camera, 2, DVec3::new(0.0, -0.5, 0.0), [0.0, 0.0, 1.0, 0.5]);
             let unknown = at(&camera, 9, DVec3::ZERO, GREEN);
-            let stats =
-                renderer.draw(&gpu.device, &gpu.queue, &target, [0.0; 4], &view, &[glass, unknown, front]);
+            let stats = renderer.draw(
+                &gpu.device,
+                &gpu.queue,
+                &target,
+                [0.0; 4],
+                &view,
+                &[glass, unknown, front],
+                &[],
+            );
             assert_eq!(stats.draw_calls, 2);
             let centre = pixel(&read_rgba(&gpu.device, &gpu.queue, &target).unwrap(), SIZE.0 / 2, SIZE.1 / 2);
             assert!(centre[0] > 55 && centre[0] < 75 && centre[1] == 0 && centre[2] > 150, "{centre:?}");
