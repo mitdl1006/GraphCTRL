@@ -366,6 +366,8 @@ pub enum Created {
     Feature(Id<crate::design::Feature>),
     /// An imported assembly.
     Assembly(Id<crate::design::Assembly>),
+    /// An assembly constraint.
+    Relationship(Id<crate::relate::Relationship>),
 }
 
 /// The result of a command that was applied.
@@ -428,6 +430,9 @@ pub enum EditError {
     /// A value is not a finite number, not positive where it must be, or of the wrong length.
     #[error("a value is out of range")]
     BadValue,
+    /// Assembly constraints cannot all be satisfied; these are not.
+    #[error("the assembly constraints cannot all be satisfied")]
+    Unsolvable(Vec<Id<crate::relate::Relationship>>),
 }
 
 /// Unit of a bare number in a dimension field.

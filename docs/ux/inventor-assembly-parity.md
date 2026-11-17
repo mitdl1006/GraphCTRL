@@ -280,8 +280,8 @@
 | A49 | About Work Features | GUID-045A1EA5-….htm |
 | A50 | To Create Work Features | GUID-38A9748E-….htm |
 | A51 | To set visibility of work features… | GUID-BA193171-….htm |
-| A52 | About Reference Planes | GUID-991276D7-….htm |
-| A53 | To Display Reference Planes | GUID-7FB44EFA-….htm |
+| A52 | About Reference Planes | GUID-991276D7-D2BF-4266-9A57-E49146DC760C.htm |
+| A53 | To Display Reference Planes | GUID-7FB44EFA-4D72-4D9B-8318-8294DE054EC7.htm |
 | A54 | Part Browser Reference | GUID-36DB9904-….htm |
 | A55 | Part Browser Icon Reference (Origin Plane/Point) | GUID-5F5D6502-….htm |
 | A56 | Visibility of assembly components | GUID-BF99EA40-….htm |

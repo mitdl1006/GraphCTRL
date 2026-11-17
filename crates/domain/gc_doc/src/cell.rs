@@ -345,6 +345,18 @@ pub enum CellOp {
     },
     /// Deletes an imported assembly.
     DeleteAssembly(Id<crate::design::Assembly>),
+    /// Adds an assembly constraint and moves the components it ties (the ones not grounded) into place.
+    /// Refused when it cannot be satisfied together with the others.
+    AddRelationship(crate::relate::Relationship),
+    /// Changes an assembly constraint (kind, offset, selections) and solves again.
+    SetRelationship {
+        /// The constraint.
+        id: Id<crate::relate::Relationship>,
+        /// The new data.
+        relationship: crate::relate::Relationship,
+    },
+    /// Deletes an assembly constraint; the components stay where they are.
+    DeleteRelationship(Id<crate::relate::Relationship>),
     /// Moves a design item in the model tree to just before another (`None`: to the end). Refused when
     /// it would come before something it depends on, or after something that depends on it.
     MoveInTree {
@@ -653,6 +665,7 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
                 return Err(EditError::BadValue);
             }
             txn.modify(*id, |b: &mut Body, _| b.clone_from(body))?;
+            settle(txn)?;
             Ok((Vec::new(), "Edit body"))
         }
         CellOp::DeleteBody(id) => {
@@ -672,6 +685,7 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
         CellOp::PlaceRobot { id, placement } => {
             placed(placement)?;
             txn.modify(*id, |r: &mut Robot, _| r.placement = *placement)?;
+            settle(txn)?;
             Ok((Vec::new(), "Place robot"))
         }
         CellOp::SetBodyLook { id, look } => {
@@ -839,6 +853,7 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
         CellOp::PlaceAssembly { id, placement } => {
             placed(placement)?;
             txn.modify(*id, |a: &mut crate::design::Assembly, _| a.placement = *placement)?;
+            settle(txn)?;
             Ok((Vec::new(), "Move assembly"))
         }
         CellOp::SetAssemblyLook { id, look } => {
@@ -848,6 +863,32 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
         CellOp::DeleteAssembly(id) => {
             txn.remove(*id)?;
             Ok((Vec::new(), "Delete assembly"))
+        }
+        CellOp::AddRelationship(relationship) => {
+            if !relationship.is_valid()
+                || !txn.doc().has_occurrence(relationship.first.occurrence)
+                || !txn.doc().has_occurrence(relationship.second.occurrence)
+            {
+                return Err(EditError::BadValue);
+            }
+            let id = txn.insert(relationship.clone());
+            settle(txn)?;
+            Ok((vec![Created::Relationship(id)], "Constrain"))
+        }
+        CellOp::SetRelationship { id, relationship } => {
+            if !relationship.is_valid()
+                || !txn.doc().has_occurrence(relationship.first.occurrence)
+                || !txn.doc().has_occurrence(relationship.second.occurrence)
+            {
+                return Err(EditError::BadValue);
+            }
+            txn.modify(*id, |r: &mut crate::relate::Relationship, _| r.clone_from(relationship))?;
+            settle(txn)?;
+            Ok((Vec::new(), "Edit constraint"))
+        }
+        CellOp::DeleteRelationship(id) => {
+            txn.remove(*id)?;
+            Ok((Vec::new(), "Delete constraint"))
         }
         CellOp::MoveInTree { item, before } => {
             let doc = txn.doc();
@@ -929,4 +970,33 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
             Ok((Vec::new(), "Delete path"))
         }
     }
+}
+
+/// Moves the components that assembly constraints tie into place after an edit; refused when the
+/// constraints cannot all be satisfied.
+pub(crate) fn settle(txn: &mut Txn<'_>) -> Result<(), EditError> {
+    if txn.doc().relationships().is_empty() {
+        return Ok(());
+    }
+    let moves = txn.doc().solve_relationships().map_err(|u| EditError::Unsolvable(u.sick))?;
+    for (item, pose) in moves {
+        let placement =
+            Placement { xyz: pose.translation.to_array(), rpy: gc_math::rpy_from_quat(pose.rotation) };
+        match item.kind {
+            Kind::Body => {
+                txn.modify(Id::<Body>::from_raw(item.raw), |b: &mut Body, _| b.placement = placement)?
+            }
+            Kind::RobotInstance => {
+                txn.modify(Id::<Robot>::from_raw(item.raw), |r: &mut Robot, _| r.placement = placement)?;
+            }
+            Kind::Assembly => txn.modify(
+                Id::<crate::design::Assembly>::from_raw(item.raw),
+                |a: &mut crate::design::Assembly, _| {
+                    a.placement = placement;
+                },
+            )?,
+            _ => {}
+        }
+    }
+    Ok(())
 }
