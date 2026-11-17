@@ -5,7 +5,13 @@
 use gc_plugin_api::Registry;
 use gc_plugin_ur::UrPlugin;
 use gc_robot::import;
-use gc_robotics_api::{KINEMATICS_FACTORIES, Pose, ROBOT_MODEL_PROVIDERS};
+use gc_robotics_api::{KINEMATICS_FACTORIES, Pose};
+
+/// A UR package's description from the robot library of the repository.
+fn urdf(model: &str) -> String {
+    let path = format!("{}/../../../robots/{model}/{model}.urdf", env!("CARGO_MANIFEST_DIR"));
+    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"))
+}
 
 fn max_error(a: &Pose, b: &Pose) -> f64 {
     a.xyz.iter().zip(&b.xyz).map(|(x, y)| (x - y).abs()).fold(0.0, f64::max)
@@ -18,7 +24,6 @@ fn max_error(a: &Pose, b: &Pose) -> f64 {
 fn singular_poses_still_give_valid_finite_solutions() {
     let mut registry = Registry::default();
     registry.load(&UrPlugin).unwrap();
-    let provider = &registry.get(ROBOT_MODEL_PROVIDERS)[0];
     let factory = &registry.get(KINEMATICS_FACTORIES)[0];
     let pi = std::f64::consts::PI;
     let cases: [[f64; 6]; 6] = [
@@ -30,7 +35,7 @@ fn singular_poses_still_give_valid_finite_solutions() {
         [-pi + 1e-7, -1.0, 1.0, -1.0, -1.0, pi - 1e-7], // at the angle wrap
     ];
     for model in ["ur3e", "ur5e", "ur10e", "ur16e"] {
-        let (robot, _) = import(&provider.urdf(model).unwrap()).unwrap();
+        let (robot, _) = import(&urdf(model)).unwrap();
         let spec = robot.default_chain().unwrap().to_spec().unwrap();
         let solver = factory.build(&spec).unwrap();
         let (mut q_out, mut branches) = (Vec::new(), Vec::new());
@@ -55,9 +60,8 @@ fn singular_poses_still_give_valid_finite_solutions() {
 fn damaged_targets_are_refused_without_panic() {
     let mut registry = Registry::default();
     registry.load(&UrPlugin).unwrap();
-    let provider = &registry.get(ROBOT_MODEL_PROVIDERS)[0];
     let factory = &registry.get(KINEMATICS_FACTORIES)[0];
-    let (robot, _) = import(&provider.urdf("ur5e").unwrap()).unwrap();
+    let (robot, _) = import(&urdf("ur5e")).unwrap();
     let spec = robot.default_chain().unwrap().to_spec().unwrap();
     let solver = factory.build(&spec).unwrap();
     let (mut q_out, mut branches) = (Vec::new(), Vec::new());
@@ -91,11 +95,10 @@ fn damaged_targets_are_refused_without_panic() {
 fn the_fully_stretched_arm_is_reachable() {
     let mut registry = Registry::default();
     registry.load(&UrPlugin).unwrap();
-    let provider = &registry.get(ROBOT_MODEL_PROVIDERS)[0];
     let factory = &registry.get(KINEMATICS_FACTORIES)[0];
     let pi = std::f64::consts::PI;
     for model in ["ur3e", "ur5e", "ur10e", "ur16e"] {
-        let (robot, _) = import(&provider.urdf(model).unwrap()).unwrap();
+        let (robot, _) = import(&urdf(model)).unwrap();
         let spec = robot.default_chain().unwrap().to_spec().unwrap();
         let solver = factory.build(&spec).unwrap();
         let (mut q_out, mut branches) = (Vec::new(), Vec::new());
