@@ -1,5 +1,18 @@
 # 백엔드 인계 (2026-11-17)
 
+## 2026-11-18 — P2-20 표현(Representations): 뷰·위치
+
+근거(원문): To Create, Edit, or Copy Positional Representations `GUID-34C28C35-45CA-4476-9336-30146F7C9471.htm`([Primary] = 기본 상태,
+새 위치 표현은 Primary 복사, 관계·컴포넌트 재정의, 하나만 활성). 뷰 표현 원문 페이지는 이 환경에서 열리지 않아 명세(A62/A64: 가시성·표시 상태 저장)를 따랐다.
+- 뷰: `CellOp::AddViewRepresentation{name, camera, section}`(지금 가시성 저장; camera·section은 뷰포트가 쓰고 읽는 문자열 — 형식은 프론트엔드/리드 결정),
+  `SetViewRepresentation{index, view}`, `ActivateViewRepresentation(index)`(숨김·표시를 한 undo 단계로 적용, 부품·로봇 링크 포함).
+- 위치: `AddPositionalRepresentation(name)`("Primary" 예약), `SetPositionalRepresentation{index, position: PositionalRepresentation{values:
+  [(관계, 값)], suppression: [(관계, bool)], placements: [(컴포넌트, Placement)]}}`, `ActivatePositionalRepresentation(Some(i) | None=Primary)`.
+  활성 위치의 재정의는 풀이 때 적용되고 Primary의 관계 정의는 그대로; Primary로 돌아가면 컴포넌트가 Primary 위치로 돌아간다.
+  `DeleteRepresentation{view, position}`. 세션 `representations()`. 저장: `Timeline.representations`.
+- 아직: 엑셀 편집, Verify, 표현 복사(Copy = 지금은 Set으로 복제 가능), Model State.
+- 테스트 `gc_doc/tests/relate.rs`(view_representations_…, positional_representations_…).
+
 ## 2026-11-18 — 컴포넌트 패턴(직사각형·원형, 리드 순서 ②)
 
 근거(원문): Create rectangular patterns of components `GUID-CF627358-120F-4142-A9D0-13217BD3432D.htm`, Create circular patterns of

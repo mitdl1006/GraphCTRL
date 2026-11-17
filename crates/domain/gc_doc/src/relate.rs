@@ -708,6 +708,7 @@ impl Document {
 
     /// The components the active relationships touch and the relationships ready to evaluate.
     fn gather(&self) -> Result<(Vec<Owner>, Vec<Term>), Unsolved> {
+        let active = self.active_position();
         let mut owners: Vec<Owner> = Vec::new();
         let mut terms: Vec<Term> = Vec::new();
         let index_of = |doc: &Document, owners: &mut Vec<Owner>, item: AnyId| -> Option<usize> {
@@ -720,9 +721,19 @@ impl Document {
             Some(owners.len() - 1)
         };
         for (id, relationship) in self.relationships().iter() {
-            if self.is_inactive(id.erase()) {
+            // The active positional representation may suppress, bring back or change relationships.
+            let position = active.as_ref();
+            let suppressed = position
+                .and_then(|p| p.suppression.iter().find(|(r, _)| *r == id).map(|(_, s)| *s))
+                .unwrap_or_else(|| self.is_inactive(id.erase()));
+            if suppressed {
                 continue;
             }
+            let value = position.and_then(|p| p.values.iter().find(|(r, _)| *r == id).map(|(_, v)| *v));
+            let relationship = &match value {
+                Some(v) => Relationship { kind: with_value(&relationship.kind, v), ..relationship.clone() },
+                None => relationship.clone(),
+            };
             let (Some(a), Some(b), Some(g1), Some(g2)) = (
                 index_of(self, &mut owners, relationship.first.occurrence.owner()),
                 index_of(self, &mut owners, relationship.second.occurrence.owner()),

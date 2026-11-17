@@ -651,6 +651,14 @@ impl Session {
         self.set_suppressed(id.erase(), suppressed)
     }
 
+    /// View and positional representations (the Representations folder). Change them with
+    /// `CellOp::{AddViewRepresentation, SetViewRepresentation, ActivateViewRepresentation,
+    /// AddPositionalRepresentation, SetPositionalRepresentation, ActivatePositionalRepresentation,
+    /// DeleteRepresentation}` through [`Session::execute`].
+    pub fn representations(&self) -> gc_doc::Representations {
+        self.doc.representations()
+    }
+
     /// The component patterns (for the browser: each with its parents and occurrences).
     pub fn patterns(&self) -> Vec<gc_doc::ComponentPattern> {
         self.doc.patterns()
