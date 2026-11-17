@@ -1,5 +1,31 @@
 # 백엔드 인계 (2026-11-17)
 
+## 2026-11-18 — P2-16 Ground and Root(원점에 고정) · Place at Component Origin
+
+근거(원문): Ground and Root `GUID-98FA88B2-AA32-4A27-946A-DCECB36A6696.htm`, Place at Component Origin
+`GUID-E7A45820-E297-449D-AFBF-3C8D8EAE8A0E.htm`.
+- `session.ground_at_origin(&[AnyId])`(`CellOp::GroundAtOrigin`): 어셈블리 원점으로 옮기고 정렬한 뒤 고정, 한 undo 단계. 묶인 컴포넌트는
+  다시 풀어 따라온다. **원문과 차이**: 기존 구속과 충돌하면 원문은 고정하고 빨간 Recover를 띄우지만, 우리는 `Unsolvable`로 거부한다
+  (아픈 상태를 허용하지 않는 설계). "Create origin flush constraints"(어셈블리 원점은 컴포넌트가 아니라 지금 표현 불가)와
+  "Reposition to the top of the browser"(컴포넌트 순서 개념 없음)는 아직 없다.
+- `session.place_at_component_origin(item, target: Occurrence)`(`CellOp::PlaceAtComponentOrigin`): 컴포넌트를 대상(부품·로봇 링크 포함)의
+  원점에 맞춰 놓고 원점 평면 3쌍 Flush로 구속 → 완전 구속, 대상을 따라감. 파일 열기 대화상자 흐름은 프론트엔드(추가 후 이 함수 호출).
+- 억제 로봇은 `item_geometry`·`interference`에서도 빠진다(measure.rs 한 곳).
+- P2-17/P2-18은 `RelationKind` 변형 추가가 필요 — app의 constrain.rs가 전수 match라 리드에게 `_ =>` 갈래를 요청해 둠.
+- 테스트 `gc_doc/tests/relate.rs`(ground_at_origin…, place_at_component_origin…).
+
+## 2026-11-18 — 바디·로봇 억제(리드 순서 ⑤)
+
+- `session.set_component(Occurrence::Item(body|robot), ComponentFlag::Suppressed, on)` 이제 허용(한 undo 단계, 저장). 억제된 바디:
+  `shown_body` = None(그리지 않음·선택 안 됨), 장애물·계획·지문에서 빠짐. 억제된 로봇: `link_poses`/`tcp_pose` = None(그리지 않음),
+  `plan`은 NotPlanned. 문서에는 그대로 남는다. `Document::is_component_suppressed(item)`.
+- 근거: 원문 A60(억제 요소는 그래픽에 없고 갱신 때 계산되지 않음) — 명세 표 인용.
+- 테스트 `gc_session/tests/robot_links.rs::suppressed_bodies_and_robots_are_kept_but_not_drawn_checked_or_planned`.
+
+## 2026-11-18 — P1-6은 리드 구현(e25a650)으로 통일
+
+- 백엔드의 중복 구현(e1b73ae: session.project_cut_edges, SketchOp::AddFixedSegments)은 리드 결정에 따라 제거했다.
+
 ## 2026-11-18 — 어셈블리 P1-5 Project Geometry
 
 근거(원문): To Project Geometry into a 2D Sketch `GUID-B8D8B07B-86F2-4CB7-AB21-3131D94AD1CC.htm`, About Projecting Sketch Geometry

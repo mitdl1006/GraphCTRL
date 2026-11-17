@@ -60,6 +60,10 @@ impl Session {
                 Geometry::from_shapes(&[(pose_of(&body.placement), shape)]).ok()
             }
             CellItem::Robot(id) => {
+                // A suppressed robot takes no part in measuring or interference.
+                if self.doc().is_component_suppressed(id.erase()) {
+                    return None;
+                }
                 let loaded = self.robot_model(id)?;
                 let stored = self.doc().get(id)?;
                 let base = self.shown_base(id)?;

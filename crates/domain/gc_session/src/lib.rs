@@ -610,6 +610,22 @@ impl Session {
         self.execute(&Command::Sketch { sketch, op: gc_doc::SketchOp::Project { source, construction } })
     }
 
+    /// Ground and Root, "Ground at origin": moves components to the assembly's origin, aligned with it,
+    /// and grounds them (one undo step).
+    pub fn ground_at_origin(&mut self, items: &[gc_core::AnyId]) -> Result<(), EditError> {
+        self.execute(&Command::Cell(gc_doc::CellOp::GroundAtOrigin(items.to_vec()))).map(|_| ())
+    }
+
+    /// Place at Component Origin: puts a component (just added, typically) on another's origin and
+    /// constrains it there with three Flush constraints (one undo step).
+    pub fn place_at_component_origin(
+        &mut self,
+        item: gc_core::AnyId,
+        target: gc_doc::Occurrence,
+    ) -> Result<(), EditError> {
+        self.execute(&Command::Cell(gc_doc::CellOp::PlaceAtComponentOrigin { item, target })).map(|_| ())
+    }
+
     /// A component's origin folder in the world: centre point, axes and planes (assembly P1-2).
     pub fn component_origin(&self, occurrence: gc_doc::Occurrence) -> Option<gc_doc::ComponentOrigin> {
         self.doc.component_origin(occurrence)

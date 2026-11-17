@@ -164,9 +164,10 @@ impl Document {
             (ComponentFlag::Visible, Occurrence::Part { .. } | Occurrence::Link { .. }) => {
                 !listed(&state.hidden, occurrence)
             }
-            (ComponentFlag::Suppressed, Occurrence::Item(item)) => {
+            (ComponentFlag::Suppressed, Occurrence::Item(item)) if item.kind == Kind::Assembly => {
                 self.timeline().is_some_and(|(_, t)| t.suppressed.contains(&item))
             }
+            (ComponentFlag::Suppressed, Occurrence::Item(_)) => listed(&state.suppressed, occurrence),
             (ComponentFlag::Suppressed, Occurrence::Part { .. }) => listed(&state.suppressed, occurrence),
             (ComponentFlag::Suppressed, Occurrence::Link { .. }) => false,
         }
@@ -261,6 +262,11 @@ impl Document {
             && self.components_state().origins_shown.contains(&(occurrence, element))
     }
 
+    /// True when a body, robot or assembly is suppressed (kept but not computed).
+    pub fn is_component_suppressed(&self, item: AnyId) -> bool {
+        self.component_flag(Occurrence::Item(item), ComponentFlag::Suppressed)
+    }
+
     /// True when the document has no component yet (the first one placed is grounded).
     pub(crate) fn has_no_components(&self) -> bool {
         self.bodies().is_empty() && self.robots().is_empty() && self.assemblies().is_empty()
@@ -285,10 +291,12 @@ pub(crate) fn set_component(
     };
     let label = match (flag, occurrence) {
         (ComponentFlag::Visible, Occurrence::Item(item)) => return set_visible(txn, item, on),
+        (ComponentFlag::Suppressed, Occurrence::Item(item)) if item.kind != Kind::Assembly => {
+            // Bodies and robots: kept but neither drawn nor an obstacle nor planned for.
+            crate::cell::set_timeline(txn, |t| toggle(&mut t.components.suppressed, on))?;
+            if on { "Suppress" } else { "Unsuppress" }
+        }
         (ComponentFlag::Suppressed, Occurrence::Item(item)) => {
-            if item.kind != Kind::Assembly {
-                return Err(EditError::BadValue); // bodies and robots: not yet
-            }
             crate::cell::set_timeline(txn, |t| {
                 t.suppressed.retain(|s| *s != item);
                 if on {
