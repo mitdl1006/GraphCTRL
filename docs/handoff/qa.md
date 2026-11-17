@@ -61,3 +61,16 @@
   2. 구동 `sequence`: **증분 0·NaN·무한·매우 작음(1e-6, 10 범위 → 10만 스텝 상한에서 0.1에서 멈춤)이면 End에 도달하지 않음**(0은 Start에 머묾, NaN·무한은 NaN 값). 재현: `-- --ignored an_unusable_increment`
   3. `Session::interference`: **한 집합에 같은 컴포넌트가 두 번 들어 있으면 자기 자신과 짝지어** 전체 체적을 간섭으로 보고(에이전트·스크립트에서 가능, 선택기에서는 불가). 재현: `cargo test -p gc_session --test qa_assembly_edges -- --ignored a_component_listed_twice`
 - 구동의 충돌 감지(앱 내부 `Drive::show`)는 UI 상태에 묶여 있어 헤드리스 테스트 불가 — kittest로 후속. 참고 링크는 테스트 파일 머리 주석.
+
+## 2026-11-17 원점 폴더·측정 원통 경계 테스트 (리드 fef27eb merge)
+
+- 리드가 고친 버그 4건(구동 NaN/무한, 증분, 간섭 중복, place_robot)은 `#[ignore]` 해제 상태로 통과 확인(리드 merge에 포함). 백엔드 47a24ee·769bf8b, 측정 원통 957ac24, 누적·3점 각도 13a37c2, 검사 탭 efdbad3은 리드 브랜치에 이미 있다.
+- **프론트엔드 de9ef3e(원점 폴더 브라우저·그리기·피킹)는 리드 브랜치에 아직 없다** — 프론트엔드 브랜치를 merge하면 `crates/app/gc_app/tests/shell.rs`에서 충돌(리드 쪽 테스트와 겹침, 프론트엔드·리드가 해소 필요). 그래서 어셈블리 P1 #2/#3 스텁의 `#[ignore]`는 화면 쪽(항목 이름·순서, 뷰포트 피킹)만 남기고 사유를 갱신. 리드 결정(이름·순서, 숨긴 요소는 뷰포트에서 선택 불가·브라우저에서 선택 가능)은 스텁 본문에 그대로 있음.
+- **`gc_session/tests/qa_origin_folder.rs`(5개 통과, 2개 BUG ignore)**: 모든 종류(바디·로봇·어셈블리 부품)의 원점이 숨김으로 시작하고 컴포넌트 포즈와 일치, 축은 단위·직교·오른손계, 평면 법선이 문서 원점 평면 규칙(XY +Z, XZ −Y, YZ +X)과 일치, 컴포넌트를 옮기면 원점이 따라가고 보이기 상태 유지, 보이기·숨기기 Undo 1단계·정확 복원, 없는 축(3·255)·없는 컴포넌트·목록 중 하나라도 잘못이면 전체 거부, 삭제 후 Undo·저장·열기에서 보이는 집합 동일.
+- **`gc_mesh/tests/qa_regions.rs`(7개 통과)**: 상자의 모든 삼각형이 정확히 자기 면(삼각형 2개·외곽 4변·면적)을 찾음, 없는 삼각형·퇴화 삼각형·빈 메시는 None, 이상한 허용값(0·음수·NaN·무한)·NaN/무한 좌표에서 패닉 없음, 코너가 반복된 삼각형 수프도 면을 이룸, 원통 측면은 반지름 1 % 이내·축·길이·중심을 찾고 캡은 평면(원통 아님), 상자·구는 원통 없음, 거친 원통(3~8면) 무패닉.
+- **`gc_session/tests/qa_assembly_edges.rs` 추가(측정 원통, 통과 2 + BUG ignore 1)**: 원통–점·원통 간 표면 간격 = 중심 거리 − 반지름(음수 없음), 중심 대 중심 = 축까지 거리, 평행·직각 각도, 겹치면 0, 축 끝 너머 점, 서로 바꿔도 같은 수, 퇴화 원통(반지름 0·길이 0·축 없음)에서 유한한 값.
+- **새 버그 3건 (낮은 심각도)**:
+  1. `SetOriginVisible`: **이미 보이는 요소를 다시 보이게 하면(또는 한 요청에 같은 요소를 두 번) 중복 항목이 저장**되어 문서가 달라지고 목록이 늘어난다(숨기기 한 번이면 모두 사라져 화면 오류는 없음). 담당: 백엔드(`gc_doc/src/tree.rs` `set_component` 계열 `origins_shown`). 재현: `cargo test -p gc_session --test qa_origin_folder -- --ignored showing_an_element_twice`
+  2. **삭제된 컴포넌트에 대해 `origin_visible`이 계속 true**(`origins_shown`에 낡은 항목이 남아 저장됨). 같은 위치. 재현: `-- --ignored a_deleted_components_origin`
+  3. **측정 원통: `closest`(가장 가까운 두 점)가 `distance`와 맞지 않음** — 원통–모서리·면·원통에서 `closest`는 축 위의 점이고 `distance`는 표면 간격이라 오버레이 선 길이가 값과 다르다(원통–점은 맞음). 담당: 백엔드(`gc_session/src/measure.rs` `with_cylinder`). 재현: `cargo test -p gc_session --test qa_assembly_edges -- --ignored cylinder_closest_points`
+- **미검증**: 측정의 누적 값(Accumulated Properties)과 3점 각도는 `gc_app` 내부 상태(`pub(crate)`)라 헤드리스 테스트 불가 — 3점 각도는 `u·w` 공식이 UI 코드에 인라인이다. 리드가 계산 부분을 `gc_session`(순수 함수)로 옮기면 경계 테스트(같은 점 두 개 → 각도 정의 안 됨, 일직선 0·180°, 영벡터)를 추가하겠다.
