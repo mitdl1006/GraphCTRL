@@ -4,6 +4,7 @@ mod agent;
 mod app;
 mod diagnostics;
 mod example;
+mod interference;
 mod measure;
 mod ribbon;
 

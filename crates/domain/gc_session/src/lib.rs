@@ -28,14 +28,14 @@ pub use cell::{
     Resources, Shown, ShownPart,
 };
 pub use design::WorkShape;
-pub use gc_collide::Closest;
+pub use gc_collide::{Closest, Interference};
 use gc_core::{Id, Revision};
 use gc_doc::{Applied, Command, Created, Document, EditError, History, Sketch, SketchOp, apply};
 pub use gc_motion::{Guarantee, LinkPair, PairReason, StateProblem};
 pub use gc_persist::PersistError;
 use gc_sketch::{Curve, DimKind, Dimension, FrameOutcome, Item, SkPoint, SketchDrag, SketchReport};
 use gc_tools::{Preview, Prompt, Tool, ToolEvent, ToolKind, ToolOutput};
-pub use measure::{Feature, FeaturePair, ItemMeasure, PairMeasure, measure_features};
+pub use measure::{Feature, FeaturePair, InterferenceRow, ItemMeasure, PairMeasure, measure_features};
 
 /// A dimension that is about to be placed and needs its value from the user.
 #[derive(Clone, Copy, Debug, PartialEq)]

@@ -229,6 +229,17 @@ pub struct Closest {
     pub on_second: [f64; 3],
 }
 
+/// Where two geometries overlap, as estimated by [`Geometry::interference`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct Interference {
+    /// The volume of the overlap (m³); 0 when they only touch.
+    pub volume: f64,
+    /// Its centroid in the world.
+    pub centroid: [f64; 3],
+    /// Sample points inside both, for showing the overlap.
+    pub points: Vec<[f64; 3]>,
+}
+
 /// Shapes placed in the world, for measuring between things (a body, a whole robot at some joint
 /// values). The same shapes the collision checks use, so a measured gap and a collision agree.
 #[derive(Clone, Default)]
@@ -261,6 +272,64 @@ impl Geometry {
     /// True when there are no shapes.
     pub fn is_empty(&self) -> bool {
         self.parts.is_empty()
+    }
+
+    /// The world bounds of the shapes: lowest and highest corner; `None` when empty.
+    pub fn bounds(&self) -> Option<(DVec3, DVec3)> {
+        self.parts.iter().map(|(pose, shape)| shape.compute_aabb(pose)).fold(None, |acc, aabb| {
+            Some(match acc {
+                None => (aabb.mins, aabb.maxs),
+                Some((low, high)) => (low.min(aabb.mins), high.max(aabb.maxs)),
+            })
+        })
+    }
+
+    /// True when the point lies inside one of the shapes.
+    pub fn contains(&self, point: DVec3) -> bool {
+        self.parts.iter().any(|(pose, shape)| shape.contains_point(pose, point))
+    }
+
+    /// The overlap of two geometries, estimated on a grid of `cells` samples per axis over the overlap of
+    /// their bounds: its volume (m³), its centroid and the sample points inside both (the centres of the
+    /// cells counted). `None` when they do not overlap.
+    pub fn interference(&self, other: &Geometry, cells: usize) -> Result<Option<Interference>, CollideError> {
+        if !self.closest(other)?.is_some_and(|c| c.distance == 0.0) {
+            return Ok(None);
+        }
+        let (Some((low_a, high_a)), Some((low_b, high_b))) = (self.bounds(), other.bounds()) else {
+            return Ok(None);
+        };
+        let (low, high) = (low_a.max(low_b), high_a.min(high_b));
+        let size = high - low;
+        if size.min_element() < 0.0 {
+            return Ok(None);
+        }
+        let cells = cells.max(2);
+        #[allow(clippy::cast_precision_loss, reason = "a few hundred cells per axis")]
+        let step = size / cells as f64;
+        let cell_volume = step.x * step.y * step.z;
+        let mut points = Vec::new();
+        let mut sum = DVec3::ZERO;
+        for i in 0..cells {
+            for j in 0..cells {
+                for k in 0..cells {
+                    #[allow(clippy::cast_precision_loss, reason = "a few hundred cells per axis")]
+                    let p = low + step * DVec3::new(i as f64 + 0.5, j as f64 + 0.5, k as f64 + 0.5);
+                    if self.contains(p) && other.contains(p) {
+                        sum += p;
+                        points.push(p.to_array());
+                    }
+                }
+            }
+        }
+        if points.is_empty() {
+            // Touching, or an overlap thinner than a cell: report the contact with no volume.
+            let at = self.closest(other)?.map_or([0.0; 3], |c| c.on_first);
+            return Ok(Some(Interference { volume: 0.0, centroid: at, points: vec![at] }));
+        }
+        #[allow(clippy::cast_precision_loss, reason = "sample counts are small")]
+        let count = points.len() as f64;
+        Ok(Some(Interference { volume: count * cell_volume, centroid: (sum / count).to_array(), points }))
     }
 
     /// Where this geometry and another come closest; `None` when either is empty.
@@ -528,6 +597,24 @@ impl World {
             }
         }
         Ok(smallest)
+    }
+}
+
+#[cfg(test)]
+mod interference_tests {
+    use super::*;
+
+    #[test]
+    fn two_overlapping_boxes_share_a_known_volume() {
+        let place = |x: f64| DPose3::from_translation(DVec3::new(x, 0.0, 0.0));
+        let a = Geometry::from_shapes(&[(place(0.0), ShapeDesc::Box([0.2, 0.2, 0.2]))]).unwrap();
+        let b = Geometry::from_shapes(&[(place(0.15), ShapeDesc::Box([0.2, 0.2, 0.2]))]).unwrap();
+        // Overlap 0.05 × 0.2 × 0.2 = 0.002 m³, centred at x = 0.075.
+        let found = a.interference(&b, 20).unwrap().unwrap();
+        assert!((found.volume - 0.002).abs() < 1e-9, "{}", found.volume);
+        assert!((found.centroid[0] - 0.075).abs() < 1e-9);
+        let apart = Geometry::from_shapes(&[(place(0.5), ShapeDesc::Box([0.2, 0.2, 0.2]))]).unwrap();
+        assert!(a.interference(&apart, 20).unwrap().is_none());
     }
 }
 

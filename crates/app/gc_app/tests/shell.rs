@@ -2396,3 +2396,67 @@ fn measure_picks_faces_with_the_edges_and_faces_priority() {
     click(&mut harness, side);
     assert!(harness.state().session.selected_item().is_some());
 }
+
+/// Tools > Analyze Interference (Inventor 2026 help, "To Analyze Interference Among Components":
+/// https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-80DED0A6-AC65-4C7C-AD85-0144EE6DAB5B.htm):
+/// all components in Set #1, OK lists the interference with its volume; Ignore hides it unless
+/// "Ignored" is ticked; picking while a set is defined adds and removes components.
+#[test]
+fn interference_lists_overlaps_and_ignores_them() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("파일").click();
+    harness.run();
+    harness.get_by_label("예제 열기 (UR5e 셀)").click();
+    harness.run();
+    // A block pushed 30 mm into the pillar (pillar 80 × 80 mm at x = 450 mm): overlap 30 × 80 × 200 mm.
+    let block = harness
+        .state_mut()
+        .session
+        .add_body(
+            gc_doc::Solid::Box { size: [0.2, 0.08, 0.2] },
+            gc_doc::Placement { xyz: [0.45 + 0.04 + 0.1 - 0.03, 0.1, 0.5], rpy: [0.0; 3] },
+        )
+        .unwrap();
+    harness.run();
+    harness.get_by_label("도구").click();
+    harness.run();
+    harness.get_by_label("간섭 분석").click();
+    harness.run();
+
+    // Picking while Set #1 is defined adds the block; picking it again removes it.
+    harness.state_mut().session.select_item(Some(gc_session::CellItem::Body(block)));
+    harness.run();
+    assert!(harness.query_by_label("  Body2").is_some());
+    harness.state_mut().session.select_item(None);
+    harness.run();
+    harness.state_mut().session.select_item(Some(gc_session::CellItem::Body(block)));
+    harness.run();
+    assert!(harness.query_by_label("  Body2").is_none());
+
+    harness.get_by_label("모든 컴포넌트를 세트 #1에").click();
+    harness.run();
+    harness.get_by_label("확인").click();
+    harness.run();
+    harness.get_by_label("간섭 1개 · 총 체적 480000.0 mm³");
+    let row = "Body1 : Body2  체적 480000.0 mm³  중심 (475.0, 100.0, 500.0) mm";
+    harness.get_by_label(row);
+    if gpu {
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        harness.render().unwrap().save(out.join("review-28-interference.png")).unwrap();
+    }
+    harness.get_by_label(row).click_secondary();
+    harness.run();
+    harness.get_by_label("무시").click();
+    harness.run();
+    assert!(harness.query_by_label(row).is_none());
+    harness.get_by_label("무시한 항목 표시").click();
+    harness.run();
+    harness.get_by_label(row);
+    harness.get_by_label("다시 분석").click();
+    harness.run();
+    harness.get_by_label("세트 #2 정의");
+}

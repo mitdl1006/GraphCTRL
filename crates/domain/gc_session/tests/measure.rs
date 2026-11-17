@@ -70,3 +70,29 @@ fn a_robot_and_a_pillar_measure_what_the_collision_check_sees() {
     assert!(closer.distance < gap - 0.01, "{} vs {gap}", closer.distance);
     assert!(session.measure_item(CellItem::Robot(robot)).is_some());
 }
+
+/// Analyze Interference (Inventor 2026 help, "To Analyze Interference Among Components":
+/// https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-80DED0A6-AC65-4C7C-AD85-0144EE6DAB5B.htm):
+/// one set checks its members among themselves, two sets check one against the other only.
+#[test]
+fn interference_is_found_within_one_set_or_between_two() {
+    let mut session = Session::new();
+    let place = |x: f64| Placement { xyz: [x, 0.0, 0.0], rpy: [0.0; 3] };
+    let cube = Solid::Box { size: [0.2, 0.2, 0.2] };
+    let a = CellItem::Body(session.add_body(cube.clone(), place(0.0)).unwrap());
+    let b = CellItem::Body(session.add_body(cube.clone(), place(0.15)).unwrap());
+    let c = CellItem::Body(session.add_body(cube, place(0.3)).unwrap());
+
+    // a∩b and b∩c overlap by 0.05 × 0.2 × 0.2 m; a and c are apart.
+    let all = session.interference(&[a, b, c], &[]);
+    assert_eq!(all.len(), 2);
+    for row in &all {
+        assert!((row.overlap.volume - 0.002).abs() < 1e-9, "{row:?}");
+    }
+    assert_eq!((all[0].first, all[0].second), (a, b));
+    // Set 1 = {a}, set 2 = {b, c}: only a∩b; members of set 2 are not compared with each other.
+    let between = session.interference(&[a], &[b, c]);
+    assert_eq!(between.len(), 1);
+    assert_eq!(between[0].second, b);
+    assert!(session.interference(&[a], &[c]).is_empty());
+}

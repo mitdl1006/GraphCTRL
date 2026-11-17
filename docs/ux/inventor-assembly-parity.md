@@ -180,7 +180,7 @@
 18. **Joint 완성(BE)**: Slider·Cylindrical·Ball(·Planar 확인 후), Linear/Angular 한계, Lock/Protect, Between Two Faces·Offset Origin [A30].
 19. **Drive 대화상자(FE+BE)**: 조인트·구속 시연(Start/End/Increment/Repetitions/Collision Detection) — UR 관절·그리퍼 손가락 시연에 사용 [A31,A32].
 20. **View·Positional 표현(BE+FE)**: 가시성·단면 정의(View), 관계 오프셋·억제(Positional) 저장, Primary는 편집 불가 [A44,A63].
-21. **Interference 분석(BE+FE)** — 세트 지정·결과 목록·무시·줌 [A47,A48].
+21. **Interference 분석(BE+FE)** — 세트 지정·결과 목록·무시·줌 [A47,A48]. **상태(리드, 2026-11-17)**: 1차 완료 — 도구 > 간섭 분석: 세트 #1/#2 정의(선택으로 추가·제거, 세트 #2 비면 세트 #1 내부 검사), 모든 컴포넌트를 세트 #1에, 결과(개수·총 체적·항목별 체적·중심), 무시/이하 모두 무시/무시 해제/모두 해제, 무시 항목 취소선과 표시 필터, 두 번 클릭 확대, 모두 복사, 뷰포트에 간섭 영역 표본점(빨강). 체적은 충돌 형상 위 24³ 격자 추정. 원문 GUID-80DED0A6-AC65-4C7C-AD85-0144EE6DAB5B. 남음: 간섭 영역을 임시 솔리드로 렌더(지금은 점), 나사 필터(해당 없음), 인쇄, 검사 탭 리본 버튼.
 22. **작업 축·점·Show Inputs·Object Visibility, Grip Snap(BE+FE)** [A14,A49,A50,A51].
 23. **단면 미니 툴바(Move/Rotate 전환·값 상자·Cap Preview), 컴포넌트별 단면 참여(FE)** [A44].
 

@@ -304,3 +304,47 @@ mod tests {
         assert!(reversed.angle.unwrap() < 0.11);
     }
 }
+
+/// One interference found by [`Session::interference`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct InterferenceRow {
+    /// The first component.
+    pub first: CellItem,
+    /// The second component.
+    pub second: CellItem,
+    /// The overlap: volume, centroid and sample points.
+    pub overlap: gc_collide::Interference,
+}
+
+/// Grid samples per axis when estimating an overlap's volume.
+const INTERFERENCE_CELLS: usize = 24;
+
+impl Session {
+    /// Analyse interference as Inventor does (Inspect tab > Interference panel > Analyze Interference;
+    /// https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-80DED0A6-AC65-4C7C-AD85-0144EE6DAB5B.htm):
+    /// every component of `first` against every component of `second`, or, when `second` is empty, the
+    /// components of `first` among themselves. A robot counts as one component. Volumes are estimated
+    /// on a grid over each overlap.
+    pub fn interference(&self, first: &[CellItem], second: &[CellItem]) -> Vec<InterferenceRow> {
+        let geometry: std::collections::BTreeMap<CellItem, Geometry> =
+            first.iter().chain(second).filter_map(|item| Some((*item, self.item_geometry(*item)?))).collect();
+        let mut pairs = Vec::new();
+        if second.is_empty() {
+            for (i, a) in first.iter().enumerate() {
+                pairs.extend(first.iter().skip(i + 1).map(|b| (*a, *b)));
+            }
+        } else {
+            for a in first {
+                pairs.extend(second.iter().filter(|b| *b != a).map(|b| (*a, *b)));
+            }
+        }
+        pairs
+            .into_iter()
+            .filter_map(|(a, b)| {
+                let overlap =
+                    geometry.get(&a)?.interference(geometry.get(&b)?, INTERFERENCE_CELLS).ok()??;
+                Some(InterferenceRow { first: a, second: b, overlap })
+            })
+            .collect()
+    }
+}

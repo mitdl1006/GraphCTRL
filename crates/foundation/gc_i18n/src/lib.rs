@@ -635,6 +635,31 @@ messages! {
     MeasureFeatureAngle => ("각도 {0}°", "Angle {0}°"),
     MeasureRestart => ("다시 시작", "Restart"),
     MeasureDone => ("완료", "Done"),
+    // --- Analyze Interference (Inventor: Inspect tab > Interference panel) ---
+    /// Tools menu and the window title.
+    MenuInterference => ("간섭 분석", "Analyze Interference"),
+    /// Interference: the buttons that define a set; while one is active, picks add to (or remove from) it.
+    InterferenceSet1 => ("세트 #1 정의", "Define Set #1"),
+    InterferenceSet2 => ("세트 #2 정의", "Define Set #2"),
+    /// Interference: put every robot and body in set 1 (Inventor's tip: a crossing window over all).
+    InterferenceAll => ("모든 컴포넌트를 세트 #1에", "All components in Set #1"),
+    /// Interference: what to do while defining a set.
+    InterferenceHint => ("세트 버튼을 누른 뒤 뷰포트나 브라우저에서 컴포넌트를 선택하십시오. 다시 선택하면 빠집니다. 세트 #2가 비어 있으면 세트 #1 안에서 서로 검사합니다.", "Press a set button, then select components in the view or the browser; selecting one again removes it. With Set #2 empty, Set #1 is checked among itself."),
+    /// Interference: the summary. `{0}` the count, `{1}` the total volume in mm³.
+    InterferenceFound => ("간섭 {0}개 · 총 체적 {1} mm³", "{0} interferences · total volume {1} mm³"),
+    InterferenceNone => ("간섭이 없습니다.", "No interference detected."),
+    /// Interference: one row. `{0}` and `{1}` the components, `{2}` the volume in mm³, `{3}` `{4}` `{5}` the centroid in mm.
+    InterferenceRow => ("{0} : {1}  체적 {2} mm³  중심 ({3}, {4}, {5}) mm", "{0} : {1}  volume {2} mm³  centroid ({3}, {4}, {5}) mm"),
+    InterferenceShowIgnored => ("무시한 항목 표시", "Ignored"),
+    InterferenceIgnore => ("무시", "Ignore"),
+    /// Interference: ignore every interference with a volume below this one.
+    InterferenceIgnoreSmaller => ("이 체적 이하 모두 무시", "Ignore all volumes up to this one"),
+    InterferenceUnignore => ("무시 해제", "Un-ignore"),
+    InterferenceUnignoreAll => ("모두 무시 해제", "Un-ignore all"),
+    /// Interference: back to the sets.
+    InterferenceAgain => ("다시 분석", "Analyze again"),
+    /// Interference: the volumes are estimated on a grid.
+    InterferenceEstimate => ("체적은 격자 표본으로 추정합니다(충돌 형상 기준). 항목을 두 번 클릭하면 확대합니다.", "Volumes are estimated on a sample grid (collision shapes). Double-click an entry to zoom to it."),
     // --- AI agent API ---
     /// Tools menu: the window that connects AI agents (MCP).
     MenuAgent => ("AI 에이전트 연결", "AI agent connection"),

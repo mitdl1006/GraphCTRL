@@ -249,6 +249,8 @@ pub struct GraphCtrlApp {
     agent: crate::agent::Agent,
     /// The Measure panel.
     measure: crate::measure::Measure,
+    /// The Analyze Interference window.
+    interference: crate::interference::Interference,
     expression: String,
     ime: ImeTest,
     /// Whether the licence notices window is open.
@@ -331,6 +333,7 @@ impl GraphCtrlApp {
             packages,
             agent,
             measure: crate::measure::Measure::default(),
+            interference: crate::interference::Interference::default(),
             expression: String::new(),
             ime: ImeTest { dimension: "25 mm".to_owned(), ..ImeTest::default() },
             notices: false,
@@ -715,6 +718,9 @@ impl GraphCtrlApp {
                 if ui.button(tr!(lang, MenuMeasure)).clicked() {
                     self.measure.start(&self.session);
                 }
+                if ui.button(tr!(lang, MenuInterference)).clicked() {
+                    self.interference.start(&self.session);
+                }
                 if ui.button(tr!(lang, MenuAgent)).clicked() {
                     self.agent.open = true;
                 }
@@ -990,7 +996,13 @@ impl eframe::App for GraphCtrlApp {
             self.measure.follow_view(&mut self.viewport);
             self.measure.follow(&self.session);
             self.measure.overlay(ui.painter(), &self.viewport, &self.session);
+            self.interference.follow(&self.session);
+            self.interference.zoom(&mut self.viewport);
+            self.interference.overlay(ui.painter(), &self.viewport);
         });
+        if self.interference.open {
+            self.interference.window(&ctx, &self.session, lang);
+        }
         if self.measure.open {
             self.measure.window(&ctx, &self.session, lang);
         }
