@@ -665,6 +665,46 @@ impl Session {
         }
     }
 
+    /// Makes a path that follows the lines of a sketch in the order they were drawn: a waypoint on the
+    /// first point, then one at the end of every line, approached in a straight line. Where a line does
+    /// not start at the end of the one before, the robot moves there freely first. The waypoints stay
+    /// attached to the sketch points, so the path follows when the sketch is edited.
+    pub fn path_from_sketch(
+        &mut self,
+        robot: Id<Robot>,
+        sketch_id: Id<Sketch>,
+    ) -> Result<Id<MotionPath>, EditError> {
+        let sketch = self.doc.get(sketch_id).ok_or(EditError::BadValue)?;
+        let mut stops: Vec<(Id<SkPoint>, bool)> = Vec::new();
+        let mut end: Option<[f64; 3]> = None;
+        for curve in sketch.curves.keys() {
+            let Some((a, b)) = sketch.line(*curve) else { continue };
+            let (Some(start), Some(finish)) = (sketch.pos(a), sketch.pos(b)) else { continue };
+            let joined = end.is_some_and(|e| (0..3).all(|k| (e[k] - start[k]).abs() < 1e-9));
+            if !joined {
+                stops.push((a, false));
+            }
+            stops.push((b, true));
+            end = Some(finish);
+        }
+        if stops.is_empty() {
+            return Err(EditError::BadValue);
+        }
+        let mut waypoints = Vec::with_capacity(stops.len());
+        for (point, _) in &stops {
+            waypoints.push(
+                self.add_waypoint(robot, WaypointTarget::SketchPoint { sketch: sketch_id, point: *point })?,
+            );
+        }
+        let name = format!("Path{}", self.doc.paths().len() + 1);
+        let linear = stops.iter().map(|(_, linear)| *linear).collect();
+        let path = MotionPath { name, robot, waypoints, linear, planner: PLANNERS[0].0.to_owned(), seed: 1 };
+        match self.cell_op(CellOp::AddPath(path))?.first() {
+            Some(Created::Path(id)) => Ok(*id),
+            _ => Err(EditError::BadValue),
+        }
+    }
+
     /// Everything a plan of this path depends on, as text.
     fn plan_inputs(&self, path: Id<MotionPath>) -> Option<String> {
         let doc = &self.doc;

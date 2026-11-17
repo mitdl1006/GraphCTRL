@@ -380,6 +380,96 @@ fn ur5e_close_up_renders_with_gpu() {
     assert!(blue > 200, "{blue} blue pixels");
 }
 
+/// The idea of the product in one test: draw a polyline in a 3D sketch, make it a path, and the UR5e's
+/// tool follows the lines; change a dimension and the path follows the sketch.
+#[test]
+fn the_ur5e_follows_a_sketched_polyline() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("로봇").click();
+    harness.run();
+    harness.get_by_label("UR5e 로봇").click();
+    harness.run();
+    let app = harness.state_mut();
+    let robot = app.session.doc().robots().iter().next().unwrap().0;
+    // Elbow up, tool pointing down.
+    app.session.jog(robot, &[0.0, -1.57, 1.57, -1.57, -1.57, 0.0]);
+    app.session.end_jog();
+
+    // An L in the air, 250 mm above the floor: 300 mm along Y, then 200 mm along X.
+    let sketch = app.session.create_sketch_3d().unwrap();
+    app.session.set_tool(ToolKind::Line);
+    app.session.spatial_click([0.45, -0.15, 0.25], None, None);
+    app.session.spatial_click([0.45, 0.15, 0.25], None, Some(1));
+    app.session.spatial_click([0.65, 0.15, 0.25], None, Some(0));
+    app.session.tool_event(ToolEvent::Key(gc_tools::Key::Escape));
+    let first = *app.session.active_sketch().unwrap().1.curves.keys().next().unwrap();
+    app.session.set_tool(ToolKind::Dimension);
+    let pick = |item| ToolEvent::ClickItem { item, pos: [0.0; 2], modifier: false };
+    app.session.tool_event(pick(Some(gc_sketch::Item::Curve(first))));
+    app.session.tool_event(pick(None));
+    app.session.submit_value("300 mm");
+    let length = *app.session.active_sketch().unwrap().1.dimensions.keys().next().unwrap();
+    app.session.finish_sketch();
+    harness.run();
+
+    harness.get_by_label("스케치 경로").click();
+    harness.run();
+    harness.get_by_label("계획").click();
+    harness.run();
+    let session = &harness.state().session;
+    let path = session.doc().paths().iter().next().unwrap().0;
+    assert_eq!(session.doc().get(path).unwrap().linear, vec![false, true, true]);
+    assert_eq!(session.plan_status(path), gc_session::PlanStatus::Ready, "{:?}", session.plan_error(path));
+    // The tool passes through the three sketch points, and between them stays on the lines' height.
+    let tips: Vec<[f64; 3]> = session.planned(path).unwrap().tip_path().collect();
+    for corner in [[0.45, -0.15, 0.25], [0.45, 0.15, 0.25], [0.65, 0.15, 0.25]] {
+        let nearest = tips
+            .iter()
+            .map(|t| {
+                ((t[0] - corner[0]).powi(2) + (t[1] - corner[1]).powi(2) + (t[2] - corner[2]).powi(2)).sqrt()
+            })
+            .fold(f64::INFINITY, f64::min);
+        assert!(nearest < 0.01, "{corner:?}: {nearest}");
+    }
+    let on_lines = tips.iter().skip_while(|t| (t[2] - 0.25).abs() > 1e-3).all(|t| (t[2] - 0.25).abs() < 1e-3);
+    assert!(on_lines, "once on the sketch, the tool stays at its height");
+    if gpu {
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        let app = harness.state_mut();
+        let duration = app.session.planned(path).unwrap().duration();
+        app.session.set_playback(Some((path, duration * 0.7)));
+        harness.get_by_label("뷰").click();
+        harness.run();
+        harness.get_by_label("전체 보기").click();
+        harness.run();
+        harness.render().unwrap().save(out.join("review-11-ur5e-follows-sketch.png")).unwrap();
+        harness.state_mut().session.set_playback(None);
+    }
+
+    // The first line 300 mm -> 200 mm: the sketch changes, the path is out of date, and planning again
+    // follows the new corner.
+    let app = harness.state_mut();
+    app.session.enter_sketch(sketch);
+    app.session.edit_dimension(length, "200 mm").unwrap();
+    app.session.finish_sketch();
+    assert_eq!(app.session.plan_status(path), gc_session::PlanStatus::Stale);
+    assert_eq!(app.session.plan(path), gc_session::PlanStatus::Ready, "{:?}", app.session.plan_error(path));
+    let tips: Vec<[f64; 3]> = app.session.planned(path).unwrap().tip_path().collect();
+    let corner = [0.45, 0.05, 0.25];
+    let nearest = tips
+        .iter()
+        .map(|t| {
+            ((t[0] - corner[0]).powi(2) + (t[1] - corner[1]).powi(2) + (t[2] - corner[2]).powi(2)).sqrt()
+        })
+        .fold(f64::INFINITY, f64::min);
+    assert!(nearest < 0.01, "the corner moved with the dimension: {nearest}");
+}
+
 /// With worker threads, planning does not finish inside the click: the window shows "planning" and picks
 /// the result up when the job reports back.
 #[test]

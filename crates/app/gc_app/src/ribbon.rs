@@ -262,6 +262,20 @@ fn robot_tab(
             // The new path becomes the one the panel works on.
             cell.path = session.add_path(robot, waypoints).ok();
         }
+        // The sketch being edited, else the newest one, becomes a path along its lines.
+        let sketch = session
+            .active_sketch()
+            .map(|(id, _)| id)
+            .or_else(|| session.doc().sketches().iter().last().map(|(id, _)| id))
+            .filter(|id| {
+                session.doc().get(*id).is_some_and(|s| s.curves.keys().any(|c| s.line(*c).is_some()))
+            });
+        let enabled = robot.is_some() && sketch.is_some();
+        if ribbon_button(ui, Icon::Sketch, tr!(lang, CmdPathFromSketch), false, enabled).clicked()
+            && let (Some(robot), Some(sketch)) = (robot, sketch)
+        {
+            cell.path = session.path_from_sketch(robot, sketch).ok();
+        }
         // While a plan is being computed the same button cancels it.
         let planning = session.is_planning();
         let label = if planning { tr!(lang, Cancel) } else { tr!(lang, CmdPlan) };

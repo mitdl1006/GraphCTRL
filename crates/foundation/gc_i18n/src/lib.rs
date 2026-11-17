@@ -294,6 +294,8 @@ messages! {
     CmdWaypointAtPoint => ("스케치 점", "Sketch Point"),
     /// Command: create a path through the waypoints.
     CmdMakePath => ("경로 만들기", "Create Path"),
+    /// Command: make a path that follows the lines of a sketch.
+    CmdPathFromSketch => ("스케치 경로", "Path from Sketch"),
     /// Command: plan the path.
     CmdPlan => ("계획", "Plan"),
     /// Command: play the planned motion.
