@@ -843,3 +843,92 @@ impl Document {
         Some(if held { RelationStatus::Full } else { RelationStatus::Under })
     }
 }
+
+impl Document {
+    /// Drive: where the components would stand with a relationship driven to `value`, without changing
+    /// the document (Inventor's Drive dialog plays a constraint or joint through values). The value is the
+    /// offset (metres) of a Mate, Flush or Insert, or the turn (radians, from where the moving component
+    /// stands now) of a Rotational joint; a Rigid joint cannot be driven. Returns the world poses of the
+    /// components that move.
+    pub fn driven(&self, id: Id<Relationship>, value: f64) -> Result<Vec<(AnyId, DPose3)>, crate::EditError> {
+        use crate::{CellOp, Command, EditError};
+        let relationship = self.get(id).ok_or(EditError::BadValue)?.clone();
+        if !value.is_finite() {
+            return Err(EditError::BadValue);
+        }
+        let mut preview = self.clone();
+        match relationship.kind {
+            RelationKind::Mate { sense, .. } => {
+                let kind = RelationKind::Mate { offset: value, sense };
+                let relationship = Relationship { kind, ..relationship };
+                crate::apply(&mut preview, &Command::Cell(CellOp::SetRelationship { id, relationship }))?;
+            }
+            RelationKind::Flush { .. } => {
+                let relationship =
+                    Relationship { kind: RelationKind::Flush { offset: value }, ..relationship };
+                crate::apply(&mut preview, &Command::Cell(CellOp::SetRelationship { id, relationship }))?;
+            }
+            RelationKind::Insert { aligned, .. } => {
+                let kind = RelationKind::Insert { offset: value, aligned };
+                let relationship = Relationship { kind, ..relationship };
+                crate::apply(&mut preview, &Command::Cell(CellOp::SetRelationship { id, relationship }))?;
+            }
+            RelationKind::Rotational { .. } => {
+                // Turn the moving component about the joint's axis, then let the others follow.
+                let first = relationship.first.occurrence.owner();
+                let second = relationship.second.occurrence.owner();
+                let grounded =
+                    |item: AnyId| self.component_flag(Occurrence::Item(item), ComponentFlag::Grounded);
+                let (mover, sign) = if !grounded(first) {
+                    (first, 1.0)
+                } else if !grounded(second) {
+                    (second, -1.0)
+                } else {
+                    return Err(EditError::BadValue);
+                };
+                let axis_on = self.in_owner(&relationship.second).ok_or(EditError::BadValue)?;
+                let (point, z, _) =
+                    joint_world(&self.owner_pose(second).ok_or(EditError::BadValue)?, &axis_on);
+                let pose = self.owner_pose(mover).ok_or(EditError::BadValue)?;
+                let turn = DQuat::from_axis_angle(z.normalize(), sign * value);
+                let moved = DPose3::from_parts(
+                    point + turn * (pose.translation - point),
+                    (turn * pose.rotation).normalize(),
+                );
+                let placement = crate::Placement {
+                    xyz: moved.translation.to_array(),
+                    rpy: gc_math::rpy_from_quat(moved.rotation),
+                };
+                let op = match mover.kind {
+                    Kind::Body => {
+                        let mut body = self
+                            .get(Id::<crate::Body>::from_raw(mover.raw))
+                            .ok_or(EditError::BadValue)?
+                            .clone();
+                        body.placement = placement;
+                        CellOp::SetBody { id: Id::from_raw(mover.raw), body }
+                    }
+                    Kind::RobotInstance => CellOp::PlaceRobot { id: Id::from_raw(mover.raw), placement },
+                    Kind::Assembly => CellOp::PlaceAssembly { id: Id::from_raw(mover.raw), placement },
+                    _ => return Err(EditError::BadValue),
+                };
+                crate::apply(&mut preview, &Command::Cell(op))?;
+            }
+            RelationKind::Rigid { .. } => return Err(EditError::BadValue),
+        }
+        let items: Vec<AnyId> = self
+            .bodies()
+            .iter()
+            .map(|(id, _)| id.erase())
+            .chain(self.robots().iter().map(|(id, _)| id.erase()))
+            .chain(self.assemblies().iter().map(|(id, _)| id.erase()))
+            .collect();
+        Ok(items
+            .into_iter()
+            .filter_map(|item| {
+                let now = preview.owner_pose(item)?;
+                (self.owner_pose(item)? != now).then_some((item, now))
+            })
+            .collect())
+    }
+}

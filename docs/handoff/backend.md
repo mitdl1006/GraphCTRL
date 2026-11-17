@@ -1,5 +1,16 @@
 # 백엔드 인계 (2026-11-17)
 
+## 2026-11-18 — 관계 구동(Drive) — 리드 요청
+
+- `session.drive_relationship(id, value) -> Result<(), EditError>`: 문서를 바꾸지 않고 관계를 `value`로 구동했을 때의 위치로 보여 준다
+  (Mate·Flush·Insert = 오프셋 m, Rotational = 지금 자세에서의 회전 rad; Rigid는 거부). 풀 수 없는 값은 거부하고 직전 표시 유지.
+  `session.end_drive_relationship()`로 문서 위치로 복귀. `session.driven_placement(item) -> Option<Placement>`.
+- 표시 연결: `shown_body`(바디), `shown_base`(로봇), `assembly_parts`(어셈블리)가 구동 위치를 쓴다 — 렌더가 이 셋을 쓰면 추가 작업 없음.
+  계산은 `Document::driven(id, value) -> Result<Vec<(AnyId, DPose3)>, EditError>`(문서 사본에 같은 명령을 적용해 풀이).
+- 아직: 한계(Start/End)·단계·반복 재생은 대시보드 쪽(리드). 구동 중 문서가 바뀌면 표시가 낡을 수 있으니 대화상자를 닫을 때 end 호출.
+  원문 A31(To Drive Relationships)의 GUID가 명세 표에서 잘려 있어 원문 대조는 아직.
+- 테스트 `gc_session/tests/robot_links.rs::drive_plays_a_relationship_through_values_without_changing_the_document`.
+
 ## 2026-11-18 — 로봇 링크를 하위 컴포넌트로(리드 순서 ②)
 
 사용자 요구 "로봇조차도 xyz가 있으니 xy평면 같은 것들에 접근 가능해야".
