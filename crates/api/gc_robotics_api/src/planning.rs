@@ -44,6 +44,12 @@ pub trait StateChecker: Sync {
 
     /// Distance to the nearest obstacle at `q` in metres, when the host can compute it.
     fn clearance(&self, q: &[f64]) -> Option<f64>;
+
+    /// How many single-state checks one [`StateChecker::motion_valid`] call from `a` to `b` costs, so that
+    /// a planner counts its budget (`max_state_checks`) the way the host does. The default counts one.
+    fn motion_cost(&self, _a: &[f64], _b: &[f64]) -> u64 {
+        1
+    }
 }
 
 /// Lets a running planner see cancellation and report progress.

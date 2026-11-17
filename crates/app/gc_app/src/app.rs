@@ -134,11 +134,14 @@ struct ImeTest {
 /// The built-in plugins. Their contributions reach the application only through the registry, the same
 /// way a third-party plugin's would.
 fn builtin_plugins() -> Vec<Box<dyn gc_plugin_api::Plugin>> {
-    vec![Box::new(gc_plugin_ur::UrPlugin)]
+    vec![Box::new(gc_plugin_ur::UrPlugin), Box::new(gc_plugin_planners::PlannersPlugin)]
 }
 
-/// The closed-form inverse kinematics plugins offer.
-type Kinematics = Vec<std::sync::Arc<dyn gc_robotics_api::KinematicsFactory>>;
+/// What plugins offer the session besides robots: closed-form inverse kinematics and motion planners.
+struct Kinematics {
+    factories: Vec<std::sync::Arc<dyn gc_robotics_api::KinematicsFactory>>,
+    planners: Vec<std::sync::Arc<dyn gc_robotics_api::MotionPlanner>>,
+}
 
 /// A robot the user can add: a package of the robot library, or one a plugin offers.
 pub(crate) enum LibraryRobot {
@@ -201,7 +204,10 @@ fn robot_library(
             log::error!("plugin `{}` was not loaded: {error}", plugin.manifest().id);
         }
     }
-    let kinematics = registry.get(gc_robotics_api::KINEMATICS_FACTORIES);
+    let kinematics = Kinematics {
+        factories: registry.get(gc_robotics_api::KINEMATICS_FACTORIES),
+        planners: registry.get(gc_robotics_api::MOTION_PLANNERS),
+    };
     let providers = registry.get(gc_robotics_api::ROBOT_MODEL_PROVIDERS);
     let mut library: Vec<LibraryRobot> = packages.iter().cloned().map(LibraryRobot::Package).collect();
     let mut models = Vec::new();
@@ -278,7 +284,8 @@ impl GraphCtrlApp {
             .unwrap_or_default();
         let mut session = Session::new();
         session.set_resources(resources);
-        session.set_kinematics(kinematics);
+        session.set_kinematics(kinematics.factories);
+        session.set_planners(kinematics.planners);
         session.set_robot_library(robot_dir);
         if options.background_jobs {
             let notifier = std::sync::Arc::new(Repaint(cc.egui_ctx.clone()));
@@ -647,6 +654,9 @@ impl GraphCtrlApp {
             ui.menu_button(tr!(lang, MenuTools), |ui| {
                 if ui.button(tr!(lang, MenuPoseCalc)).clicked() {
                     self.pose_calc.get_or_insert_with(gc_panels::PoseCalc::default);
+                }
+                if ui.checkbox(&mut self.viewport.perf_overlay, tr!(lang, MenuPerfOverlay)).clicked() {
+                    ui.close();
                 }
                 if ui.button(tr!(lang, MenuImeTest)).clicked() {
                     self.ime.open = true;
