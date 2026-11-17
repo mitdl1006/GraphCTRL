@@ -6,6 +6,7 @@
 
 mod gizmo;
 mod hud;
+mod origin;
 mod paint;
 mod target;
 
@@ -22,6 +23,7 @@ use gc_sketch::Space;
 use gc_tools::{Key as ToolKey, ToolEvent, ToolKind};
 use gc_ui::colors;
 
+pub use origin::ALL as ORIGIN_ELEMENTS;
 pub use paint::{format_angle, format_length};
 pub use target::Background;
 
@@ -71,6 +73,10 @@ pub(crate) fn plane_of(session: &Session, sketch: &Sketch) -> SketchPlane {
 pub struct Viewport {
     /// Whether the frame time and draw statistics are shown in the corner.
     pub perf_overlay: bool,
+    /// The origin element (plane, axis, point) of a component that is selected in the view or the browser.
+    pub origin_selected: Option<(gc_doc::Occurrence, gc_doc::OriginElement)>,
+    /// The origin plane under the right-click menu.
+    origin_menu: Option<(gc_doc::Occurrence, gc_doc::OriginElement)>,
     /// The heads-up display of the drawing tools.
     hud: hud::Hud,
     /// Whether the heads-up display (dynamic input) is on.
@@ -122,6 +128,8 @@ impl Viewport {
             perf_overlay: false,
             clear: None,
             spatial_drag: None,
+            origin_selected: None,
+            origin_menu: None,
             hud: hud::Hud::default(),
             hud_on: true,
             slice: false,
@@ -352,6 +360,15 @@ impl Viewport {
             self.background.has_gpu(),
             self.show_constraints,
         );
+        {
+            let camera = self.camera;
+            let screen = |world: DVec3| {
+                let p = camera.project(world, size)?;
+                #[allow(clippy::cast_possible_truncation, reason = "screen coordinates fit f32")]
+                Some(egui::pos2(rect.left() + p[0] as f32, rect.top() + p[1] as f32))
+            };
+            origin::paint(&ui.painter_at(rect), &screen, session, self.origin_selected);
+        }
         if self.hud_on && active.is_some() && !session.sketch_is_spatial() {
             self.hud.show(ui.ctx(), session, cursor, lang);
         } else {
@@ -858,16 +875,44 @@ impl Viewport {
             let at = response.interact_pointer_pos().map(to_view);
             self.measure_pick = Some(at.and_then(|at| self.pick_feature(session, at, size)));
         } else if !on_handles && response.clicked_by(PointerButton::Primary) {
-            let picked =
-                response.interact_pointer_pos().and_then(|p| self.pick_item(session, to_view(p), size));
+            // Origin planes, axes and points that are shown come before the solids behind them.
+            let at = response.interact_pointer_pos().map(to_view);
+            self.origin_selected = at.and_then(|at| origin::pick(&self.camera, size, session, at));
+            let picked = if self.origin_selected.is_some() {
+                None
+            } else {
+                response.interact_pointer_pos().and_then(|p| self.pick_item(session, to_view(p), size))
+            };
             session.select_item(picked);
         }
         if response.secondary_clicked() {
-            self.context_item =
-                response.interact_pointer_pos().and_then(|p| self.pick_item(session, to_view(p), size));
-            session.select_item(self.context_item);
+            let at = response.interact_pointer_pos().map(to_view);
+            self.origin_menu = at.and_then(|at| origin::pick(&self.camera, size, session, at));
+            if self.origin_menu.is_some() {
+                self.origin_selected = self.origin_menu;
+                self.context_item = None;
+                session.select_item(None);
+            } else {
+                self.context_item =
+                    response.interact_pointer_pos().and_then(|p| self.pick_item(session, to_view(p), size));
+                session.select_item(self.context_item);
+            }
         }
-        if let Some(item) = self.context_item {
+        if let Some((occurrence, element)) = self.origin_menu {
+            response.context_menu(|ui| {
+                if let gc_doc::OriginElement::Plane(plane) = element
+                    && ui.button(tr!(lang, CmdSketchHere)).clicked()
+                {
+                    // A refusal is shown in the status bar.
+                    drop(session.create_sketch_on_component(occurrence, plane));
+                    ui.close();
+                }
+                if ui.button(tr!(lang, CmdHide)).clicked() {
+                    drop(session.set_origin_visible(occurrence, &[element], false));
+                    ui.close();
+                }
+            });
+        } else if let Some(item) = self.context_item {
             response.context_menu(|ui| item_menu(ui, session, lang, item));
         }
     }
@@ -946,6 +991,7 @@ impl Viewport {
         if session.active_sketch().is_none() {
             if escape {
                 session.select_item(None);
+                self.origin_selected = None;
             }
             if delete && let Some(item) = session.selected_item() {
                 // A refusal (still in use) is explained in the status bar.

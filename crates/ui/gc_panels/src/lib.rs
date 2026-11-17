@@ -30,6 +30,12 @@ pub enum BrowserAction {
     Select(Option<gc_session::CellItem>),
     /// Plan a path.
     Plan(gc_core::Id<gc_doc::MotionPath>),
+    /// Show or hide elements of a component's origin folder.
+    OriginVisible(gc_doc::Occurrence, Vec<gc_doc::OriginElement>, bool),
+    /// Select an origin element in the browser (the view follows), or nothing.
+    OriginSelect(Option<(gc_doc::Occurrence, gc_doc::OriginElement)>),
+    /// Start a sketch on an origin plane of a component.
+    SketchOnComponent(gc_doc::Occurrence, gc_doc::OriginPlane),
 }
 
 /// What is typed into the parameter editor of the browser.
@@ -43,6 +49,8 @@ pub struct ParamsUi {
     pub rename: Option<(gc_core::AnyId, String)>,
     /// The rename has just begun: the field takes the keyboard focus.
     pub rename_fresh: bool,
+    /// The origin element selected in the view or here.
+    pub origin_selected: Option<(gc_doc::Occurrence, gc_doc::OriginElement)>,
 }
 
 /// The named parameters: a list, and one editor that adds a parameter or, when the name exists, changes
@@ -208,6 +216,17 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
                 if result.clicked() || result.secondary_clicked() {
                     action = Some(BrowserAction::Select(Some(item)));
                 }
+                // Components have an origin folder of their own.
+                if let CellItem::Body(_) | CellItem::Robot(_) = item {
+                    origin_folder(
+                        ui,
+                        session,
+                        lang,
+                        state,
+                        gc_doc::Occurrence::Item(cell_any(item)),
+                        &mut action,
+                    );
+                }
             }
         });
     };
@@ -242,6 +261,104 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
         .collect();
     section(ui, tr!(lang, BrowserPaths), paths);
     action
+}
+
+/// The name of an origin element.
+fn origin_name(lang: Lang, element: gc_doc::OriginElement) -> &'static str {
+    use gc_doc::{OriginElement, OriginPlane};
+    match element {
+        OriginElement::Plane(OriginPlane::Yz) => tr!(lang, OriginYz),
+        OriginElement::Plane(OriginPlane::Xz) => tr!(lang, OriginXz),
+        OriginElement::Plane(OriginPlane::Xy) => tr!(lang, OriginXy),
+        OriginElement::Axis(0) => tr!(lang, OriginAxisX),
+        OriginElement::Axis(1) => tr!(lang, OriginAxisY),
+        OriginElement::Axis(_) => tr!(lang, OriginAxisZ),
+        OriginElement::Point => tr!(lang, OriginPoint),
+    }
+}
+
+/// The "origin" folder of a component: three planes, three axes and the centre point, hidden until the
+/// user shows them (a check box each; the folder's menu shows or hides all seven).
+fn origin_folder(
+    ui: &mut Ui,
+    session: &Session,
+    lang: Lang,
+    state: &ParamsUi,
+    occurrence: gc_doc::Occurrence,
+    action: &mut Option<BrowserAction>,
+) {
+    use gc_doc::OriginElement;
+    let elements = gc_viewport_elements();
+    let all_shown = elements.iter().all(|e| session.origin_visible(occurrence, *e));
+    ui.indent(("gc_origin_indent", occurrence), |ui| {
+        let header = egui::CollapsingHeader::new(tr!(lang, BrowserOrigin))
+            .id_salt(("gc_origin_folder", occurrence))
+            .default_open(false)
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 1.0;
+                for element in elements {
+                    let name = origin_name(lang, element);
+                    let mut visible = session.origin_visible(occurrence, element);
+                    let show_label = tr!(lang, ShowItem, name);
+                    let icon = match element {
+                        OriginElement::Plane(_) => Icon::Sketch,
+                        OriginElement::Axis(_) => Icon::Line,
+                        OriginElement::Point => Icon::Waypoint,
+                    };
+                    let row = TreeRow {
+                        icon,
+                        text: name,
+                        selected: state.origin_selected == Some((occurrence, element)),
+                        visible: Some((&mut visible, show_label.as_str())),
+                        delete: None,
+                        edit: None,
+                        focus: false,
+                        dim: false,
+                    };
+                    let result = gc_ui::panel::tree_row(ui, row);
+                    if result.toggled {
+                        *action = Some(BrowserAction::OriginVisible(occurrence, vec![element], visible));
+                    }
+                    if result.row.clicked() || result.row.secondary_clicked() {
+                        *action = Some(BrowserAction::OriginSelect(Some((occurrence, element))));
+                    }
+                    result.row.context_menu(|ui| {
+                        if let OriginElement::Plane(plane) = element
+                            && ui.button(tr!(lang, CmdSketchHere)).clicked()
+                        {
+                            *action = Some(BrowserAction::SketchOnComponent(occurrence, plane));
+                            ui.close();
+                        }
+                        let text = if visible { tr!(lang, CmdHide) } else { tr!(lang, CmdShow) };
+                        if ui.button(text).clicked() {
+                            *action = Some(BrowserAction::OriginVisible(occurrence, vec![element], !visible));
+                            ui.close();
+                        }
+                    });
+                }
+            });
+        header.header_response.context_menu(|ui| {
+            let text = if all_shown { tr!(lang, CmdHideOrigin) } else { tr!(lang, CmdShowOrigin) };
+            if ui.button(text).clicked() {
+                *action = Some(BrowserAction::OriginVisible(occurrence, elements.to_vec(), !all_shown));
+                ui.close();
+            }
+        });
+    });
+}
+
+/// The seven origin elements in the order of the folder.
+fn gc_viewport_elements() -> [gc_doc::OriginElement; 7] {
+    use gc_doc::{OriginElement, OriginPlane};
+    [
+        OriginElement::Plane(OriginPlane::Yz),
+        OriginElement::Plane(OriginPlane::Xz),
+        OriginElement::Plane(OriginPlane::Xy),
+        OriginElement::Axis(0),
+        OriginElement::Axis(1),
+        OriginElement::Axis(2),
+        OriginElement::Point,
+    ]
 }
 
 /// The id of a cell item, whatever its kind.
