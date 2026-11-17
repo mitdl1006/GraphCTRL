@@ -367,6 +367,8 @@ impl Scene {
 #[derive(Default)]
 pub struct Picker {
     trees: std::collections::BTreeMap<u64, Arc<gc_mesh::MeshBvh>>,
+    /// Triangle adjacency per mesh, for finding the face around a hit (built on the first pick of it).
+    adjacency: std::collections::BTreeMap<u64, Arc<gc_mesh::region::Adjacency>>,
 }
 
 /// Where a ray meets the surface of a solid, for measuring edges and faces.
@@ -416,16 +418,35 @@ impl Picker {
         let pose = solid.pose;
         // Half a degree and ten micrometres: tessellated flat faces stay one face, curved ones split.
         let mesh = solid.shape.mesh().ok();
-        let face = mesh
-            .as_ref()
-            .and_then(|mesh| gc_mesh::region::planar_region(mesh, hit.triangle, 0.5_f64.to_radians(), 1e-5));
-        // A smooth surface that bends less than 20° per edge and fits a circle within 1 %.
-        let cylinder = mesh
-            .as_ref()
-            .and_then(|mesh| {
-                gc_mesh::region::cylindrical_region(mesh, hit.triangle, 20_f64.to_radians(), 0.01)
-            })
-            .filter(|c| c.triangles.len() > face.as_ref().map_or(0, |f| f.triangles.len()));
+        let adjacency = mesh.as_ref().map(|mesh| {
+            Arc::clone(
+                self.adjacency
+                    .entry(solid.shape.key())
+                    .or_insert_with(|| Arc::new(gc_mesh::region::Adjacency::of(mesh))),
+            )
+        });
+        let (face, cylinder) = match (mesh.as_ref(), adjacency.as_ref()) {
+            (Some(mesh), Some(adjacency)) => {
+                let face = gc_mesh::region::planar_region_in(
+                    mesh,
+                    adjacency,
+                    hit.triangle,
+                    0.5_f64.to_radians(),
+                    1e-5,
+                );
+                // A smooth surface that bends less than 20° per edge and fits a circle within 1 %.
+                let cylinder = gc_mesh::region::cylindrical_region_in(
+                    mesh,
+                    adjacency,
+                    hit.triangle,
+                    20_f64.to_radians(),
+                    0.01,
+                )
+                .filter(|c| c.triangles.len() > face.as_ref().map_or(0, |f| f.triangles.len()));
+                (face, cylinder)
+            }
+            _ => (None, None),
+        };
         Some(SurfaceHit {
             owner: solid.owner?,
             point: pose * hit.point,

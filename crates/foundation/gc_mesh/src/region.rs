@@ -36,11 +36,61 @@ fn corner(p: [f32; 3]) -> DVec3 {
     DVec3::new(f64::from(p[0]), f64::from(p[1]), f64::from(p[2]))
 }
 
+/// Which triangles share an edge with each triangle (corners closer than a micrometre count as shared).
+/// Building it is the costly part of finding a region; keep one per mesh and reuse it.
+#[derive(Clone, Debug, Default)]
+pub struct Adjacency {
+    neighbours: Vec<Vec<u32>>,
+}
+
+impl Adjacency {
+    /// The adjacency of a mesh's triangles.
+    pub fn of(mesh: &MeshData) -> Self {
+        let positions = mesh.positions();
+        let indices = mesh.indices();
+        let count = indices.len() / 3;
+        let mut by_edge: BTreeMap<(Key, Key), Vec<u32>> = BTreeMap::new();
+        for t in 0..count {
+            let at = |k: usize| indices.get(3 * t + k).and_then(|i| positions.get(*i as usize)).copied();
+            let (Some(a), Some(b), Some(c)) = (at(0), at(1), at(2)) else { continue };
+            for (p, q) in [(a, b), (b, c), (c, a)] {
+                let (kp, kq) = (key(p), key(q));
+                #[allow(clippy::cast_possible_truncation, reason = "triangle indices fit u32")]
+                by_edge.entry((kp.min(kq), kp.max(kq))).or_default().push(t as u32);
+            }
+        }
+        let mut neighbours = vec![Vec::new(); count];
+        for sharing in by_edge.values() {
+            for &t in sharing {
+                if let Some(list) = neighbours.get_mut(t as usize) {
+                    list.extend(sharing.iter().copied().filter(|other| *other != t));
+                }
+            }
+        }
+        Self { neighbours }
+    }
+
+    fn of_triangle(&self, t: usize) -> &[u32] {
+        self.neighbours.get(t).map_or(&[], Vec::as_slice)
+    }
+}
+
 /// The flat region around `triangle`: triangles reached across shared edges whose normals are within
 /// `angle` (radians) of the first one and whose corners lie within `distance` of its plane. Corners
 /// closer than a micrometre count as shared, so meshes that repeat corners per triangle work too.
 /// `None` when the triangle does not exist or is degenerate.
 pub fn planar_region(mesh: &MeshData, triangle: u32, angle: f64, distance: f64) -> Option<PlanarRegion> {
+    planar_region_in(mesh, &Adjacency::of(mesh), triangle, angle, distance)
+}
+
+/// [`planar_region`] with the mesh's adjacency already built.
+pub fn planar_region_in(
+    mesh: &MeshData,
+    adjacency: &Adjacency,
+    triangle: u32,
+    angle: f64,
+    distance: f64,
+) -> Option<PlanarRegion> {
     let positions = mesh.positions();
     let indices = mesh.indices();
     let count = indices.len() / 3;
@@ -57,32 +107,23 @@ pub fn planar_region(mesh: &MeshData, triangle: u32, angle: f64, distance: f64) 
     let point = corner(first[0]);
     let cos_limit = gc_math::fm::cos(angle);
 
-    // Which triangles share each edge (by corner keys, the smaller key first).
-    let mut by_edge: BTreeMap<(Key, Key), Vec<usize>> = BTreeMap::new();
-    for t in 0..count {
-        let Some(c) = corners(t) else { continue };
-        for (a, b) in [(c[0], c[1]), (c[1], c[2]), (c[2], c[0])] {
-            let (ka, kb) = (key(a), key(b));
-            by_edge.entry((ka.min(kb), ka.max(kb))).or_default().push(t);
-        }
-    }
     let joins = |t: usize| -> bool {
         corners(t).is_some_and(|c| {
             normal_of(&c).try_normalize().is_some_and(|n| n.dot(normal) >= cos_limit)
                 && c.iter().all(|p| (corner(*p) - point).dot(normal).abs() <= distance)
         })
     };
+    if triangle as usize >= count {
+        return None;
+    }
     let mut region = BTreeSet::from([triangle as usize]);
     let mut todo = vec![triangle as usize];
     while let Some(t) = todo.pop() {
-        let Some(c) = corners(t) else { continue };
-        for (a, b) in [(c[0], c[1]), (c[1], c[2]), (c[2], c[0])] {
-            let (ka, kb) = (key(a), key(b));
-            for &next in by_edge.get(&(ka.min(kb), ka.max(kb))).map_or(&[][..], Vec::as_slice) {
-                if !region.contains(&next) && joins(next) {
-                    region.insert(next);
-                    todo.push(next);
-                }
+        for &next in adjacency.of_triangle(t) {
+            let next = next as usize;
+            if !region.contains(&next) && joins(next) {
+                region.insert(next);
+                todo.push(next);
             }
         }
     }
@@ -132,6 +173,17 @@ pub fn cylindrical_region(
     bend: f64,
     tolerance: f64,
 ) -> Option<CylinderRegion> {
+    cylindrical_region_in(mesh, &Adjacency::of(mesh), triangle, bend, tolerance)
+}
+
+/// [`cylindrical_region`] with the mesh's adjacency already built.
+pub fn cylindrical_region_in(
+    mesh: &MeshData,
+    adjacency: &Adjacency,
+    triangle: u32,
+    bend: f64,
+    tolerance: f64,
+) -> Option<CylinderRegion> {
     let positions = mesh.positions();
     let indices = mesh.indices();
     let count = indices.len() / 3;
@@ -146,26 +198,19 @@ pub fn cylindrical_region(
         })
     };
     let first = normal_of(triangle as usize)?;
-    let mut by_edge: BTreeMap<(Key, Key), Vec<usize>> = BTreeMap::new();
-    for t in 0..count {
-        let Some(c) = corners(t) else { continue };
-        for (a, b) in [(c[0], c[1]), (c[1], c[2]), (c[2], c[0])] {
-            let (ka, kb) = (key(a), key(b));
-            by_edge.entry((ka.min(kb), ka.max(kb))).or_default().push(t);
-        }
+    if triangle as usize >= count {
+        return None;
     }
     let cos_bend = gc_math::fm::cos(bend);
     let mut region = BTreeSet::from([triangle as usize]);
     let mut todo = vec![triangle as usize];
     while let Some(t) = todo.pop() {
-        let (Some(c), Some(n)) = (corners(t), normal_of(t)) else { continue };
-        for (a, b) in [(c[0], c[1]), (c[1], c[2]), (c[2], c[0])] {
-            let (ka, kb) = (key(a), key(b));
-            for &next in by_edge.get(&(ka.min(kb), ka.max(kb))).map_or(&[][..], Vec::as_slice) {
-                if !region.contains(&next) && normal_of(next).is_some_and(|m| m.dot(n) >= cos_bend) {
-                    region.insert(next);
-                    todo.push(next);
-                }
+        let Some(n) = normal_of(t) else { continue };
+        for &next in adjacency.of_triangle(t) {
+            let next = next as usize;
+            if !region.contains(&next) && normal_of(next).is_some_and(|m| m.dot(n) >= cos_bend) {
+                region.insert(next);
+                todo.push(next);
             }
         }
     }
