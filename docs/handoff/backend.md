@@ -12,8 +12,10 @@
   원점 요소 표시(프론트엔드 요청): `gc_doc::OriginElement::{Plane(OriginPlane), Axis(0..=2), Point}`,
   `session.set_origin_visible(occurrence, &[OriginElement], bool) -> Result<(), EditError>`(여러 개를 한 undo 단계, 저장됨, 기본 숨김),
   `session.origin_visible(occurrence, element) -> bool`. 폴더 전체 토글은 7개를 한꺼번에 넘긴다.
-- 근거: 명세의 A52 About Reference Planes / A53 To Display Reference Planes(명세 표의 GUID가 잘려 원문을 열지 못함 — 전체 GUID를
-  알려 주면 확인하겠다), A11 Place Components.
+- 근거(원문 확인): A52 About Reference Planes `GUID-991276D7-D2BF-4266-9A57-E49146DC760C.htm`(모든 파트·어셈블리에 원점에서 만나는
+  숨은 작업 평면 + 중심점, 표시하면 와이어·셰이딩 모두 보임, 평면 선택 후 Sketch), A53 To Display Reference Planes
+  `GUID-7FB44EFA-4D72-4D9B-8318-8294DE054EC7.htm`(Origin 펼침 → 평면 선택 → Visibility, 모서리 드래그로 크기·이동, 중심점은 Project Geometry로
+  스케치에 투영). 명세와 차이 없음. 크기·이동 드래그와 중심점 투영(P1-5)은 아직.
 - 테스트: `gc_session/tests/sketch_planes.rs::every_component_has_an_origin_and_a_sketch_on_its_plane_moves_with_it`.
 
 **구동(Drive) 제안 — 리드 요청**: 어셈블리 구속·조인트가 생기면 `session.drive_relationship(id: Id<Relationship>, value: f64)`로
