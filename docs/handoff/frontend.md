@@ -27,6 +27,9 @@
 - 경로 결과 카드·로봇 속성의 보증 문구(Guarantee)/ACM/접촉 허용 표시: **대기** — 백엔드 세션 API(`docs/handoff/backend.md`)가 아직 리드 브랜치에 없음
 - 3D 스케치 점 드래그(아래 요청 필요)
 
+## 백엔드에 보낸 요청 (2026-11-17, 시그니처는 제안, 회신 후 확정)
+rename(item, name) · 스케치·웨이포인트·경로·좌표계 가시성(`Shown` 확장)과 set_suppressed/is_suppressed · dependents_of(item) · move_item/롤백(문서 모델 이후) · 3D 점 드래그(`begin_drag_3d`/`update_3d`, 세션 `spatial_drag_*`) · gc_session이 PairReason/LinkPair/Guarantee re-export.
+
 ## 요청 사항 (리드/백엔드)
 - `gc_session`이 `gc_motion::{PairReason, LinkPair, Guarantee}`를 re-export해 주세요. gc_panels에 gc_motion 의존을 추가하면 Cargo.lock이 바뀌어 지금은 `PairReason`을 Debug 이름으로 구분하고 있습니다(`cell.rs` acm).
 - 패닉 메시지 문구는 아직 영어 고정(언어 설정 접근 불가) — 필요하면 설정 파일의 언어를 읽도록.
