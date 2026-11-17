@@ -11,7 +11,7 @@
 
 use gc_linalg::{Matrix, PivotPolicy, lstsq_min_norm, qr_pivoted};
 
-use crate::constraint::{P2, Round};
+use crate::constraint::{P2, P3, Round};
 use crate::problem::{Input, Problem, max_abs};
 use crate::rows::{DEGENERATE, RowKind};
 use crate::system::{Flip, Ref, System};
@@ -27,6 +27,8 @@ const SETTLE_STEPS: usize = 2000;
 pub enum Grab {
     /// A point: it follows the cursor.
     Point(P2),
+    /// A point of a 3D sketch: it follows a cursor in space (see [`System::begin_drag_3d`]).
+    Point3(P3),
     /// The body of a line or arc: its end points keep their offset from the cursor.
     Body(Vec<P2>),
     /// The rim of a circle or arc: the radius (or whatever else is free) changes so that the rim passes
@@ -75,8 +77,8 @@ pub struct Dragging {
     target: Target,
     x_start: Vec<f64>,
     x: Vec<f64>,
-    cursor_begin: [f64; 2],
-    cursor: [f64; 2],
+    cursor_begin: [f64; 3],
+    cursor: [f64; 3],
     max_substep: f64,
 }
 
@@ -85,12 +87,19 @@ impl System {
     ///
     /// Grabbed coordinates that cannot move are ignored; the drag is refused only when none can.
     pub fn begin_drag(self, grab: &Grab, cursor: [f64; 2]) -> Result<Dragging, (Self, DragRefused)> {
+        self.begin_drag_3d(grab, [cursor[0], cursor[1], 0.0])
+    }
+
+    /// Starts a drag with a cursor in space, for points of 3D sketches ([`Grab::Point3`]). Planar grabs
+    /// use the cursor's X and Y.
+    pub fn begin_drag_3d(self, grab: &Grab, cursor: [f64; 3]) -> Result<Dragging, (Self, DragRefused)> {
         let compiled = self.compile();
         if compiled.conflict {
             return Err((self, DragRefused::Unsolved));
         }
         let grabbed: Vec<ParamId> = match grab {
             Grab::Point(p) => p.to_vec(),
+            Grab::Point3(p) => p.to_vec(),
             Grab::Body(points) => points.iter().flatten().copied().collect(),
             Grab::Rim(round) => vec![round.c[0], round.c[1], round.r],
         };
@@ -128,13 +137,14 @@ impl System {
             },
         };
         let target = match grab {
-            Grab::Point(_) | Grab::Body(_) => {
+            Grab::Point(_) | Grab::Point3(_) | Grab::Body(_) => {
                 // A point takes part with both coordinates as soon as one of them can move: mobility is
                 // only a first-order statement, and a point on a circle moves in both over a finite drag.
                 let located =
                     |p: ParamId| unknown_of(p).and_then(|(g, offset)| local(g).map(|l| (l, offset)));
+                let dims = if matches!(grab, Grab::Point3(_)) { 3 } else { 2 };
                 let entries: Vec<(usize, f64, usize, f64)> = grabbed
-                    .chunks(2)
+                    .chunks(dims)
                     .filter(|point| point.iter().any(|p| mobile(*p).is_some()))
                     .flat_map(|point| point.iter().enumerate())
                     .filter_map(|(axis, p)| located(*p).map(|(l, offset)| (l, offset, axis, self.value(*p))))
@@ -248,7 +258,7 @@ impl Dragging {
     }
 
     /// Target mismatch `target - T(x)` and its Jacobian `dT/dx` for the cursor position `cursor`.
-    fn target_error(&self, x: &[f64], cursor: [f64; 2]) -> (Vec<f64>, Matrix) {
+    fn target_error(&self, x: &[f64], cursor: [f64; 3]) -> (Vec<f64>, Matrix) {
         let n = self.problem.n;
         match &self.target {
             Target::Coordinates { entries, relative } => {
@@ -293,7 +303,7 @@ impl Dragging {
     ///
     /// Returns the new point, the length of the step taken and whether the cursor is reached, or `None`
     /// when no step keeps the constraints in reach.
-    fn step(&self, x: &[f64], cursor: [f64; 2]) -> Option<(Vec<f64>, f64, bool)> {
+    fn step(&self, x: &[f64], cursor: [f64; 3]) -> Option<(Vec<f64>, f64, bool)> {
         let problem = &self.problem;
         let n = problem.n;
         let tolerance = tol::RESIDUAL * problem.size;
@@ -350,7 +360,7 @@ impl Dragging {
     /// Moves `x` towards the constrained optimum for one cursor position with at most `budget` steps,
     /// then puts it exactly onto the constraints. Returns `(cursor reached, optimum reached)`, or `None`
     /// when the constraints cannot be restored.
-    fn project(&self, x: &mut Vec<f64>, cursor: [f64; 2], budget: usize) -> Option<(bool, bool)> {
+    fn project(&self, x: &mut Vec<f64>, cursor: [f64; 3], budget: usize) -> Option<(bool, bool)> {
         let size = self.problem.size;
         let mut reached = false;
         let mut settled = false;
@@ -378,10 +388,15 @@ impl Dragging {
     /// Moves the cursor to `cursor` and updates the sketch. Long cursor moves are followed in small steps
     /// so the geometry cannot jump to another branch on the way.
     pub fn update(&mut self, cursor: [f64; 2]) -> FrameOutcome {
+        self.update_3d([cursor[0], cursor[1], 0.0])
+    }
+
+    /// Moves a cursor in space (a drag started with [`System::begin_drag_3d`]).
+    pub fn update_3d(&mut self, cursor: [f64; 3]) -> FrameOutcome {
         // Geometry may have shrunk since the drag began (a radius dragged small): steps follow its size.
         self.max_substep = smallest_length(&self.problem, &self.x)
             .map_or(f64::INFINITY, |l| (l / 4.0).max(tol::NUDGE * self.problem.size));
-        let travel = ((cursor[0] - self.cursor[0]).powi(2) + (cursor[1] - self.cursor[1]).powi(2)).sqrt();
+        let travel = (0..3).map(|k| (cursor[k] - self.cursor[k]).powi(2)).sum::<f64>().sqrt();
         let steps_wanted = (travel / self.max_substep).ceil();
         #[allow(
             clippy::cast_possible_truncation,
@@ -397,6 +412,7 @@ impl Dragging {
             let sub_cursor = [
                 self.cursor[0] + (cursor[0] - self.cursor[0]) * t,
                 self.cursor[1] + (cursor[1] - self.cursor[1]) * t,
+                self.cursor[2] + (cursor[2] - self.cursor[2]) * t,
             ];
             let Some((hit, _)) = self.project(&mut x, sub_cursor, FRAME_STEPS) else {
                 return FrameOutcome::NotConverged;

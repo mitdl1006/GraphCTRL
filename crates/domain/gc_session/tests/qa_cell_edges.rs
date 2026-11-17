@@ -101,11 +101,9 @@ fn damaged_tools_and_placements_are_refused_and_change_nothing() {
     assert!(session.doc().same_content(&before));
 }
 
-/// A 100 m box tool engulfing the whole arm is accepted, and `robot_problem` reports nothing: the tool is
-/// apparently not checked against the arm's own links (only against the environment). Possibly by design;
-/// the lead should confirm.
+/// A 100 m box tool engulfing the whole arm is a collision with the arm's own links: the tool is checked
+/// against every link except the tip link and the link it is mounted on.
 #[test]
-#[ignore = "BUG?: a tool engulfing the arm is not reported as a collision; see docs/handoff/qa.md"]
 fn a_huge_tool_is_a_collision_problem_not_a_crash() {
     let mut session = Session::new();
     let robot = session.add_robot("Robot1", &six_axis()).unwrap();

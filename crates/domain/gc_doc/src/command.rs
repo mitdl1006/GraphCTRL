@@ -123,6 +123,22 @@ pub enum SketchOp {
 /// An edit of the document.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Command {
+    /// Renames a model-tree item (sketch, body, robot, waypoint, path, work frame, work feature,
+    /// feature, assembly). Refused when the name is empty or another item of the same kind has it.
+    Rename {
+        /// The item.
+        item: gc_core::AnyId,
+        /// The new name (leading and trailing spaces are dropped).
+        name: String,
+    },
+    /// Shows or hides a model-tree item. Bodies, robots and assemblies keep it in their look; other
+    /// items in the model tree's state.
+    SetVisible {
+        /// The item.
+        item: gc_core::AnyId,
+        /// True to show it.
+        visible: bool,
+    },
     /// Adds a named parameter. `angle` selects degrees instead of millimetres for bare numbers.
     AddParam {
         /// The name.
@@ -152,6 +168,14 @@ pub enum Command {
         frame: Id<Frame>,
         /// True for a 3D sketch.
         spatial: bool,
+    },
+    /// Creates an empty 2D sketch on a work plane or a face of an imported part. The sketch follows
+    /// that plane when it changes; the plane cannot be deleted while the sketch uses it.
+    CreateSketchOn {
+        /// Name shown in the browser.
+        name: String,
+        /// What the sketch plane is attached to.
+        source: crate::design::PlaneSource,
     },
     /// Deletes a sketch.
     DeleteSketch {
@@ -194,6 +218,12 @@ pub enum Created {
     Path(Id<crate::cell::MotionPath>),
     /// A work frame.
     Frame(Id<crate::cell::WorkFrame>),
+    /// A work plane, axis or point.
+    WorkFeature(Id<crate::design::WorkFeature>),
+    /// A modelling feature.
+    Feature(Id<crate::design::Feature>),
+    /// An imported assembly.
+    Assembly(Id<crate::design::Assembly>),
 }
 
 /// The result of a command that was applied.
@@ -250,6 +280,9 @@ pub enum EditError {
     /// The points that set a work frame's axes coincide with its origin or lie on one line with it.
     #[error("the axis points do not give a frame")]
     DegenerateFrame,
+    /// Another item of the same kind already has this name.
+    #[error("the name is already taken")]
+    NameTaken,
     /// A value is not a finite number, not positive where it must be, or of the wrong length.
     #[error("a value is out of range")]
     BadValue,
@@ -519,8 +552,36 @@ fn run(txn: &mut Txn<'_>, command: &Command) -> Result<(Vec<Created>, &'static s
             })?;
             Ok((vec![Created::Sketch(id)], "New sketch"))
         }
+        Command::CreateSketchOn { name, source } => {
+            let doc = txn.doc();
+            let pose = doc.plane_source_pose(source).ok_or(EditError::BadValue)?;
+            let world = doc.world().ok_or(EditError::BadValue)?;
+            let frame = txn.insert(Frame {
+                name: format!("{name} plane"),
+                kind: crate::document::FrameKind::User,
+                parent: Some(world),
+                xyz: pose.translation.to_array(),
+                quat_xyzw: pose.rotation.to_array(),
+                source: Some(*source),
+            });
+            let mut sketch = Sketch::new(Space::Planar(frame.erase()));
+            sketch.name.clone_from(name);
+            let id = txn.insert(sketch);
+            txn.modify(id, |s: &mut Sketch, ids| {
+                s.add_external(ids, ExternalRef::FrameOrigin(frame.erase()), [0.0; 3]);
+            })?;
+            Ok((vec![Created::Sketch(id)], "New sketch"))
+        }
         Command::DeleteSketch { id } => {
-            txn.remove(*id)?;
+            let removed = txn.remove(*id)?;
+            // A plane made for this sketch alone (attached to a work plane or a face) goes with it.
+            let (Space::Planar(frame) | Space::Spatial(frame)) = removed.space;
+            let frame: Id<Frame> = Id::from_raw(frame.raw);
+            let attached = txn.doc().get(frame).is_some_and(|f| f.source.is_some());
+            let used = txn.doc().references().iter().any(|(_, to)| *to == frame.erase());
+            if attached && !used {
+                txn.remove(frame)?;
+            }
             Ok((Vec::new(), "Delete sketch"))
         }
         Command::Sketch { sketch, op } => {
@@ -528,6 +589,8 @@ fn run(txn: &mut Txn<'_>, command: &Command) -> Result<(Vec<Created>, &'static s
             txn.modify(*sketch, |s: &mut Sketch, ids| sketch_op(s, ids, op, &scope))?
         }
         Command::Cell(op) => crate::cell::run(txn, op),
+        Command::Rename { item, name } => crate::tree::rename(txn, *item, name),
+        Command::SetVisible { item, visible } => crate::tree::set_visible(txn, *item, *visible),
     }
 }
 

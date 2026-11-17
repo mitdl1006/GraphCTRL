@@ -17,7 +17,7 @@ mod space;
 
 pub use planners::{Algorithm, Failure, Options, Request, Solution, Stats, plan};
 pub use rng::Rng;
-pub use simplify::{densify, path_cost, shortcut, smooth_corners, validate};
+pub use simplify::{densify, partial_shortcut, path_cost, shortcut, smooth_corners, validate};
 pub use space::Space;
 
 /// Decides which states and motions are allowed.
