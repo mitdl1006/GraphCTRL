@@ -532,6 +532,16 @@ impl Session {
         self.doc.predict_relationship(first, second)
     }
 
+    /// The joint type Automatic picks for two joint origins (Rotational for a circular origin, otherwise
+    /// Rigid). Joints are added with [`Session::add_relationship`] like constraints.
+    pub fn automatic_joint(
+        &self,
+        first: &gc_doc::Selection,
+        second: &gc_doc::Selection,
+    ) -> gc_doc::RelationKind {
+        gc_doc::Document::automatic_joint(first, second)
+    }
+
     /// A component's origin folder in the world: centre point, axes and planes (assembly P1-2).
     pub fn component_origin(&self, occurrence: gc_doc::Occurrence) -> Option<gc_doc::ComponentOrigin> {
         self.doc.component_origin(occurrence)
