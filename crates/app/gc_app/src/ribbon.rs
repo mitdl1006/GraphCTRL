@@ -18,6 +18,8 @@ pub(crate) enum Tab {
     Sketch,
     Robot,
     Inspect,
+    /// Inventor's Manage tab: parameters.
+    Manage,
     View,
 }
 
@@ -62,6 +64,8 @@ pub(crate) enum RibbonAction {
     StartInterference,
     /// Open the drive dialog.
     StartDrive,
+    /// Open the parameters dialog.
+    StartParameters,
 }
 
 pub(crate) fn show(
@@ -84,6 +88,7 @@ pub(crate) fn show(
             (Tab::Sketch, Msg::TabSketch),
             (Tab::Robot, Msg::TabRobot),
             (Tab::Inspect, Msg::TabInspect),
+            (Tab::Manage, Msg::TabManage),
             (Tab::View, Msg::TabView),
         ] {
             if ribbon_tab(ui, label.text(lang), *tab == this) {
@@ -187,6 +192,13 @@ pub(crate) fn show(
                 ribbon_group(ui, tr!(lang, GroupAnalyze), |ui| {
                     if ribbon_button(ui, Icon::Cuboid, tr!(lang, MenuInterference), false, true).clicked() {
                         action = Some(RibbonAction::StartInterference);
+                    }
+                });
+            }
+            Tab::Manage => {
+                ribbon_group(ui, tr!(lang, GroupParameters), |ui| {
+                    if ribbon_button(ui, Icon::Text("fx"), tr!(lang, MenuParameters), false, true).clicked() {
+                        action = Some(RibbonAction::StartParameters);
                     }
                 });
             }

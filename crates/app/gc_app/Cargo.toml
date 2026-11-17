@@ -31,6 +31,7 @@ gc_render.workspace = true
 gc_agent.workspace = true
 gc_math.workspace = true
 gc_robot.workspace = true
+gc_expr.workspace = true
 eframe.workspace = true
 egui.workspace = true
 rfd.workspace = true

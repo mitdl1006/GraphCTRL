@@ -30,6 +30,10 @@
 
 - 리본 정리 1차: "검사" 탭 신설(측정, 간섭 분석), "구동"은 로봇 탭의 "관계" 그룹으로 이동, 도구 메뉴에서 세 항목 제거(근거 `docs/ux/inventor-assembly-ui.md` §2). "로봇" 탭은 Inventor에 없는 추가 기능이라 그대로 두고, 나머지 탭(설계·관리·환경 등)은 원문을 못 구해 만들지 않음. 단면도(Half/Quarter/Three-Quarter): 도움말 A44의 GUID가 문서에 잘려 있어(`GUID-9A47D4FC-….htm`) 원문을 못 읽었고 Quarter/Three-Quarter가 잘라 내는 쪽(1/4 vs 3/4)이 불확실해 보류 — 리드가 전체 GUID를 주면 구현. 컴포넌트 원점 폴더(#2)는 백엔드 `component_origin` 대기.
 
+- 어셈블리 P1-2/3: 바디·로봇마다 브라우저에 "원점" 폴더(YZ 평면, XZ 평면, XY 평면, X축, Y축, Z축, 중심점; 기본 숨김, 항목마다 체크, 폴더 우클릭 "원점 표시/숨기기"), 보인 요소는 뷰포트에 컴포넌트 포즈로 그려짐(`gc_viewport/src/origin.rs`: 평면 반투명 정사각형, 축 색선, 점), 클릭 선택(점→축→평면 순, 숨긴 요소는 뷰포트에서 선택 안 됨·브라우저에서는 선택 가능, 브라우저와 선택 동기화, Esc 해제), 평면 우클릭 "스케치 만들기"(`create_sketch_on_component`). 테스트 `a_component_origin_plane_is_shown_picked_and_sketched_on`, 스크린샷 `review-32-origin-plane.png`. 근거는 `docs/ux/inventor-assembly-parity.md`의 A52/A53 요약뿐(도움말 원문은 직접 확인 못 함). 미구현: 평면 크기 드래그 조절(지금 고정 한 변 0.3 m라 작은 부품에는 큼), 속성 창에 소유 컴포넌트·좌표 표시, 설비(assemblies)·부품 트리와 그 원점 폴더, 로봇 링크 프레임.
+
+- 브라우저를 어셈블리 트리로(리드 요청 1·4·3): 맨 위에 문서 노드("Cell1" 또는 파일 이름) 아래에 관계·표현(아직 빈 자리)·원점·구성요소("Body1:1", "UR5e_1:1", 각자 원점 폴더). 스케치·파라미터·좌표계·웨이포인트·경로는 GraphCTRL 고유 폴더로 아래에 유지(파라미터 폴더는 리드의 매개변수 대화상자가 들어오면 제거). 상태바 맨 오른쪽에 "구성요소 N"·"문서 1"(원문: 활성 문서의 발생(occurrence) 수와 열린 문서 수). 오른쪽 탐색 막대(모두 확대·초점 이동·확대/축소·궤도·면 보기; 초점 이동·확대/축소·궤도는 Esc까지 켜져 있는 왼쪽 버튼 도구, 면 보기는 선택한 원점 평면 또는 편집 중 2D 스케치 평면으로 시점 정렬)와 ViewCube 옆 홈 버튼(코드로 그린 아이콘). 근거: 인벤터 2026 Inventor Browser·Assembly Browser Reference(GUID-EDF6B951…, GUID-CB6B1637-71AD-4753-8CC9-19559BFEE3A5), Navigation Bar(GUID-FAAB453E…), Graphics Windows 상태바(GUID-7544AABF…). 원문과 다른 점: 탐색 막대 사용자 정의·도킹·불투명도·전체 탐색 휠은 없음. 스크린샷 `review-33-nav-bar-tree.png`, 테스트 `the_navigation_bar_and_the_assembly_tree`. 미구현: 설비(어셈블리)·부품 occurrence 노드, 접지·비활성·보이지 않음 아이콘 상태, 사용자 정의 폴더.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

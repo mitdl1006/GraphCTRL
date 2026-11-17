@@ -6,10 +6,11 @@
 
 mod gizmo;
 mod hud;
+mod origin;
 mod paint;
 mod target;
 
-use egui::{Key, PointerButton, Sense};
+use egui::{Key, PointerButton, Sense, vec2};
 use gc_core::Id;
 use gc_doc::Sketch;
 use gc_draw::{Camera, NavAction, NavInput, NavPreset, StandardView, nav_action, viewcube};
@@ -22,6 +23,7 @@ use gc_sketch::Space;
 use gc_tools::{Key as ToolKey, ToolEvent, ToolKind};
 use gc_ui::colors;
 
+pub use origin::ALL as ORIGIN_ELEMENTS;
 pub use paint::{format_angle, format_length};
 pub use target::Background;
 
@@ -67,10 +69,24 @@ pub(crate) fn plane_of(session: &Session, sketch: &Sketch) -> SketchPlane {
     SketchPlane::of_pose(&pose)
 }
 
+/// A tool of the navigation bar that stays on: the left button pans, zooms or orbits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NavTool {
+    Pan,
+    Zoom,
+    Orbit,
+}
+
 /// The viewport widget and its view state.
 pub struct Viewport {
     /// Whether the frame time and draw statistics are shown in the corner.
     pub perf_overlay: bool,
+    /// The navigation tool chosen on the navigation bar: it works with the left button until it ends.
+    nav_tool: Option<NavTool>,
+    /// The origin element (plane, axis, point) of a component that is selected in the view or the browser.
+    pub origin_selected: Option<(gc_doc::Occurrence, gc_doc::OriginElement)>,
+    /// The origin plane under the right-click menu.
+    origin_menu: Option<(gc_doc::Occurrence, gc_doc::OriginElement)>,
     /// The heads-up display of the drawing tools.
     hud: hud::Hud,
     /// Whether the heads-up display (dynamic input) is on.
@@ -122,6 +138,9 @@ impl Viewport {
             perf_overlay: false,
             clear: None,
             spatial_drag: None,
+            nav_tool: None,
+            origin_selected: None,
+            origin_menu: None,
             hud: hud::Hud::default(),
             hud_on: true,
             slice: false,
@@ -352,12 +371,22 @@ impl Viewport {
             self.background.has_gpu(),
             self.show_constraints,
         );
+        {
+            let camera = self.camera;
+            let screen = |world: DVec3| {
+                let p = camera.project(world, size)?;
+                #[allow(clippy::cast_possible_truncation, reason = "screen coordinates fit f32")]
+                Some(egui::pos2(rect.left() + p[0] as f32, rect.top() + p[1] as f32))
+            };
+            origin::paint(&ui.painter_at(rect), &screen, session, self.origin_selected);
+        }
         if self.hud_on && active.is_some() && !session.sketch_is_spatial() {
             self.hud.show(ui.ctx(), session, cursor, lang);
         } else {
             self.hud.cancel();
         }
         self.view_cube(ui, rect, lang);
+        self.nav_bar(ui, rect, session, lang);
         if self.perf_overlay {
             self.perf(ui, rect, lang);
         }
@@ -387,6 +416,103 @@ impl Viewport {
         painter.rect_filled(frame, 4.0, egui::Color32::from_black_alpha(170));
         painter.galley(frame.min + egui::vec2(6.0, 3.0), galley, egui::Color32::WHITE);
         ui.ctx().request_repaint();
+    }
+
+    /// The navigation bar under the view cube: zoom all, pan, zoom, orbit and look at, with a home button
+    /// at the cube. A tool stays on until Esc or the next choice.
+    /// Reference: Inventor 2026 help, To Work with the Navigation Bar (GUID-FAAB453E-31EB-46B8-9A74-3BF7A4D88EC9).
+    fn nav_bar(&mut self, ui: &mut egui::Ui, rect: egui::Rect, session: &Session, lang: Lang) {
+        let free = self.clear.unwrap_or(rect);
+        let button = 30.0;
+        let tools = [
+            (gc_ui::Icon::ZoomAll, tr!(lang, NavZoomAll), None),
+            (gc_ui::Icon::Pan, tr!(lang, NavPan), Some(NavTool::Pan)),
+            (gc_ui::Icon::Zoom, tr!(lang, NavZoom), Some(NavTool::Zoom)),
+            (gc_ui::Icon::Orbit, tr!(lang, NavOrbit), Some(NavTool::Orbit)),
+            (gc_ui::Icon::LookAt, tr!(lang, NavLookAt), None),
+        ];
+        let top_left = egui::pos2(free.right() - 8.0 - button, free.top() + 140.0);
+        let bar = egui::Rect::from_min_size(top_left, vec2(button, button * tools.len() as f32));
+        if !free.contains_rect(bar) {
+            return;
+        }
+        let painter = ui.painter_at(rect);
+        painter.rect_filled(bar.expand(2.0), 8.0, gc_ui::panel_fill(false));
+        painter.rect_stroke(
+            bar.expand(2.0),
+            8.0,
+            egui::Stroke::new(1.0, colors::border()),
+            egui::StrokeKind::Outside,
+        );
+        let look_target = self.look_target(session);
+        let mut act = None;
+        for (index, (icon, label, tool)) in tools.iter().enumerate() {
+            let cell =
+                egui::Rect::from_min_size(top_left + vec2(0.0, button * index as f32), vec2(button, button));
+            let enabled = !(index == 4 && look_target.is_none());
+            let sense = if enabled { Sense::click() } else { Sense::hover() };
+            let response = ui.interact(cell, egui::Id::unique(("gc_nav_bar", index)), sense);
+            let active = tool.is_some() && self.nav_tool == *tool;
+            response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, enabled, active, *label));
+            if active {
+                painter.rect_filled(cell.shrink(2.0), 6.0, colors::ACCENT.gamma_multiply(0.25));
+            } else if response.hovered() && enabled {
+                painter.rect_filled(cell.shrink(2.0), 6.0, colors::text().gamma_multiply(0.1));
+            }
+            let tint = if enabled { colors::text() } else { colors::muted().gamma_multiply(0.5) };
+            icon.paint(&painter, cell.shrink(7.0), tint);
+            if response.on_hover_text(*label).clicked() {
+                act = Some(index);
+            }
+        }
+        match act {
+            Some(0) => {
+                self.nav_tool = None;
+                self.fit(session, [1000.0, 700.0]);
+            }
+            Some(4) => {
+                self.nav_tool = None;
+                if let Some((normal, up)) = look_target {
+                    self.camera.look_along(-normal, up);
+                }
+            }
+            Some(index) => {
+                let chosen = tools[index].2;
+                self.nav_tool = if self.nav_tool == chosen { None } else { chosen };
+            }
+            None => {}
+        }
+        // The home button at the view cube's corner.
+        let home = egui::Rect::from_center_size(
+            free.right_top() + vec2(-74.0 - 52.0, 74.0 - 52.0),
+            vec2(22.0, 22.0),
+        );
+        if free.contains_rect(home) {
+            let response = ui.interact(home, egui::Id::unique("gc_nav_home"), Sense::click());
+            let label = tr!(lang, NavHome);
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
+            if response.hovered() {
+                painter.rect_filled(home, 5.0, colors::text().gamma_multiply(0.1));
+            }
+            gc_ui::Icon::Home.paint(&painter, home.shrink(3.0), colors::text());
+            if response.on_hover_text(label).clicked() {
+                self.camera.look(StandardView::Iso);
+            }
+        }
+    }
+
+    /// The face the Look At tool turns the view to: a selected origin plane, or the sketch plane being
+    /// edited. Returns the face's normal and the direction that is up in it.
+    fn look_target(&self, session: &Session) -> Option<(DVec3, DVec3)> {
+        if let Some((occurrence, gc_doc::OriginElement::Plane(plane))) = self.origin_selected
+            && let Some(origin) = session.component_origin(occurrence)
+        {
+            let pose = origin.plane(plane);
+            return Some((pose.rotation * DVec3::Z, pose.rotation * DVec3::Y));
+        }
+        let (_, sketch) = session.active_sketch()?;
+        let plane = plane_of(session, sketch);
+        (!session.sketch_is_spatial()).then_some((plane.normal, plane.v))
     }
 
     /// The view cube in the top-right corner: shows how the view is turned; clicking a face, an edge or a
@@ -464,7 +590,11 @@ impl Viewport {
     fn navigate(&mut self, ui: &egui::Ui, response: &egui::Response, rect: egui::Rect, size: [f64; 2]) {
         let to_view = |p: egui::Pos2| [f64::from(p.x - rect.left()), f64::from(p.y - rect.top())];
         let (scroll, delta, modifiers, keys, pointer) = ui.input(|i| {
-            let keys = (i.key_down(Key::F2), i.key_down(Key::F3), i.key_down(Key::F4));
+            let keys = (
+                i.key_down(Key::F2) || self.nav_tool == Some(NavTool::Pan),
+                i.key_down(Key::F3) || self.nav_tool == Some(NavTool::Zoom),
+                i.key_down(Key::F4) || self.nav_tool == Some(NavTool::Orbit),
+            );
             (i.smooth_scroll_delta.y, i.pointer.delta(), i.modifiers, keys, i.pointer.latest_pos())
         });
         if response.hovered()
@@ -863,16 +993,44 @@ impl Viewport {
             let at = response.interact_pointer_pos().map(to_view);
             self.measure_pick = Some(at.and_then(|at| self.pick_feature(session, at, size)));
         } else if !on_handles && response.clicked_by(PointerButton::Primary) {
-            let picked =
-                response.interact_pointer_pos().and_then(|p| self.pick_item(session, to_view(p), size));
+            // Origin planes, axes and points that are shown come before the solids behind them.
+            let at = response.interact_pointer_pos().map(to_view);
+            self.origin_selected = at.and_then(|at| origin::pick(&self.camera, size, session, at));
+            let picked = if self.origin_selected.is_some() {
+                None
+            } else {
+                response.interact_pointer_pos().and_then(|p| self.pick_item(session, to_view(p), size))
+            };
             session.select_item(picked);
         }
         if response.secondary_clicked() {
-            self.context_item =
-                response.interact_pointer_pos().and_then(|p| self.pick_item(session, to_view(p), size));
-            session.select_item(self.context_item);
+            let at = response.interact_pointer_pos().map(to_view);
+            self.origin_menu = at.and_then(|at| origin::pick(&self.camera, size, session, at));
+            if self.origin_menu.is_some() {
+                self.origin_selected = self.origin_menu;
+                self.context_item = None;
+                session.select_item(None);
+            } else {
+                self.context_item =
+                    response.interact_pointer_pos().and_then(|p| self.pick_item(session, to_view(p), size));
+                session.select_item(self.context_item);
+            }
         }
-        if let Some(item) = self.context_item {
+        if let Some((occurrence, element)) = self.origin_menu {
+            response.context_menu(|ui| {
+                if let gc_doc::OriginElement::Plane(plane) = element
+                    && ui.button(tr!(lang, CmdSketchHere)).clicked()
+                {
+                    // A refusal is shown in the status bar.
+                    drop(session.create_sketch_on_component(occurrence, plane));
+                    ui.close();
+                }
+                if ui.button(tr!(lang, CmdHide)).clicked() {
+                    drop(session.set_origin_visible(occurrence, &[element], false));
+                    ui.close();
+                }
+            });
+        } else if let Some(item) = self.context_item {
             response.context_menu(|ui| item_menu(ui, session, lang, item));
         }
     }
@@ -940,6 +1098,9 @@ impl Viewport {
         {
             self.slice = !self.slice;
         }
+        if ctx.input(|i| i.key_pressed(Key::Escape)) {
+            self.nav_tool = None;
+        }
         if ctx.input(|i| i.key_pressed(Key::F8)) {
             self.show_constraints = true;
         }
@@ -951,6 +1112,7 @@ impl Viewport {
         if session.active_sketch().is_none() {
             if escape {
                 session.select_item(None);
+                self.origin_selected = None;
             }
             if delete && let Some(item) = session.selected_item() {
                 // A refusal (still in use) is explained in the status bar.

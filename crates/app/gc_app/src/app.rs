@@ -253,6 +253,8 @@ pub struct GraphCtrlApp {
     interference: crate::interference::Interference,
     /// The Drive dialog.
     drive: crate::drive::Drive,
+    /// The Parameters dialog.
+    parameters: crate::parameters::Parameters,
     expression: String,
     ime: ImeTest,
     /// Whether the licence notices window is open.
@@ -337,6 +339,7 @@ impl GraphCtrlApp {
             measure: crate::measure::Measure::default(),
             interference: crate::interference::Interference::default(),
             drive: crate::drive::Drive::default(),
+            parameters: crate::parameters::Parameters::default(),
             expression: String::new(),
             ime: ImeTest { dimension: "25 mm".to_owned(), ..ImeTest::default() },
             notices: false,
@@ -954,6 +957,7 @@ impl eframe::App for GraphCtrlApp {
             Some(ribbon::RibbonAction::StartMeasure) => self.measure.start(&self.session),
             Some(ribbon::RibbonAction::StartInterference) => self.interference.start(&self.session),
             Some(ribbon::RibbonAction::StartDrive) => self.drive.start(&mut self.session),
+            Some(ribbon::RibbonAction::StartParameters) => self.parameters.open = true,
             _ => {}
         }
         if ribbon_action == Some(ribbon::RibbonAction::ImportRobot)
@@ -1018,6 +1022,9 @@ impl eframe::App for GraphCtrlApp {
         if self.interference.open {
             self.interference.window(&ctx, &self.session, lang);
         }
+        if self.parameters.open {
+            self.parameters.window(&ctx, &mut self.session, lang);
+        }
         if self.drive.open {
             self.drive.tick(&ctx, &mut self.session);
             self.drive.window(&ctx, &mut self.session, lang);
@@ -1041,6 +1048,7 @@ impl eframe::App for GraphCtrlApp {
             },
             |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
+                    self.params.origin_selected = self.viewport.origin_selected;
                     match gc_panels::browser(ui, &self.session, lang, &mut self.params) {
                         Some(BrowserAction::EditSketch(id)) => {
                             self.session.enter_sketch(id);
@@ -1055,7 +1063,21 @@ impl eframe::App for GraphCtrlApp {
                                 self.params = gc_panels::ParamsUi::default();
                             }
                         }
-                        Some(BrowserAction::Select(item)) => self.session.select_item(item),
+                        Some(BrowserAction::Select(item)) => {
+                            self.viewport.origin_selected = None;
+                            self.session.select_item(item);
+                        }
+                        Some(BrowserAction::OriginVisible(occurrence, elements, visible)) => {
+                            // A refusal is shown in the status bar.
+                            drop(self.session.set_origin_visible(occurrence, &elements, visible));
+                        }
+                        Some(BrowserAction::OriginSelect(chosen)) => {
+                            self.session.select_item(None);
+                            self.viewport.origin_selected = chosen;
+                        }
+                        Some(BrowserAction::SketchOnComponent(occurrence, plane)) => {
+                            drop(self.session.create_sketch_on_component(occurrence, plane));
+                        }
                         Some(BrowserAction::Plan(path)) => {
                             self.cell.playing = false;
                             self.session.plan(path);

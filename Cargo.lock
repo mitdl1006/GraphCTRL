@@ -1562,6 +1562,7 @@ dependencies = [
  "gc_core",
  "gc_doc",
  "gc_draw",
+ "gc_expr",
  "gc_i18n",
  "gc_jobs",
  "gc_math",

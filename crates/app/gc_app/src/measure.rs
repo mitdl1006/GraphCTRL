@@ -202,16 +202,15 @@ impl Measure {
         }
         let text = egui::Color32::PLACEHOLDER;
         if let [Feature::Point(a), Feature::Point(vertex), Feature::Point(c)] = self.features.as_slice() {
-            // Three points: the angle at the second one.
-            let (a, v, c) = [a, vertex, c].map(|p| gc_math::DVec3::from_array(*p)).into();
-            let (u, w) = (a - v, c - v);
-            let angle = gc_math::fm::atan2(u.cross(w).length(), u.dot(w));
-            lines.push(valued(
-                text,
-                tr!(lang, MeasureFeatureAngle, format!("{:.3}", angle.to_degrees())),
-                Group::Angle,
-                angle,
-            ));
+            // Three points: the angle at the second one (none when two points coincide).
+            if let Some(angle) = gc_session::angle_at(*a, *vertex, *c) {
+                lines.push(valued(
+                    text,
+                    tr!(lang, MeasureFeatureAngle, format!("{:.3}", angle.to_degrees())),
+                    Group::Angle,
+                    angle,
+                ));
+            }
         } else if let [a, b] = self.features.as_slice() {
             let pair: FeaturePair = gc_session::measure_features(a, b);
             if let Some(distance) = pair.distance {

@@ -29,7 +29,7 @@ pending!(
 
 pending!(
     a2_every_component_has_an_origin_folder_with_planes_axes_and_a_centre_point,
-    "FEATURE assembly P1-2: no per-component origin folder (A52, A53, A55)",
+    "FEATURE assembly P1-2 (screen half): data model and visibility are tested in qa_origin_folder.rs; the browser folder rows with the decided names and the drawing are on the frontend branch de9ef3e, not merged into the lead branch yet (A52, A53, A55)",
     "LEAD DECISION 2026-11-17: under a folder `원점` (en `Origin`) the children, in this order, are `YZ 평면`, \
      `XZ 평면`, `XY 평면`, `X축`, `Y축`, `Z축`, `중심점` (en YZ Plane, XZ Plane, XY Plane, X Axis, Y Axis, Z Axis, \
      Center Point), the same spelling as the document origin. Two components each have one; hidden by default; \
@@ -39,7 +39,7 @@ pending!(
 
 pending!(
     a3_origin_planes_axes_and_points_can_be_picked_in_the_viewport,
-    "FEATURE assembly P1-3: no picking of origin features (A52, A53)",
+    "FEATURE assembly P1-3 (screen half): viewport picking of origin features is on the frontend branch de9ef3e, not merged into the lead branch yet (A52, A53)",
     "LEAD DECISION 2026-11-17: hidden origin planes, axes and points are NOT selectable in the viewport but ARE \
      selectable in the browser; once shown they are selectable in the viewport. Click a shown plane -> \
      highlighted, browser synced, properties show the owner and coordinates; Esc clears; right-click offers \
