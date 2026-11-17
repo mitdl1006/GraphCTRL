@@ -3,9 +3,10 @@
 use std::collections::BTreeMap;
 
 use gc_core::{AnyId, Entity, Id, Kind};
+use serde::{Deserialize, Serialize};
 
 /// Where a sketch lives.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Space {
     /// In the XY plane of a frame; points use two coordinates.
     Planar(AnyId),
@@ -14,7 +15,7 @@ pub enum Space {
 }
 
 /// Something outside the sketch that a point follows.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ExternalRef {
     /// The origin of a frame (the sketch's own frame for the projected origin).
     FrameOrigin(AnyId),
@@ -30,7 +31,7 @@ pub enum ExternalRef {
 }
 
 /// Whether the solver may move a point.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PointKind {
     /// An ordinary sketch point.
     Free,
@@ -39,7 +40,7 @@ pub enum PointKind {
 }
 
 /// A sketch point.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SkPoint {
     /// Position in the sketch frame (z is 0 and unused in a planar sketch).
     pub pos: [f64; 3],
@@ -53,7 +54,7 @@ impl Entity for SkPoint {
 }
 
 /// The shape of a curve.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum CurveGeom {
     /// A segment from `a` to `b`.
     Line {
@@ -81,7 +82,7 @@ pub enum CurveGeom {
 }
 
 /// A curve of a sketch.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Curve {
     /// The shape.
     pub geom: CurveGeom,
@@ -106,7 +107,7 @@ impl Curve {
 }
 
 /// A geometric constraint.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum GeoConstraint {
     /// Two points coincide.
     Coincident(Id<SkPoint>, Id<SkPoint>),
@@ -175,7 +176,7 @@ impl Entity for GeoConstraint {
 
 /// What a dimension measures. Signs and sides are captured at creation and keep the solver on the branch
 /// that was drawn.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum DimKind {
     /// Distance between two points (also the length of a line).
     Distance {
@@ -239,7 +240,7 @@ pub enum DimKind {
 }
 
 /// A dimension.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Dimension {
     /// What it measures.
     pub kind: DimKind,
@@ -259,8 +260,10 @@ impl Entity for Dimension {
 }
 
 /// A sketch.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Sketch {
+    /// Name shown in the browser.
+    pub name: String,
     /// Where the sketch lives.
     pub space: Space,
     /// Points by id.
@@ -293,6 +296,7 @@ impl Sketch {
     /// An empty sketch.
     pub fn new(space: Space) -> Self {
         Self {
+            name: String::new(),
             space,
             points: BTreeMap::new(),
             curves: BTreeMap::new(),

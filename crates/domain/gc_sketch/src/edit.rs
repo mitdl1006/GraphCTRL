@@ -37,7 +37,7 @@ pub enum SketchError {
 }
 
 /// A sketch item, as named in reports.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub enum Item {
     /// A point (reported when it is a fixed reference).
     Point(Id<SkPoint>),
