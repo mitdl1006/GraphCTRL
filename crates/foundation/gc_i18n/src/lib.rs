@@ -602,6 +602,8 @@ messages! {
     ConstrainCircle => ("원", "circle"),
     /// Constrain: a joint origin (a frame: point and axes).
     ConstrainFrame => ("조인트 원점", "joint origin"),
+    /// Constrain: selected geometry of a kind without its own word yet.
+    ConstrainGeometry => ("형상", "geometry"),
     /// Status bar: the constraint cannot be solved with the others.
     ErrUnsolvable => ("구속을 풀 수 없습니다", "The constraints cannot be solved"),
     /// Status bar: the number of occurrences (components) in the document.
