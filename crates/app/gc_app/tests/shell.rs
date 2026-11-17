@@ -2218,3 +2218,58 @@ fn slice_graphics_reveals_the_sketch_plane() {
     harness.run();
     assert!(!harness.state().viewport().slice);
 }
+
+/// The heads-up display: after the first click of the line tool, typing a length, Tab, an angle and Enter
+/// draws that line (Inventor's dynamic input).
+#[test]
+fn the_heads_up_display_draws_a_line_from_typed_values() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("XY 스케치").click();
+    harness.run();
+    assert_eq!(harness.state().session.tool(), ToolKind::Line);
+    let click = |harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, at: egui::Pos2| {
+        harness.event(egui::Event::PointerMoved(at));
+        harness.run();
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.run();
+        }
+    };
+    click(&mut harness, egui::pos2(520.0, 450.0));
+    harness.event(egui::Event::PointerMoved(egui::pos2(640.0, 400.0)));
+    harness.run();
+    // The boxes are up: the length and the direction.
+    harness.get_by_label("HUD 길이");
+    harness.get_by_label("HUD 각도");
+    for text in ["5", "0"] {
+        harness.event(egui::Event::Text(text.into()));
+        harness.run();
+    }
+    harness.key_press(egui::Key::Tab);
+    harness.run();
+    for text in ["3", "0"] {
+        harness.event(egui::Event::Text(text.into()));
+        harness.run();
+    }
+    harness.key_press(egui::Key::Enter);
+    harness.run();
+    let (_, sketch) = harness.state().session.active_sketch().unwrap();
+    let id = *sketch.curves.keys().next().expect("the line was drawn");
+    let (a, b) = sketch.line(id).unwrap();
+    let (pa, pb) =
+        (harness.state().session.point_pos(a).unwrap(), harness.state().session.point_pos(b).unwrap());
+    let (dx, dy) = (pb[0] - pa[0], pb[1] - pa[1]);
+    let length = gc_math::fm::hypot(dx, dy);
+    assert!((length - 0.05).abs() < 1e-6, "length {length}");
+    let angle = gc_math::fm::atan2(dy, dx).to_degrees();
+    assert!((angle - 30.0).abs() < 1e-6, "angle {angle}");
+}
