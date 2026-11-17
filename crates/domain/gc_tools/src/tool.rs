@@ -1,7 +1,7 @@
 //! The tools.
 
 use gc_core::Id;
-use gc_doc::{EndSnap, SketchOp};
+use gc_doc::{DimSlot, EndSnap, SketchOp, tangent_arc};
 use gc_math::fm;
 use gc_sketch::{Curve, CurveGeom, DimKind, GeoConstraint, Item, SkPoint, Sketch, SketchGrab};
 
@@ -14,6 +14,47 @@ pub enum Key {
     Escape,
     /// Delete the selection.
     Delete,
+    /// Line tool: take back the last segment of the chain.
+    Backspace,
+    /// Finish the current shape with the values typed into the input boxes.
+    Enter,
+}
+
+/// Commands from the right-click menu while a tool runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToolCommand {
+    /// Line tool: draw the closing segment back to where the chain started; the tool stays on.
+    Close,
+    /// End the current input (like Esc) without leaving the tool.
+    Done,
+}
+
+/// An input box of the heads-up display next to the cursor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum HudField {
+    /// Length of a line or of a rectangle's first side.
+    Length,
+    /// Direction of a line, degrees from the sketch's X axis.
+    Angle,
+    /// Radius of an arc or a fillet.
+    Radius,
+    /// Diameter of a circle.
+    Diameter,
+    /// Width of a rectangle (first side for the three-point rectangle: the second side).
+    Width,
+    /// Height of a two-point rectangle.
+    Height,
+}
+
+/// One input box as the display should show it now.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HudSlot {
+    /// Which box.
+    pub field: HudField,
+    /// The value the cursor gives right now, in SI units (metres, radians).
+    pub measured: f64,
+    /// The value typed and locked, if any (shown with a lock).
+    pub locked: Option<String>,
 }
 
 /// Input to a tool. Positions are sketch coordinates; `px` is the size of one screen pixel in sketch units.
@@ -66,6 +107,24 @@ pub enum ToolEvent {
     Value(String),
     /// The user dismissed the value box.
     CancelValue,
+    /// A double click: the line tool ends its chain there.
+    DoubleClick {
+        /// Cursor position.
+        pos: [f64; 2],
+        /// Size of a pixel.
+        px: f64,
+        /// Ctrl is held: do not snap.
+        modifier: bool,
+    },
+    /// A command from the right-click menu.
+    Command(ToolCommand),
+    /// A value typed into an input box (`Some`: locked to it) or cleared (`None`).
+    Hud {
+        /// Which box.
+        field: HudField,
+        /// The value as typed (a number, with or without a unit, or an expression).
+        value: Option<String>,
+    },
 }
 
 /// The geometric constraints the constraint tool can add.
@@ -107,6 +166,13 @@ pub enum ToolKind {
     Arc,
     /// Draw a rectangle by two opposite corners.
     Rectangle,
+    /// Draw an arc through three points: its two ends, then a point that sets the side and the radius.
+    Arc3,
+    /// Draw an arc that continues an existing line or arc from its end: click the end, then where the
+    /// arc goes.
+    ArcTangent,
+    /// Draw a rectangle at any angle: two corners along one side, then the width.
+    Rectangle3,
     /// Place a dimension.
     Dimension,
     /// Add a geometric constraint.
@@ -189,6 +255,8 @@ pub struct Preview {
     pub snap: Option<Snap>,
     /// Items picked so far (highlighted).
     pub picks: Vec<Item>,
+    /// Dotted alignment lines: from an existing point to where the cursor snapped level or plumb with it.
+    pub alignments: Vec<([f64; 2], [f64; 2])>,
 }
 
 /// A tool with its state.
@@ -207,6 +275,20 @@ pub struct Tool {
     arc_start: Option<[f64; 2]>,
     /// Arc: the angle swept from the start so far, signed, following the cursor round the centre.
     arc_sweep: f64,
+    /// What the first point snapped to.
+    anchor_snap: Option<Snap>,
+    /// Three-point arc and rectangle: the second point and what it snapped to.
+    second: Option<Snap>,
+    /// Line tool: the points of the chain drawn so far, start first.
+    chain: Vec<[f64; 2]>,
+    /// Line tool: dragging an arc out of the chain's end.
+    arc_drag: bool,
+    /// Tangent arc: the end it starts from and the curve it continues.
+    tangent_from: Option<(Id<SkPoint>, Id<Curve>)>,
+    /// Draw construction geometry (the Format panel's Construction toggle).
+    construction: bool,
+    /// Values typed into the input boxes, locked.
+    hud: Vec<(HudField, String)>,
 }
 
 fn angle_about(centre: [f64; 2], point: [f64; 2]) -> f64 {
@@ -344,6 +426,59 @@ fn picks_needed(kind: ConstraintKind) -> usize {
     }
 }
 
+/// A typed value as a plain number in SI units, for shaping the preview: millimetres (or degrees for an
+/// angle) unless a unit is given. `None` for an expression the tool cannot read on its own (it still
+/// becomes a dimension when the shape is finished).
+fn plain_value(text: &str, angle: bool) -> Option<f64> {
+    let text = text.trim();
+    let (number, unit) = match text.find(|c: char| c.is_alphabetic() || c == '°') {
+        Some(at) => (text[..at].trim(), text[at..].trim()),
+        None => (text, ""),
+    };
+    let value: f64 = number.parse().ok()?;
+    let scale = match (unit, angle) {
+        ("", false) | ("mm", false) => 0.001,
+        ("cm", false) => 0.01,
+        ("m", false) => 1.0,
+        ("in", false) => 0.0254,
+        ("", true) | ("deg", true) | ("°", true) => std::f64::consts::PI / 180.0,
+        ("rad", true) => 1.0,
+        _ => return None,
+    };
+    let value = value * scale;
+    value.is_finite().then_some(value)
+}
+
+/// The curve (line or arc) whose two ends are at `p` and `q`, in either order.
+fn curve_between(sketch: &Sketch, p: [f64; 2], q: [f64; 2]) -> Option<(Id<Curve>, Id<SkPoint>)> {
+    let near = |id: Id<SkPoint>, at: [f64; 2]| xy(sketch, id).is_some_and(|pos| distance(pos, at) < 1e-9);
+    sketch.curves.iter().rev().find_map(|(id, curve)| {
+        let (a, b) = match curve.geom {
+            CurveGeom::Line { a, b } => (a, b),
+            CurveGeom::Arc { s, e, .. } => (s, e),
+            CurveGeom::Circle { .. } => return None,
+        };
+        if near(a, p) && near(b, q) {
+            Some((*id, b))
+        } else if near(b, p) && near(a, q) {
+            Some((*id, a))
+        } else {
+            None
+        }
+    })
+}
+
+fn end_snap(snap: &Snap) -> EndSnap {
+    EndSnap {
+        point: snap.point,
+        curve: snap.curve,
+        also_on: snap.also_on,
+        midpoint_of: snap.midpoint_of,
+        aligned: snap.aligned.map(|(id, level, _)| (id, level)),
+        tangent_to: snap.tangent_to,
+    }
+}
+
 impl Tool {
     /// A tool in its initial state.
     pub fn new(kind: ToolKind) -> Self {
@@ -356,12 +491,29 @@ impl Tool {
             dragging: false,
             arc_start: None,
             arc_sweep: 0.0,
+            anchor_snap: None,
+            second: None,
+            chain: Vec::new(),
+            arc_drag: false,
+            tangent_from: None,
+            construction: false,
+            hud: Vec::new(),
         }
     }
 
     /// Which tool this is.
     pub fn kind(&self) -> ToolKind {
         self.kind
+    }
+
+    /// True when new geometry is drawn as construction geometry.
+    pub fn construction(&self) -> bool {
+        self.construction
+    }
+
+    /// Draws new geometry as construction geometry (or not) from now on.
+    pub fn set_construction(&mut self, construction: bool) {
+        self.construction = construction;
     }
 
     /// What the status bar should say.
@@ -375,8 +527,13 @@ impl Tool {
             (ToolKind::Arc, false) => Prompt::ArcCentre,
             (ToolKind::Arc, true) if self.arc_start.is_none() => Prompt::ArcStart,
             (ToolKind::Arc, true) => Prompt::ArcEnd,
-            (ToolKind::Rectangle, false) => Prompt::RectangleFirst,
-            (ToolKind::Rectangle, true) => Prompt::RectangleSecond,
+            (ToolKind::Arc3, false) => Prompt::ArcStart,
+            (ToolKind::Arc3, true) if self.second.is_none() => Prompt::ArcEnd,
+            (ToolKind::Arc3, true) => Prompt::ArcCentre,
+            (ToolKind::ArcTangent, _) if self.tangent_from.is_none() => Prompt::ArcStart,
+            (ToolKind::ArcTangent, _) => Prompt::ArcEnd,
+            (ToolKind::Rectangle | ToolKind::Rectangle3, false) => Prompt::RectangleFirst,
+            (ToolKind::Rectangle | ToolKind::Rectangle3, true) => Prompt::RectangleSecond,
             (ToolKind::Dimension, _) if self.pending.is_some() => Prompt::DimensionValue,
             (ToolKind::Dimension, _) if self.picks.is_empty() => Prompt::DimensionPick,
             (ToolKind::Dimension, _) => Prompt::DimensionPlace,
@@ -384,10 +541,124 @@ impl Tool {
         }
     }
 
+    /// The input boxes the display should show now (none when the tool takes no typed values at this
+    /// step).
+    pub fn hud(&self) -> Vec<HudSlot> {
+        let Some(anchor) = self.anchor.or(self.tangent_from.and(self.cursor.map(|c| c.pos))) else {
+            return Vec::new();
+        };
+        let cursor = self.cursor.map_or(anchor, |c| c.pos);
+        let slot =
+            |field, measured| HudSlot { field, measured, locked: self.locked(field).map(str::to_owned) };
+        match self.kind {
+            ToolKind::Line if !self.arc_drag => {
+                vec![
+                    slot(HudField::Length, distance(anchor, cursor)),
+                    slot(HudField::Angle, angle_about(anchor, cursor)),
+                ]
+            }
+            ToolKind::Circle => vec![slot(HudField::Diameter, 2.0 * distance(anchor, cursor))],
+            ToolKind::Arc if self.arc_start.is_none() => {
+                vec![slot(HudField::Radius, distance(anchor, cursor))]
+            }
+            ToolKind::Rectangle => vec![
+                slot(HudField::Width, (cursor[0] - anchor[0]).abs()),
+                slot(HudField::Height, (cursor[1] - anchor[1]).abs()),
+            ],
+            ToolKind::Rectangle3 => match self.second {
+                None => vec![
+                    slot(HudField::Length, distance(anchor, cursor)),
+                    slot(HudField::Angle, angle_about(anchor, cursor)),
+                ],
+                Some(second) => {
+                    let side = [second.pos[0] - anchor[0], second.pos[1] - anchor[1]];
+                    let length = fm::hypot(side[0], side[1]).max(f64::MIN_POSITIVE);
+                    let width = ((cursor[0] - second.pos[0]) * -side[1]
+                        + (cursor[1] - second.pos[1]) * side[0])
+                        / length;
+                    vec![slot(HudField::Width, width.abs())]
+                }
+            },
+            _ => Vec::new(),
+        }
+    }
+
+    fn locked(&self, field: HudField) -> Option<&str> {
+        self.hud.iter().find(|(f, _)| *f == field).map(|(_, v)| v.as_str())
+    }
+
+    /// The locked value of a box as a number, when the tool can read it.
+    fn locked_value(&self, field: HudField) -> Option<f64> {
+        self.locked(field).and_then(|text| plain_value(text, field == HudField::Angle))
+    }
+
+    /// The cursor moved to where the locked values put it.
+    fn apply_locks(&self, at: Snap) -> Snap {
+        let Some(anchor) = self.anchor else { return at };
+        let mut pos = at.pos;
+        match self.kind {
+            ToolKind::Line | ToolKind::Rectangle3 if self.second.is_none() => {
+                let length = self.locked_value(HudField::Length).unwrap_or_else(|| distance(anchor, pos));
+                let angle = self.locked_value(HudField::Angle).unwrap_or_else(|| angle_about(anchor, pos));
+                if self.locked(HudField::Length).is_some() || self.locked(HudField::Angle).is_some() {
+                    pos = [anchor[0] + length * fm::cos(angle), anchor[1] + length * fm::sin(angle)];
+                }
+            }
+            ToolKind::Circle | ToolKind::Arc if self.arc_start.is_none() => {
+                let radius = match self.kind {
+                    ToolKind::Circle => self.locked_value(HudField::Diameter).map(|d| d / 2.0),
+                    _ => self.locked_value(HudField::Radius),
+                };
+                if let Some(radius) = radius {
+                    let angle = angle_about(anchor, pos);
+                    pos = [anchor[0] + radius * fm::cos(angle), anchor[1] + radius * fm::sin(angle)];
+                }
+            }
+            ToolKind::Rectangle => {
+                let sign = |v: f64| if v < 0.0 { -1.0 } else { 1.0 };
+                if let Some(w) = self.locked_value(HudField::Width) {
+                    pos[0] = anchor[0] + sign(pos[0] - anchor[0]) * w;
+                }
+                if let Some(h) = self.locked_value(HudField::Height) {
+                    pos[1] = anchor[1] + sign(pos[1] - anchor[1]) * h;
+                }
+            }
+            ToolKind::Rectangle3 => {
+                if let (Some(second), Some(width)) = (self.second, self.locked_value(HudField::Width)) {
+                    let side = [second.pos[0] - anchor[0], second.pos[1] - anchor[1]];
+                    let length = fm::hypot(side[0], side[1]).max(f64::MIN_POSITIVE);
+                    let n = [-side[1] / length, side[0] / length];
+                    let along = (pos[0] - second.pos[0]) * n[0] + (pos[1] - second.pos[1]) * n[1];
+                    let sign = if along < 0.0 { -1.0 } else { 1.0 };
+                    pos = [second.pos[0] + n[0] * width * sign, second.pos[1] + n[1] * width * sign];
+                }
+            }
+            _ => return at,
+        }
+        if pos.iter().zip(&at.pos).all(|(a, b)| a.to_bits() == b.to_bits()) {
+            at
+        } else {
+            Snap { pos, ..snap_free(pos) }
+        }
+    }
+
     /// What to draw on top of the sketch.
-    pub fn preview(&self) -> Preview {
+    pub fn preview(&self, sketch: &Sketch) -> Preview {
         let mut preview = Preview { snap: self.cursor, picks: self.picks.clone(), ..Preview::default() };
-        if let (Some(anchor), Some(cursor)) = (self.anchor, self.cursor.map(|s| s.pos)) {
+        if let Some((_, _, from)) = self.cursor.and_then(|c| c.aligned) {
+            preview.alignments.push((from, self.cursor.map_or(from, |c| c.pos)));
+        }
+        let cursor = self.cursor.map(|s| s.pos);
+        if let (Some((from, curve)), Some(cursor)) =
+            (self.tangent_from.or(self.chain_end(sketch).filter(|_| self.arc_drag)), cursor)
+            && (self.kind == ToolKind::ArcTangent || self.arc_drag)
+        {
+            if let Some(arc) = tangent_arc(sketch, from, curve, cursor) {
+                preview.arcs.push((arc.centre, arc.radius, arc.start_angle, arc.sweep));
+            }
+            return preview;
+        }
+        if let (Some(anchor), Some(cursor)) = (self.anchor, cursor) {
             match self.kind {
                 ToolKind::Line => preview.lines.push((anchor, cursor)),
                 ToolKind::Circle => preview.circles.push((anchor, distance(anchor, cursor))),
@@ -408,22 +679,73 @@ impl Tool {
                         ));
                     }
                 },
+                ToolKind::Arc3 => match self.second {
+                    None => preview.lines.push((anchor, cursor)),
+                    Some(second) => {
+                        if let Some((centre, radius, start, sweep)) = arc_through(anchor, second.pos, cursor)
+                        {
+                            preview.arcs.push((centre, radius, start, sweep));
+                        } else {
+                            preview.lines.push((anchor, second.pos));
+                        }
+                    }
+                },
                 ToolKind::Rectangle => {
                     let corners = [anchor, [cursor[0], anchor[1]], cursor, [anchor[0], cursor[1]]];
                     preview.lines.extend((0..4).map(|i| (corners[i], corners[(i + 1) % 4])));
                 }
+                ToolKind::Rectangle3 => match self.second {
+                    None => preview.lines.push((anchor, cursor)),
+                    Some(second) => {
+                        let side = [second.pos[0] - anchor[0], second.pos[1] - anchor[1]];
+                        let length = fm::hypot(side[0], side[1]).max(f64::MIN_POSITIVE);
+                        let n = [-side[1] / length, side[0] / length];
+                        let width = (cursor[0] - second.pos[0]) * n[0] + (cursor[1] - second.pos[1]) * n[1];
+                        let corners = [
+                            anchor,
+                            second.pos,
+                            [second.pos[0] + n[0] * width, second.pos[1] + n[1] * width],
+                            [anchor[0] + n[0] * width, anchor[1] + n[1] * width],
+                        ];
+                        preview.lines.extend((0..4).map(|i| (corners[i], corners[(i + 1) % 4])));
+                    }
+                },
                 _ => {}
             }
         }
         preview
     }
 
+    /// Line tool: the last curve of the chain and its point at the chain's end.
+    fn chain_end(&self, sketch: &Sketch) -> Option<(Id<SkPoint>, Id<Curve>)> {
+        let [.., before, end] = self.chain.as_slice() else { return None };
+        curve_between(sketch, *before, *end).map(|(curve, point)| (point, curve))
+    }
+
     fn reset(&mut self) {
         self.anchor = None;
+        self.anchor_snap = None;
+        self.second = None;
         self.arc_start = None;
         self.arc_sweep = 0.0;
         self.picks.clear();
         self.pending = None;
+        self.chain.clear();
+        self.arc_drag = false;
+        self.tangent_from = None;
+        self.hud.clear();
+    }
+
+    /// An edit as drawn: wrapped as construction geometry when the toggle is on, and with the locked
+    /// input values attached as dimensions.
+    fn emit(&mut self, op: SketchOp, slots: &[(HudField, DimSlot)]) -> ToolOutput {
+        let dims: Vec<(DimSlot, String)> = slots
+            .iter()
+            .filter_map(|(field, slot)| self.locked(*field).map(|text| (*slot, text.to_owned())))
+            .collect();
+        self.hud.clear();
+        let op = if dims.is_empty() { op } else { SketchOp::WithDimensions { op: Box::new(op), dims } };
+        ToolOutput::Edit(if self.construction { SketchOp::AsConstruction(Box::new(op)) } else { op })
     }
 
     /// Feeds one event to the tool. `sketch` is the sketch as it is now (after earlier outputs were
@@ -433,14 +755,23 @@ impl Tool {
             ToolEvent::Move { pos, px, suppress_snap } => {
                 let drawing = matches!(
                     self.kind,
-                    ToolKind::Line | ToolKind::Circle | ToolKind::Arc | ToolKind::Rectangle
+                    ToolKind::Line
+                        | ToolKind::Circle
+                        | ToolKind::Arc
+                        | ToolKind::Arc3
+                        | ToolKind::ArcTangent
+                        | ToolKind::Rectangle
+                        | ToolKind::Rectangle3
                 );
                 let previous = if self.kind == ToolKind::Line { self.anchor } else { None };
                 let before = self.cursor.map(|s| s.pos);
-                self.cursor = drawing.then(|| snap(sketch, pos, px, previous, suppress_snap));
+                self.cursor =
+                    drawing.then(|| self.apply_locks(snap(sketch, pos, px, previous, suppress_snap)));
                 // The arc follows the cursor round its centre, so that it can be drawn either way and
                 // past half a turn.
-                if let (Some(centre), Some(start), Some(now)) = (self.anchor, self.arc_start, self.cursor) {
+                if let (ToolKind::Arc, Some(centre), Some(start), Some(now)) =
+                    (self.kind, self.anchor, self.arc_start, self.cursor)
+                {
                     let from = angle_about(centre, before.unwrap_or(start));
                     let mut step = angle_about(centre, now.pos) - from;
                     let tau = std::f64::consts::TAU;
@@ -453,6 +784,18 @@ impl Tool {
             ToolEvent::ClickItem { item, pos, modifier } => {
                 self.click(sketch, pos, 0.0, modifier, Some(item))
             }
+            ToolEvent::DoubleClick { pos, px, modifier } => {
+                if self.kind != ToolKind::Line {
+                    return self.click(sketch, pos, px, modifier, None);
+                }
+                // The second click of a double click may already have drawn the last segment.
+                let mut out = Vec::new();
+                if self.anchor.is_some_and(|a| distance(a, snap(sketch, pos, px, None, modifier).pos) > px) {
+                    out = self.click(sketch, pos, px, modifier, None);
+                }
+                self.reset();
+                out
+            }
             ToolEvent::DragStart { pos, px } if self.kind == ToolKind::Select => {
                 let grab = match pick(sketch, pos, px) {
                     Some(Item::Point(p)) => SketchGrab::Point(p),
@@ -462,6 +805,40 @@ impl Tool {
                 self.dragging = true;
                 vec![ToolOutput::BeginDrag { grab, cursor: pos }]
             }
+            // Line tool: dragging out of the chain's end draws a tangent arc.
+            ToolEvent::DragStart { pos, px } if self.kind == ToolKind::Line => {
+                if self.anchor.is_some_and(|a| distance(a, pos) <= crate::tolerance::POINT_PX * px)
+                    && self.chain_end(sketch).is_some()
+                {
+                    self.arc_drag = true;
+                    self.cursor = Some(snap(sketch, pos, px, None, true));
+                }
+                Vec::new()
+            }
+            ToolEvent::Drag { pos } if self.arc_drag => {
+                self.cursor = Some(snap_free(pos));
+                Vec::new()
+            }
+            ToolEvent::DragEnd if self.arc_drag => {
+                self.arc_drag = false;
+                let (Some((from, curve)), Some(end)) = (self.chain_end(sketch), self.cursor) else {
+                    return Vec::new();
+                };
+                if tangent_arc(sketch, from, curve, end.pos).is_none() {
+                    return Vec::new();
+                }
+                self.chain.push(end.pos);
+                self.anchor = Some(end.pos);
+                vec![self.emit(
+                    SketchOp::AddTangentArc {
+                        from,
+                        curve,
+                        end: [end.pos[0], end.pos[1], 0.0],
+                        snap_end: end_snap(&end),
+                    },
+                    &[],
+                )]
+            }
             ToolEvent::Drag { pos } if self.dragging => vec![ToolOutput::DragTo(pos)],
             ToolEvent::DragEnd if self.dragging => {
                 self.dragging = false;
@@ -470,11 +847,84 @@ impl Tool {
             ToolEvent::DragStart { .. } | ToolEvent::Drag { .. } | ToolEvent::DragEnd => Vec::new(),
             ToolEvent::Key(Key::Delete) if self.kind == ToolKind::Select => vec![ToolOutput::DeleteSelection],
             ToolEvent::Key(Key::Delete) => Vec::new(),
+            ToolEvent::Key(Key::Backspace) if self.kind == ToolKind::Line => {
+                // Take back the chain's last segment (line or arc); with none left, the start point.
+                let last = self.chain_end(sketch).map(|(_, curve)| curve);
+                self.chain.pop();
+                self.anchor = self.chain.last().copied();
+                if self.anchor.is_none() {
+                    self.reset();
+                }
+                last.map(|curve| ToolOutput::Edit(SketchOp::Delete(vec![Item::Curve(curve)])))
+                    .into_iter()
+                    .collect()
+            }
+            ToolEvent::Key(Key::Backspace) => Vec::new(),
+            ToolEvent::Key(Key::Enter) => {
+                // Finish the shape at the locked values, as a click there would.
+                let Some(cursor) = self.cursor else { return Vec::new() };
+                let pos = cursor.pos;
+                self.click(sketch, pos, 0.0, true, None)
+            }
+            ToolEvent::Command(ToolCommand::Close) if self.kind == ToolKind::Line => {
+                let (Some(&start), Some(end)) = (self.chain.first(), self.anchor) else { return Vec::new() };
+                if self.chain.len() < 3 {
+                    return Vec::new(); // closing needs at least two segments
+                }
+                let snap_a = curve_between(sketch, self.chain[self.chain.len() - 2], end)
+                    .map(|(_, point)| EndSnap { point: Some(point), ..EndSnap::default() })
+                    .unwrap_or_default();
+                let snap_b = curve_between(sketch, start, self.chain[1])
+                    .and_then(|(curve, other)| {
+                        let (a, b) = match sketch.curves.get(&curve)?.geom {
+                            CurveGeom::Line { a, b } => (a, b),
+                            CurveGeom::Arc { s, e, .. } => (s, e),
+                            CurveGeom::Circle { .. } => return None,
+                        };
+                        Some(if other == a { b } else { a })
+                    })
+                    .map(|point| EndSnap { point: Some(point), ..EndSnap::default() })
+                    .unwrap_or_default();
+                self.reset();
+                vec![self.emit(
+                    SketchOp::AddLine {
+                        a: [end[0], end[1], 0.0],
+                        b: [start[0], start[1], 0.0],
+                        snap_a,
+                        snap_b,
+                        horizontal: None,
+                    },
+                    &[],
+                )]
+            }
+            ToolEvent::Command(ToolCommand::Close) => Vec::new(),
+            ToolEvent::Command(ToolCommand::Done) => {
+                if self.dragging {
+                    self.dragging = false;
+                    return vec![ToolOutput::CancelDrag];
+                }
+                self.reset();
+                Vec::new()
+            }
+            ToolEvent::Hud { field, value } => {
+                self.hud.retain(|(f, _)| *f != field);
+                if let Some(value) = value.filter(|v| !v.trim().is_empty()) {
+                    self.hud.push((field, value));
+                }
+                if let Some(cursor) = self.cursor {
+                    self.cursor = Some(self.apply_locks(cursor));
+                }
+                Vec::new()
+            }
             ToolEvent::Key(Key::Escape) => {
                 if self.dragging {
                     self.dragging = false;
                     vec![ToolOutput::CancelDrag]
-                } else if self.anchor.is_some() || !self.picks.is_empty() || self.pending.is_some() {
+                } else if self.anchor.is_some()
+                    || !self.picks.is_empty()
+                    || self.pending.is_some()
+                    || self.tangent_from.is_some()
+                {
                     self.reset();
                     Vec::new()
                 } else if self.kind == ToolKind::Select {
@@ -497,6 +947,24 @@ impl Tool {
         }
     }
 
+    /// Where the click puts the next point: snapped, then moved to the locked values.
+    fn place(
+        &self,
+        sketch: &Sketch,
+        pos: [f64; 2],
+        px: f64,
+        previous: Option<[f64; 2]>,
+        modifier: bool,
+    ) -> Snap {
+        let typed = !self.hud.is_empty() && px == 0.0;
+        let snapped = if typed {
+            self.cursor.unwrap_or_else(|| snap_free(pos))
+        } else {
+            snap(sketch, pos, px, previous, modifier)
+        };
+        self.apply_locks(snapped)
+    }
+
     /// `picked` is what the caller found under the cursor; without it the tool picks in the sketch plane.
     fn click(
         &mut self,
@@ -506,43 +974,67 @@ impl Tool {
         modifier: bool,
         picked: Option<Option<Item>>,
     ) -> Vec<ToolOutput> {
-        let end_snap = |s: &Snap| EndSnap { point: s.point, curve: s.curve };
         let pick = |sketch: &Sketch, pos: [f64; 2], px: f64| picked.unwrap_or_else(|| pick(sketch, pos, px));
         match self.kind {
             ToolKind::Select => vec![ToolOutput::Select { item: pick(sketch, pos, px), extend: modifier }],
             ToolKind::Line => {
-                let here = snap(sketch, pos, px, self.anchor, modifier);
-                let Some(start) = self.anchor.replace(here.pos) else { return Vec::new() };
+                let here = self.place(sketch, pos, px, self.anchor, modifier);
+                let Some(start) = self.anchor else {
+                    self.anchor = Some(here.pos);
+                    self.anchor_snap = Some(here);
+                    self.chain = vec![here.pos];
+                    return Vec::new();
+                };
                 if distance(start, here.pos) <= px {
-                    self.anchor = Some(start);
                     return Vec::new(); // a click on the start point is not a line
                 }
                 // The start is snapped again now: the previous segment's end point exists by now, so a
                 // chain becomes connected lines.
-                let at_start = snap(sketch, start, px, None, modifier);
-                vec![ToolOutput::Edit(SketchOp::AddLine {
-                    a: [start[0], start[1], 0.0],
-                    b: [here.pos[0], here.pos[1], 0.0],
-                    snap_a: end_snap(&at_start),
-                    snap_b: end_snap(&here),
-                    horizontal: here.horizontal,
-                })]
+                let at_start = match self.anchor_snap.filter(|_| self.chain.len() == 1) {
+                    Some(first) => first,
+                    None => snap(sketch, start, px.max(1e-9), None, modifier),
+                };
+                self.anchor = Some(here.pos);
+                self.anchor_snap = None;
+                self.chain.push(here.pos);
+                vec![self.emit(
+                    SketchOp::AddLine {
+                        a: [start[0], start[1], 0.0],
+                        b: [here.pos[0], here.pos[1], 0.0],
+                        snap_a: end_snap(&at_start),
+                        snap_b: end_snap(&here),
+                        horizontal: here.horizontal,
+                    },
+                    &[(HudField::Length, DimSlot::Length)],
+                )]
             }
             ToolKind::Circle => {
-                let here = snap(sketch, pos, px, None, modifier).pos;
+                let here = self.place(sketch, pos, px, None, modifier);
                 let Some(centre) = self.anchor.take() else {
-                    self.anchor = Some(here);
+                    self.anchor = Some(here.pos);
+                    self.anchor_snap = Some(here);
                     return Vec::new();
                 };
-                let radius = distance(centre, here);
+                let radius = distance(centre, here.pos);
                 if radius <= px {
                     self.anchor = Some(centre);
                     return Vec::new();
                 }
-                vec![ToolOutput::Edit(SketchOp::AddCircle { centre: [centre[0], centre[1], 0.0], radius })]
+                let centre_snap = self.anchor_snap.take().map(|s| end_snap(&s)).unwrap_or_default();
+                let out = self.emit(
+                    SketchOp::AddCircle {
+                        centre: [centre[0], centre[1], 0.0],
+                        radius,
+                        centre_snap,
+                        rim_snap: end_snap(&here),
+                    },
+                    &[(HudField::Diameter, DimSlot::Diameter)],
+                );
+                self.reset();
+                vec![out]
             }
             ToolKind::Arc => {
-                let here = snap(sketch, pos, px, None, modifier).pos;
+                let here = self.place(sketch, pos, px, None, modifier).pos;
                 let Some(centre) = self.anchor else {
                     self.anchor = Some(here);
                     return Vec::new();
@@ -552,7 +1044,7 @@ impl Tool {
                         self.arc_start = Some(here);
                         self.arc_sweep = 0.0;
                         // The sweep is measured from the start point, not from wherever the cursor was.
-                        self.cursor = Some(Snap { pos: here, ..snap(sketch, here, px, None, true) });
+                        self.cursor = Some(snap_free(here));
                     }
                     return Vec::new();
                 };
@@ -565,29 +1057,131 @@ impl Tool {
                 let end = [centre[0] + radius * fm::cos(angle), centre[1] + radius * fm::sin(angle)];
                 // Stored arcs run counter-clockwise from start to end.
                 let (first, last) = if self.arc_sweep > 0.0 { (start, end) } else { (end, start) };
+                let out = self.emit(
+                    SketchOp::AddArc {
+                        centre: [centre[0], centre[1], 0.0],
+                        start: [first[0], first[1], 0.0],
+                        end: [last[0], last[1], 0.0],
+                    },
+                    &[(HudField::Radius, DimSlot::Radius)],
+                );
                 self.reset();
-                vec![ToolOutput::Edit(SketchOp::AddArc {
-                    centre: [centre[0], centre[1], 0.0],
-                    start: [first[0], first[1], 0.0],
-                    end: [last[0], last[1], 0.0],
-                })]
+                vec![out]
             }
-            ToolKind::Rectangle => {
-                let here = snap(sketch, pos, px, None, modifier).pos;
-                let Some(corner) = self.anchor.take() else {
-                    self.anchor = Some(here);
+            ToolKind::Arc3 => {
+                let here = self.place(sketch, pos, px, None, modifier);
+                let Some(first) = self.anchor else {
+                    self.anchor = Some(here.pos);
+                    self.anchor_snap = Some(here);
                     return Vec::new();
                 };
-                if (here[0] - corner[0]).abs() <= px || (here[1] - corner[1]).abs() <= px {
-                    self.anchor = Some(corner);
+                let Some(second) = self.second else {
+                    if distance(first, here.pos) > px {
+                        self.second = Some(here);
+                    }
+                    return Vec::new();
+                };
+                if arc_through(first, second.pos, here.pos).is_none() {
+                    return Vec::new(); // on the chord's line: no arc
+                }
+                let snap_a = self.anchor_snap.map(|s| end_snap(&s)).unwrap_or_default();
+                let out = self.emit(
+                    SketchOp::AddArcThrough {
+                        a: [first[0], first[1], 0.0],
+                        b: [second.pos[0], second.pos[1], 0.0],
+                        through: [here.pos[0], here.pos[1], 0.0],
+                        snap_a,
+                        snap_b: end_snap(&second),
+                    },
+                    &[],
+                );
+                self.reset();
+                vec![out]
+            }
+            ToolKind::ArcTangent => {
+                let Some((from, curve)) = self.tangent_from else {
+                    // The first click picks the end of a line or arc to continue.
+                    let Some(Item::Point(point)) = pick(sketch, pos, px) else { return Vec::new() };
+                    let owner = sketch.curves.iter().find_map(|(id, c)| match c.geom {
+                        CurveGeom::Line { a, b } | CurveGeom::Arc { s: a, e: b, .. }
+                            if a == point || b == point =>
+                        {
+                            Some(*id)
+                        }
+                        _ => None,
+                    });
+                    if let Some(curve) = owner {
+                        self.tangent_from = Some((point, curve));
+                    }
+                    return Vec::new();
+                };
+                let here = self.place(sketch, pos, px, None, modifier);
+                if tangent_arc(sketch, from, curve, here.pos).is_none() {
                     return Vec::new();
                 }
-                let at_corner = snap(sketch, corner, px, None, modifier);
-                vec![ToolOutput::Edit(SketchOp::AddRectangle {
-                    a: corner,
-                    b: here,
-                    snap_a: end_snap(&at_corner),
-                })]
+                let out = self.emit(
+                    SketchOp::AddTangentArc {
+                        from,
+                        curve,
+                        end: [here.pos[0], here.pos[1], 0.0],
+                        snap_end: end_snap(&here),
+                    },
+                    &[],
+                );
+                self.reset();
+                vec![out]
+            }
+            ToolKind::Rectangle => {
+                let here = self.place(sketch, pos, px, None, modifier);
+                let Some(corner) = self.anchor else {
+                    self.anchor = Some(here.pos);
+                    self.anchor_snap = Some(here);
+                    return Vec::new();
+                };
+                if (here.pos[0] - corner[0]).abs() <= px || (here.pos[1] - corner[1]).abs() <= px {
+                    return Vec::new();
+                }
+                let snap_a = self.anchor_snap.map(|s| end_snap(&s)).unwrap_or_default();
+                let out = self.emit(
+                    SketchOp::AddRectangle { a: corner, b: here.pos, snap_a },
+                    &[(HudField::Width, DimSlot::Width), (HudField::Height, DimSlot::Height)],
+                );
+                self.reset();
+                vec![out]
+            }
+            ToolKind::Rectangle3 => {
+                let here = self.place(sketch, pos, px, None, modifier);
+                let Some(first) = self.anchor else {
+                    self.anchor = Some(here.pos);
+                    self.anchor_snap = Some(here);
+                    return Vec::new();
+                };
+                let Some(second) = self.second else {
+                    if distance(first, here.pos) > px {
+                        self.second = Some(here);
+                    }
+                    return Vec::new();
+                };
+                let side = [second.pos[0] - first[0], second.pos[1] - first[1]];
+                let length = fm::hypot(side[0], side[1]);
+                let width = ((here.pos[0] - second.pos[0]) * -side[1]
+                    + (here.pos[1] - second.pos[1]) * side[0])
+                    / length;
+                if width.abs() <= px {
+                    return Vec::new();
+                }
+                let snap_a = self.anchor_snap.map(|s| end_snap(&s)).unwrap_or_default();
+                let out = self.emit(
+                    SketchOp::AddRectangle3 {
+                        a: [first[0], first[1], 0.0],
+                        b: [second.pos[0], second.pos[1], 0.0],
+                        c: [here.pos[0], here.pos[1], 0.0],
+                        snap_a,
+                    },
+                    &[(HudField::Length, DimSlot::Width), (HudField::Width, DimSlot::Height)],
+                );
+                self.reset();
+                vec![out]
             }
             ToolKind::Dimension => {
                 if self.pending.is_some() {
@@ -625,4 +1219,39 @@ impl Tool {
             }
         }
     }
+}
+
+/// The cursor position as it is, with nothing snapped.
+fn snap_free(pos: [f64; 2]) -> Snap {
+    Snap {
+        pos,
+        kind: crate::pick::SnapKind::Free,
+        point: None,
+        curve: None,
+        horizontal: None,
+        inference: None,
+        also_on: None,
+        midpoint_of: None,
+        aligned: None,
+        tangent_to: None,
+    }
+}
+
+/// The arc from `a` to `b` through `through`: centre, radius, start angle (at `a`) and signed sweep.
+fn arc_through(a: [f64; 2], b: [f64; 2], through: [f64; 2]) -> Option<([f64; 2], f64, f64, f64)> {
+    let d = 2.0 * (a[0] * (b[1] - through[1]) + b[0] * (through[1] - a[1]) + through[0] * (a[1] - b[1]));
+    let scale = distance(a, b).max(distance(a, through)).max(1e-12);
+    if d.abs() < 1e-9 * scale * scale {
+        return None;
+    }
+    let sq = |p: [f64; 2]| p[0] * p[0] + p[1] * p[1];
+    let centre = [
+        (sq(a) * (b[1] - through[1]) + sq(b) * (through[1] - a[1]) + sq(through) * (a[1] - b[1])) / d,
+        (sq(a) * (through[0] - b[0]) + sq(b) * (a[0] - through[0]) + sq(through) * (b[0] - a[0])) / d,
+    ];
+    let tau = std::f64::consts::TAU;
+    let (ta, tb, tt) = (angle_about(centre, a), angle_about(centre, b), angle_about(centre, through));
+    let ccw = (tb - ta).rem_euclid(tau);
+    let sweep = if (tt - ta).rem_euclid(tau) < ccw { ccw } else { ccw - tau };
+    Some((centre, distance(centre, a), ta, sweep))
 }

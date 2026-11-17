@@ -95,8 +95,8 @@ impl Session {
         let line = SketchOp::AddLine {
             a: start,
             b: pos,
-            snap_a: EndSnap { point: start_point, curve: None },
-            snap_b: EndSnap { point, curve: None },
+            snap_a: EndSnap { point: start_point, ..EndSnap::default() },
+            snap_b: EndSnap { point, ..EndSnap::default() },
             horizontal: None,
         };
         let Ok(created) = self.sketch_op(line) else { return };
