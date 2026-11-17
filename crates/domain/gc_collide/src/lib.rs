@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use gc_math::{DPose3, DQuat, DVec3};
 use gc_mesh::MeshData;
-use parry3d_f64::query;
+use parry3d_f64::query::{self, ClosestPoints};
 use parry3d_f64::shape::SharedShape;
 
 /// A shape to build a body from. Sizes are metres; every shape is centred on its own origin.
@@ -85,6 +85,16 @@ pub struct Hit {
 struct Part {
     local: DPose3,
     shape: SharedShape,
+    /// Centre and half extents of the shape's bounds in its own frame.
+    centre: DVec3,
+    half: DVec3,
+}
+
+impl Part {
+    fn new(local: DPose3, shape: SharedShape) -> Self {
+        let aabb = shape.compute_local_aabb();
+        Self { local, shape, centre: (aabb.mins + aabb.maxs) / 2.0, half: (aabb.maxs - aabb.mins) / 2.0 }
+    }
 }
 
 #[derive(Clone)]
@@ -103,10 +113,17 @@ impl Body {
     fn refresh_bounds(&mut self) {
         let mut low = DVec3::INFINITY;
         let mut high = DVec3::NEG_INFINITY;
+        // The local bounds turned with the part: a little looser than the shape's own bounds, but it
+        // costs the same for every shape, however many vertices a hull has.
         for part in &self.parts {
-            let aabb = part.shape.compute_aabb(&(self.pose * part.local));
-            low = low.min(aabb.mins);
-            high = high.max(aabb.maxs);
+            let pose = self.pose * part.local;
+            let centre = pose * part.centre;
+            let turn = gc_math::DMat3::from_quat(pose.rotation);
+            let half = turn.x_axis.abs() * part.half.x
+                + turn.y_axis.abs() * part.half.y
+                + turn.z_axis.abs() * part.half.z;
+            low = low.min(centre - half);
+            high = high.max(centre + half);
         }
         (self.low, self.high) = (low, high);
     }
@@ -204,19 +221,26 @@ fn proximity(a: &Body, b: &Body, padding: f64) -> Result<Proximity, CollideError
         for part_b in &b.parts {
             let (pose_a, pose_b) = (a.pose * part_a.local, b.pose * part_b.local);
             let unsupported = |_e| CollideError::Unsupported;
-            let overlap = query::intersection_test(&pose_a, &*part_a.shape, &pose_b, &*part_b.shape)
-                .map_err(unsupported)?;
-            if overlap.intersecting {
-                return Ok(Proximity::Colliding);
-            }
             if padding > 0.0 {
-                let gap = query::distance(&pose_a, &*part_a.shape, &pose_b, &*part_b.shape)
+                // One query answers both questions: overlapping, or how close within the padding.
+                match query::closest_points(&pose_a, &*part_a.shape, &pose_b, &*part_b.shape, padding)
                     .map_err(unsupported)?
-                    .distance;
-                let closer = !matches!(closest, Proximity::WithinPadding(d) if d <= gap);
-                if gap <= padding && closer {
-                    closest = Proximity::WithinPadding(gap);
+                {
+                    ClosestPoints::Intersecting => return Ok(Proximity::Colliding),
+                    ClosestPoints::WithinMargin(on_a, on_b) => {
+                        let gap = on_a.distance(on_b);
+                        let closer = !matches!(closest, Proximity::WithinPadding(d) if d <= gap);
+                        if gap <= padding && closer {
+                            closest = Proximity::WithinPadding(gap);
+                        }
+                    }
+                    ClosestPoints::Disjoint => {}
                 }
+            } else if query::intersection_test(&pose_a, &*part_a.shape, &pose_b, &*part_b.shape)
+                .map_err(unsupported)?
+                .intersecting
+            {
+                return Ok(Proximity::Colliding);
             }
         }
     }
@@ -244,7 +268,7 @@ impl World {
         let mut parts = Vec::with_capacity(shapes.len());
         for (pose, desc) in shapes {
             let (correction, shape) = build(desc)?;
-            parts.push(Part { local: *pose * correction, shape });
+            parts.push(Part::new(*pose * correction, shape));
         }
         let mut body = Body {
             name: name.to_owned(),

@@ -143,10 +143,27 @@ impl RobotScene {
                 world.allow(a, b);
             }
         }
+        // Links that no chain joint moves (the base, typically) keep their distance to every obstacle
+        // whatever the configuration: checking them tells nothing about a motion, and a base standing on
+        // a table would otherwise make every configuration invalid.
+        let static_links: Vec<BodyId> = {
+            let mut still = Vec::new();
+            let mut moved = Vec::new();
+            model.link_poses(&chain.expand(&vec![0.0; chain.dof()]), &mut still);
+            model.link_poses(&chain.expand(&vec![0.7; chain.dof()]), &mut moved);
+            link_bodies
+                .iter()
+                .zip(still.iter().zip(&moved))
+                .filter_map(|(body, (a, b))| body.filter(|_| a == b))
+                .collect()
+        };
         for obstacle in obstacles {
             let body =
                 world.add_body(&obstacle.name, false, 0.0, &[(DPose3::IDENTITY, obstacle.shape.clone())])?;
             world.set_pose(body, obstacle.pose);
+            for link in &static_links {
+                world.allow(*link, body);
+            }
         }
         let tool = DPose3::IDENTITY;
         let mut scene =
