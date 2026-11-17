@@ -43,6 +43,16 @@ pub enum Icon {
     Import,
     /// A house.
     Home,
+    /// A ring with an arrow: orbit.
+    Orbit,
+    /// Four arrows: pan.
+    Pan,
+    /// A magnifier: zoom.
+    Zoom,
+    /// Corner brackets round a box: zoom all.
+    ZoomAll,
+    /// A face seen straight on with an eye line: look at.
+    LookAt,
     /// A box in perspective, its far face smaller.
     Perspective,
     /// A short text, for constraint symbols.
@@ -228,6 +238,59 @@ impl Icon {
                 for pair in walls.windows(2) {
                     line(pair[0], pair[1]);
                 }
+            }
+            Self::Orbit => {
+                painter.circle_stroke(at(0.5, 0.5), rect.width() * 0.32, stroke);
+                dot(at(0.5, 0.5));
+                line(at(0.82, 0.3), at(0.9, 0.18));
+                line(at(0.82, 0.3), at(0.7, 0.28));
+            }
+            Self::Pan => {
+                line(at(0.5, 0.1), at(0.5, 0.9));
+                line(at(0.1, 0.5), at(0.9, 0.5));
+                for (a, b, c) in [
+                    (at(0.5, 0.1), at(0.4, 0.22), at(0.6, 0.22)),
+                    (at(0.5, 0.9), at(0.4, 0.78), at(0.6, 0.78)),
+                    (at(0.1, 0.5), at(0.22, 0.4), at(0.22, 0.6)),
+                    (at(0.9, 0.5), at(0.78, 0.4), at(0.78, 0.6)),
+                ] {
+                    line(a, b);
+                    line(a, c);
+                }
+            }
+            Self::Zoom => {
+                painter.circle_stroke(at(0.43, 0.43), rect.width() * 0.26, stroke);
+                line(at(0.62, 0.62), at(0.88, 0.88));
+                line(at(0.33, 0.43), at(0.53, 0.43));
+                line(at(0.43, 0.33), at(0.43, 0.53));
+            }
+            Self::ZoomAll => {
+                for (x, y, dx, dy) in [
+                    (0.12, 0.12, 1.0, 1.0),
+                    (0.88, 0.12, -1.0, 1.0),
+                    (0.12, 0.88, 1.0, -1.0),
+                    (0.88, 0.88, -1.0, -1.0),
+                ] {
+                    line(at(x, y), at(x + 0.22 * dx, y));
+                    line(at(x, y), at(x, y + 0.22 * dy));
+                }
+                painter.rect_stroke(
+                    egui::Rect::from_two_pos(at(0.36, 0.36), at(0.64, 0.64)),
+                    1.0,
+                    stroke,
+                    egui::StrokeKind::Middle,
+                );
+            }
+            Self::LookAt => {
+                painter.rect_stroke(
+                    egui::Rect::from_two_pos(at(0.2, 0.25), at(0.8, 0.75)),
+                    1.0,
+                    stroke,
+                    egui::StrokeKind::Middle,
+                );
+                line(at(0.5, 0.05), at(0.5, 0.25));
+                line(at(0.42, 0.14), at(0.5, 0.25));
+                line(at(0.58, 0.14), at(0.5, 0.25));
             }
             Self::Text(text) => {
                 painter.text(
