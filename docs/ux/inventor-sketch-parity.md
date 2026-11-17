@@ -89,7 +89,7 @@
 |---|---|---|---|---|---|---|
 | Rectangular Pattern (사각 패턴) [S12] | 대화상자: 기하 선택 → 방향 1 선택(화살표) + Count + Spacing(수식 가능), 방향 2 동일. 선택 Extents: Boundary(Include Geometry/Include Centroids/Base Points). 고급: Suppress, Associative, Fitted. OK로 생성. 패턴 형상은 완전 구속이며 구속은 그룹으로 유지. 경계 밖 형상은 다른 색·선종류(2026.2) | RP [S29] | 없음 | 신규 | P2 | BE+FE |
 | Circular Pattern (원형 패턴) [S12] | 축(점·꼭짓점·작업축) 선택, Count, Angle(첫~끝 요소 사이 각도, 수식 가능) | CP [S29] | 없음 | 신규 | P2 | BE+FE |
-| Mirror (대칭 복사) [S12] | 대화상자: 기하 선택 → Mirror Line 선택(파란 화살표). 스플라인이 대칭선과 교차하면 Self Symmetric. Apply로 계속·Done으로 종료 | (미확인; 표의 MI는 피처 미러) | 없음 | 신규(대칭 구속은 있음) | P2 | BE |
+| Mirror (대칭 복사) [S12] | 대화상자: 기하 선택 → Mirror Line 선택(파란 화살표). 스플라인이 대칭선과 교차하면 Self Symmetric. Apply로 계속·Done으로 종료 | (미확인; 표의 MI는 피처 미러) | **BE 완료**: `SketchOp::Mirror{curves, axis}` — 복사 점마다 대칭 구속(대칭선 위 점은 공유), 원은 같은 반지름, 호는 방향 반대로. 자유도 추가 없음(원본을 바꾸면 따라감) | 대화상자(Select·Mirror Line·Apply/Done)는 FE. Self Symmetric(스플라인)은 스플라인이 없어 해당 없음 | P2 | BE |
 | 패턴 편집 | 요소 우클릭 Edit Pattern, 패턴 치수 더블클릭, Delete / Delete Pattern / Suppress Element(s) [S12] | | 없음 | | P3 | BE+FE |
 
 ### 2.6 Constrain 패널 — 구속조건

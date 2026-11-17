@@ -222,3 +222,78 @@ fn straight_slots_keep_their_centres_and_width_with_five_degrees_of_freedom() {
     assert!(bench.op(bad(SlotKind::Overall, [0.0; 3], [0.1, 0.0, 0.0], 0.1)).is_err(), "shorter than wide");
     assert!(bench.op(bad(SlotKind::CenterPoint, [0.0; 3], [f64::NAN, 0.0, 0.0], 0.1)).is_err());
 }
+
+fn add_line(bench: &mut Bench, a: [f64; 2], b: [f64; 2]) -> Id<Curve> {
+    let created = bench
+        .op(SketchOp::AddLine {
+            a: [a[0], a[1], 0.0],
+            b: [b[0], b[1], 0.0],
+            snap_a: Default::default(),
+            snap_b: Default::default(),
+            horizontal: None,
+        })
+        .unwrap();
+    Bench::curves(&created)[0]
+}
+
+/// Inventor 2026 help, To Create and Edit Sketch Patterns (GUID-AAD3A699-FED8-4614-A31D-0A2316328CEE),
+/// Create Mirror Patterns: select geometry, then the mirror line.
+#[test]
+fn mirror_copies_are_symmetric_about_the_line_and_add_no_freedom() {
+    let mut bench = Bench::new();
+    let axis = add_line(&mut bench, [0.0, -1.0], [0.0, 1.0]);
+    // A line touching the axis, a circle and an arc on the right.
+    let touching = add_line(&mut bench, [0.0, 0.2], [0.3, 0.4]);
+    let circle = Bench::curves(
+        &bench
+            .op(SketchOp::AddCircle {
+                centre: [0.5, 0.0, 0.0],
+                radius: 0.1,
+                centre_snap: Default::default(),
+                rim_snap: Default::default(),
+            })
+            .unwrap(),
+    )[0];
+    let arc = Bench::curves(
+        &bench
+            .op(SketchOp::AddArc { centre: [0.4, -0.4, 0.0], start: [0.5, -0.4, 0.0], end: [0.4, -0.3, 0.0] })
+            .unwrap(),
+    )[0];
+    // The line's end on the axis is held there.
+    let end = bench.sketch().line(touching).unwrap().0;
+    bench.op(SketchOp::AddConstraint(GeoConstraint::PointOnCurve(end, axis))).unwrap();
+    let dof = bench.dof();
+    let depth = bench.history.undo_depth();
+    let created = bench.op(SketchOp::Mirror { curves: vec![touching, circle, arc], axis }).unwrap();
+    assert_eq!(bench.history.undo_depth(), depth + 1);
+    assert_eq!(bench.dof(), dof, "the copies follow their originals");
+    let copies = Bench::curves(&created);
+    assert_eq!(copies.len(), 3);
+    let sketch = bench.sketch();
+    // The touching line shares its end on the axis with its copy.
+    assert_eq!(sketch.line(copies[0]).unwrap().0, end);
+    let other = sketch.pos(sketch.line(copies[0]).unwrap().1).unwrap();
+    assert!((other[0] + 0.3).abs() < 1e-12 && (other[1] - 0.4).abs() < 1e-12);
+    // The circle's copy at (-0.5, 0), same radius; the arc's copy runs the other way round.
+    let (centre, radius) = sketch.round(copies[1]).unwrap();
+    assert!((sketch.pos(centre).unwrap()[0] + 0.5).abs() < 1e-12 && (radius - 0.1).abs() < 1e-12);
+    let gc_sketch::CurveGeom::Arc { s, e, .. } = sketch.curves[&copies[2]].geom else { panic!() };
+    assert!(
+        (sketch.pos(s).unwrap()[0] + 0.4).abs() < 1e-12 && (sketch.pos(e).unwrap()[0] + 0.5).abs() < 1e-12
+    );
+
+    // Editing the original moves the copy: the circle grows, so does its mirror image.
+    bench
+        .op(SketchOp::AddDimension {
+            kind: gc_sketch::DimKind::Radius(circle),
+            source: "150".into(),
+            text_pos: [0.0; 2],
+        })
+        .unwrap();
+    let (_, r) = bench.sketch().round(copies[1]).unwrap();
+    assert!((r - 0.15).abs() < 1e-9, "{r}");
+    // Refused: not a line as the axis, the axis among the curves, nothing to mirror.
+    assert!(bench.op(SketchOp::Mirror { curves: vec![touching], axis: circle }).is_err());
+    assert!(bench.op(SketchOp::Mirror { curves: vec![axis], axis }).is_err());
+    assert!(bench.op(SketchOp::Mirror { curves: vec![], axis }).is_err());
+}

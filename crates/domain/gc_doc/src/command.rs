@@ -108,6 +108,16 @@ pub enum SketchOp {
         /// How the clicks are read.
         kind: SlotKind,
     },
+    /// The sketch Mirror command (Inventor 2026 help, To Create and Edit Sketch Patterns,
+    /// GUID-AAD3A699-FED8-4614-A31D-0A2316328CEE, Create Mirror Patterns): copies of the curves reflected
+    /// across a line, every copied point symmetric to its original about it (points on the line are
+    /// shared), circles of equal radius. The copies add no degrees of freedom.
+    Mirror {
+        /// The curves to mirror.
+        curves: Vec<Id<Curve>>,
+        /// The mirror line.
+        axis: Id<Curve>,
+    },
     /// The Center Point toggle on selected standalone points (curve ends and centres are refused).
     SetCenterPoint {
         /// The points.
@@ -1056,6 +1066,79 @@ fn sketch_op(
             }
             require(sketch, ids, GeoConstraint::Equal(far, near), &mut created)?;
             "Slot"
+        }
+        SketchOp::Mirror { curves, axis } => {
+            let (Some((la, lb)), false) = (sketch.line(*axis), curves.contains(axis)) else {
+                return Err(SketchError::InvalidValue.into());
+            };
+            let (Some(a), Some(b)) = (sketch.pos(la), sketch.pos(lb)) else {
+                return Err(SketchError::MissingItem.into());
+            };
+            let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+            let length = gc_math::fm::hypot(dx, dy);
+            if curves.is_empty() || length < 1e-12 {
+                return Err(SketchError::InvalidValue.into());
+            }
+            let (ux, uy) = (dx / length, dy / length);
+            let reflect = |p: [f64; 3]| {
+                let (px, py) = (p[0] - a[0], p[1] - a[1]);
+                let along = px * ux + py * uy;
+                let (fx, fy) = (a[0] + along * ux, a[1] + along * uy);
+                [2.0 * fx - p[0], 2.0 * fy - p[1], p[2]]
+            };
+            let off_line = |p: [f64; 3]| ((p[0] - a[0]) * uy - (p[1] - a[1]) * ux).abs() > 1e-9;
+            let originals: Vec<Curve> = curves
+                .iter()
+                .map(|c| sketch.curves.get(c).copied().ok_or(SketchError::MissingCurve))
+                .collect::<Result<_, _>>()?;
+            // Each point once: its copy (or itself on the mirror line).
+            let mut copies: std::collections::BTreeMap<Id<SkPoint>, Id<SkPoint>> =
+                std::collections::BTreeMap::new();
+            for curve in &originals {
+                for point in curve.points() {
+                    if copies.contains_key(&point) {
+                        continue;
+                    }
+                    let pos = sketch.pos(point).ok_or(SketchError::MissingItem)?;
+                    let copy = if off_line(pos) { sketch.add_point(ids, reflect(pos)) } else { point };
+                    copies.insert(point, copy);
+                }
+            }
+            let map = |p: Id<SkPoint>| copies.get(&p).copied().ok_or(SketchError::MissingItem);
+            let mut made = Vec::new();
+            for (original, curve) in curves.iter().zip(&originals) {
+                let geom = match curve.geom {
+                    gc_sketch::CurveGeom::Line { a, b } => {
+                        gc_sketch::CurveGeom::Line { a: map(a)?, b: map(b)? }
+                    }
+                    gc_sketch::CurveGeom::Circle { c, r } => gc_sketch::CurveGeom::Circle { c: map(c)?, r },
+                    // A reflection turns the arc's direction round: it runs back from the copied end.
+                    gc_sketch::CurveGeom::Arc { c, s, e } => {
+                        gc_sketch::CurveGeom::Arc { c: map(c)?, s: map(e)?, e: map(s)? }
+                    }
+                };
+                let id: Id<Curve> = ids.alloc();
+                sketch.curves.insert(id, Curve { geom, construction: curve.construction });
+                created.push(Created::Curve(id));
+                made.push((*original, id, matches!(curve.geom, gc_sketch::CurveGeom::Circle { .. })));
+            }
+            for (point, copy) in copies.clone() {
+                if point != copy {
+                    created.push(Created::Point(copy));
+                    require(
+                        sketch,
+                        ids,
+                        GeoConstraint::Symmetric { p: point, q: copy, axis: *axis },
+                        &mut created,
+                    )?;
+                }
+            }
+            for (original, copy, circle) in made {
+                if circle {
+                    require(sketch, ids, GeoConstraint::Equal(original, copy), &mut created)?;
+                }
+            }
+            "Mirror"
         }
         SketchOp::SetCenterPoint { points, center } => {
             let owned: std::collections::BTreeSet<Id<SkPoint>> =
