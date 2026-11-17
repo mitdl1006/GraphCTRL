@@ -679,7 +679,7 @@ pub fn status_bar(
                 gc_doc::EditError::Sketch(SketchError::Unsolved(_)) => Msg::ErrUnsolved,
                 gc_doc::EditError::InUse => Msg::ErrInUse,
                 gc_doc::EditError::NameTaken => Msg::ErrNameTaken,
-                gc_doc::EditError::Unsolvable(_) => Msg::ErrUnsolvable,
+                gc_doc::EditError::Unsolvable { .. } => Msg::ErrUnsolvable,
                 gc_doc::EditError::BadValue => Msg::ErrBadValue,
                 gc_doc::EditError::Underconstrained => Msg::ErrUnderconstrained,
                 gc_doc::EditError::DegenerateFrame => Msg::ErrDegenerateFrame,

@@ -196,7 +196,9 @@ fn origin_planes_can_be_mated_and_impossible_constraints_are_refused() {
         first: on(block, bottom(0.2)),
         second: on(table, top(1.0)),
     });
-    assert!(matches!(result, Err(EditError::Unsolvable(_))), "{result:?}");
+    let Err(error @ EditError::Unsolvable { .. }) = result else { panic!("{result:?}") };
+    let message = error.to_string();
+    assert!(message.contains("Flush:1") || message.contains("Mate:2"), "names the constraints: {message}");
     assert_eq!(bench.doc.relationships(), before.relationships());
     assert_eq!(bench.doc.bodies(), before.bodies());
 
@@ -246,4 +248,101 @@ fn a_constrained_component_cannot_be_deleted_while_constrained() {
         .unwrap();
     // Deleting a constrained component takes nothing with it silently: it is in use.
     assert!(bench.cell(CellOp::DeleteBody(block)).is_err());
+}
+
+fn table_frame() -> Geometry {
+    // On the table top (local z = 0.5), 0.5 m along X, Z up and X along the table.
+    Geometry::Frame { origin: [0.5, 0.0, 0.5], z: [0.0, 0.0, 1.0], x: [1.0, 0.0, 0.0] }
+}
+
+#[test]
+fn a_rigid_joint_mounts_a_base_on_the_table_and_it_follows_the_table() {
+    let mut bench = Bench::new();
+    let (table, base) = table_and_box(&mut bench);
+    // The base's own origin on the table frame, Z the same way (flip): standing upright on it.
+    bench
+        .relate(Relationship {
+            name: "Rigid:1".into(),
+            kind: RelationKind::Rigid { flip: true },
+            first: on(base, Geometry::origin_frame()),
+            second: on(table, table_frame()),
+        })
+        .unwrap();
+    let pose = bench.pose(base);
+    assert!(close(pose.translation, DVec3::new(0.5, 0.0, 1.0)), "{:?}", pose.translation);
+    assert!(close(pose.rotation * DVec3::Z, DVec3::Z) && close(pose.rotation * DVec3::X, DVec3::X));
+    // The table moves and turns: the base goes with it, still on the same spot of the table.
+    let mut moved = bench.doc.get(table).unwrap().clone();
+    moved.placement = Placement { xyz: [1.0, 2.0, 0.5], rpy: [0.0, 0.0, std::f64::consts::FRAC_PI_2] };
+    bench.cell(CellOp::SetBody { id: table, body: moved }).unwrap();
+    let pose = bench.pose(base);
+    assert!(close(pose.translation, DVec3::new(1.0, 2.5, 1.0)), "{:?}", pose.translation);
+    assert!(close(pose.rotation * DVec3::X, DVec3::Y));
+    // A rigid joint leaves nothing free: dragging the base anywhere brings it back.
+    let mut dragged = bench.doc.get(base).unwrap().clone();
+    dragged.placement = Placement { xyz: [3.0, 0.0, 0.0], rpy: [0.0, 0.0, 1.0] };
+    bench.cell(CellOp::SetBody { id: base, body: dragged }).unwrap();
+    assert!(close(bench.pose(base).translation, DVec3::new(1.0, 2.5, 1.0)));
+
+    // Without flip the Z axes are opposed: the base hangs upside down from the spot.
+    let id = bench.doc.relationships().iter().next().unwrap().0;
+    let relationship = Relationship {
+        kind: RelationKind::Rigid { flip: false },
+        ..bench.doc.relationships().get(id).unwrap().clone()
+    };
+    bench.cell(CellOp::SetRelationship { id, relationship }).unwrap();
+    assert!(close(bench.pose(base).rotation * DVec3::Z, -DVec3::Z));
+}
+
+#[test]
+fn a_rotational_joint_leaves_the_turn_about_its_axis_free() {
+    let mut bench = Bench::new();
+    let (table, base) = table_and_box(&mut bench);
+    bench
+        .relate(Relationship {
+            name: "Rotational:1".into(),
+            kind: RelationKind::Rotational { flip: true },
+            first: on(base, Geometry::origin_frame()),
+            second: on(table, table_frame()),
+        })
+        .unwrap();
+    assert!(close(bench.pose(base).translation, DVec3::new(0.5, 0.0, 1.0)));
+    // Turned about Z and tipped over: the turn stays, the tip does not.
+    let mut turned = bench.doc.get(base).unwrap().clone();
+    turned.placement = Placement { xyz: [0.5, 0.0, 1.0], rpy: [0.3, 0.0, 0.7] };
+    bench.cell(CellOp::SetBody { id: base, body: turned }).unwrap();
+    let pose = bench.pose(base);
+    assert!(close(pose.rotation * DVec3::Z, DVec3::Z), "upright again");
+    let x = pose.rotation * DVec3::X;
+    assert!(
+        (gc_math::fm::atan2(x.y, x.x) - 0.7).abs() < 0.05,
+        "the turn is kept: {}",
+        gc_math::fm::atan2(x.y, x.x)
+    );
+    // Automatic picks Rotational when both origins are circular, Rigid otherwise.
+    let circle = on(base, Geometry::Circle { centre: [0.0; 3], normal: [0.0, 0.0, 1.0] });
+    let hole = on(table, Geometry::Circle { centre: [0.5, 0.0, 0.5], normal: [0.0, 0.0, 1.0] });
+    assert_eq!(Document::automatic_joint(&circle, &hole), RelationKind::Rotational { flip: false });
+    assert_eq!(
+        Document::automatic_joint(&circle, &on(table, table_frame())),
+        RelationKind::Rigid { flip: false }
+    );
+    assert_eq!(
+        Document::automatic_joint(&on(base, Geometry::origin_frame()), &on(table, table_frame())),
+        RelationKind::Rigid { flip: false }
+    );
+}
+
+#[test]
+fn a_tool_is_mounted_by_its_joint_origin_on_the_flange() {
+    // The tool's mounting face: 5 cm below its own origin, facing down (out of the tool, towards the flange).
+    let face = Geometry::Frame { origin: [0.0, 0.0, -0.05], z: [0.0, 0.0, -1.0], x: [1.0, 0.0, 0.0] };
+    let placement = face.rigid_mount(false);
+    // The face's centre lands on the flange origin and faces against the flange's Z: the tool sits
+    // 5 cm out along the flange's Z, upright.
+    assert!(close(placement.translation, DVec3::new(0.0, 0.0, 0.05)), "{:?}", placement.translation);
+    assert!(close(placement.rotation * DVec3::Z, DVec3::Z));
+    let flipped = face.rigid_mount(true);
+    assert!(close(flipped.rotation * DVec3::Z, -DVec3::Z));
+    assert!(close(flipped.translation + flipped.rotation * DVec3::new(0.0, 0.0, -0.05), DVec3::ZERO));
 }

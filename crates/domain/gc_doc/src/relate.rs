@@ -45,6 +45,15 @@ pub enum Geometry {
         /// Normal of the circle's plane.
         normal: [f64; 3],
     },
+    /// A joint origin: a point with a Z axis (out of the face it sits on) and an X axis.
+    Frame {
+        /// The point.
+        origin: [f64; 3],
+        /// Z axis.
+        z: [f64; 3],
+        /// X axis (made perpendicular to Z).
+        x: [f64; 3],
+    },
 }
 
 impl Geometry {
@@ -67,12 +76,55 @@ impl Geometry {
         }
     }
 
+    /// Where a component must stand (its pose in a frame) so that this joint origin on it meets that
+    /// frame's own origin by a rigid joint: Z axes opposed (`flip`: the same way), X axes alike. Used to
+    /// mount a tool on a robot's flange.
+    pub fn rigid_mount(&self, flip: bool) -> DPose3 {
+        let (origin, z, x) = self.joint_frame();
+        let y = z.cross(x);
+        let local =
+            DPose3::from_parts(origin, DQuat::from_mat3(&gc_math::DMat3::from_cols(x, y, z)).normalize());
+        let target =
+            if flip { DQuat::IDENTITY } else { DQuat::from_axis_angle(DVec3::X, std::f64::consts::PI) };
+        DPose3::from_parts(DVec3::ZERO, target) * local.inverse()
+    }
+
+    /// The origin of the component itself as a joint origin: its centre point with its Z and X axes.
+    pub fn origin_frame() -> Self {
+        Geometry::Frame { origin: [0.0; 3], z: [0.0, 0.0, 1.0], x: [1.0, 0.0, 0.0] }
+    }
+
+    /// The geometry as a joint origin in the component's frame: point, unit Z, unit X. A plane or circle
+    /// takes Z along its normal, an axis along its direction, a point the component's Z; X is then the
+    /// component's X (or Y) made perpendicular.
+    fn joint_frame(&self) -> (DVec3, DVec3, DVec3) {
+        let v = DVec3::from_array;
+        let (origin, z, x) = match *self {
+            Geometry::Frame { origin, z, x } => (v(origin), v(z), Some(v(x))),
+            Geometry::Plane { point, normal } => (v(point), v(normal), None),
+            Geometry::Circle { centre, normal } => (v(centre), v(normal), None),
+            Geometry::Axis { point, direction } => (v(point), v(direction), None),
+            Geometry::Point(point) => (v(point), DVec3::Z, Some(DVec3::X)),
+        };
+        let z = z.normalize_or_zero();
+        let helper = x.unwrap_or(if z.x.abs() < 0.9 { DVec3::X } else { DVec3::Y });
+        let x = (helper - z * helper.dot(z)).normalize_or_zero();
+        (origin, z, x)
+    }
+
     fn is_finite(&self) -> bool {
         let (a, b) = match *self {
             Geometry::Plane { point, normal } => (point, normal),
             Geometry::Axis { point, direction } => (point, direction),
             Geometry::Point(p) => (p, [1.0, 0.0, 0.0]),
             Geometry::Circle { centre, normal } => (centre, normal),
+            Geometry::Frame { origin, z, x } => {
+                let cross = DVec3::from_array(z).cross(DVec3::from_array(x));
+                if !x.iter().all(|v| v.is_finite()) || cross.length() < 1e-9 {
+                    return false;
+                }
+                (origin, z)
+            }
         };
         let direction = DVec3::from_array(b);
         a.iter().chain(&b).all(|v| v.is_finite()) && direction.length() > 1e-12
@@ -113,6 +165,18 @@ pub enum RelationKind {
     Flush {
         /// Distance, metres.
         offset: f64,
+    },
+    /// A rigid joint: the two joint origins coincide with their Z axes opposed (`flip`: the same way) and
+    /// their X axes alike. Removes all freedom between the components.
+    Rigid {
+        /// Flip component: Z axes the same way.
+        flip: bool,
+    },
+    /// A rotational joint: the origins coincide and the Z axes line up (opposed unless `flip`); turning
+    /// about Z stays free.
+    Rotational {
+        /// Flip component: Z axes the same way.
+        flip: bool,
     },
     /// A circular edge into another: axes coincident and the circles' planes mated at `offset`. Rotation
     /// about the axis stays free.
@@ -158,8 +222,12 @@ impl Relationship {
             RelationKind::Insert { offset, .. } => {
                 offset.is_finite() && matches!((g1, g2), (Geometry::Circle { .. }, Geometry::Circle { .. }))
             }
+            RelationKind::Rigid { .. } | RelationKind::Rotational { .. } => true,
         };
-        fits && g1.is_finite()
+        let joint = matches!(self.kind, RelationKind::Rigid { .. } | RelationKind::Rotational { .. });
+        let frames = matches!(g1, Geometry::Frame { .. }) || matches!(g2, Geometry::Frame { .. });
+        fits && (joint || !frames)
+            && g1.is_finite()
             && g2.is_finite()
             && self.first.occurrence.owner() != self.second.occurrence.owner()
     }
@@ -183,6 +251,7 @@ fn world(pose: &DPose3, geometry: &Geometry) -> (World, Option<(DVec3, DVec3)>) 
         Geometry::Circle { centre, normal } => {
             (World::Axis(p(centre), d(normal)), Some((p(centre), d(normal))))
         }
+        Geometry::Frame { origin, z, .. } => (World::Axis(p(origin), d(z)), None),
     }
 }
 
@@ -195,6 +264,13 @@ fn across(v: DVec3, d: DVec3) -> DVec3 {
 /// the same), with Undirected settled from `now` (the dot product of the directions as they lie).
 fn sense_sign(kind: &RelationKind, now: f64) -> f64 {
     match *kind {
+        RelationKind::Rigid { flip } | RelationKind::Rotational { flip } => {
+            if flip {
+                1.0
+            } else {
+                -1.0
+            }
+        }
         RelationKind::Mate { sense: AxisSense::Aligned, .. } | RelationKind::Flush { .. } => 1.0,
         RelationKind::Insert { aligned, .. } => {
             if aligned {
@@ -227,6 +303,7 @@ fn residuals(
         RelationKind::Mate { offset, .. }
         | RelationKind::Flush { offset }
         | RelationKind::Insert { offset, .. } => offset,
+        RelationKind::Rigid { .. } | RelationKind::Rotational { .. } => 0.0,
     };
     let push3 = |out: &mut Vec<f64>, v: DVec3| out.extend([v.x, v.y, v.z]);
     if let (RelationKind::Insert { .. }, Some((c1, n1)), Some((c2, n2))) = (kind, first.1, second.1) {
@@ -311,6 +388,7 @@ impl Document {
             }
             Geometry::Point(point) => Geometry::Point(p(point)),
             Geometry::Circle { centre, normal } => Geometry::Circle { centre: p(centre), normal: d(normal) },
+            Geometry::Frame { origin, z, x } => Geometry::Frame { origin: p(origin), z: d(z), x: d(x) },
         })
     }
 
@@ -403,8 +481,25 @@ impl Document {
     }
 }
 
+/// A joint origin in the world: point, Z, X.
+fn joint_world(pose: &DPose3, geometry: &Geometry) -> (DVec3, DVec3, DVec3) {
+    let (p, z, x) = geometry.joint_frame();
+    (pose.translation + pose.rotation * p, pose.rotation * z, pose.rotation * x)
+}
+
 fn term_residuals(term: &Term, poses: &[DPose3]) -> Vec<f64> {
-    let mut out = Vec::with_capacity(7);
+    let mut out = Vec::with_capacity(9);
+    if let RelationKind::Rigid { .. } | RelationKind::Rotational { .. } = term.kind {
+        let (p1, z1, x1) = joint_world(&poses[term.owners[0]], &term.geometry[0]);
+        let (p2, z2, x2) = joint_world(&poses[term.owners[1]], &term.geometry[1]);
+        let push3 = |out: &mut Vec<f64>, v: DVec3| out.extend([v.x, v.y, v.z]);
+        push3(&mut out, p1 - p2);
+        push3(&mut out, z1 - z2 * term.sign);
+        if let RelationKind::Rigid { .. } = term.kind {
+            push3(&mut out, x1 - x2);
+        }
+        return out;
+    }
     let w1 = world(&poses[term.owners[0]], &term.geometry[0]);
     let w2 = world(&poses[term.owners[1]], &term.geometry[1]);
     residuals(&term.kind, w1, w2, term.sign, &mut out);
@@ -419,6 +514,10 @@ fn all_residuals(terms: &[Term], poses: &[DPose3]) -> Vec<f64> {
 /// squares do not start at the saddle where opposite directions have no gradient.
 fn rough_turns(owners: &[Owner], terms: &[Term], poses: &mut [DPose3]) {
     for term in terms {
+        if let RelationKind::Rigid { .. } | RelationKind::Rotational { .. } = term.kind {
+            joint_turns(owners, term, poses);
+            continue;
+        }
         let w1 = world(&poses[term.owners[0]], &term.geometry[0]);
         let w2 = world(&poses[term.owners[1]], &term.geometry[1]);
         let pair = match (w1.1, w2.1) {
@@ -556,4 +655,47 @@ fn solve_linear(mut a: Vec<f64>, mut b: Vec<f64>, n: usize) -> Option<Vec<f64>> 
         x[row] = (b[row] - tail) / a[row * n + row];
     }
     x.iter().all(|v| v.is_finite()).then_some(x)
+}
+
+/// The rough turns of a joint: Z axes the right way, then (rigid) X axes alike, each by half a turn.
+fn joint_turns(owners: &[Owner], term: &Term, poses: &mut [DPose3]) {
+    let mover = if owners[term.owners[0]].free {
+        0
+    } else if owners[term.owners[1]].free {
+        1
+    } else {
+        return;
+    };
+    let index = term.owners[mover];
+    let (_, z1, _) = joint_world(&poses[term.owners[0]], &term.geometry[0]);
+    let (_, z2, _) = joint_world(&poses[term.owners[1]], &term.geometry[1]);
+    if z1.dot(z2 * term.sign) < -0.5 {
+        let z = if mover == 0 { z1 } else { z2 };
+        let helper = if z.x.abs() < 0.9 { DVec3::X } else { DVec3::Y };
+        let turn = DQuat::from_axis_angle(z.cross(helper).normalize(), std::f64::consts::PI);
+        poses[index].rotation = (turn * poses[index].rotation).normalize();
+    }
+    if let RelationKind::Rigid { .. } = term.kind {
+        let (_, z1, x1) = joint_world(&poses[term.owners[0]], &term.geometry[0]);
+        let (_, z2, x2) = joint_world(&poses[term.owners[1]], &term.geometry[1]);
+        if x1.dot(x2) < -0.5 {
+            let z = if mover == 0 { z1 } else { z2 };
+            let turn = DQuat::from_axis_angle(z.normalize(), std::f64::consts::PI);
+            poses[index].rotation = (turn * poses[index].rotation).normalize();
+        }
+    }
+}
+
+impl Document {
+    /// The joint type Automatic picks for two joint origins: Rotational when both are circular, otherwise
+    /// Rigid (Inventor 2026 help, Create Joints Reference, GUID-6AA68E8F-7C97-4806-8483-3941DE915E70;
+    /// Cylindrical and Ball, for points on cylinders and spheres, are not modelled yet).
+    pub fn automatic_joint(first: &Selection, second: &Selection) -> RelationKind {
+        let circular = |s: &Selection| matches!(s.geometry, Geometry::Circle { .. });
+        if circular(first) && circular(second) {
+            RelationKind::Rotational { flip: false }
+        } else {
+            RelationKind::Rigid { flip: false }
+        }
+    }
 }

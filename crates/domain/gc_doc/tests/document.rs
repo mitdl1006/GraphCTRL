@@ -271,3 +271,39 @@ fn drag_results_are_written_in_one_step_and_must_satisfy_the_constraints() {
         assert!(doc.same_content(&before));
     }
 }
+
+#[test]
+fn renaming_a_parameter_renames_its_references_in_one_undo_step() {
+    let (mut doc, mut history, sketch, w, dimension, _) = rectangle_driven_by_parameter();
+    let applied = apply(
+        &mut doc,
+        &Command::AddParam { name: "h".into(), source: "w + 1 mm + w / 2".into(), angle: false },
+    )
+    .unwrap();
+    history.record(applied.label, applied.delta);
+    let Created::Param(h) = applied.created[0] else { panic!() };
+    let depth = history.undo_depth();
+    let applied = apply(&mut doc, &Command::RenameParam { id: w, name: "width".into() }).unwrap();
+    history.record(applied.label, applied.delta);
+    assert_eq!(history.undo_depth(), depth + 1);
+    assert_eq!(doc.get(w).unwrap().name, "width");
+    assert_eq!(doc.get(h).unwrap().source, "width + 1 mm + width / 2");
+    assert_eq!(doc.get(sketch).unwrap().dimensions[&dimension].source, "width * 2");
+    // Values are unchanged.
+    assert!((doc.get(h).unwrap().value - 0.031).abs() < 1e-12);
+
+    // A taken or malformed name is refused.
+    assert!(matches!(
+        apply(&mut doc, &Command::RenameParam { id: w, name: "h".into() }),
+        Err(EditError::BadName(_))
+    ));
+    assert!(matches!(
+        apply(&mut doc, &Command::RenameParam { id: w, name: "2x".into() }),
+        Err(EditError::BadName(_))
+    ));
+
+    history.undo(&mut doc).unwrap();
+    assert_eq!(doc.get(w).unwrap().name, "w");
+    assert_eq!(doc.get(h).unwrap().source, "w + 1 mm + w / 2");
+    assert_eq!(doc.get(sketch).unwrap().dimensions[&dimension].source, "w * 2");
+}

@@ -968,6 +968,23 @@ impl Session {
         self.cell_op(CellOp::SetTool { id: robot, tool: Some(tool) }).map(|_| ()).map_err(|e| e.to_string())
     }
 
+    /// Mounts a robot's tool on its flange by a rigid joint: the joint origin on the tool (in the tool's
+    /// own frame, e.g. the centre of its mounting face with Z out of it) meets the flange frame, Z axes
+    /// opposed unless `flip` (assembly P1-11). One undo step; refused when the robot has no tool.
+    pub fn mount_tool(
+        &mut self,
+        robot: Id<Robot>,
+        origin: gc_doc::Geometry,
+        flip: bool,
+    ) -> Result<(), EditError> {
+        let mut tool =
+            self.doc.get(robot).and_then(|r| r.tool.as_deref().cloned()).ok_or(EditError::BadValue)?;
+        let pose = origin.rigid_mount(flip);
+        tool.placement =
+            Placement { xyz: pose.translation.to_array(), rpy: gc_math::rpy_from_quat(pose.rotation) };
+        self.cell_op(CellOp::SetTool { id: robot, tool: Some(tool) }).map(|_| ())
+    }
+
     /// The selected item of the cell.
     pub fn selected_item(&self) -> Option<CellItem> {
         self.cell.selected.filter(|item| self.item_exists(*item))
