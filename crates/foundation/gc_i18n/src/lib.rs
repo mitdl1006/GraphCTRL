@@ -520,6 +520,14 @@ messages! {
     /// Plan metric: the move was possible in a straight joint-space line.
     PlanStraight => ("직선 이동(플래너 불필요)", "Straight move (no planner needed)"),
     // --- frontend ---
+    /// Ribbon tab for measuring and analysing the cell.
+    TabInspect => ("검사", "Inspect"),
+    /// Inspect tab group: measuring.
+    GroupMeasure => ("측정", "Measure"),
+    /// Inspect tab group: analyses.
+    GroupAnalyze => ("분석", "Analyze"),
+    /// Robot tab group: relationships and motion of components.
+    GroupRelationships => ("관계", "Relationships"),
     /// Heads-up display box names.
     HudLength => ("길이", "Length"),
     /// Heads-up display box: direction.

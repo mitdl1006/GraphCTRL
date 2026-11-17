@@ -17,6 +17,7 @@ pub(crate) enum Tab {
     Model,
     Sketch,
     Robot,
+    Inspect,
     View,
 }
 
@@ -55,6 +56,12 @@ pub(crate) enum RibbonAction {
     ImportMesh,
     /// Ask for a robot description file and add the robot.
     ImportRobot,
+    /// Open the measure panel.
+    StartMeasure,
+    /// Open the interference analysis.
+    StartInterference,
+    /// Open the drive dialog.
+    StartDrive,
 }
 
 pub(crate) fn show(
@@ -76,6 +83,7 @@ pub(crate) fn show(
             (Tab::Model, Msg::TabModel),
             (Tab::Sketch, Msg::TabSketch),
             (Tab::Robot, Msg::TabRobot),
+            (Tab::Inspect, Msg::TabInspect),
             (Tab::View, Msg::TabView),
         ] {
             if ribbon_tab(ui, label.text(lang), *tab == this) {
@@ -170,6 +178,18 @@ pub(crate) fn show(
                 }
             }
             Tab::Robot => action = robot_tab(ui, session, viewport, cell, library, lang),
+            Tab::Inspect => {
+                ribbon_group(ui, tr!(lang, GroupMeasure), |ui| {
+                    if ribbon_button(ui, Icon::Dimension, tr!(lang, MenuMeasure), false, true).clicked() {
+                        action = Some(RibbonAction::StartMeasure);
+                    }
+                });
+                ribbon_group(ui, tr!(lang, GroupAnalyze), |ui| {
+                    if ribbon_button(ui, Icon::Cuboid, tr!(lang, MenuInterference), false, true).clicked() {
+                        action = Some(RibbonAction::StartInterference);
+                    }
+                });
+            }
             Tab::View => {
                 ribbon_group(ui, tr!(lang, GroupViews), |ui| {
                     for (view, label, icon) in [
@@ -225,6 +245,11 @@ fn robot_tab(
     let robot = session.doc().robots().iter().next().map(|(id, _)| id);
     let path = cell.active_path(session);
     // Failures of these commands are shown in the status bar.
+    ribbon_group(ui, tr!(lang, GroupRelationships), |ui| {
+        if ribbon_button(ui, Icon::Play, tr!(lang, MenuDrive), false, robot.is_some()).clicked() {
+            action = Some(RibbonAction::StartDrive);
+        }
+    });
     ribbon_group(ui, tr!(lang, GroupAdd), |ui| {
         // One robot per cell for now: the panels show the first one.
         // The robot library in one list: the packages of the library folder and what plugins offer.

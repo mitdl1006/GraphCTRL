@@ -28,6 +28,8 @@
 
 - 스케치 P1-6 HUD 입력(동적 입력): 도구가 다음 점을 기다리는 동안 커서 옆에 길이·각도·반지름 등 상자(`gc_viewport/src/hud.rs`, 백엔드 `tool_hud()`/`ToolEvent::Hud`/`Key::Enter`). 숫자를 치면 강조된 상자에 들어가고 Tab이 잠그고(자물쇠 아이콘) 다음 상자로, Shift+Tab은 이전, Enter가 잠근 값으로 도형 완성, Esc가 취소. 근거: 인벤터 2026 "To Draw 2D Geometry Using Dynamic Input" https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-33A8B11D-A04C-4809-BC82-C0419215915F.htm . 원문과의 차이: HUD는 인벤터에서 응용 옵션으로 켜는 선택 기능(기본 꺼짐)인데 여기서는 기본 켬(`Viewport::hud_on`, 설정 화면 없음); 점 도구의 X/Y 좌표 입력과 "Enable Pointer Input"(시작점 좌표 입력)은 백엔드에 점 도구가 없어 미구현. 테스트 `the_heads_up_display_draws_a_line_from_typed_values`.
 
+- 리본 정리 1차: "검사" 탭 신설(측정, 간섭 분석), "구동"은 로봇 탭의 "관계" 그룹으로 이동, 도구 메뉴에서 세 항목 제거(근거 `docs/ux/inventor-assembly-ui.md` §2). "로봇" 탭은 Inventor에 없는 추가 기능이라 그대로 두고, 나머지 탭(설계·관리·환경 등)은 원문을 못 구해 만들지 않음. 단면도(Half/Quarter/Three-Quarter): 도움말 A44의 GUID가 문서에 잘려 있어(`GUID-9A47D4FC-….htm`) 원문을 못 읽었고 Quarter/Three-Quarter가 잘라 내는 쪽(1/4 vs 3/4)이 불확실해 보류 — 리드가 전체 GUID를 주면 구현. 컴포넌트 원점 폴더(#2)는 백엔드 `component_origin` 대기.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹
