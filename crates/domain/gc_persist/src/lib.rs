@@ -316,6 +316,7 @@ mod tests {
             joints: vec![0.1, -0.2, 0.3],
             max_acc: 5.0,
             look: Default::default(),
+            tool: None,
         };
         let Created::Robot(robot) = cell(&mut doc, CellOp::AddRobot(robot))[0] else { panic!("no robot") };
         let target = WaypointTarget::SketchPoint { sketch, point: a };

@@ -805,3 +805,43 @@ fn a_paths_waypoints_are_reordered_added_and_taken_out() {
     assert!(session.execute(&steps(vec![right, theirs], vec![false; 2])).is_err());
     assert_eq!(session.doc().get(path).unwrap().waypoints, vec![right, left, right]);
 }
+
+#[test]
+fn a_tool_on_the_flange_is_checked_for_collisions() {
+    use gc_math::DVec3;
+    let mut session = Session::new();
+    let robot = session.add_robot("Robot1", &six_axis()).unwrap();
+    session.jog(robot, &LEFT);
+    session.end_jog();
+    // A small box 250 mm out along the flange's Z axis: clear of the bare arm.
+    let flange = session.tcp_pose(robot).unwrap();
+    let at = flange.transform_point(DVec3::new(0.0, 0.0, 0.25));
+    session
+        .add_body(Solid::Box { size: [0.05; 3] }, Placement { xyz: at.to_array(), rpy: [0.0; 3] })
+        .unwrap();
+    assert!(session.robot_problem(robot).is_none());
+
+    // A 300 mm tool reaches into it. Previewing changes the check but not the document; releasing makes
+    // one undo step.
+    let tool = gc_doc::Tool {
+        solid: Solid::Cylinder { radius: 0.02, length: 0.3 },
+        placement: Placement { xyz: [0.0, 0.0, 0.15], rpy: [0.0; 3] },
+    };
+    let depth = session.history().undo_depth();
+    session.preview_tool(robot, Some(tool.clone()));
+    assert!(session.robot_problem(robot).is_some(), "the tool hits the box");
+    assert_eq!(session.doc().get(robot).unwrap().tool.as_deref(), None);
+    session.end_tool_preview();
+    assert_eq!(session.doc().get(robot).unwrap().tool.as_deref(), Some(&tool));
+    assert_eq!(session.history().undo_depth(), depth + 1);
+    assert!(session.robot_problem(robot).is_some());
+
+    // An invalid tool is ignored; undo takes the tool off again.
+    let mut bad = tool;
+    bad.solid = Solid::Cylinder { radius: -1.0, length: 0.3 };
+    session.preview_tool(robot, Some(bad.clone()));
+    assert_ne!(session.shown_tool(robot).unwrap(), Some(bad.clone()));
+    assert!(session.execute(&Command::Cell(CellOp::SetTool { id: robot, tool: Some(bad) })).is_err());
+    session.undo();
+    assert!(session.robot_problem(robot).is_none());
+}

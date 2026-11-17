@@ -25,6 +25,7 @@ fn robot() -> Robot {
         joints: vec![0.0; 6],
         max_acc: 5.0,
         look: Default::default(),
+        tool: None,
     }
 }
 

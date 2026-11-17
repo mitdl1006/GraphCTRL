@@ -122,6 +122,26 @@ pub struct Robot {
     /// How it is shown.
     #[serde(default)]
     pub look: Look,
+    /// What it carries on its tip link, if anything (boxed: most robots carry nothing).
+    #[serde(default)]
+    pub tool: Option<Box<Tool>>,
+}
+
+/// Something a robot carries on its tip link (a gripper, a torch): drawn with the robot and checked for
+/// collisions as part of it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Tool {
+    /// Its shape.
+    pub solid: Solid,
+    /// Where it sits in the tip link's frame.
+    pub placement: Placement,
+}
+
+impl Tool {
+    /// True when the shape has positive sizes and the placement is finite.
+    pub fn is_valid(&self) -> bool {
+        self.solid.is_valid() && finite(&self.placement.xyz) && finite(&self.placement.rpy)
+    }
 }
 
 impl Entity for Robot {
@@ -344,6 +364,13 @@ pub enum CellOp {
         /// True for a straight line of the tool tip into the waypoint of the same position.
         linear: Vec<bool>,
     },
+    /// Gives a robot a tool, or takes it away.
+    SetTool {
+        /// The robot.
+        id: Id<Robot>,
+        /// The tool; `None` for none.
+        tool: Option<Tool>,
+    },
     /// Deletes a path.
     DeletePath(Id<MotionPath>),
 }
@@ -543,6 +570,13 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
                 p.linear.clone_from(linear);
             })?;
             Ok((Vec::new(), "Edit path"))
+        }
+        CellOp::SetTool { id, tool } => {
+            if tool.as_ref().is_some_and(|t| !t.is_valid()) {
+                return Err(EditError::BadValue);
+            }
+            txn.modify(*id, |r: &mut Robot, _| r.tool = tool.clone().map(Box::new))?;
+            Ok((Vec::new(), "Set tool"))
         }
         CellOp::DeletePath(id) => {
             txn.remove(*id)?;

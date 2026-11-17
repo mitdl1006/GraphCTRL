@@ -208,6 +208,8 @@ const LINK_LIGHT: [f32; 4] = [0.90, 0.47, 0.13, 1.0];
 const GHOST: [f32; 4] = [0.45, 0.70, 1.0, 0.35];
 /// A ghost robot in a pose with a problem.
 const GHOST_BAD: [f32; 4] = [1.0, 0.35, 0.30, 0.40];
+/// A tool on a robot's flange: brushed metal.
+const TOOL: [f32; 4] = [0.72, 0.70, 0.62, 1.0];
 const LINK_DARK: [f32; 4] = [0.27, 0.29, 0.32, 1.0];
 
 impl Scene {
@@ -226,18 +228,8 @@ impl Scene {
         };
         for (id, _) in doc.bodies().iter() {
             let Some(body) = session.shown_body(id) else { continue };
-            let shape = match &body.solid {
-                Solid::Box { size } => Shape3::Primitive(Primitive::Box(*size)),
-                Solid::Cylinder { radius, length } => {
-                    Shape3::Primitive(Primitive::Cylinder { radius: *radius, length: *length })
-                }
-                Solid::Sphere { radius } => Shape3::Primitive(Primitive::Sphere(*radius)),
-                // A file that could not be read is reported in the panel and not drawn.
-                Solid::Mesh { .. } => match session.body_mesh(&body.solid) {
-                    Some(mesh) => Shape3::Mesh(mesh.clone()),
-                    None => continue,
-                },
-            };
+            // A file that could not be read is reported in the panel and not drawn.
+            let Some(shape) = solid_shape(session, &body.solid) else { continue };
             let pose = pose_from_xyz_rpy(body.placement.xyz, body.placement.rpy);
             let look = session.shown_look(Shown::Body(id)).unwrap_or_default();
             if look.hidden {
@@ -270,7 +262,8 @@ impl Scene {
                     color
                 }
             };
-            push_robot(&mut scene, loaded, &poses, Some(owner), &shown);
+            let tool = robot_tool(session, id);
+            push_robot(&mut scene, loaded, &poses, tool.as_ref(), Some(owner), &shown);
         }
         // How the arm would stand at the waypoint under the mouse or selected: see-through, reddish when
         // something is wrong there.
@@ -283,7 +276,8 @@ impl Scene {
                 let grey = (color[0] + color[1] + color[2]) / 3.0;
                 [0.5 * tint[0] + 0.5 * grey, 0.5 * tint[1] + 0.5 * grey, 0.5 * tint[2] + 0.5 * grey, tint[3]]
             };
-            push_robot(&mut scene, loaded, &poses, None, &shown);
+            let tool = robot_tool(session, ghost.robot);
+            push_robot(&mut scene, loaded, &poses, tool.as_ref(), None, &shown);
         }
         scene.tool_points = doc.robots().iter().filter_map(|(id, _)| session.tcp_pose(id)).collect();
         for (id, frame) in doc.work_frames().iter() {
@@ -385,9 +379,16 @@ fn push_robot(
     scene: &mut Scene,
     loaded: &gc_session::LoadedRobot,
     poses: &[DPose3],
+    tool: Option<&(usize, DPose3, Shape3)>,
     owner: Option<CellItem>,
     shown: &dyn Fn([f32; 4]) -> [f32; 4],
 ) {
+    if let Some((tip, placement, shape)) = tool
+        && let Some(tip_pose) = poses.get(*tip)
+    {
+        let pose = *tip_pose * *placement;
+        scene.solids.push(Solid3 { shape: shape.clone(), pose, color: shown(TOOL), owner });
+    }
     for (index, (link, link_pose)) in loaded.model.links.iter().zip(poses).enumerate() {
         let geometries = if link.visuals.is_empty() { &link.collisions } else { &link.visuals };
         let color = if index % 2 == 0 { LINK_DARK } else { LINK_LIGHT };
@@ -412,4 +413,26 @@ fn push_robot(
             scene.solids.push(Solid3 { shape, pose, color: shown(color), owner });
         }
     }
+}
+
+/// What a body's or a tool's solid is drawn as; `None` for a mesh file that could not be read.
+fn solid_shape(session: &Session, solid: &Solid) -> Option<Shape3> {
+    Some(match solid {
+        Solid::Box { size } => Shape3::Primitive(Primitive::Box(*size)),
+        Solid::Cylinder { radius, length } => {
+            Shape3::Primitive(Primitive::Cylinder { radius: *radius, length: *length })
+        }
+        Solid::Sphere { radius } => Shape3::Primitive(Primitive::Sphere(*radius)),
+        Solid::Mesh { .. } => Shape3::Mesh(session.body_mesh(solid)?.clone()),
+    })
+}
+
+/// A robot's tool: the index of the link that carries it, its pose there, and its shape.
+fn robot_tool(session: &Session, robot: gc_core::Id<gc_doc::Robot>) -> Option<(usize, DPose3, Shape3)> {
+    let stored = session.doc().get(robot)?;
+    let tool = session.shown_tool(robot)??;
+    let tip = session.robot_model(robot)?.model.link(&stored.tip_link)?;
+    let placement = pose_from_xyz_rpy(tool.placement.xyz, tool.placement.rpy);
+    let tool = &tool;
+    Some((tip, placement, solid_shape(session, &tool.solid)?))
 }

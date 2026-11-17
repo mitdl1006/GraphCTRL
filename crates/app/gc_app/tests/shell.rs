@@ -403,6 +403,20 @@ fn ur5e_close_up_renders_with_gpu() {
         })
         .count();
     assert!(blue > 200, "{blue} blue pixels");
+
+    // A cylinder tool on the flange, chosen in the panel, and the TCP moved to its far end.
+    harness.get_by_label("툴").click();
+    harness.run();
+    harness.get_by_label("툴 형상").click();
+    harness.run();
+    harness.query_all_by_label("원기둥").last().unwrap().click();
+    harness.run();
+    harness.get_by_label("TCP를 툴 끝으로").click();
+    harness.run();
+    let stored = harness.state().session.doc().get(robot).unwrap();
+    assert!(matches!(stored.tool.as_ref().unwrap().solid, gc_doc::Solid::Cylinder { .. }));
+    assert!((stored.tcp.xyz[2] - 0.15).abs() < 1e-12, "{:?}", stored.tcp);
+    harness.render().unwrap().save(out.join("review-18-tool.png")).unwrap();
 }
 
 /// The idea of the product in one test: draw a polyline in a 3D sketch, make it a path, and the UR5e's

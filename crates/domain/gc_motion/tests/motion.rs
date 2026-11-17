@@ -24,9 +24,17 @@ fn scene(obstacles: &[Obstacle]) -> RobotScene {
     let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
     let (model, _) = import(&text).unwrap_or_else(|findings| panic!("{findings:?}"));
     let chain = model.chain("base_link", "tool0").unwrap();
-    let (scene, missing) =
-        RobotScene::new(Arc::new(model), chain, "tool0", DPose3::IDENTITY, obstacles, PADDING, &|_| None)
-            .unwrap();
+    let (scene, missing) = RobotScene::new(
+        Arc::new(model),
+        chain,
+        "tool0",
+        DPose3::IDENTITY,
+        obstacles,
+        PADDING,
+        &|_| None,
+        &[],
+    )
+    .unwrap();
     assert!(missing.is_empty());
     scene
 }

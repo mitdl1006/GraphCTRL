@@ -69,6 +69,7 @@ pub fn cell(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) 
     if let Some(robot) = robot {
         jog(ui, session, lang, robot);
         base(ui, session, lang, robot);
+        tool(ui, session, lang, robot);
     }
     match focus {
         None => bodies(ui, session, lang, None),
@@ -86,6 +87,7 @@ pub fn cell(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) 
         session.end_jog();
         session.end_base_preview();
         session.end_tcp_preview();
+        session.end_tool_preview();
         session.end_body_preview();
         session.end_target_preview();
         session.end_frame_preview();
@@ -379,6 +381,112 @@ fn frames(
     }
 }
 
+/// The size of a box, cylinder or sphere, or the scale of a mesh. Returns true when the user changed it.
+fn solid_size(ui: &mut Ui, session: &Session, lang: Lang, solid: &mut Solid) -> bool {
+    let mut changed = false;
+    match solid {
+        Solid::Mesh { file, scale } => {
+            ui.horizontal(|ui| {
+                let label = ui.label(tr!(lang, PropScale));
+                let drag = egui::DragValue::new(scale).speed(0.001).range(1e-6..=1000.0);
+                changed |= ui.add(drag).labelled_by(label.id).changed();
+            });
+            if let Some(error) = session.mesh_error(file) {
+                ui.colored_label(colors::ERROR, error);
+            }
+        }
+        Solid::Box { size } => {
+            ui.label(tr!(lang, PropSize));
+            ui.horizontal(|ui| {
+                for (value, name) in size.iter_mut().zip(["X", "Y", "Z"]) {
+                    changed |= millimetres(ui, value, name, 1.0);
+                }
+            });
+        }
+        Solid::Cylinder { radius, length } => {
+            ui.label(tr!(lang, PropSize));
+            ui.horizontal(|ui| {
+                changed |= millimetres(ui, radius, "R", 1.0);
+                changed |= millimetres(ui, length, "L", 1.0);
+            });
+        }
+        Solid::Sphere { radius } => {
+            ui.label(tr!(lang, PropSize));
+            changed |= ui.horizontal(|ui| millimetres(ui, radius, "R", 1.0)).inner;
+        }
+    }
+    changed
+}
+
+/// The shapes a tool can be made of here, with a size that suits a small gripper or torch, centred so
+/// that it starts at the flange.
+fn tool_of(kind: usize) -> Option<gc_doc::Tool> {
+    let along_z = |solid, half: f64| gc_doc::Tool {
+        solid,
+        placement: gc_doc::Placement { xyz: [0.0, 0.0, half], rpy: [0.0; 3] },
+    };
+    match kind {
+        1 => Some(along_z(Solid::Cylinder { radius: 0.03, length: 0.15 }, 0.075)),
+        2 => Some(along_z(Solid::Box { size: [0.08, 0.08, 0.12] }, 0.06)),
+        3 => Some(along_z(Solid::Sphere { radius: 0.04 }, 0.04)),
+        _ => None,
+    }
+}
+
+/// Where the far end of a tool is, along its own Z axis, in the flange's frame.
+fn tool_end(tool: &gc_doc::Tool) -> gc_doc::Placement {
+    let half = match tool.solid {
+        Solid::Cylinder { length, .. } => length / 2.0,
+        Solid::Box { size } => size[2] / 2.0,
+        Solid::Sphere { radius } => radius,
+        Solid::Mesh { .. } => 0.0,
+    };
+    let pose = gc_math::pose_from_xyz_rpy(tool.placement.xyz, tool.placement.rpy);
+    let end = pose.transform_point(gc_math::DVec3::new(0.0, 0.0, half));
+    gc_doc::Placement { xyz: end.to_array(), rpy: tool.placement.rpy }
+}
+
+/// What the robot carries on its flange: its shape, size and place. It is drawn with the robot and
+/// checked for collisions like a link.
+fn tool(ui: &mut Ui, session: &mut Session, lang: Lang, robot: gc_core::Id<gc_doc::Robot>) {
+    let Some(mut tool) = session.shown_tool(robot) else { return };
+    let mut changed = false;
+    let mut tcp_to_end = false;
+    egui::CollapsingHeader::new(tr!(lang, PanelTool)).id_salt("gc_robot_tool").show(ui, |ui| {
+        let kinds = [tr!(lang, ToolNone), tr!(lang, ToolCylinder), tr!(lang, ToolBox), tr!(lang, ToolSphere)];
+        let current = match tool.as_ref().map(|t| &t.solid) {
+            None => 0,
+            Some(Solid::Cylinder { .. }) => 1,
+            Some(Solid::Box { .. }) => 2,
+            Some(Solid::Sphere { .. }) => 3,
+            Some(Solid::Mesh { .. }) => 4,
+        };
+        let mut chosen = current;
+        egui::ComboBox::from_label(tr!(lang, PropToolShape))
+            .selected_text(kinds.get(current).copied().unwrap_or(tr!(lang, ToolMesh)))
+            .show_ui(ui, |ui| {
+                for (index, name) in kinds.iter().enumerate() {
+                    ui.selectable_value(&mut chosen, index, *name);
+                }
+            });
+        if chosen != current {
+            tool = tool_of(chosen);
+            changed = true;
+        }
+        if let Some(tool) = &mut tool {
+            changed |= solid_size(ui, session, lang, &mut tool.solid);
+            changed |= placement(ui, lang, &mut tool.placement);
+            tcp_to_end = ui.button(tr!(lang, ToolTcpAtEnd)).clicked();
+        }
+    });
+    if tcp_to_end && let Some(end) = tool.as_ref().map(tool_end) {
+        session.preview_tcp(robot, end);
+    }
+    if changed {
+        session.preview_tool(robot, tool);
+    }
+}
+
 fn bodies(ui: &mut Ui, session: &mut Session, lang: Lang, only: Option<gc_core::Id<gc_doc::Body>>) {
     let ids: Vec<_> =
         session.doc().bodies().iter().map(|(id, _)| id).filter(|id| only.is_none_or(|o| o == *id)).collect();
@@ -396,37 +504,7 @@ fn bodies(ui: &mut Ui, session: &mut Session, lang: Lang, only: Option<gc_core::
             .show(ui, |ui| {
                 transparency(ui, session, lang, gc_session::Shown::Body(id));
                 changed |= placement(ui, lang, &mut body.placement);
-                match &mut body.solid {
-                    Solid::Mesh { file, scale } => {
-                        ui.horizontal(|ui| {
-                            let label = ui.label(tr!(lang, PropScale));
-                            let drag = egui::DragValue::new(scale).speed(0.001).range(1e-6..=1000.0);
-                            changed |= ui.add(drag).labelled_by(label.id).changed();
-                        });
-                        if let Some(error) = session.mesh_error(file) {
-                            ui.colored_label(colors::ERROR, error);
-                        }
-                    }
-                    Solid::Box { size } => {
-                        ui.label(tr!(lang, PropSize));
-                        ui.horizontal(|ui| {
-                            for (value, name) in size.iter_mut().zip(["X", "Y", "Z"]) {
-                                changed |= millimetres(ui, value, name, 1.0);
-                            }
-                        });
-                    }
-                    Solid::Cylinder { radius, length } => {
-                        ui.label(tr!(lang, PropSize));
-                        ui.horizontal(|ui| {
-                            changed |= millimetres(ui, radius, "R", 1.0);
-                            changed |= millimetres(ui, length, "L", 1.0);
-                        });
-                    }
-                    Solid::Sphere { radius } => {
-                        ui.label(tr!(lang, PropSize));
-                        changed |= ui.horizontal(|ui| millimetres(ui, radius, "R", 1.0)).inner;
-                    }
-                }
+                changed |= solid_size(ui, session, lang, &mut body.solid);
             });
         if changed {
             session.preview_body(id, body);

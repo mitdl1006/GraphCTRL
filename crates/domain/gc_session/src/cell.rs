@@ -10,7 +10,7 @@ use std::sync::Arc;
 use gc_collide::ShapeDesc;
 use gc_core::Id;
 use gc_doc::{
-    Body, CellOp, Command, Created, Document, EditError, MotionPath, Placement, Robot, Sketch, Solid,
+    Body, CellOp, Command, Created, Document, EditError, MotionPath, Placement, Robot, Sketch, Solid, Tool,
     Waypoint, WaypointTarget, WorkFrame,
 };
 use gc_jobs::{CancelToken, Executor, JobHandle, JobOutcome};
@@ -304,6 +304,7 @@ pub(crate) struct CellState {
     body: Option<(Id<Body>, Body)>,
     base: Option<(Id<Robot>, Placement)>,
     tcp: Option<(Id<Robot>, Placement)>,
+    tool: Option<(Id<Robot>, Option<Tool>)>,
     waypoint: Option<(Id<Waypoint>, WaypointTarget)>,
     frame: Option<(Id<WorkFrame>, WorkFrame)>,
     look: Option<(Shown, gc_doc::Look)>,
@@ -337,6 +338,7 @@ impl Default for CellState {
             body: None,
             base: None,
             tcp: None,
+            tool: None,
             waypoint: None,
             frame: None,
             look: None,
@@ -372,6 +374,11 @@ impl CellState {
         }
         for (_, body) in doc.bodies().iter() {
             self.read_body_mesh(&body.solid);
+        }
+        for (_, robot) in doc.robots().iter() {
+            if let Some(tool) = &robot.tool {
+                self.read_body_mesh(&tool.solid);
+            }
         }
         self.plans.retain(|id, _| doc.get(*id).is_some());
         self.comparisons.retain(|id, _| doc.get(*id).is_some());
@@ -427,6 +434,17 @@ impl CellState {
             _ => None,
         }
     }
+}
+
+/// The collision shapes of a robot's tool in its tip link's frame: a mesh as its convex parts. `None`
+/// when the tool's mesh is not available.
+fn tool_shapes(tool: Option<&Tool>, meshes: &BTreeMap<String, MeshRef>) -> Option<Vec<(DPose3, ShapeDesc)>> {
+    let Some(tool) = tool else { return Some(Vec::new()) };
+    let pose = pose_of(&tool.placement);
+    Some(match shape_of(&tool.solid, meshes)? {
+        ShapeDesc::Mesh(mesh) => gc_collide::hulls_of(&mesh).into_iter().map(|hull| (pose, hull)).collect(),
+        shape => vec![(pose, shape)],
+    })
 }
 
 /// The collision shape of a body's solid.
@@ -615,6 +633,7 @@ impl Session {
             joints: vec![0.0; loaded.chain.dof()],
             max_acc: 5.0,
             look: Default::default(),
+            tool: None,
         };
         match self.cell_op(CellOp::AddRobot(robot)).map_err(|e| e.to_string())?.first() {
             Some(Created::Robot(id)) => Ok(*id),
@@ -843,7 +862,8 @@ impl Session {
         let stored = self.doc.get(robot)?;
         let base = self.shown_base(robot)?;
         let mut obstacles = Vec::new();
-        let mut built_from = format!("{:?} {} {base:?}", robot, stored.urdf.len());
+        let tool = self.shown_tool(robot)?;
+        let mut built_from = format!("{:?} {} {base:?} {tool:?}", robot, stored.urdf.len());
         for (id, _) in self.doc.bodies().iter() {
             let body = self.shown_body(id)?;
             // A body whose mesh is not there cannot be checked; it is left out here and stops planning.
@@ -867,6 +887,7 @@ impl Session {
                 &obstacles,
                 PADDING,
                 &|uri| loaded.file(uri),
+                &tool_shapes(tool.as_ref(), &self.cell.meshes).unwrap_or_default(),
             )
             .ok()?;
             *scene = Some((built_from, built));
@@ -890,7 +911,9 @@ impl Session {
         let base = self.shown_base(robot)?;
         let tcp = self.shown_tcp(robot)?;
         let bodies: Vec<_> = self.doc.bodies().iter().filter_map(|(id, _)| self.shown_body(id)).collect();
-        let question = format!("{robot:?} {target:?} {world:?} {base:?} {tcp:?} {seed:?} {bodies:?}");
+        let tool = self.shown_tool(robot)?;
+        let question =
+            format!("{robot:?} {target:?} {world:?} {base:?} {tcp:?} {tool:?} {seed:?} {bodies:?}");
         if let Some((asked, ghost)) = self.cell.ghost.borrow().as_ref()
             && *asked == question
         {
@@ -963,6 +986,34 @@ impl Session {
             && self.doc.get(id).is_some_and(|r| r.tcp != tcp)
         {
             self.last_error = self.cell_op(CellOp::SetTcp { id, tcp }).err();
+        }
+    }
+
+    /// What a robot carries as it is shown: the preview while it is being edited, else the document's.
+    /// `None` when the robot does not exist; `Some(None)` when it carries nothing.
+    pub fn shown_tool(&self, robot: Id<Robot>) -> Option<Option<Tool>> {
+        match &self.cell.tool {
+            Some((id, preview)) if *id == robot => Some(preview.clone()),
+            _ => self.doc.get(robot).map(|r| r.tool.as_deref().cloned()),
+        }
+    }
+
+    /// Previews a robot's tool without touching the document. An invalid tool is ignored.
+    pub fn preview_tool(&mut self, robot: Id<Robot>, tool: Option<Tool>) {
+        if self.doc.get(robot).is_some() && tool.as_ref().is_none_or(Tool::is_valid) {
+            if let Some(tool) = &tool {
+                self.cell.read_body_mesh(&tool.solid);
+            }
+            self.cell.tool = Some((robot, tool));
+        }
+    }
+
+    /// Commits the tool preview as one undo step.
+    pub fn end_tool_preview(&mut self) {
+        if let Some((id, tool)) = self.cell.tool.take()
+            && self.doc.get(id).is_some_and(|r| r.tool.as_deref() != tool.as_ref())
+        {
+            self.last_error = self.cell_op(CellOp::SetTool { id, tool }).err();
         }
     }
 
@@ -1272,8 +1323,9 @@ impl Session {
         let bodies: Vec<(&Placement, &Solid)> =
             doc.bodies().iter().map(|(_, b)| (&b.placement, &b.solid)).collect();
         Some(format!(
-            "{} {} {} {:?} {:?} {:?} {} {bodies:?} {targets:?} {:?} {} {}",
+            "{} {:?} {} {} {:?} {:?} {:?} {} {bodies:?} {targets:?} {:?} {} {}",
             robot.urdf.len(),
+            robot.tool,
             robot.base_link,
             robot.tip_link,
             robot.placement,
@@ -1496,6 +1548,8 @@ fn plan_path(
             .ok_or_else(|| format!("the mesh of `{}` is not available", body.name))?;
         obstacles.push(Obstacle { name: body.name.clone(), pose: pose_of(&body.placement), shape });
     }
+    let tool = tool_shapes(robot.tool.as_deref(), meshes)
+        .ok_or_else(|| format!("the mesh of the tool of `{}` is not available", robot.name))?;
     let (scene, _) = RobotScene::new(
         Arc::clone(&loaded.model),
         loaded.chain.clone(),
@@ -1504,6 +1558,7 @@ fn plan_path(
         &obstacles,
         PADDING,
         &|uri| loaded.file(uri),
+        &tool,
     )
     .map_err(|e| e.to_string())?;
     let scene = scene.with_tool(pose_of(&robot.tcp));

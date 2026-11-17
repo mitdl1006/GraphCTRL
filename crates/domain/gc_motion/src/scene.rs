@@ -76,6 +76,8 @@ impl RobotScene {
     /// - `padding` is the distance robot links keep from obstacles.
     /// - `meshes` supplies the mesh a URDF `filename` refers to; links whose mesh is not supplied get no
     ///   collision geometry for it, and its name is returned in the list of missing meshes.
+    /// - `tool` lists shapes, posed in the tip link's frame, that the tip link carries (convex: give a
+    ///   mesh as its hulls).
     ///
     /// Link pairs joined by a joint, and pairs that already touch in the zero configuration, are never
     /// checked against each other.
@@ -87,12 +89,18 @@ impl RobotScene {
         obstacles: &[Obstacle],
         padding: f64,
         meshes: &dyn Fn(&str) -> Option<Arc<MeshData>>,
+        tool: &[(DPose3, ShapeDesc)],
     ) -> Result<(Self, Vec<String>), CollideError> {
         let mut world = World::new();
+        let tip_link = model.link(tip_link).unwrap_or(model.root);
         let mut missing = Vec::new();
         let mut link_bodies = Vec::with_capacity(model.links.len());
-        for link in &model.links {
+        for (index, link) in model.links.iter().enumerate() {
             let mut shapes = Vec::new();
+            // A tool is part of the link that carries it.
+            if index == tip_link {
+                shapes.extend(tool.iter().cloned());
+            }
             for geometry in &link.collisions {
                 match &geometry.shape {
                     Shape::Box(size) => shapes.push((geometry.pose, ShapeDesc::Box(*size))),
@@ -140,7 +148,6 @@ impl RobotScene {
                 world.add_body(&obstacle.name, false, 0.0, &[(DPose3::IDENTITY, obstacle.shape.clone())])?;
             world.set_pose(body, obstacle.pose);
         }
-        let tip_link = model.link(tip_link).unwrap_or(model.root);
         let tool = DPose3::IDENTITY;
         let mut scene =
             Self { model, chain, base, world, link_bodies, tip_link, tool, resolution: 0.02, padding };
