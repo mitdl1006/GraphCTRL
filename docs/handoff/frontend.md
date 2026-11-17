@@ -44,6 +44,8 @@
 
 - 로봇 링크 하위 노드·구속 상태 점(백엔드 3a481c2): 로봇 행 아래 "링크" 폴더에 `robot_links`의 링크를 사슬 깊이만큼 들여 "이름:1"로 나열하고 링크마다 원점 폴더(뷰포트가 링크 원점도 그리고 고름, 구속·조인트 선택에도 그대로). 구성요소 행과 "관계" 폴더 행 오른쪽에 구속 상태 점: 검은 점(완전 구속/고정), 속 빈 점(움직일 수 있음), 붉은 대시(만족하지 않음). 근거는 `docs/ux/inventor-parity.md`·Assembly Browser Reference의 상태 설명뿐(아이콘 모양 원문 미확인). 미구현: 링크별 가시성·선택, 점 호버 설명, DOF 기호. 테스트 `robot_links_are_components_below_the_robot`.
 
+- Free Move / Free Rotate(어셈블리 #13): 마킹 메뉴의 "컴포넌트 이동"·"컴포넌트 회전"이 도구를 켜고(`Viewport::free_tool`), 왼쪽 드래그가 바디·로봇을 뷰 평면에서 옮기거나(광선과 컴포넌트를 지나는 뷰 평면의 교점 차이) 자기 원점 기준으로 돌림(화면 가로·세로 드래그 = 카메라 up·right 축 회전, 픽셀당 0.01 rad), 드래그 한 번이 실행 취소 한 단계, Esc로 종료(`gc_viewport/src/freemove.rs`). 근거: `docs/ux/inventor-assembly-parity.md`의 A12/A13 요약만(도움말 원문 확인 못 함). 원문과 다른 점·미구현: 3D 회전 기호(내부/상하/좌우/테두리), 구속된 컴포넌트의 Update 복귀(드래그 후 구속 위치로 돌아가기), 접지 컴포넌트 이동 막기, 설비·부품 occurrence 드래그, 리본 버튼. 테스트 `free_move_and_free_rotate_drag_a_component`.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

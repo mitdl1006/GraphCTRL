@@ -51,7 +51,7 @@ fn plane_axes(k: usize) -> (DVec3, DVec3) {
 }
 
 /// The world pose of the item the gizmo works on, and whether it can be moved (not only turned).
-fn pose_of(session: &Session, item: CellItem) -> Option<(DPose3, bool)> {
+pub(crate) fn pose_of(session: &Session, item: CellItem) -> Option<(DPose3, bool)> {
     let pose = |p: Placement| gc_math::pose_from_xyz_rpy(p.xyz, p.rpy);
     match item {
         CellItem::Body(id) => Some((pose(session.shown_body(id)?.placement), true)),
@@ -71,7 +71,7 @@ fn placement(pose: &DPose3) -> Placement {
 }
 
 /// Shows the item at a new world pose, as a preview.
-fn preview(session: &mut Session, item: CellItem, pose: &DPose3) {
+pub(crate) fn preview(session: &mut Session, item: CellItem, pose: &DPose3) {
     match item {
         CellItem::Body(id) => {
             if let Some(mut body) = session.shown_body(id).cloned() {
@@ -101,7 +101,7 @@ fn preview(session: &mut Session, item: CellItem, pose: &DPose3) {
     }
 }
 
-fn commit(session: &mut Session, item: CellItem) {
+pub(crate) fn commit(session: &mut Session, item: CellItem) {
     match item {
         CellItem::Body(_) => session.end_body_preview(),
         CellItem::Robot(_) => session.end_base_preview(),

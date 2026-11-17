@@ -128,8 +128,7 @@ impl Cmd {
             Self::Home => tr!(lang, NavHome).to_owned(),
             Self::FitAll => tr!(lang, NavZoomAll).to_owned(),
         };
-        let enabled = !matches!(self, Self::Move | Self::Rotate);
-        MarkingItem { label, enabled }
+        MarkingItem { label, enabled: true }
     }
 }
 
@@ -143,6 +142,8 @@ pub(crate) enum Effect {
     Home,
     /// Fit everything in the view.
     Fit,
+    /// Switch Free Move or Free Rotate on.
+    Free(crate::FreeTool),
 }
 
 /// Carries a command out.
@@ -153,7 +154,8 @@ pub(crate) fn run(cmd: Cmd, session: &mut Session) -> Effect {
         Cmd::FinishSketch => session.finish_sketch(),
         Cmd::Constrain => return Effect::Request(ViewportRequest::Constrain),
         Cmd::Place => return Effect::Request(ViewportRequest::PlaceComponent),
-        Cmd::Move | Cmd::Rotate => {}
+        Cmd::Move => return Effect::Free(crate::FreeTool::Move),
+        Cmd::Rotate => return Effect::Free(crate::FreeTool::Rotate),
         Cmd::ToggleVisible(item) => {
             if let Some(shown) = item.shown()
                 && let Some(look) = session.shown_look(shown)
