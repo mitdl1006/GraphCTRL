@@ -23,8 +23,8 @@ mod txn;
 
 mod design;
 pub use cell::{
-    AcmOverride, Body, CellOp, ContactAllowance, Look, MotionPath, Placement, Robot, Solid, Tool, Waypoint,
-    WaypointTarget, WorkFrame,
+    AcmOverride, Body, CellOp, ContactAllowance, LinkMotion, Look, MotionPath, Placement, Robot, RobotLink,
+    Solid, Tool, Waypoint, WaypointTarget, WorkFrame,
 };
 pub use command::{
     Applied, Command, Created, DimSlot, EditError, EndSnap, SketchOp, TangentArc, apply, tangent_arc,

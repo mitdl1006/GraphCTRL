@@ -222,6 +222,10 @@ impl Document {
                 let rotation = DQuat::from_mat3(&gc_math::DMat3::from_cols(x, z.cross(x), z)).normalize();
                 placed(&a.placement) * DPose3::from_parts(column(3), rotation)
             }
+            Occurrence::Link { robot, index } => {
+                let r = self.get(robot)?;
+                placed(&r.placement) * *r.link_frames().get(index as usize)?
+            }
         };
         Some(ComponentOrigin { pose })
     }

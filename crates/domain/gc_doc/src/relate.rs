@@ -375,7 +375,9 @@ impl Document {
 
     /// The geometry of a selection in its owner's frame (a part's geometry goes through the part's frame).
     fn in_owner(&self, selection: &Selection) -> Option<Geometry> {
-        let Occurrence::Part { .. } = selection.occurrence else { return Some(selection.geometry) };
+        if let Occurrence::Item(_) = selection.occurrence {
+            return Some(selection.geometry);
+        }
         let owner = self.owner_pose(selection.occurrence.owner())?;
         let part = self.component_origin(selection.occurrence)?.pose;
         let local = owner.inverse() * part;
@@ -426,7 +428,18 @@ impl Document {
     /// Solves all relationships: the new world poses of the components that move. Grounded components
     /// stay; so do components no relationship touches.
     pub fn solve_relationships(&self) -> Result<Vec<(AnyId, DPose3)>, Unsolved> {
-        let (owners, terms) = self.gather()?;
+        self.solve_relationships_holding(&[])
+    }
+
+    /// Like [`Document::solve_relationships`], with some components held where they are as if grounded
+    /// (a robot whose joints were just set keeps its base; what is tied to its links follows).
+    pub fn solve_relationships_holding(&self, held: &[AnyId]) -> Result<Vec<(AnyId, DPose3)>, Unsolved> {
+        let (mut owners, terms) = self.gather()?;
+        for owner in &mut owners {
+            if held.contains(&owner.item) {
+                owner.free = false;
+            }
+        }
         let start: Vec<DPose3> = owners.iter().map(|o| o.pose).collect();
         let mut poses = start.clone();
         rough_turns(&owners, &terms, &mut poses);

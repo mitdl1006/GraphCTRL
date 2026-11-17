@@ -1,5 +1,19 @@
 # 백엔드 인계 (2026-11-17)
 
+## 2026-11-18 — 로봇 링크를 하위 컴포넌트로(리드 순서 ②)
+
+사용자 요구 "로봇조차도 xyz가 있으니 xy평면 같은 것들에 접근 가능해야".
+- 문서: `Robot.links: Vec<RobotLink{name, parent, origin, axis, motion: LinkMotion::{Fixed, Turn{joint, scale, offset}, Slide{..}}}>` —
+  설명(URDF)에서 뽑은 링크 트리를 평범한 자료로 저장(문서가 URDF를 읽지 않고 링크 프레임을 계산). `Robot::link_frames()`(로봇 배치 기준).
+  로봇을 추가할 때 채우고, 옛 프로젝트는 열 때 채운다(편집이 아니며 '변경됨'으로 표시 안 함). `CellOp::SetRobotLinks{id, links}`.
+  미믹 관절은 구동 관절의 배율·오프셋으로, 계획 체인 밖 관절은 0으로 고정.
+- `Occurrence::Link{robot, index}` — `component_origin`(관절값을 따라 움직이는 링크 원점 폴더: 평면 3·축 3·점), 구속·조인트 선택,
+  `create_sketch_on_component`, 원점 표시, 가시성(숨김) 모두 같은 API. 억제는 거부.
+- **조인트 값이 바뀌면(SetJoints) 관계를 다시 풀되 그 로봇의 베이스는 그대로**: 링크에 Rigid로 붙인 바디(툴·공작물)가 팔을 따라간다.
+- 세션: `session.robot_links(robot) -> Vec<ComponentNode>`(로봇 노드 아래 표시용; `components()`에는 넣지 않음 — 상태바 개수·기존 트리 유지).
+  미리보기 관절(조그·구동·재생)은 문서 값이 아니므로 링크 원점은 문서 관절값 기준이다.
+- 테스트 `gc_session/tests/robot_links.rs`(세션 FK와 일치, 관절 변경 추종, 링크에 붙인 바디·링크 평면 스케치 추종, 옛 프로젝트 채움).
+
 ## 2026-11-18 — 어셈블리 P1-10 구속 상태·남은 자유도
 
 근거(원문): Degrees of freedom in assemblies `GUID-6E131E5A-438B-4008-94F3-D3A3E92EF44C.htm`(처음 6 = 병진 3 + 회전 3, 구속은 자유도를

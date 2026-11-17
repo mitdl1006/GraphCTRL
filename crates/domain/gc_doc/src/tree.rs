@@ -148,6 +148,9 @@ impl Document {
             Occurrence::Part { assembly, index } => {
                 self.get(assembly).is_some_and(|a| (index as usize) < a.parts.len())
             }
+            Occurrence::Link { robot, index } => {
+                self.get(robot).is_some_and(|r| (index as usize) < r.links.len())
+            }
         }
     }
 
@@ -158,11 +161,14 @@ impl Document {
             (ComponentFlag::Grounded, _) => listed(&state.grounded, occurrence),
             (ComponentFlag::Enabled, _) => !listed(&state.disabled, occurrence),
             (ComponentFlag::Visible, Occurrence::Item(item)) => self.is_visible(item),
-            (ComponentFlag::Visible, Occurrence::Part { .. }) => !listed(&state.hidden, occurrence),
+            (ComponentFlag::Visible, Occurrence::Part { .. } | Occurrence::Link { .. }) => {
+                !listed(&state.hidden, occurrence)
+            }
             (ComponentFlag::Suppressed, Occurrence::Item(item)) => {
                 self.timeline().is_some_and(|(_, t)| t.suppressed.contains(&item))
             }
             (ComponentFlag::Suppressed, Occurrence::Part { .. }) => listed(&state.suppressed, occurrence),
+            (ComponentFlag::Suppressed, Occurrence::Link { .. }) => false,
         }
     }
 
@@ -215,6 +221,26 @@ impl Document {
             }
         }
         out
+    }
+
+    /// A robot's links as sub-components, root first, each under its parent link (the root under the
+    /// robot). Empty when the robot's link tree is not known. Not part of [`Document::components`], which
+    /// lists what was placed in the cell.
+    pub fn robot_links(&self, robot: Id<Robot>) -> Vec<ComponentNode> {
+        let links = self.get(robot).map(|r| r.links.clone()).unwrap_or_default();
+        links
+            .iter()
+            .enumerate()
+            .map(|(index, link)| {
+                #[allow(clippy::cast_possible_truncation, reason = "link counts fit in u32")]
+                let occurrence = Occurrence::Link { robot, index: index as u32 };
+                let parent = match link.parent {
+                    Some(p) => Occurrence::Link { robot, index: p },
+                    None => Occurrence::Item(robot.erase()),
+                };
+                self.node(occurrence, Some(parent), link.name.clone())
+            })
+            .collect()
     }
 
     fn node(&self, occurrence: Occurrence, parent: Option<Occurrence>, name: String) -> ComponentNode {
@@ -279,7 +305,8 @@ pub(crate) fn set_component(
             crate::cell::set_timeline(txn, |t| toggle(&mut t.components.disabled, !on))?;
             if on { "Enable" } else { "Disable" }
         }
-        (ComponentFlag::Visible, Occurrence::Part { .. }) => {
+        (ComponentFlag::Suppressed, Occurrence::Link { .. }) => return Err(EditError::BadValue),
+        (ComponentFlag::Visible, Occurrence::Part { .. } | Occurrence::Link { .. }) => {
             crate::cell::set_timeline(txn, |t| toggle(&mut t.components.hidden, !on))?;
             if on { "Show" } else { "Hide" }
         }
