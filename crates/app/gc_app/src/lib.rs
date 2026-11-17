@@ -11,6 +11,7 @@ mod example;
 mod interference;
 mod measure;
 mod parameters;
+mod pattern;
 mod ribbon;
 
 pub use app::{FileDialogs, GraphCtrlApp, RunOptions, run};

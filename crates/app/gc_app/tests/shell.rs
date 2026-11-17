@@ -2534,7 +2534,7 @@ fn drive_moves_a_joint_and_stops_at_a_collision() {
     harness.run();
     let robot = harness.state().session.doc().robots().iter().next().unwrap().0;
     let stored = harness.state().session.robot_joints(robot).unwrap();
-    harness.query_all_by_label("로봇").next().unwrap().click();
+    harness.query_all_by_label("조립").next().unwrap().click();
     harness.run();
     harness.get_by_label("구동").click();
     harness.run();
@@ -2843,7 +2843,7 @@ fn the_constrain_dialog_mates_two_components() {
     app.viewport_mut().camera.pan([0.0, 0.0], [-250.0, 0.0], [1280.0, 700.0]);
     harness.run();
 
-    harness.get_by_label("로봇").click();
+    harness.get_by_label("조립").click();
     harness.run();
     harness.get_by_label("구속").click();
     harness.run_steps(5);
@@ -3032,7 +3032,7 @@ fn the_joint_dialog_joins_two_components_rigidly() {
     app.viewport_mut().camera.pan([0.0, 0.0], [-250.0, 0.0], [1280.0, 700.0]);
     harness.run();
 
-    harness.get_by_label("로봇").click();
+    harness.get_by_label("조립").click();
     harness.run();
     harness.get_by_label("조인트").click();
     harness.run_steps(5);
@@ -3308,4 +3308,32 @@ fn a_relationship_is_suppressed_from_the_browser() {
     harness.get_by_label("억제").click();
     harness.run();
     assert!(harness.state().session.doc().is_inactive(id.erase()));
+}
+
+/// The Pattern dialog opens from the ribbon and lists the components to pattern.
+#[test]
+fn the_pattern_dialog_lists_the_components() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.05, 0.05, 0.05] };
+    harness.state_mut().session.add_body(solid, gc_doc::Placement::default()).unwrap();
+    harness.run();
+    harness.get_by_label("조립").click();
+    harness.run();
+    harness.get_by_label("패턴").click();
+    harness.run_steps(3);
+    harness.get_by_label("패턴화할 컴포넌트");
+    harness.get_by_label("사각형");
+    harness.get_by_label("원형").click();
+    harness.run_steps(3);
+    harness.get_by_label_contains("회전 축");
+    if gpu {
+        let image = harness.render().unwrap();
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        image.save(out.join("review-40-assemble-pattern.png")).unwrap();
+    }
 }
