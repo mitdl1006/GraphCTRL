@@ -1803,6 +1803,7 @@ fn plan_path(
                 Some(world) => analytic_goals(loaded, &scene.flange_target(world), &start),
                 None => Vec::new(),
             },
+            contacts: Vec::new(),
         };
         let planned = match previous.and_then(|p| p.segments.get(index)) {
             Some(old) => replan(&scene, &request, old, control),

@@ -10,7 +10,7 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(test, allow(clippy::float_cmp, reason = "tests compare exactly representable values"))]
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use gc_math::{DPose3, DQuat, DVec3};
@@ -222,6 +222,8 @@ pub fn hulls_of(mesh: &MeshData) -> Vec<ShapeDesc> {
 pub struct World {
     bodies: Vec<Body>,
     allowed: BTreeSet<(usize, usize)>,
+    /// Pairs checked with a padding of their own instead of the movable body's.
+    pair_padding: BTreeMap<(usize, usize), f64>,
 }
 
 fn proximity(a: &Body, b: &Body, padding: f64) -> Result<Proximity, CollideError> {
@@ -338,6 +340,24 @@ impl World {
         self.allowed.remove(&(a.0.min(b.0), a.0.max(b.0)));
     }
 
+    /// Checks this pair with its own padding (`Some`) or with the movable body's again (`None`).
+    pub fn set_pair_padding(&mut self, a: BodyId, b: BodyId, padding: Option<f64>) {
+        let key = (a.0.min(b.0), a.0.max(b.0));
+        match padding {
+            Some(p) => {
+                self.pair_padding.insert(key, p.max(0.0));
+            }
+            None => {
+                self.pair_padding.remove(&key);
+            }
+        }
+    }
+
+    /// The body with this name, if there is one (the first, if several share it).
+    pub fn find(&self, name: &str) -> Option<BodyId> {
+        self.bodies.iter().position(|b| b.name == name).map(BodyId)
+    }
+
     /// The pairs excluded from checking, by name, each pair ordered and the list sorted.
     pub fn allowed_pairs(&self) -> Vec<(String, String)> {
         let mut pairs: Vec<(String, String)> = self
@@ -364,6 +384,9 @@ impl World {
             return Ok(Proximity::Clear);
         };
         let padding = match (first.movable, second.movable) {
+            _ if self.pair_padding.contains_key(&(a.0.min(b.0), a.0.max(b.0))) => {
+                self.pair_padding[&(a.0.min(b.0), a.0.max(b.0))]
+            }
             (true, false) => first.padding,
             (false, true) => second.padding,
             _ => 0.0,

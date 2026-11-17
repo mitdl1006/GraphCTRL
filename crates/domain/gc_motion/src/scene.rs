@@ -52,7 +52,60 @@ pub enum StateProblem {
     Unknown,
 }
 
+/// Where a [`ContactAllowance`] applies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ContactScope {
+    /// Near the waypoints of the motion: while the tool centre point is within the radius of the start
+    /// or the goal.
+    Waypoint,
+    /// Along the whole motion.
+    Segment,
+}
+
+/// Lets a robot part come closer to an obstacle than the padding where the work needs it (plan 5.7):
+/// the pair is checked without padding there, and touching is refused unless `allow_touch`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContactAllowance {
+    /// The robot link (a tool is part of the link that carries it).
+    pub body: String,
+    /// The obstacle.
+    pub obstacle: String,
+    /// Where it applies.
+    pub scope: ContactScope,
+    /// For [`ContactScope::Waypoint`]: how far from a waypoint the tool centre point may be, metres
+    /// (50 mm by default).
+    pub radius: f64,
+    /// Overlap is allowed too, not only a gap below the padding.
+    pub allow_touch: bool,
+}
+
+impl ContactAllowance {
+    /// The usual allowance: no padding within 50 mm of a waypoint, no touching.
+    pub fn near_waypoint(body: &str, obstacle: &str) -> Self {
+        Self {
+            body: body.to_owned(),
+            obstacle: obstacle.to_owned(),
+            scope: ContactScope::Waypoint,
+            radius: 0.05,
+            allow_touch: false,
+        }
+    }
+}
+
+/// A contact allowance with its bodies found and its waypoints placed.
+#[derive(Clone, Debug)]
+struct Contact {
+    link: BodyId,
+    obstacle: BodyId,
+    /// `None`: everywhere. Otherwise the points the tool centre point must be near, and how near.
+    near: Option<(Vec<gc_math::DVec3>, f64)>,
+    allow_touch: bool,
+    /// The pair was excluded from checking anyway.
+    excluded: bool,
+}
+
 /// A robot placed in a cell with obstacles.
+#[derive(Clone)]
 pub struct RobotScene {
     model: Arc<RobotModel>,
     chain: Chain,
@@ -72,6 +125,8 @@ pub struct RobotScene {
     link_radius: Vec<f64>,
     /// Per chain coordinate: the model joint, whether it slides, and the links (with bodies) it moves.
     movers: Vec<(usize, bool, Vec<usize>)>,
+    /// Contact allowances in force.
+    contacts: Vec<Contact>,
 }
 
 impl RobotScene {
@@ -216,6 +271,7 @@ impl RobotScene {
             padding,
             link_radius,
             movers,
+            contacts: Vec::new(),
         };
         // Links that touch in the zero configuration are designed to: they are not checked either.
         scene.place(&vec![0.0; scene.chain.dof()]);
@@ -295,7 +351,31 @@ impl RobotScene {
         {
             return Some(StateProblem::JointLimit { joint: self.chain.joint_names()[joint].clone() });
         }
-        self.place_in(world, q);
+        let poses = self.link_poses(q);
+        for (pose, body) in poses.iter().zip(&self.link_bodies) {
+            if let Some(body) = body {
+                world.set_pose(*body, *pose);
+            }
+        }
+        if !self.contacts.is_empty() {
+            let tip = (poses[self.tip_link] * self.tool).translation;
+            for contact in &self.contacts {
+                let active = contact
+                    .near
+                    .as_ref()
+                    .is_none_or(|(points, radius)| points.iter().any(|p| (*p - tip).length() <= *radius));
+                match (active, contact.allow_touch) {
+                    (true, true) => world.allow(contact.link, contact.obstacle),
+                    (true, false) => world.set_pair_padding(contact.link, contact.obstacle, Some(0.0)),
+                    (false, _) => {
+                        world.set_pair_padding(contact.link, contact.obstacle, None);
+                        if !contact.excluded {
+                            world.disallow(contact.link, contact.obstacle);
+                        }
+                    }
+                }
+            }
+        }
         match world.first_hit() {
             Ok(None) => None,
             Ok(Some(hit)) => {
@@ -324,6 +404,46 @@ impl RobotScene {
     /// The distance robot links keep from obstacles.
     pub fn padding(&self) -> f64 {
         self.padding
+    }
+
+    /// The scene with contact allowances in force for a motion whose waypoints put the tool centre point
+    /// at `waypoints` (world positions). Returns the allowances naming a body or obstacle the scene does
+    /// not have; they are left out.
+    #[must_use]
+    pub fn with_contacts(
+        mut self,
+        allowances: &[ContactAllowance],
+        waypoints: &[gc_math::DVec3],
+    ) -> (Self, Vec<ContactAllowance>) {
+        let mut unknown = Vec::new();
+        self.contacts.clear();
+        for allowance in allowances {
+            let link = self.world.find(&allowance.body).filter(|b| self.link_bodies.contains(&Some(*b)));
+            let obstacle =
+                self.world.find(&allowance.obstacle).filter(|b| !self.link_bodies.contains(&Some(*b)));
+            let (Some(link), Some(obstacle)) = (link, obstacle) else {
+                unknown.push(allowance.clone());
+                continue;
+            };
+            let near = match allowance.scope {
+                ContactScope::Segment => None,
+                ContactScope::Waypoint => Some((waypoints.to_vec(), allowance.radius.max(0.0))),
+            };
+            let excluded = self.world.is_allowed(link, obstacle);
+            self.contacts.push(Contact {
+                link,
+                obstacle,
+                near,
+                allow_touch: allowance.allow_touch,
+                excluded,
+            });
+        }
+        (self, unknown)
+    }
+
+    /// True when contact allowances are in force: some pairs are then checked without padding somewhere.
+    pub fn has_contacts(&self) -> bool {
+        !self.contacts.is_empty()
     }
 
     /// An upper bound of how far any point of a robot body moves on the joint-space segment from `a` to

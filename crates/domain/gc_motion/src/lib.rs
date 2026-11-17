@@ -11,6 +11,7 @@
 #![cfg_attr(test, allow(clippy::float_cmp, reason = "tests compare exactly representable values"))]
 
 mod scene;
+mod sphere;
 
 use std::sync::Arc;
 
@@ -23,7 +24,8 @@ use gc_robot::{IkOptions, NumericIk};
 use gc_robotics_api::IkFailureReason;
 use gc_traj::{Limits, TimingError, Trajectory, Validated, ValidationError};
 
-pub use scene::{Checker, Obstacle, RobotScene, StateProblem};
+pub use scene::{Checker, ContactAllowance, ContactScope, Obstacle, RobotScene, StateProblem};
+pub use sphere::{SpherePlan, SphereRequest, plan_sphere};
 
 /// How far a blend may leave the corner it rounds, as a distance in joint space (radians for an arm).
 pub const BLEND_DEVIATION: f64 = 0.1;
@@ -62,6 +64,9 @@ pub struct MotionRequest {
     /// Goal configurations already known for a pose goal (from a closed-form solver), nearest first.
     /// When given, they replace the numerical search for goal configurations.
     pub goal_seeds: Vec<Vec<f64>>,
+    /// Robot parts allowed closer to obstacles than the padding (near the start and the goal, or along
+    /// the whole motion). Allowances naming a body the scene does not have are ignored.
+    pub contacts: Vec<ContactAllowance>,
 }
 
 /// A planned and validated motion.
@@ -106,8 +111,8 @@ pub struct MotionPlan {
 pub struct Guarantee {
     /// The padding every checked state keeps from obstacles, metres.
     pub padding_nominal: f64,
-    /// The smallest padding used anywhere along the motion, metres (equal to the nominal padding: the
-    /// motion is not planned with reduced padding anywhere).
+    /// The smallest padding used anywhere along the motion, metres: zero where contact allowances are in
+    /// force for some pairs, else the nominal padding.
     pub padding_min: f64,
     /// The largest change of a joint between two checked states, degrees.
     pub step_deg: f64,
@@ -183,7 +188,27 @@ pub fn plan_motion(
     request: &MotionRequest,
     control: &dyn Control,
 ) -> Result<MotionPlan, MotionError> {
-    plan_preferring(scene, request, None, control)
+    let scoped = with_contacts(scene, request);
+    plan_preferring(scoped.as_ref().unwrap_or(scene), request, None, control)
+}
+
+/// The scene with the request's contact allowances in force, when it has any: they apply near the start
+/// and the goal positions of the tool centre point.
+fn with_contacts(scene: &RobotScene, request: &MotionRequest) -> Option<RobotScene> {
+    if request.contacts.is_empty() {
+        return None;
+    }
+    let dof = scene.chain().dof();
+    let mut waypoints = Vec::new();
+    if request.start.len() == dof {
+        waypoints.push(scene.tip_in_world(&request.start).translation);
+    }
+    match &request.goal {
+        Goal::Pose(pose) => waypoints.push(pose.translation),
+        Goal::Joints(q) if q.len() == dof => waypoints.push(scene.tip_in_world(q).translation),
+        Goal::Joints(_) => {}
+    }
+    Some(scene.clone().with_contacts(&request.contacts, &waypoints).0)
 }
 
 /// Plans a motion again after its input changed, re-using what can be re-used (plan 5.8, re-planning
@@ -202,6 +227,8 @@ pub fn replan(
     previous: &MotionPlan,
     control: &dyn Control,
 ) -> Result<MotionPlan, MotionError> {
+    let scoped = with_contacts(scene, request);
+    let scene = scoped.as_ref().unwrap_or(scene);
     let (space, limits) = setup(scene, request)?;
     if previous.linear == request.linear
         && let Some(plan) = keep(scene, request, &space, &limits, &previous.path)
@@ -506,7 +533,7 @@ fn certify(
     }
     Ok(Guarantee {
         padding_nominal: padding,
-        padding_min: padding,
+        padding_min: if scene.has_contacts() { 0.0 } else { padding },
         step_deg,
         step_mm: step_m * 1e3,
         clearance: padding - step_m / 2.0,
