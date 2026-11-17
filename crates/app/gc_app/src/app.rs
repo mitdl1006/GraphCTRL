@@ -378,6 +378,12 @@ impl GraphCtrlApp {
         self.drive.set_end(end);
     }
 
+    /// Opens the Drive dialog for an assembly relationship (Inventor: right-click it in the browser >
+    /// Drive). The browser's relationship menu calls this.
+    pub fn drive_relationship(&mut self, id: gc_core::Id<gc_doc::Relationship>) {
+        self.drive.start_relationship(&mut self.session, id);
+    }
+
     /// Closes the Drive dialog as its close button does, for tests.
     #[doc(hidden)]
     pub fn close_drive_for_test(&mut self) {

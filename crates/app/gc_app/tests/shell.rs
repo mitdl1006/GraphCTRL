@@ -3092,3 +3092,69 @@ fn robot_links_are_components_below_the_robot() {
     harness.run();
     assert!(harness.state().session.origin_visible(occurrence, gc_doc::OriginElement::Point));
 }
+
+/// Drive on an assembly relationship (Inventor 2026 help, "To Drive Relationships in Assemblies":
+/// https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-B78E59C9-F9FB-4ED5-B60E-C9198770B1AF.htm):
+/// a block mated on top of a base is driven from its offset (0) to 10 mm; Go to End lifts it; with
+/// Collision Detection, driving it down into the base stops; closing puts it back.
+#[test]
+fn drive_moves_a_mated_block_and_stops_at_a_collision() {
+    use gc_doc::{AxisSense, Geometry, Occurrence, Placement, RelationKind, Relationship, Selection, Solid};
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let session = &mut harness.state_mut().session;
+    let base = session
+        .add_body(Solid::Box { size: [0.4, 0.4, 0.2] }, Placement { xyz: [0.0, 0.0, 0.1], rpy: [0.0; 3] })
+        .unwrap();
+    let block = session
+        .add_body(Solid::Box { size: [0.1, 0.1, 0.1] }, Placement { xyz: [0.0, 0.0, 0.5], rpy: [0.0; 3] })
+        .unwrap();
+    let face = |body: gc_core::Id<gc_doc::Body>, z: f64, nz: f64| Selection {
+        occurrence: Occurrence::Item(body.erase()),
+        geometry: Geometry::Plane { point: [0.0, 0.0, z], normal: [0.0, 0.0, nz] },
+    };
+    let mate = session
+        .add_relationship(Relationship {
+            name: "Mate:1".into(),
+            kind: RelationKind::Mate { offset: 0.0, sense: AxisSense::Opposed },
+            first: face(block, -0.05, -1.0),
+            second: face(base, 0.1, 1.0),
+        })
+        .unwrap();
+    let rest = harness.state().session.shown_body(block).unwrap().placement;
+    assert!((rest.xyz[2] - 0.25).abs() < 1e-6, "mated on top: {rest:?}");
+
+    harness.state_mut().drive_relationship(mate);
+    harness.run();
+    harness.get_by_label("끝으로").click();
+    harness.run();
+    harness.get_by_label("현재 값 10.000mm");
+    let lifted = harness.state().session.shown_body(block).unwrap().placement;
+    assert!((lifted.xyz[2] - 0.26).abs() < 1e-6, "{lifted:?}");
+
+    // Down into the base with Collision Detection: the drive stops on the way.
+    harness.get_by_label("시작으로").click();
+    harness.run();
+    harness.get_by_label("자세히").click();
+    harness.run();
+    harness.get_by_label("충돌 감지").click();
+    harness.run();
+    harness.state_mut().drive_end_for_test(-50.0);
+    harness.get_by_label("정방향").click();
+    for _ in 0..100 {
+        harness.step();
+        if harness.query_by_label_contains("충돌 감지:").is_some() {
+            break;
+        }
+    }
+    harness.run_steps(2);
+    assert!(harness.query_by_label_contains("충돌 감지: Body2 ↔ Body1").is_some());
+
+    harness.state_mut().close_drive_for_test();
+    harness.run();
+    let back = harness.state().session.shown_body(block).unwrap().placement;
+    assert!((back.xyz[2] - 0.25).abs() < 1e-6, "{back:?}");
+}

@@ -99,6 +99,8 @@ pub(crate) struct Drive {
     pub open: bool,
     robot: Option<gc_core::Id<gc_doc::Robot>>,
     joint: usize,
+    /// An assembly relationship to drive instead of a robot joint.
+    relation: Option<gc_core::Id<gc_doc::Relationship>>,
     start: f64,
     end: f64,
     pause: f64,
@@ -115,6 +117,8 @@ pub(crate) struct Drive {
     last_step: f64,
     /// What stopped the drive, and the value where it stopped.
     collided: Option<(StateProblem, String)>,
+    /// Why a relationship could not be driven, or which components collided while driving it.
+    stopped_by: Option<String>,
 }
 
 impl Default for Drive {
@@ -123,6 +127,7 @@ impl Default for Drive {
             open: false,
             robot: None,
             joint: 0,
+            relation: None,
             start: 0.0,
             end: 10.0,
             pause: 0.0,
@@ -136,7 +141,32 @@ impl Default for Drive {
             index: 0,
             last_step: 0.0,
             collided: None,
+            stopped_by: None,
         }
+    }
+}
+
+/// Display factor and unit of a relationship's driven value: an offset in millimetres, or a turn in
+/// degrees for a rotational joint. `None` for a relationship that cannot be driven (a rigid joint).
+fn relation_unit(session: &Session, id: gc_core::Id<gc_doc::Relationship>) -> Option<(f64, &'static str)> {
+    match session.doc().get(id)?.kind {
+        gc_doc::RelationKind::Mate { .. }
+        | gc_doc::RelationKind::Flush { .. }
+        | gc_doc::RelationKind::Insert { .. } => Some((1000.0, "mm")),
+        gc_doc::RelationKind::Rotational { .. } => Some((180.0 / std::f64::consts::PI, "°")),
+        gc_doc::RelationKind::Rigid { .. } => None,
+    }
+}
+
+/// The relationship's offset as placed (metres), where it has one.
+fn relation_offset(session: &Session, id: gc_core::Id<gc_doc::Relationship>) -> f64 {
+    match session.doc().get(id).map(|r| r.kind) {
+        Some(
+            gc_doc::RelationKind::Mate { offset, .. }
+            | gc_doc::RelationKind::Flush { offset }
+            | gc_doc::RelationKind::Insert { offset, .. },
+        ) => offset,
+        _ => 0.0,
     }
 }
 
@@ -150,6 +180,16 @@ fn unit(session: &Session, robot: gc_core::Id<gc_doc::Robot>, joint: usize) -> (
 }
 
 impl Drive {
+    /// Opens the dialog for an assembly relationship (Inventor: right-click the relationship > Drive).
+    pub(crate) fn start_relationship(
+        &mut self,
+        session: &mut Session,
+        id: gc_core::Id<gc_doc::Relationship>,
+    ) {
+        *self = Self { open: true, relation: Some(id), ..Self::default() };
+        self.reset_values(session);
+    }
+
     /// Opens the dialog for a robot (the selected one, else the first), joint 1, starting where it is.
     pub(crate) fn start(&mut self, session: &mut Session) {
         let robot = match session.selected_item() {
@@ -163,6 +203,19 @@ impl Drive {
     /// Start at the joint's value, End 10 further (Inventor's defaults).
     fn reset_values(&mut self, session: &mut Session) {
         session.end_drive();
+        session.end_drive_relationship();
+        self.stopped_by = None;
+        if let Some(id) = self.relation {
+            let (factor, unit_name) = relation_unit(session, id).unwrap_or((1.0, ""));
+            // An offset starts where it is; a rotational joint turns from where it stands.
+            let now = if unit_name == "mm" { relation_offset(session, id) } else { 0.0 };
+            self.start = (now * factor * 1000.0).round() / 1000.0;
+            self.end = self.start + 10.0;
+            self.index = 0;
+            self.playing = Playing::Stopped;
+            self.collided = None;
+            return;
+        }
         let Some(robot) = self.robot else { return };
         let (factor, _) = unit(session, robot, self.joint);
         let now = session.robot_joints(robot).and_then(|q| q.get(self.joint).copied()).unwrap_or(0.0);
@@ -180,6 +233,9 @@ impl Drive {
     /// Shows the robot at a step; with Collision Detection, a collision stops the motion. Returns false
     /// when it stopped.
     fn show(&mut self, session: &mut Session, index: usize) -> bool {
+        if let Some(id) = self.relation {
+            return self.show_relation(session, id, index);
+        }
         let Some(robot) = self.robot else { return false };
         let values = self.values();
         let Some(value) = values.get(index).copied() else { return false };
@@ -197,6 +253,55 @@ impl Drive {
             self.collided = Some((problem, format!("{value:.3}{unit_name}")));
             self.playing = Playing::Stopped;
             return false;
+        }
+        true
+    }
+
+    /// Drives a relationship to a step; with Collision Detection, components that end up overlapping stop
+    /// the motion.
+    fn show_relation(
+        &mut self,
+        session: &mut Session,
+        id: gc_core::Id<gc_doc::Relationship>,
+        index: usize,
+    ) -> bool {
+        let Some((factor, unit_name)) = relation_unit(session, id) else { return false };
+        let Some(value) = self.values().get(index).copied() else { return false };
+        if let Err(error) = session.drive_relationship(id, value / factor) {
+            self.stopped_by = Some(error.to_string());
+            self.playing = Playing::Stopped;
+            return false;
+        }
+        self.index = index;
+        if self.collision {
+            let doc = session.doc();
+            let all: Vec<CellItem> = doc
+                .robots()
+                .iter()
+                .map(|(id, _)| CellItem::Robot(id))
+                .chain(doc.bodies().iter().map(|(id, _)| CellItem::Body(id)))
+                .collect();
+            let (moved, still): (Vec<CellItem>, Vec<CellItem>) = all.into_iter().partition(|item| {
+                let id = match *item {
+                    CellItem::Robot(id) => id.erase(),
+                    CellItem::Body(id) => id.erase(),
+                    CellItem::Waypoint(id) => id.erase(),
+                    CellItem::Frame(id) => id.erase(),
+                    CellItem::Path(id) => id.erase(),
+                };
+                session.driven_placement(id).is_some()
+            });
+            if !moved.is_empty()
+                && !still.is_empty()
+                && let Some(row) =
+                    session.interference(&moved, &still).into_iter().find(|r| r.overlap.volume > 0.0)
+            {
+                let name = |item| session.item_name(item).unwrap_or_default();
+                self.stopped_by =
+                    Some(format!("{}|{}|{value:.3}{unit_name}", name(row.first), name(row.second)));
+                self.playing = Playing::Stopped;
+                return false;
+            }
         }
         true
     }
@@ -232,6 +337,7 @@ impl Drive {
     /// Closes the dialog and puts the robot back as the document has it.
     pub(crate) fn close(&mut self, session: &mut Session) {
         session.end_drive();
+        session.end_drive_relationship();
         self.open = false;
     }
 
@@ -246,11 +352,50 @@ impl Drive {
         );
         if !open {
             session.end_drive();
+            session.end_drive_relationship();
         }
         self.open = open;
     }
 
     fn contents(&mut self, ui: &mut egui::Ui, session: &mut Session, lang: Lang) {
+        // What is driven: a robot joint, or a relationship that can be driven (not a rigid joint).
+        let relations: Vec<(gc_core::Id<gc_doc::Relationship>, String)> = session
+            .relationships()
+            .into_iter()
+            .filter(|(id, _)| relation_unit(session, *id).is_some())
+            .map(|(id, r)| (id, r.name.clone()))
+            .collect();
+        if !relations.is_empty() || self.relation.is_some() {
+            let before = self.relation;
+            ui.horizontal(|ui| {
+                let label = ui.label(tr!(lang, DriveRelation));
+                let shown = self
+                    .relation
+                    .and_then(|id| relations.iter().find(|(r, _)| *r == id).map(|(_, n)| n.clone()))
+                    .unwrap_or_else(|| tr!(lang, DriveTargetJoint).to_owned());
+                egui::ComboBox::from_id_salt("drive_relation")
+                    .selected_text(shown)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.relation, None, tr!(lang, DriveTargetJoint));
+                        for (id, name) in &relations {
+                            ui.selectable_value(&mut self.relation, Some(*id), name);
+                        }
+                    })
+                    .response
+                    .labelled_by(label.id);
+            });
+            if self.relation != before {
+                if self.relation.is_none() && self.robot.is_none() {
+                    self.robot = session.doc().robots().iter().next().map(|(id, _)| id);
+                }
+                self.reset_values(session);
+            }
+        }
+        if let Some(id) = self.relation {
+            let unit_name = relation_unit(session, id).map_or("", |(_, u)| u);
+            self.controls(ui, session, lang, unit_name);
+            return;
+        }
         let robots: Vec<(gc_core::Id<gc_doc::Robot>, String)> =
             session.doc().robots().iter().map(|(id, r)| (id, r.name.clone())).collect();
         let Some(robot) = self.robot.filter(|id| robots.iter().any(|(r, _)| r == id)) else {
@@ -290,6 +435,11 @@ impl Drive {
             self.reset_values(session);
         }
         let (_, unit_name) = unit(session, robot, self.joint);
+        self.controls(ui, session, lang, unit_name);
+    }
+
+    /// Start, End, Pause Delay, the play buttons, the value and More.
+    fn controls(&mut self, ui: &mut egui::Ui, session: &mut Session, lang: Lang, unit_name: &str) {
         let stopped = self.playing == Playing::Stopped;
         ui.add_enabled_ui(stopped, |ui| {
             egui::Grid::new("drive_values").num_columns(2).show(ui, |ui| {
@@ -348,6 +498,13 @@ impl Drive {
         });
         if let Some(value) = self.values().get(self.index) {
             ui.label(tr!(lang, DriveValue, format!("{value:.3}{unit_name}")));
+        }
+        if let Some(why) = &self.stopped_by {
+            let text = match why.split('|').collect::<Vec<_>>().as_slice() {
+                [a, b, at] => tr!(lang, DriveInterfered, a, b, at),
+                _ => tr!(lang, DriveRefused, why),
+            };
+            ui.colored_label(ui.visuals().error_fg_color, text);
         }
         if let Some((problem, at)) = &self.collided {
             let what = gc_panels::problem_text(lang, problem);
