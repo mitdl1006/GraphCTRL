@@ -3,6 +3,7 @@
 mod agent;
 mod app;
 mod constrain;
+mod cut_edges;
 mod diagnostics;
 mod drive;
 mod example;

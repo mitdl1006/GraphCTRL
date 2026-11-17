@@ -2972,52 +2972,46 @@ fn the_marking_menu_picks_by_mark_and_by_menu() {
     }
 }
 
-/// The Joint dialog: the centre points (joint origins) of two components, type Automatic gives a rigid
-/// joint, and the first component moves onto the second.
+/// Sketch tab > Project Cut Edges (Inventor 2026 help, "To Project Geometry into a 2D Sketch":
+/// https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-B8D8B07B-86F2-4CB7-AB21-3131D94AD1CC.htm):
+/// with the pillar selected, the XY sketch gets the four edges where its plane cuts the pillar, as fixed
+/// lines in one undo step.
 #[test]
-fn the_joint_dialog_joins_two_components_rigidly() {
+fn project_cut_edges_adds_the_cut_of_the_selected_part() {
     let mut harness = egui_kittest::Harness::builder()
         .with_size(SIZE)
         .with_pixels_per_point(1.0)
         .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
     harness.run();
-    let solid = gc_doc::Solid::Box { size: [0.05, 0.05, 0.05] };
-    let app = harness.state_mut();
-    app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
-    let placement = gc_doc::Placement { xyz: [0.12, 0.0, 0.0], rpy: [0.0; 3] };
-    let moving = app.session.add_body(solid, placement).unwrap();
-    app.fit_view();
-    app.viewport_mut().camera.pan([0.0, 0.0], [-250.0, 0.0], [1280.0, 700.0]);
+    harness.get_by_label("파일").click();
     harness.run();
-
-    harness.get_by_label("로봇").click();
+    harness.get_by_label("예제 열기 (UR5e 셀)").click();
     harness.run();
-    harness.get_by_label("조인트").click();
-    harness.run_steps(5);
-    let click = |harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, world: gc_math::DVec3| {
-        let at = harness.state().viewport().screen_of(world).unwrap();
-        harness.event(egui::Event::PointerMoved(at));
-        harness.run_steps(3);
-        for pressed in [true, false] {
-            harness.event(egui::Event::PointerButton {
-                pos: at,
-                button: egui::PointerButton::Primary,
-                pressed,
-                modifiers: egui::Modifiers::NONE,
-            });
-            harness.run_steps(3);
-        }
+    // The XY sketch's plane cuts the pillar (80 × 80 mm, standing on the floor at 450, 100 mm) at its foot.
+    let (sketch, pillar) = {
+        let doc = harness.state().session.doc();
+        (doc.sketches().iter().next().unwrap().0, doc.bodies().iter().next().unwrap().0)
     };
-    click(&mut harness, gc_math::DVec3::new(0.12, 0.0, 0.0));
-    harness.get_by_label_contains("첫 번째 원점: Body2:1");
-    click(&mut harness, gc_math::DVec3::new(0.0, 0.0, 0.0));
-    harness.get_by_label_contains("두 번째 원점: Body1:1");
-    harness.get_by_label("확인").click();
+    let before = harness.state().session.doc().get(sketch).unwrap().curves.len();
+    harness.state_mut().session.enter_sketch(sketch);
+    harness.state_mut().session.select_item(Some(gc_session::CellItem::Body(pillar)));
     harness.run();
-    let session = &harness.state().session;
-    assert_eq!(session.relationships().len(), 1, "{:?}", session.last_error());
-    let sideways = session.doc().get(moving).unwrap().placement.xyz[0];
-    assert!(sideways.abs() < 1e-6, "the origins coincide now: {sideways}");
+    // The ribbon's Sketch tab (the browser has a "스케치" folder too; the tab comes first).
+    harness.query_all_by_label("스케치").next().unwrap().click();
+    harness.run();
+    let depth = harness.state().session.history().undo_depth();
+    harness.get_by_label("절단 모서리 투영").click();
+    harness.run();
+    harness.get_by_label("절단 모서리 4개를 투영했습니다.");
+    let after = harness.state().session.doc().get(sketch).unwrap().clone();
+    assert_eq!(after.curves.len(), before + 4);
+    assert_eq!(harness.state().session.history().undo_depth(), depth + 1);
+    // The square is 80 mm on a side around (450, 100).
+    let xs: Vec<f64> = after.points.values().map(|p| p.pos[0]).filter(|x| (x - 0.45).abs() < 0.05).collect();
+    assert!(
+        xs.iter().any(|x| (x - 0.41).abs() < 1e-6) && xs.iter().any(|x| (x - 0.49).abs() < 1e-6),
+        "{xs:?}"
+    );
 }
 
 /// The links of a robot are components below it in the browser, each with an origin folder; a link's

@@ -12,6 +12,7 @@ mod data;
 pub mod edges;
 pub mod primitives;
 pub mod region;
+pub mod slice;
 pub mod stl;
 mod store;
 

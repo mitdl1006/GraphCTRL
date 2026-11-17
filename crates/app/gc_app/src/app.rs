@@ -968,6 +968,15 @@ impl eframe::App for GraphCtrlApp {
             Some(ribbon::RibbonAction::StartConstrain) => self.constrain.start(),
             Some(ribbon::RibbonAction::StartJoint) => self.joint.start(),
             Some(ribbon::RibbonAction::StartParameters) => self.parameters.open = true,
+            Some(ribbon::RibbonAction::ProjectCutEdges) => {
+                self.notice = Some(match crate::cut_edges::project_cut_edges(&mut self.session) {
+                    Ok(count) => tr!(lang, CutEdgesDone, count),
+                    Err(crate::cut_edges::CutError::Refused(why)) => tr!(lang, FileError, why),
+                    Err(crate::cut_edges::CutError::NothingCut | crate::cut_edges::CutError::NoSketch) => {
+                        tr!(lang, CutEdgesNone).to_owned()
+                    }
+                });
+            }
             _ => {}
         }
         if ribbon_action == Some(ribbon::RibbonAction::ImportRobot)
