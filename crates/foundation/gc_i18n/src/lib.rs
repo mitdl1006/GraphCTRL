@@ -708,6 +708,48 @@ messages! {
     ConflictNoSingle => ("한 관계만으로는 풀리지 않습니다. 새 관계를 바꾸세요.", "No single relationship is the cause. Change the new relationship."),
     /// Constraint error dialog: delete the relationship in the way.
     ConflictDelete => ("삭제", "Delete"),
+    /// Pattern dialog: the Assemble tab command and the dialog's title.
+    PatternTitle => ("패턴", "Pattern"),
+    /// Pattern dialog: tab for columns and rows.
+    PatternRectangular => ("사각형", "Rectangular"),
+    /// Pattern dialog: tab for copies round an axis.
+    PatternCircular => ("원형", "Circular"),
+    /// Pattern dialog: the components that are copied.
+    PatternComponents => ("패턴화할 컴포넌트", "Components to pattern"),
+    /// Pattern dialog: the column direction.
+    PatternColumn => ("열", "Column"),
+    /// Pattern dialog: the row direction.
+    PatternRow => ("행", "Row"),
+    /// Pattern dialog: the rotation axis.
+    PatternAxis => ("회전 축", "Rotation axis"),
+    /// Pattern dialog: reverse the direction.
+    PatternFlip => ("뒤집기", "Flip"),
+    /// Pattern dialog: spread both ways from the parent.
+    PatternMidplane => ("중간 평면", "Midplane"),
+    /// Pattern dialog: number of occurrences.
+    PatternCount => ("개수", "Count"),
+    /// Pattern dialog: distance between occurrences in millimetres.
+    PatternSpacing => ("간격 (mm)", "Spacing (mm)"),
+    /// Pattern dialog: angle in degrees.
+    PatternAngle => ("각도 (°)", "Angle (°)"),
+    /// Pattern dialog: copies turn as they go round.
+    PatternRotational => ("회전", "Rotational"),
+    /// Pattern dialog: copies keep the parent's orientation.
+    PatternFixed => ("고정", "Fixed"),
+    /// Pattern dialog: the angle is between occurrences.
+    PatternIncremental => ("증분", "Incremental"),
+    /// Pattern dialog: the angle is the total the pattern covers.
+    PatternFitted => ("맞춤", "Fitted"),
+    /// Browser: the folder of component patterns.
+    BrowserPatterns => ("패턴", "Patterns"),
+    /// Ribbon: Inventor's Assemble tab.
+    TabAssemble => ("조립", "Assemble"),
+    /// Assemble tab: group of the place command.
+    GroupComponent => ("컴포넌트", "Component"),
+    /// Assemble tab: places a component (the mesh and assembly import).
+    CmdPlace => ("배치", "Place"),
+    /// Assemble tab: group of free move and free rotate.
+    GroupPosition => ("위치", "Position"),
     /// Plan card: what the checks guarantee. `{0}` padding mm, `{1}` step mm, `{2}` step degrees, `{3}` clearance mm.
     PlanGuarantee => ("패딩 {0} mm, 검사 간격 {1} mm·{2}°에서 볼록 충돌 모델이 장애물과 {3} mm 이상 떨어짐", "Padding {0} mm; with check steps of {1} mm and {2} degrees the convex collision model stays at least {3} mm from obstacles"),
     /// Plan card: the guarantee holds only at the checked states.

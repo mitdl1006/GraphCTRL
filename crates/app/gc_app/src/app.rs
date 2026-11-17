@@ -263,6 +263,7 @@ pub struct GraphCtrlApp {
     conflict: crate::conflict::ConstraintError,
     /// The Joint dialog.
     joint: crate::constrain::Joint,
+    pattern: crate::pattern::Pattern,
     /// The Parameters dialog.
     parameters: crate::parameters::Parameters,
     expression: String,
@@ -353,6 +354,7 @@ impl GraphCtrlApp {
             constrain: crate::constrain::Constrain::default(),
             conflict: crate::conflict::ConstraintError::default(),
             joint: crate::constrain::Joint::default(),
+            pattern: crate::pattern::Pattern::default(),
             parameters: crate::parameters::Parameters::default(),
             expression: String::new(),
             ime: ImeTest { dimension: "25 mm".to_owned(), ..ImeTest::default() },
@@ -993,6 +995,7 @@ impl eframe::App for GraphCtrlApp {
             }
             Some(ribbon::RibbonAction::StartConstrain) => self.constrain.start(),
             Some(ribbon::RibbonAction::StartJoint) => self.joint.start(),
+            Some(ribbon::RibbonAction::StartPattern) => self.pattern.start(Vec::new()),
             Some(ribbon::RibbonAction::StartParameters) => self.parameters.open = true,
             Some(ribbon::RibbonAction::ProjectCutEdges) => {
                 self.notice = Some(match crate::cut_edges::project_cut_edges(&mut self.session) {
@@ -1187,9 +1190,11 @@ impl eframe::App for GraphCtrlApp {
             None => {}
         }
         // The Constrain dialog picks origin planes, axes and points in the view.
-        self.viewport.constrain_mode = self.constrain.picking() || self.joint.open;
+        self.viewport.constrain_mode = self.constrain.picking() || self.joint.open || self.pattern.open;
         if let Some((occurrence, element)) = self.viewport.take_constrain_pick() {
-            if self.joint.open {
+            if self.pattern.open {
+                self.pattern.pick(occurrence, element);
+            } else if self.joint.open {
                 self.joint.pick(occurrence, element);
             } else {
                 self.constrain.pick(&self.session, occurrence, element);
@@ -1197,6 +1202,9 @@ impl eframe::App for GraphCtrlApp {
         }
         if self.joint.open {
             self.joint.window(&ctx, &mut self.session, lang);
+        }
+        if self.pattern.open {
+            self.pattern.window(&ctx, &mut self.session, lang);
         }
         if let Some(conflict) = self.joint.conflict.take().or_else(|| self.constrain.conflict.take()) {
             self.conflict.show_for(&self.session, conflict);

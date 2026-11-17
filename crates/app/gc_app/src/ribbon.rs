@@ -16,6 +16,8 @@ use gc_viewport::Viewport;
 pub(crate) enum Tab {
     Model,
     Sketch,
+    /// Inventor's Assemble tab: place, pattern, relationships, position.
+    Assemble,
     Robot,
     Inspect,
     /// Inventor's Manage tab: parameters.
@@ -68,6 +70,8 @@ pub(crate) enum RibbonAction {
     StartConstrain,
     /// Open the Joint dialog.
     StartJoint,
+    /// Open the Pattern dialog.
+    StartPattern,
     /// Open the parameters dialog.
     StartParameters,
     /// Project the edges the sketch plane cuts into the active sketch.
@@ -92,6 +96,7 @@ pub(crate) fn show(
         for (this, label) in [
             (Tab::Model, Msg::TabModel),
             (Tab::Sketch, Msg::TabSketch),
+            (Tab::Assemble, Msg::TabAssemble),
             (Tab::Robot, Msg::TabRobot),
             (Tab::Inspect, Msg::TabInspect),
             (Tab::Manage, Msg::TabManage),
@@ -213,6 +218,7 @@ pub(crate) fn show(
                     });
                 }
             }
+            Tab::Assemble => action = assemble_tab(ui, session, viewport, lang),
             Tab::Robot => action = robot_tab(ui, session, viewport, cell, library, lang),
             Tab::Inspect => {
                 ribbon_group(ui, tr!(lang, GroupMeasure), |ui| {
@@ -299,17 +305,28 @@ pub(crate) fn show(
     action
 }
 
-fn robot_tab(
+/// Inventor's Assemble tab: Component (place), Pattern, Relationships (constrain, joint, drive) and
+/// Position (free move, free rotate). Robot-only commands stay in the Robot tab.
+fn assemble_tab(
     ui: &mut egui::Ui,
     session: &mut Session,
     viewport: &mut Viewport,
-    cell: &mut CellUi,
-    library: &[crate::app::LibraryRobot],
     lang: Lang,
 ) -> Option<RibbonAction> {
     let mut action = None;
     let robot = session.doc().robots().iter().next().map(|(id, _)| id);
-    let path = cell.active_path(session);
+    ribbon_group(ui, tr!(lang, GroupComponent), |ui| {
+        if ribbon_button(ui, Icon::Import, tr!(lang, CmdPlace), false, true).clicked() {
+            action = Some(RibbonAction::ImportMesh);
+        }
+    });
+    ribbon_group(ui, tr!(lang, PatternTitle), |ui| {
+        if ribbon_button(ui, Icon::Select, tr!(lang, PatternTitle), false, !session.components().is_empty())
+            .clicked()
+        {
+            action = Some(RibbonAction::StartPattern);
+        }
+    });
     // Failures of these commands are shown in the status bar.
     ribbon_group(ui, tr!(lang, GroupRelationships), |ui| {
         if ribbon_button(ui, Icon::Frame, tr!(lang, ConstrainTitle), false, true).clicked() {
@@ -330,6 +347,32 @@ fn robot_tab(
             action = Some(RibbonAction::StartDrive);
         }
     });
+    ribbon_group(ui, tr!(lang, GroupPosition), |ui| {
+        let has = !session.components().is_empty();
+        for (tool, label) in [
+            (gc_viewport::FreeTool::Move, tr!(lang, MarkMove)),
+            (gc_viewport::FreeTool::Rotate, tr!(lang, MarkRotate)),
+        ] {
+            let active = viewport.free_tool == Some(tool);
+            if ribbon_button(ui, Icon::Pan, label, active, has).clicked() {
+                viewport.free_tool = if active { None } else { Some(tool) };
+            }
+        }
+    });
+    action
+}
+
+fn robot_tab(
+    ui: &mut egui::Ui,
+    session: &mut Session,
+    viewport: &mut Viewport,
+    cell: &mut CellUi,
+    library: &[crate::app::LibraryRobot],
+    lang: Lang,
+) -> Option<RibbonAction> {
+    let mut action = None;
+    let robot = session.doc().robots().iter().next().map(|(id, _)| id);
+    let path = cell.active_path(session);
     ribbon_group(ui, tr!(lang, GroupAdd), |ui| {
         // One robot per cell for now: the panels show the first one.
         // The robot library in one list: the packages of the library folder and what plugins offer.

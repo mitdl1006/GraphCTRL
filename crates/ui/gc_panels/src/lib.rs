@@ -220,6 +220,38 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
                     }
                 }
             });
+            let patterns = session.patterns();
+            if !patterns.is_empty() {
+                egui::CollapsingHeader::new(tr!(lang, BrowserPatterns)).default_open(true).show(ui, |ui| {
+                    for (index, pattern) in patterns.iter().enumerate() {
+                        let delete = tr!(lang, CmdDeleteItem, pattern.name);
+                        let text = format!("{} ({})", pattern.name, pattern.layout.count());
+                        let row = TreeRow {
+                            icon: Icon::Frame,
+                            text: &text,
+                            selected: false,
+                            visible: None,
+                            delete: Some(&delete),
+                            edit: None,
+                            focus: false,
+                            dim: false,
+                        };
+                        let result = gc_ui::panel::tree_row(ui, row);
+                        let remove = gc_doc::CellOp::DeletePattern { index, keep_copies: false };
+                        result.row.context_menu(|ui| {
+                            if ui.button(delete.as_str()).clicked() {
+                                action = Some(BrowserAction::Edit(Box::new(gc_doc::Command::Cell(
+                                    remove.clone(),
+                                ))));
+                                ui.close();
+                            }
+                        });
+                        if result.deleted {
+                            action = Some(BrowserAction::Edit(Box::new(gc_doc::Command::Cell(remove))));
+                        }
+                    }
+                });
+            }
             let row = TreeRow {
                 icon: Icon::Path,
                 text: tr!(lang, BrowserRepresentations),
