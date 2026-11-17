@@ -2331,3 +2331,68 @@ fn the_heads_up_display_draws_a_line_from_typed_values() {
     let angle = gc_math::fm::atan2(dy, dx).to_degrees();
     assert!((angle - 30.0).abs() < 1e-6, "angle {angle}");
 }
+
+/// Measure with the Edges and Faces priority (same Inventor help page as above): clicking a flat face of
+/// the pillar and then its top face gives their areas and the 90° between them; a click on a blank area
+/// restarts; changing the priority resets the command.
+#[test]
+fn measure_picks_faces_with_the_edges_and_faces_priority() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("파일").click();
+    harness.run();
+    harness.get_by_label("예제 열기 (UR5e 셀)").click();
+    harness.run();
+    harness.get_by_label("도구").click();
+    harness.run();
+    harness.get_by_label("측정").click();
+    harness.run();
+    harness.get_by_label("모서리 및 면 우선").click();
+    harness.run();
+
+    let body = harness.state().session.doc().bodies().iter().next().map(|(_, b)| b.clone()).unwrap();
+    let at = |harness: &egui_kittest::Harness<'_, GraphCtrlApp>, offset: [f64; 3]| {
+        let centre = gc_math::DVec3::from_array(body.placement.xyz) + gc_math::DVec3::from_array(offset);
+        harness.state().viewport().screen_of(centre).unwrap()
+    };
+    let click = |harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, pos: egui::Pos2| {
+        harness.event(egui::Event::PointerMoved(pos));
+        harness.run();
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.run();
+        }
+    };
+    // The middle of the +X side face (80 × 900 mm; the box centre seen from the iso view lies on its
+    // front edge), then the top face (80 × 80 mm) at its centre.
+    let side = at(&harness, [0.04, 0.0, 0.1]);
+    click(&mut harness, side);
+    harness.get_by_label("선택 1: 면 면적 72000.00 mm²");
+    let top = at(&harness, [0.0, 0.0, 0.45]);
+    click(&mut harness, top);
+    harness.get_by_label("선택 2: 면 면적 6400.00 mm²");
+    harness.get_by_label("각도 90.000°");
+    // Picking does not select components.
+    assert_eq!(harness.state().session.selected_item(), None);
+    if gpu {
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        harness.render().unwrap().save(out.join("review-27-measure-faces.png")).unwrap();
+    }
+
+    // A blank area restarts.
+    click(&mut harness, egui::pos2(700.0, 760.0));
+    assert!(harness.query_by_label_contains("선택 1:").is_none());
+    // Back to component priority: clicks select components again.
+    harness.get_by_label("컴포넌트 우선").click();
+    harness.run();
+    click(&mut harness, side);
+    assert!(harness.state().session.selected_item().is_some());
+}

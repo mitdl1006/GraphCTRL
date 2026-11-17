@@ -5,7 +5,7 @@
 //! and Done closes the panel.
 
 use gc_i18n::{Lang, tr};
-use gc_session::{CellItem, PairMeasure, Session};
+use gc_session::{CellItem, Feature, FeaturePair, PairMeasure, Session};
 use gc_viewport::Viewport;
 
 /// Colour of the first selection.
@@ -23,6 +23,16 @@ pub(crate) enum DistanceKind {
     CentreToCentre,
 }
 
+/// What a click selects (Inventor's selection priority in an assembly).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Priority {
+    /// Whole components: robots, bodies, waypoints, frames.
+    #[default]
+    Component,
+    /// Corners, straight edges and flat faces of the solids.
+    Features,
+}
+
 /// The Measure panel's state.
 #[derive(Default)]
 pub(crate) struct Measure {
@@ -35,6 +45,9 @@ pub(crate) struct Measure {
     kind: DistanceKind,
     /// The pair's values, computed when the selection changes (a robot's shapes take a moment).
     pair: Option<PairMeasure>,
+    priority: Priority,
+    /// Features picked with the Edges and Faces priority.
+    features: Vec<Feature>,
 }
 
 fn mm(v: f64) -> String {
@@ -51,6 +64,24 @@ impl Measure {
         self.first = None;
         self.second = None;
         self.pair = None;
+        self.features.clear();
+    }
+
+    /// Keeps the viewport's picking in step with the priority and takes its feature picks: a third pick
+    /// starts again, a click on a blank area restarts.
+    pub(crate) fn follow_view(&mut self, viewport: &mut Viewport) {
+        viewport.measure_features = self.open && self.priority == Priority::Features;
+        if let Some(pick) = viewport.take_measure_pick() {
+            match pick {
+                None => self.restart(),
+                Some((_, feature)) => {
+                    if self.features.len() >= 2 {
+                        self.features.clear();
+                    }
+                    self.features.push(feature);
+                }
+            }
+        }
     }
 
     /// Follows the selection: a new pick fills selection 1, then 2, then starts again; selecting nothing
@@ -60,6 +91,10 @@ impl Measure {
             return;
         }
         let selected = session.selected_item();
+        if self.priority == Priority::Features {
+            self.seen = selected;
+            return;
+        }
         if selected != self.seen {
             self.seen = selected;
             match selected {
@@ -83,8 +118,52 @@ impl Measure {
         }
     }
 
+    /// The values of the picked features, one per line.
+    fn feature_lines(&self, lang: Lang) -> Vec<(egui::Color32, String)> {
+        let mut lines = Vec::new();
+        for (colour, title, feature) in [
+            (FIRST, tr!(lang, MeasureFirst), self.features.first()),
+            (SECOND, tr!(lang, MeasureSecond), self.features.get(1)),
+        ] {
+            let Some(feature) = feature else { continue };
+            let text = match feature {
+                Feature::Point(p) => {
+                    let [x, y, z] = p.map(mm);
+                    tr!(lang, MeasurePoint, x, y, z)
+                }
+                Feature::Edge(a, b) => {
+                    tr!(
+                        lang,
+                        MeasureEdge,
+                        mm(gc_math::DVec3::from_array(*a).distance(gc_math::DVec3::from_array(*b)))
+                    )
+                }
+                Feature::Face { area, .. } => tr!(lang, MeasureFace, format!("{:.2}", area * 1e6)),
+            };
+            lines.push((colour, format!("{title}: {text}")));
+        }
+        if let [a, b] = self.features.as_slice() {
+            let pair: FeaturePair = gc_session::measure_features(a, b);
+            let text = egui::Color32::PLACEHOLDER;
+            if let Some(distance) = pair.distance {
+                lines.push((text, format!("{}: {} mm", tr!(lang, MeasureDistance), mm(distance))));
+            }
+            if let Some(delta) = pair.delta {
+                let [dx, dy, dz] = delta.map(mm);
+                lines.push((text, tr!(lang, MeasureDelta, dx, dy, dz)));
+            }
+            if let Some(angle) = pair.angle {
+                lines.push((text, tr!(lang, MeasureFeatureAngle, format!("{:.3}", angle.to_degrees()))));
+            }
+        }
+        lines
+    }
+
     /// The values as text, one per line (what Copy All copies).
     fn lines(&self, session: &Session, lang: Lang) -> Vec<(egui::Color32, String)> {
+        if self.priority == Priority::Features {
+            return self.feature_lines(lang);
+        }
         let mut lines = Vec::new();
         for (colour, title, item) in
             [(FIRST, tr!(lang, MeasureFirst), self.first), (SECOND, tr!(lang, MeasureSecond), self.second)]
@@ -125,16 +204,31 @@ impl Measure {
             ctx,
             |ui| {
                 ui.horizontal(|ui| {
-                    ui.selectable_value(&mut self.kind, DistanceKind::Minimum, tr!(lang, MeasureMinimum));
+                    let before = self.priority;
                     ui.selectable_value(
-                        &mut self.kind,
-                        DistanceKind::CentreToCentre,
-                        tr!(lang, MeasureCentres),
+                        &mut self.priority,
+                        Priority::Component,
+                        tr!(lang, MeasureByComponent),
                     );
+                    ui.selectable_value(&mut self.priority, Priority::Features, tr!(lang, MeasureByFeature));
+                    // Changing the priority resets the command, as in Inventor.
+                    if self.priority != before {
+                        self.restart();
+                    }
                 });
+                if self.priority == Priority::Component {
+                    ui.horizontal(|ui| {
+                        ui.selectable_value(&mut self.kind, DistanceKind::Minimum, tr!(lang, MeasureMinimum));
+                        ui.selectable_value(
+                            &mut self.kind,
+                            DistanceKind::CentreToCentre,
+                            tr!(lang, MeasureCentres),
+                        );
+                    });
+                }
                 ui.separator();
                 let lines = self.lines(session, lang);
-                if self.second.is_none() {
+                if self.second.is_none() && self.features.len() < 2 {
                     ui.label(egui::RichText::new(tr!(lang, MeasureHint)).weak());
                 }
                 for (colour, line) in &lines {
@@ -173,6 +267,38 @@ impl Measure {
             return;
         }
         let screen = |p: [f64; 3]| viewport.screen_of(gc_math::DVec3::from_array(p));
+        if self.priority == Priority::Features {
+            for (colour, feature) in [(FIRST, self.features.first()), (SECOND, self.features.get(1))] {
+                match feature {
+                    Some(Feature::Point(p)) => {
+                        if let Some(at) = screen(*p) {
+                            painter.circle(at, 5.0, colour, egui::Stroke::new(1.5, egui::Color32::WHITE));
+                        }
+                    }
+                    Some(Feature::Edge(a, b)) => {
+                        if let (Some(a), Some(b)) = (screen(*a), screen(*b)) {
+                            painter.line_segment([a, b], egui::Stroke::new(4.0, colour));
+                        }
+                    }
+                    Some(Feature::Face { point, normal, .. }) => {
+                        // The face's point with a short normal arrow.
+                        let tip = [0, 1, 2].map(|i| point[i] + normal[i] * 0.05);
+                        if let (Some(a), Some(b)) = (screen(*point), screen(tip)) {
+                            painter.arrow(a, b - a, egui::Stroke::new(2.5, colour));
+                        }
+                    }
+                    None => {}
+                }
+            }
+            if let [a, b] = self.features.as_slice()
+                && let Some((p, q)) = gc_session::measure_features(a, b).closest
+                && let (Some(p), Some(q)) = (screen(p), screen(q))
+            {
+                painter
+                    .line_segment([p, q], egui::Stroke::new(2.0, egui::Color32::from_rgb(0xff, 0x80, 0x00)));
+            }
+            return;
+        }
         for (colour, item) in [(FIRST, self.first), (SECOND, self.second)] {
             if let Some(at) =
                 item.and_then(|item| session.measure_item(item)).and_then(|m| screen(m.position))

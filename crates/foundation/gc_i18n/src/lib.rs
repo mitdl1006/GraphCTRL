@@ -621,6 +621,18 @@ messages! {
     /// Measure: the minimum distance could not be measured (a path, or a missing mesh).
     MeasureNoMinimum => ("최소 거리 측정 불가", "Minimum distance not available"),
     MeasureCopyAll => ("모두 복사", "Copy All"),
+    /// Measure: selection priority (Inventor: Component / Edges and Faces).
+    MeasureByComponent => ("컴포넌트 우선", "Component Priority"),
+    MeasureByFeature => ("모서리 및 면 우선", "Edges and Faces"),
+    /// Measure: a picked corner or point on a surface. `{0}`, `{1}`, `{2}` x, y, z in mm.
+    MeasurePoint => ("점 X {0}  Y {1}  Z {2} mm", "Point X {0}  Y {1}  Z {2} mm"),
+    /// Measure: a picked straight edge. `{0}` its length in mm.
+    MeasureEdge => ("모서리 길이 {0} mm", "Edge length {0} mm"),
+    /// Measure: a picked flat face. `{0}` its area in mm².
+    MeasureFace => ("면 면적 {0} mm²", "Face area {0} mm²"),
+    MeasureDistance => ("거리", "Distance"),
+    /// Measure: the angle between two picked features. `{0}` degrees.
+    MeasureFeatureAngle => ("각도 {0}°", "Angle {0}°"),
     MeasureRestart => ("다시 시작", "Restart"),
     MeasureDone => ("완료", "Done"),
     // --- AI agent API ---

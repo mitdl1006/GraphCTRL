@@ -11,6 +11,7 @@ pub mod collada;
 mod data;
 pub mod edges;
 pub mod primitives;
+pub mod region;
 pub mod stl;
 mod store;
 

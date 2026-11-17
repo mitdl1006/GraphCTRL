@@ -108,6 +108,11 @@ pub struct Viewport {
     rect: egui::Rect,
     /// The item the context menu is about.
     context_item: Option<gc_session::CellItem>,
+    /// While true (the Measure command with the Edges and Faces priority), a click picks a corner, an
+    /// edge or a face instead of selecting a component.
+    pub measure_features: bool,
+    /// The last such pick: `Some(None)` for a click on a blank area.
+    measure_pick: Option<Option<(gc_session::CellItem, gc_session::Feature)>>,
 }
 
 impl Viewport {
@@ -136,6 +141,8 @@ impl Viewport {
             gizmo: None,
             rect: egui::Rect::NOTHING,
             context_item: None,
+            measure_features: false,
+            measure_pick: None,
         }
     }
 
@@ -743,6 +750,53 @@ impl Viewport {
         Some(egui::pos2(self.rect.left() + p[0] as f32, self.rect.top() + p[1] as f32))
     }
 
+    /// The corner, edge or face under a point of the view (Measure's Edges and Faces priority): a corner
+    /// of the face's outline within 8 pixels, else an outline edge within 6 pixels, else the flat face,
+    /// else the point on the surface.
+    pub fn pick_feature(
+        &mut self,
+        session: &Session,
+        at: [f64; 2],
+        size: [f64; 2],
+    ) -> Option<(gc_session::CellItem, gc_session::Feature)> {
+        use gc_session::Feature;
+        let scene = Scene::of(session);
+        let hit = self.picker.pick_surface(&scene, &self.camera.ray(at, size))?;
+        let screen = |p: DVec3| self.camera.project(p, size);
+        let pixels = |p: DVec3| {
+            screen(p).map_or(f64::INFINITY, |s| ((s[0] - at[0]).powi(2) + (s[1] - at[1]).powi(2)).sqrt())
+        };
+        let Some((normal, point, area, outline)) = hit.face else {
+            return Some((hit.owner, Feature::Point(hit.point.to_array())));
+        };
+        let corner = outline
+            .iter()
+            .flat_map(|[a, b]| [*a, *b])
+            .map(|p| (pixels(p), p))
+            .min_by(|x, y| x.0.total_cmp(&y.0));
+        if let Some((d, p)) = corner
+            && d <= 8.0
+        {
+            return Some((hit.owner, Feature::Point(p.to_array())));
+        }
+        let edge = outline
+            .iter()
+            .filter_map(|[a, b]| Some((segment_distance(at, screen(*a)?, screen(*b)?), *a, *b)))
+            .min_by(|x, y| x.0.total_cmp(&y.0));
+        if let Some((d, a, b)) = edge
+            && d <= 6.0
+        {
+            return Some((hit.owner, Feature::Edge(a.to_array(), b.to_array())));
+        }
+        Some((hit.owner, Feature::Face { point: point.to_array(), normal: normal.to_array(), area }))
+    }
+
+    /// The last pick made while [`Self::measure_features`] is on, once: `Some(None)` for a click on a
+    /// blank area.
+    pub fn take_measure_pick(&mut self) -> Option<Option<(gc_session::CellItem, gc_session::Feature)>> {
+        self.measure_pick.take()
+    }
+
     /// The item of the cell under a screen position: waypoints and frame origins first (they are small),
     /// then the nearest solid along the ray.
     pub fn pick_item(
@@ -800,7 +854,10 @@ impl Viewport {
         if session.hover_item(hovered) {
             ui.ctx().request_repaint();
         }
-        if !on_handles && response.clicked_by(PointerButton::Primary) {
+        if self.measure_features && response.clicked_by(PointerButton::Primary) {
+            let at = response.interact_pointer_pos().map(to_view);
+            self.measure_pick = Some(at.and_then(|at| self.pick_feature(session, at, size)));
+        } else if !on_handles && response.clicked_by(PointerButton::Primary) {
             let picked =
                 response.interact_pointer_pos().and_then(|p| self.pick_item(session, to_view(p), size));
             session.select_item(picked);

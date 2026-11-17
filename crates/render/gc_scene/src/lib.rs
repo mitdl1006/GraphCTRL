@@ -369,7 +369,63 @@ pub struct Picker {
     trees: std::collections::BTreeMap<u64, Arc<gc_mesh::MeshBvh>>,
 }
 
+/// Where a ray meets the surface of a solid, for measuring edges and faces.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SurfaceHit {
+    /// What the solid belongs to.
+    pub owner: CellItem,
+    /// The hit point in the world.
+    pub point: DVec3,
+    /// The flat face around the hit, in the world: normal, a point of its plane, area and outline.
+    pub face: Option<(DVec3, DVec3, f64, Vec<[DVec3; 2]>)>,
+}
+
 impl Picker {
+    /// The nearest surface the ray hits, with the flat face around the hit point.
+    pub fn pick_surface(&mut self, scene: &Scene, ray: &gc_math::Ray) -> Option<SurfaceHit> {
+        let mut best: Option<(f64, usize, gc_mesh::RayHit)> = None;
+        for (index, solid) in scene.solids.iter().enumerate() {
+            if solid.owner.is_none() {
+                continue;
+            }
+            let centre = solid.pose.translation - ray.origin;
+            let along = centre.dot(ray.dir);
+            if (centre - ray.dir * along).length() > solid.shape.radius() + 1e-9 {
+                continue;
+            }
+            let key = solid.shape.key();
+            let tree = match self.trees.entry(key) {
+                std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
+                std::collections::btree_map::Entry::Vacant(entry) => {
+                    let Ok(mesh) = solid.shape.mesh() else { continue };
+                    entry.insert(Arc::new(gc_mesh::MeshBvh::build(&mesh)))
+                }
+            };
+            let to_local = solid.pose.inverse();
+            let local = gc_math::Ray { origin: to_local * ray.origin, dir: to_local.rotation * ray.dir };
+            let limit = best.as_ref().map_or(f64::INFINITY, |(t, _, _)| *t);
+            if let Some(hit) = tree.raycast(&local, limit) {
+                best = Some((hit.t, index, hit));
+            }
+        }
+        let (_, index, hit) = best?;
+        let solid = scene.solids.get(index)?;
+        let pose = solid.pose;
+        // Half a degree and ten micrometres: tessellated flat faces stay one face, curved ones split.
+        let face =
+            solid.shape.mesh().ok().and_then(|mesh| {
+                gc_mesh::region::planar_region(&mesh, hit.triangle, 0.5_f64.to_radians(), 1e-5)
+            });
+        Some(SurfaceHit {
+            owner: solid.owner?,
+            point: pose * hit.point,
+            face: face.map(|f| {
+                let outline = f.outline.iter().map(|[a, b]| [pose * *a, pose * *b]).collect();
+                (pose.rotation * f.normal, pose * f.point, f.area, outline)
+            }),
+        })
+    }
+
     /// The owner of the nearest solid the ray hits, and the distance along the ray.
     pub fn pick(&mut self, scene: &Scene, ray: &gc_math::Ray) -> Option<(f64, CellItem)> {
         let mut best: Option<(f64, CellItem)> = None;
