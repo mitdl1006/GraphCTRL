@@ -3044,3 +3044,64 @@ fn robot_links_are_components_below_the_robot() {
     harness.run();
     assert!(harness.state().session.origin_visible(occurrence, gc_doc::OriginElement::Point));
 }
+
+/// Free Move and Free Rotate: with the tool on, dragging a component moves it in the plane of the view
+/// or turns it about its origin, and each drag is one undo step.
+#[test]
+fn free_move_and_free_rotate_drag_a_component() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.1, 0.1, 0.1] };
+    let body = harness.state_mut().session.add_body(solid, gc_doc::Placement::default()).unwrap();
+    harness.state_mut().fit_view();
+    harness.state_mut().viewport_mut().camera.pan([0.0, 0.0], [-250.0, 0.0], [1280.0, 700.0]);
+    harness.run();
+    let drag = |harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, from: egui::Pos2, by: egui::Vec2| {
+        harness.event(egui::Event::PointerMoved(from));
+        harness.run_steps(2);
+        harness.event(egui::Event::PointerButton {
+            pos: from,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run_steps(2);
+        for step in 1..=4 {
+            harness.event(egui::Event::PointerMoved(from + by * (step as f32 / 4.0)));
+            harness.run_steps(2);
+        }
+        harness.event(egui::Event::PointerButton {
+            pos: from + by,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run_steps(2);
+    };
+    let on_body = harness.state().viewport().screen_of(gc_math::DVec3::new(0.0, 0.0, 0.05)).unwrap();
+    let depth = harness.state().session.history().undo_depth();
+
+    harness.state_mut().viewport_mut().free_tool = Some(gc_viewport::FreeTool::Move);
+    drag(&mut harness, on_body, egui::vec2(60.0, 0.0));
+    let placed = harness.state().session.doc().get(body).unwrap().placement;
+    let moved = placed.xyz.iter().map(|v| v * v).sum::<f64>().sqrt();
+    assert!(moved > 0.01, "the body moved: {placed:?}");
+    assert_eq!(harness.state().session.history().undo_depth(), depth + 1, "one undo step");
+
+    harness.state_mut().viewport_mut().free_tool = Some(gc_viewport::FreeTool::Rotate);
+    let on_body = harness
+        .state()
+        .viewport()
+        .screen_of(gc_math::DVec3::from_array(placed.xyz) + gc_math::DVec3::new(0.0, 0.0, 0.05))
+        .unwrap();
+    drag(&mut harness, on_body, egui::vec2(40.0, 0.0));
+    let turned = harness.state().session.doc().get(body).unwrap().placement;
+    assert!(turned.rpy.iter().any(|a| a.abs() > 0.05), "the body turned: {turned:?}");
+    assert_eq!(harness.state().session.history().undo_depth(), depth + 2);
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert!(harness.state().viewport().free_tool.is_none());
+}
