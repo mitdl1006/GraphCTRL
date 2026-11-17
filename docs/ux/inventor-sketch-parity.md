@@ -87,8 +87,8 @@
 
 | 명령 | 인벤터 2026 동작 | 단축키 | GraphCTRL 현재 | 차이 | 우선 | 담당 |
 |---|---|---|---|---|---|---|
-| Rectangular Pattern (사각 패턴) [S12] | 대화상자: 기하 선택 → 방향 1 선택(화살표) + Count + Spacing(수식 가능), 방향 2 동일. 선택 Extents: Boundary(Include Geometry/Include Centroids/Base Points). 고급: Suppress, Associative, Fitted. OK로 생성. 패턴 형상은 완전 구속이며 구속은 그룹으로 유지. 경계 밖 형상은 다른 색·선종류(2026.2) | RP [S29] | 없음 | 신규 | P2 | BE+FE |
-| Circular Pattern (원형 패턴) [S12] | 축(점·꼭짓점·작업축) 선택, Count, Angle(첫~끝 요소 사이 각도, 수식 가능) | CP [S29] | 없음 | 신규 | P2 | BE+FE |
+| Rectangular Pattern (사각 패턴) [S12] | 대화상자: 기하 선택 → 방향 1 선택(화살표) + Count + Spacing(수식 가능), 방향 2 동일. 선택 Extents: Boundary(Include Geometry/Include Centroids/Base Points). 고급: Suppress, Associative, Fitted. OK로 생성. 패턴 형상은 완전 구속이며 구속은 그룹으로 유지. 경계 밖 형상은 다른 색·선종류(2026.2) | RP [S29] | **BE 완료**: `SketchOp::RectangularPattern{curves, first, second: Option<SketchPatternDirection{line, count, spacing(식), flip}>, fitted}` — 복사 점마다 앞 복사본에서 방향선과 평행·첫 간격선과 같은 길이의 구성 단계, 첫 단계에 간격 치수(방향마다 1개) → 완전 구속, 간격 치수 편집이 패턴 전체를 옮김 | 패턴 개체(개수 편집·Delete Pattern·Suppress·Associative 해제·Boundary)는 없음 — 다시 만들어야 함. 대화상자는 FE | P2 | BE+FE |
+| Circular Pattern (원형 패턴) [S12] | 축(점·꼭짓점·작업축) 선택, Count, Angle(첫~끝 요소 사이 각도, 수식 가능) | CP [S29] | **BE 완료**: `SketchOp::CircularPattern{curves, axis(점), count, angle(식), flip, fitted}` — 복사 점마다 원본과 같은 반지름의 구성 선 + 앞 복사본과의 각도 치수(같은 식) → 완전 구속. 식에 모델 매개변수를 쓰면 함께 편집됨 | 축으로 작업축 선택은 점만 지원. 패턴 개체 없음(위와 같음) | P2 | BE+FE |
 | Mirror (대칭 복사) [S12] | 대화상자: 기하 선택 → Mirror Line 선택(파란 화살표). 스플라인이 대칭선과 교차하면 Self Symmetric. Apply로 계속·Done으로 종료 | (미확인; 표의 MI는 피처 미러) | **BE 완료**: `SketchOp::Mirror{curves, axis}` — 복사 점마다 대칭 구속(대칭선 위 점은 공유), 원은 같은 반지름, 호는 방향 반대로. 자유도 추가 없음(원본을 바꾸면 따라감) | 대화상자(Select·Mirror Line·Apply/Done)는 FE. Self Symmetric(스플라인)은 스플라인이 없어 해당 없음 | P2 | BE |
 | 패턴 편집 | 요소 우클릭 Edit Pattern, 패턴 치수 더블클릭, Delete / Delete Pattern / Suppress Element(s) [S12] | | 없음 | | P3 | BE+FE |
 

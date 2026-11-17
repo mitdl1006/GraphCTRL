@@ -297,3 +297,214 @@ fn mirror_copies_are_symmetric_about_the_line_and_add_no_freedom() {
     assert!(bench.op(SketchOp::Mirror { curves: vec![axis], axis }).is_err());
     assert!(bench.op(SketchOp::Mirror { curves: vec![], axis }).is_err());
 }
+
+fn dimensions(created: &[Created]) -> Vec<Id<gc_sketch::Dimension>> {
+    created.iter().filter_map(|c| if let Created::Dimension(id) = c { Some(*id) } else { None }).collect()
+}
+
+fn centre_of(bench: &Bench, circle: Id<Curve>) -> [f64; 2] {
+    let (c, _) = bench.sketch().round(circle).unwrap();
+    let p = bench.sketch().pos(c).unwrap();
+    [p[0], p[1]]
+}
+
+/// Inventor 2026 help, To Create and Edit Sketch Patterns (GUID-AAD3A699-FED8-4614-A31D-0A2316328CEE):
+/// Rectangular: geometry, Direction 1 and 2 with Count and Spacing (an equation), Fitted; "Patterned
+/// geometry is fully constrained".
+#[test]
+fn rectangular_patterns_are_fully_constrained_and_follow_their_spacing() {
+    use gc_doc::SketchPatternDirection;
+    let mut bench = Bench::new();
+    let along_x = add_line(&mut bench, [0.0, -0.5], [1.0, -0.5]);
+    let along_y = add_line(&mut bench, [-0.5, 0.0], [-0.5, 1.0]);
+    let hole = Bench::curves(
+        &bench
+            .op(SketchOp::AddCircle {
+                centre: [0.0, 0.0, 0.0],
+                radius: 0.01,
+                centre_snap: Default::default(),
+                rim_snap: Default::default(),
+            })
+            .unwrap(),
+    )[0];
+    let held = bench.sketch().round(hole).unwrap().0;
+    bench.op(SketchOp::AddConstraint(GeoConstraint::Fix(held))).unwrap();
+    let dof = bench.dof();
+    let direction = |line, count, spacing: &str| SketchPatternDirection {
+        line,
+        count,
+        spacing: spacing.into(),
+        flip: false,
+    };
+    let created = bench
+        .op(SketchOp::RectangularPattern {
+            curves: vec![hole],
+            first: direction(along_x, 3, "50"),
+            second: Some(direction(along_y, 2, "30")),
+            fitted: false,
+        })
+        .unwrap();
+    assert_eq!(bench.dof(), dof, "fully constrained to the original");
+    let circles: Vec<Id<Curve>> =
+        Bench::curves(&created).into_iter().filter(|c| bench.sketch().round(*c).is_some()).collect();
+    assert_eq!(circles.len(), 5, "3 × 2, less the original");
+    let mut centres: Vec<[f64; 2]> = circles.iter().map(|c| centre_of(&bench, *c)).collect();
+    centres.sort_by(|a, b| a[1].total_cmp(&b[1]).then(a[0].total_cmp(&b[0])));
+    let expected = [[0.05, 0.0], [0.1, 0.0], [0.0, 0.03], [0.05, 0.03], [0.1, 0.03]];
+    for (c, e) in centres.iter().zip(expected) {
+        assert!((c[0] - e[0]).abs() < 1e-9 && (c[1] - e[1]).abs() < 1e-9, "{centres:?}");
+    }
+    // One spacing dimension per direction; editing the first moves the columns.
+    let dims = dimensions(&created);
+    assert_eq!(dims.len(), 2);
+    bench.op(SketchOp::SetDimension { id: dims[0], source: "80".into() }).unwrap();
+    let mut xs: Vec<f64> = circles.iter().map(|c| centre_of(&bench, *c)[0]).collect();
+    xs.sort_by(f64::total_cmp);
+    assert!((xs[4] - 0.16).abs() < 1e-7, "{xs:?}");
+    // Fitted: 100 mm overall for three elements is 50 mm apart; flip goes the other way.
+    let mut bench2 = Bench::new();
+    let along = add_line(&mut bench2, [0.0, -0.5], [1.0, -0.5]);
+    let dot = Bench::curves(
+        &bench2
+            .op(SketchOp::AddCircle {
+                centre: [0.0; 3],
+                radius: 0.01,
+                centre_snap: Default::default(),
+                rim_snap: Default::default(),
+            })
+            .unwrap(),
+    )[0];
+    let created = bench2
+        .op(SketchOp::RectangularPattern {
+            curves: vec![dot],
+            first: SketchPatternDirection { line: along, count: 3, spacing: "100".into(), flip: true },
+            second: None,
+            fitted: true,
+        })
+        .unwrap();
+    let mut xs: Vec<f64> = Bench::curves(&created)
+        .into_iter()
+        .filter_map(|c| bench2.sketch().round(c).map(|_| centre_of(&bench2, c)[0]))
+        .collect();
+    xs.sort_by(f64::total_cmp);
+    assert!((xs[0] + 0.1).abs() < 1e-9 && (xs[1] + 0.05).abs() < 1e-9, "{xs:?}");
+    // Refused: one element, the direction among the curves, a bad spacing.
+    assert!(
+        bench2
+            .op(SketchOp::RectangularPattern {
+                curves: vec![dot],
+                first: direction(along, 1, "10"),
+                second: None,
+                fitted: false
+            })
+            .is_err()
+    );
+    assert!(
+        bench2
+            .op(SketchOp::RectangularPattern {
+                curves: vec![along],
+                first: direction(along, 2, "10"),
+                second: None,
+                fitted: false
+            })
+            .is_err()
+    );
+    assert!(
+        bench2
+            .op(SketchOp::RectangularPattern {
+                curves: vec![dot],
+                first: direction(along, 2, "-5"),
+                second: None,
+                fitted: false
+            })
+            .is_err()
+    );
+}
+
+/// Circular: an axis (point), Count and Angle (an equation), Fitted.
+#[test]
+fn circular_patterns_turn_round_the_axis_and_stay_constrained() {
+    let mut bench = Bench::new();
+    let centre = Bench::points(&bench.op(SketchOp::PlacePoint { pos: [0.0; 3], center: true }).unwrap())[0];
+    bench.op(SketchOp::AddConstraint(GeoConstraint::Fix(centre))).unwrap();
+    // A short radial line and a small circle at 0.1 on X.
+    let spoke = add_line(&mut bench, [0.05, 0.0], [0.08, 0.0]);
+    let hole = Bench::curves(
+        &bench
+            .op(SketchOp::AddCircle {
+                centre: [0.1, 0.0, 0.0],
+                radius: 0.005,
+                centre_snap: Default::default(),
+                rim_snap: Default::default(),
+            })
+            .unwrap(),
+    )[0];
+    let dof = bench.dof();
+    let created = bench
+        .op(SketchOp::CircularPattern {
+            curves: vec![spoke, hole],
+            axis: centre,
+            count: 6,
+            angle: "360 deg".into(),
+            flip: false,
+            fitted: true,
+        })
+        .unwrap();
+    assert_eq!(bench.dof(), dof, "fully constrained");
+    let circles: Vec<Id<Curve>> =
+        Bench::curves(&created).into_iter().filter(|c| bench.sketch().round(*c).is_some()).collect();
+    assert_eq!(circles.len(), 5);
+    let mut angles: Vec<f64> = circles
+        .iter()
+        .map(|c| {
+            let p = centre_of(&bench, *c);
+            p[1].atan2(p[0]).to_degrees().rem_euclid(360.0)
+        })
+        .collect();
+    angles.sort_by(f64::total_cmp);
+    for (a, e) in angles.iter().zip([60.0, 120.0, 180.0, 240.0, 300.0]) {
+        assert!((a - e).abs() < 1e-7, "{angles:?}");
+    }
+    assert!(circles.iter().all(|c| {
+        let p = centre_of(&bench, *c);
+        (p[0].hypot(p[1]) - 0.1).abs() < 1e-9
+    }));
+    // Clockwise, 30° apart, not fitted.
+    let created = bench
+        .op(SketchOp::CircularPattern {
+            curves: vec![hole],
+            axis: centre,
+            count: 2,
+            angle: "30 deg".into(),
+            flip: true,
+            fitted: false,
+        })
+        .unwrap();
+    let copy = Bench::curves(&created).into_iter().find(|c| bench.sketch().round(*c).is_some()).unwrap();
+    let p = centre_of(&bench, copy);
+    assert!((p[1].atan2(p[0]).to_degrees() + 30.0).abs() < 1e-7, "{p:?}");
+    assert!(
+        bench
+            .op(SketchOp::CircularPattern {
+                curves: vec![hole],
+                axis: centre,
+                count: 1,
+                angle: "30 deg".into(),
+                flip: false,
+                fitted: false
+            })
+            .is_err()
+    );
+    assert!(
+        bench
+            .op(SketchOp::CircularPattern {
+                curves: vec![hole],
+                axis: centre,
+                count: 3,
+                angle: "0 deg".into(),
+                flip: false,
+                fitted: false
+            })
+            .is_err()
+    );
+}
