@@ -54,6 +54,15 @@ pub struct MeshRef {
 /// A part of a mesh file as it is drawn: the mesh and the colour the file gives it, if any.
 pub type ShownPart = (MeshRef, Option<[f32; 4]>);
 
+/// Something whose look can be changed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Shown {
+    /// A body.
+    Body(Id<Body>),
+    /// A robot.
+    Robot(Id<Robot>),
+}
+
 /// A robot description that was read successfully.
 #[derive(Debug)]
 pub struct LoadedRobot {
@@ -244,6 +253,7 @@ pub(crate) struct CellState {
     tcp: Option<(Id<Robot>, Placement)>,
     waypoint: Option<(Id<Waypoint>, WaypointTarget)>,
     frame: Option<(Id<WorkFrame>, WorkFrame)>,
+    look: Option<(Shown, gc_doc::Look)>,
     plans: BTreeMap<Id<MotionPath>, Planned>,
     playback: Option<(Id<MotionPath>, f64)>,
     resources: Option<Resources>,
@@ -272,6 +282,7 @@ impl Default for CellState {
             tcp: None,
             waypoint: None,
             frame: None,
+            look: None,
             plans: BTreeMap::new(),
             playback: None,
             resources: None,
@@ -543,6 +554,7 @@ impl Session {
             tcp: Placement::default(),
             joints: vec![0.0; loaded.chain.dof()],
             max_acc: 5.0,
+            look: Default::default(),
         };
         match self.cell_op(CellOp::AddRobot(robot)).map_err(|e| e.to_string())?.first() {
             Some(Created::Robot(id)) => Ok(*id),
@@ -553,7 +565,10 @@ impl Session {
     /// Adds a body with a name that is not taken yet.
     pub fn add_body(&mut self, solid: Solid, placement: Placement) -> Result<Id<Body>, EditError> {
         let name = format!("Body{}", self.doc.bodies().len() + 1);
-        match self.cell_op(CellOp::AddBody(Body { name, placement, solid }))?.first() {
+        match self
+            .cell_op(CellOp::AddBody(Body { name, placement, solid, look: Default::default() }))?
+            .first()
+        {
             Some(Created::Body(id)) => Ok(*id),
             _ => Err(EditError::BadValue),
         }
@@ -580,10 +595,62 @@ impl Session {
         self.cell.files.insert(file.clone(), Ok(data));
         let name =
             path.file_stem().map_or_else(|| "Mesh".to_owned(), |stem| stem.to_string_lossy().into_owned());
-        let body = Body { name, placement: Placement::default(), solid: Solid::Mesh { file, scale } };
+        let body = Body {
+            name,
+            placement: Placement::default(),
+            solid: Solid::Mesh { file, scale },
+            look: Default::default(),
+        };
         match self.cell_op(CellOp::AddBody(body)).map_err(|e| e.to_string())?.first() {
             Some(Created::Body(id)) => Ok(*id),
             _ => Err("the body was not created".to_owned()),
+        }
+    }
+
+    /// How a body or a robot is shown: the preview while it is being changed, else the document's.
+    pub fn shown_look(&self, item: Shown) -> Option<gc_doc::Look> {
+        if let Some((previewed, look)) = self.cell.look
+            && previewed == item
+        {
+            return Some(look);
+        }
+        match item {
+            Shown::Body(id) => self.doc.get(id).map(|b| b.look),
+            Shown::Robot(id) => self.doc.get(id).map(|r| r.look),
+        }
+    }
+
+    /// Previews a look without touching the document (e.g. while a slider is dragged).
+    pub fn preview_look(&mut self, item: Shown, look: gc_doc::Look) {
+        if look.is_valid() {
+            self.cell.look = Some((item, look));
+        }
+    }
+
+    /// Commits the look preview as one undo step.
+    pub fn end_look_preview(&mut self) {
+        if let Some((item, look)) = self.cell.look.take() {
+            drop(self.set_look(item, look));
+        }
+    }
+
+    /// Changes how a body or a robot is shown, as one undo step. Nothing else changes: a hidden body is
+    /// still an obstacle, and plans stay current.
+    pub fn set_look(&mut self, item: Shown, look: gc_doc::Look) -> Result<(), EditError> {
+        if self.doc_look(item) == Some(look) {
+            return Ok(());
+        }
+        let op = match item {
+            Shown::Body(id) => CellOp::SetBodyLook { id, look },
+            Shown::Robot(id) => CellOp::SetRobotLook { id, look },
+        };
+        self.cell_op(op).map(|_| ())
+    }
+
+    fn doc_look(&self, item: Shown) -> Option<gc_doc::Look> {
+        match item {
+            Shown::Body(id) => self.doc.get(id).map(|b| b.look),
+            Shown::Robot(id) => self.doc.get(id).map(|r| r.look),
         }
     }
 

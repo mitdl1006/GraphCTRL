@@ -20,6 +20,8 @@ pub enum BrowserAction {
     EditSketch(Id<Sketch>),
     /// Apply this edit (delete a cell item, add or change a parameter).
     Edit(Box<gc_doc::Command>),
+    /// Show or hide a body or a robot.
+    Show(gc_session::Shown, bool),
 }
 
 /// What is typed into the parameter editor of the browser.
@@ -111,13 +113,26 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
     }
     // Cell items: name and a small button that deletes the item.
     let doc = session.doc();
-    let mut section = |ui: &mut Ui, title: &str, items: Vec<(String, String, gc_doc::CellOp)>| {
+    type Row = (String, String, gc_doc::CellOp, Option<gc_session::Shown>);
+    let mut section = |ui: &mut Ui, title: &str, items: Vec<Row>| {
         if items.is_empty() {
             return;
         }
         egui::CollapsingHeader::new(title).default_open(true).show(ui, |ui| {
-            for (name, shown, delete) in items {
+            for (name, shown, delete, toggled) in items {
                 ui.horizontal(|ui| {
+                    // Bodies and robots can be hidden; they stay obstacles for planning.
+                    if let Some(item) = toggled {
+                        let mut visible = !session.shown_look(item).unwrap_or_default().hidden;
+                        let label = tr!(lang, ShowItem, name);
+                        let check = ui.add(egui::Checkbox::without_text(&mut visible)).on_hover_text(&label);
+                        check.widget_info(|| {
+                            egui::WidgetInfo::selected(egui::Role::CheckBox, true, visible, &label)
+                        });
+                        if check.changed() {
+                            action = Some(BrowserAction::Show(item, visible));
+                        }
+                    }
                     ui.label(shown);
                     let button = ui.small_button("x").on_hover_text(tr!(lang, CmdDeleteItem, name));
                     button.widget_info(|| {
@@ -137,7 +152,14 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
         tr!(lang, BrowserBodies),
         doc.bodies()
             .iter()
-            .map(|(id, b)| (plain(&b.name).0, plain(&b.name).1, CellOp::DeleteBody(id)))
+            .map(|(id, b)| {
+                (
+                    plain(&b.name).0,
+                    plain(&b.name).1,
+                    CellOp::DeleteBody(id),
+                    Some(gc_session::Shown::Body(id)),
+                )
+            })
             .collect(),
     );
     section(
@@ -145,7 +167,14 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
         tr!(lang, BrowserRobots),
         doc.robots()
             .iter()
-            .map(|(id, r)| (plain(&r.name).0, plain(&r.name).1, CellOp::DeleteRobot(id)))
+            .map(|(id, r)| {
+                (
+                    plain(&r.name).0,
+                    plain(&r.name).1,
+                    CellOp::DeleteRobot(id),
+                    Some(gc_session::Shown::Robot(id)),
+                )
+            })
             .collect(),
     );
     section(
@@ -153,7 +182,7 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
         tr!(lang, BrowserFrames),
         doc.work_frames()
             .iter()
-            .map(|(id, f)| (plain(&f.name).0, plain(&f.name).1, CellOp::DeleteFrame(id)))
+            .map(|(id, f)| (plain(&f.name).0, plain(&f.name).1, CellOp::DeleteFrame(id), None))
             .collect(),
     );
     section(
@@ -161,7 +190,7 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
         tr!(lang, BrowserWaypoints),
         doc.waypoints()
             .iter()
-            .map(|(id, w)| (plain(&w.name).0, plain(&w.name).1, CellOp::DeleteWaypoint(id)))
+            .map(|(id, w)| (plain(&w.name).0, plain(&w.name).1, CellOp::DeleteWaypoint(id), None))
             .collect(),
     );
     let paths = doc
@@ -169,7 +198,7 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
         .iter()
         .map(|(id, p)| {
             let shown = format!("{} ({})", p.name, status_text(lang, session.plan_status(id)));
-            (p.name.clone(), shown, CellOp::DeletePath(id))
+            (p.name.clone(), shown, CellOp::DeletePath(id), None)
         })
         .collect();
     section(ui, tr!(lang, BrowserPaths), paths);

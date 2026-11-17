@@ -60,6 +60,7 @@ pub fn cell(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) 
         session.end_body_preview();
         session.end_target_preview();
         session.end_frame_preview();
+        session.end_look_preview();
     }
     paths(ui, session, lang, state);
 }
@@ -72,6 +73,7 @@ fn jog(ui: &mut Ui, session: &mut Session, lang: Lang) {
     };
     ui.add_space(8.0);
     ui.label(RichText::new(tr!(lang, PanelJog)).strong());
+    transparency(ui, session, lang, gc_session::Shown::Robot(robot));
     let mut changed = false;
     let chain = &loaded.chain;
     for (index, name) in chain.joint_names().iter().enumerate() {
@@ -157,6 +159,20 @@ fn base(ui: &mut Ui, session: &mut Session, lang: Lang) {
     });
     if changed {
         session.preview_tcp(robot, tcp);
+    }
+}
+
+/// How see-through a body or robot is, previewed while the slider moves.
+fn transparency(ui: &mut Ui, session: &mut Session, lang: Lang, item: gc_session::Shown) {
+    let Some(mut look) = session.shown_look(item) else { return };
+    let mut percent = look.transparency * 100.0;
+    let slider = egui::Slider::new(&mut percent, 0.0..=95.0)
+        .text(tr!(lang, PropTransparency))
+        .suffix(" %")
+        .custom_formatter(|value, _| format!("{value:.0}"));
+    if ui.add(slider).changed() {
+        look.transparency = (percent / 100.0).clamp(0.0, 0.95);
+        session.preview_look(item, look);
     }
 }
 
@@ -309,6 +325,7 @@ fn bodies(ui: &mut Ui, session: &mut Session, lang: Lang) {
         let Some(mut body) = session.shown_body(id).cloned() else { continue };
         let mut changed = false;
         egui::CollapsingHeader::new(&body.name).id_salt(("gc_body", id.raw())).show(ui, |ui| {
+            transparency(ui, session, lang, gc_session::Shown::Body(id));
             changed |= placement(ui, lang, &mut body.placement);
             match &mut body.solid {
                 Solid::Mesh { file, scale } => {

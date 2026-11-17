@@ -11,7 +11,7 @@ use gc_doc::Solid;
 use gc_math::{Aabb, DPose3, DVec3, pose_from_xyz_rpy};
 use gc_mesh::{MeshData, MeshError, primitives};
 use gc_robot::Shape;
-use gc_session::{MeshRef, PlanStatus, Session};
+use gc_session::{MeshRef, PlanStatus, Session, Shown};
 
 /// A basic solid, centred on its own origin. Solids with equal sizes share one uploaded mesh.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -183,15 +183,27 @@ impl Scene {
                 },
             };
             let pose = pose_from_xyz_rpy(body.placement.xyz, body.placement.rpy);
-            scene.solids.push(Solid3 { shape, pose, color: BODY });
+            let look = session.shown_look(Shown::Body(id)).unwrap_or_default();
+            if look.hidden {
+                continue;
+            }
+            let mut color = BODY;
+            color[3] = 1.0 - look.transparency as f32;
+            scene.solids.push(Solid3 { shape, pose, color });
         }
         for (id, _) in doc.robots().iter() {
             let (Some(loaded), Some(poses)) = (session.robot_model(id), session.link_poses(id)) else {
                 continue;
             };
+            let look = session.shown_look(Shown::Robot(id)).unwrap_or_default();
+            if look.hidden {
+                continue;
+            }
+            let alpha = 1.0 - look.transparency as f32;
             // A robot that collides as shown is drawn reddish.
             let colliding = session.robot_problem(id).is_some();
             let shown = |color: [f32; 4]| {
+                let color = [color[0], color[1], color[2], color[3] * alpha];
                 if colliding {
                     [0.55 + 0.45 * color[0], 0.35 * color[1], 0.35 * color[2], color[3]]
                 } else {

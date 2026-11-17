@@ -300,6 +300,7 @@ mod tests {
                 name: "기둥".into(),
                 placement,
                 solid: Solid::Cylinder { radius: 0.05, length: 1.0 },
+                look: Default::default(),
             }),
         );
         let robot = Robot {
@@ -312,6 +313,7 @@ mod tests {
             tcp: Placement::default(),
             joints: vec![0.1, -0.2, 0.3],
             max_acc: 5.0,
+            look: Default::default(),
         };
         let Created::Robot(robot) = cell(&mut doc, CellOp::AddRobot(robot))[0] else { panic!("no robot") };
         let target = WaypointTarget::SketchPoint { sketch, point: a };

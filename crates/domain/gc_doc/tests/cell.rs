@@ -24,6 +24,7 @@ fn robot() -> Robot {
         tcp: Placement::default(),
         joints: vec![0.0; 6],
         max_acc: 5.0,
+        look: Default::default(),
     }
 }
 
@@ -36,6 +37,7 @@ fn a_cell_is_built_undone_and_redone() {
         name: "Table".into(),
         placement: Placement::default(),
         solid: Solid::Box { size: [1.0, 0.6, 0.05] },
+        look: Default::default(),
     };
     cell(&mut doc, &mut history, CellOp::AddBody(body)).unwrap();
     let Created::Robot(robot_id) = cell(&mut doc, &mut history, CellOp::AddRobot(robot())).unwrap()[0] else {
@@ -112,6 +114,7 @@ fn what_is_in_use_stays_and_bad_values_change_nothing() {
                 name: "b".into(),
                 placement: Placement::default(),
                 solid: Solid::Sphere { radius: 0.0 },
+                look: Default::default(),
             }),
             EditError::BadValue,
         ),

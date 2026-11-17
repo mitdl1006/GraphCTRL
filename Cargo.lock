@@ -1340,6 +1340,7 @@ dependencies = [
  "gc_plugin_ur",
  "gc_render",
  "gc_robotics_api",
+ "gc_scene",
  "gc_session",
  "gc_sketch",
  "gc_test_support",

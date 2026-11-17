@@ -652,6 +652,83 @@ fn a_frame_from_picked_points_shows_its_six_numbers() {
     }
 }
 
+/// Equipment can be hidden or made see-through; it stays an obstacle, plans stay current, and the look is
+/// saved with the project.
+#[test]
+fn equipment_can_be_hidden_or_made_see_through() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    build_cell(
+        &mut harness,
+        "UR5e 로봇",
+        [-0.9, -1.3, 1.5, -1.8, -1.57, 0.0],
+        [0.9, -1.3, 1.5, -1.8, -1.57, 0.0],
+    );
+    let session = &harness.state().session;
+    let path = session.doc().paths().iter().next().unwrap().0;
+    let (body, _) = session.doc().bodies().iter().next().unwrap();
+    assert_eq!(session.plan_status(path), gc_session::PlanStatus::Ready, "{:?}", session.plan_error(path));
+    let solids = |harness: &egui_kittest::Harness<'_, GraphCtrlApp>| {
+        gc_scene::Scene::of(&harness.state().session).solids
+    };
+    let pillar_alpha = |harness: &egui_kittest::Harness<'_, GraphCtrlApp>| {
+        solids(harness).iter().find(|s| matches!(s.shape, gc_scene::Shape3::Primitive(_))).map(|s| s.color[3])
+    };
+    assert_eq!(pillar_alpha(&harness), Some(1.0));
+
+    // 60 % see-through: previewed while the slider moves, one undo step when it is let go.
+    let app = harness.state_mut();
+    let depth = app.session.history().undo_depth();
+    let shown = gc_session::Shown::Body(body);
+    for percent in [20.0, 40.0, 60.0] {
+        app.session.preview_look(shown, gc_doc::Look { hidden: false, transparency: percent / 100.0 });
+    }
+    app.session.end_look_preview();
+    assert_eq!(app.session.history().undo_depth(), depth + 1);
+    assert!((pillar_alpha(&harness).unwrap() - 0.4).abs() < 1e-6);
+    assert_eq!(
+        harness.state().session.plan_status(path),
+        gc_session::PlanStatus::Ready,
+        "looks do not touch plans"
+    );
+    if gpu {
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        harness.run();
+        harness.render().unwrap().save(out.join("review-14-see-through.png")).unwrap();
+    }
+
+    // Hidden from the browser: not drawn, still an obstacle.
+    harness.get_by_label("Body1 보이기").click();
+    harness.run();
+    assert_eq!(pillar_alpha(&harness), None);
+    let session = &harness.state().session;
+    assert!(session.doc().get(body).unwrap().look.hidden);
+    assert_eq!(session.plan_status(path), gc_session::PlanStatus::Ready);
+    let robot = session.doc().robots().iter().next().unwrap().0;
+    let app = harness.state_mut();
+    app.session.jog(robot, &[0.0, -1.3, 1.5, -1.8, -1.57, 0.0]);
+    assert!(app.session.robot_problem(robot).is_some(), "the hidden pillar is still in the way");
+    app.session.jog(robot, &[-0.9, -1.3, 1.5, -1.8, -1.57, 0.0]);
+    app.session.end_jog();
+    // The robot can be hidden too.
+    harness.get_by_label("UR5e_1 보이기").click();
+    harness.run();
+    assert!(solids(&harness).is_empty());
+
+    // Saved and opened again, the looks are kept.
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join("looks.gctrl");
+    harness.state_mut().session.save_as(&file).unwrap();
+    let mut reopened = gc_session::Session::new();
+    reopened.open(&file).unwrap();
+    assert_eq!(reopened.doc().get(body).unwrap().look, gc_doc::Look { hidden: true, transparency: 0.6 });
+    assert!(reopened.doc().get(robot).unwrap().look.hidden);
+}
+
 /// With worker threads, planning does not finish inside the click: the window shows "planning" and picks
 /// the result up when the job reports back.
 #[test]

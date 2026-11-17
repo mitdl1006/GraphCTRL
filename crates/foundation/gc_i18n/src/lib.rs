@@ -426,7 +426,11 @@ messages! {
     PropRotvec => ("회전 벡터(UR)", "Rotation vector (UR)"),
     /// Edit refused: a work frame's origin must be fully constrained.
     ErrUnderconstrained => ("좌표계를 정할 점이 완전히 구속되지 않았습니다(치수나 고정 구속을 추가하세요)", "A point of the frame is not fully constrained (add dimensions or fix it)"),
-
+    /// Checkbox beside a body or robot in the browser: show it. `{0}` is its name.
+    ShowItem => ("{0} 보이기", "Show {0}"),
+    /// Slider: how see-through a body or robot is, in percent.
+    PropTransparency => ("투명도", "Transparency"),
+    /// Plan status: being computed.
     PlanPlanning => ("계획 중...", "Planning..."),
     /// Plan status: up to date.
     PlanReady => ("계획됨", "Planned"),

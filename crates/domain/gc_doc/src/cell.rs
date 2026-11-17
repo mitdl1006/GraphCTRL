@@ -58,6 +58,23 @@ impl Solid {
     }
 }
 
+/// How a body or a robot is shown. It changes nothing else: a hidden or see-through body is still an
+/// obstacle for planning.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Look {
+    /// Not drawn at all.
+    pub hidden: bool,
+    /// From 0 (opaque) to 0.95 (nearly invisible).
+    pub transparency: f64,
+}
+
+impl Look {
+    /// True when the values are in range.
+    pub fn is_valid(&self) -> bool {
+        (0.0..=0.95).contains(&self.transparency)
+    }
+}
+
 /// A piece of equipment or an obstacle.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Body {
@@ -67,6 +84,9 @@ pub struct Body {
     pub placement: Placement,
     /// Its shape.
     pub solid: Solid,
+    /// How it is shown.
+    #[serde(default)]
+    pub look: Look,
 }
 
 impl Entity for Body {
@@ -99,6 +119,9 @@ pub struct Robot {
     pub joints: Vec<f64>,
     /// Acceleration limit applied to every joint, rad/s² (robot descriptions carry none).
     pub max_acc: f64,
+    /// How it is shown.
+    #[serde(default)]
+    pub look: Look,
 }
 
 impl Entity for Robot {
@@ -232,6 +255,20 @@ pub enum CellOp {
         id: Id<Robot>,
         /// The new placement.
         placement: Placement,
+    },
+    /// Changes how a body is shown.
+    SetBodyLook {
+        /// The body.
+        id: Id<Body>,
+        /// How it is shown.
+        look: Look,
+    },
+    /// Changes how a robot is shown.
+    SetRobotLook {
+        /// The robot.
+        id: Id<Robot>,
+        /// How it is shown.
+        look: Look,
     },
     /// Changes the folder a robot's mesh files are looked for in.
     SetRobotFiles {
@@ -378,6 +415,20 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
             placed(placement)?;
             txn.modify(*id, |r: &mut Robot, _| r.placement = *placement)?;
             Ok((Vec::new(), "Place robot"))
+        }
+        CellOp::SetBodyLook { id, look } => {
+            if !look.is_valid() {
+                return Err(EditError::BadValue);
+            }
+            txn.modify(*id, |b: &mut Body, _| b.look = *look)?;
+            Ok((Vec::new(), "Change display"))
+        }
+        CellOp::SetRobotLook { id, look } => {
+            if !look.is_valid() {
+                return Err(EditError::BadValue);
+            }
+            txn.modify(*id, |r: &mut Robot, _| r.look = *look)?;
+            Ok((Vec::new(), "Change display"))
         }
         CellOp::SetRobotFiles { id, resource_dir } => {
             txn.modify(*id, |r: &mut Robot, _| r.resource_dir.clone_from(resource_dir))?;
