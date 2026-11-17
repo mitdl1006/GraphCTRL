@@ -287,6 +287,7 @@ pub fn status_bar(ui: &mut Ui, session: &Session, lang: Lang, gpu: bool, notice:
                 gc_doc::EditError::InUse => Msg::ErrInUse,
                 gc_doc::EditError::BadValue => Msg::ErrBadValue,
                 gc_doc::EditError::Underconstrained => Msg::ErrUnderconstrained,
+                gc_doc::EditError::DegenerateFrame => Msg::ErrDegenerateFrame,
                 _ => Msg::ErrOther,
             };
             ui.separator();

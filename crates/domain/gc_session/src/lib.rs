@@ -56,6 +56,8 @@ pub struct Session {
     active: Option<Id<Sketch>>,
     tool: Tool,
     selection: BTreeSet<Item>,
+    /// The selected items in the order they were picked (may hold items no longer selected).
+    picked: Vec<Item>,
     drag: Option<SketchDrag>,
     report: Option<SketchReport>,
     request: Option<ValueRequest>,
@@ -82,6 +84,7 @@ impl Session {
             active: None,
             tool: Tool::new(ToolKind::Select),
             selection: BTreeSet::new(),
+            picked: Vec::new(),
             drag: None,
             report: None,
             request: None,
@@ -178,6 +181,11 @@ impl Session {
     /// The selected items of the active sketch.
     pub fn selection(&self) -> &BTreeSet<Item> {
         &self.selection
+    }
+
+    /// The selected items in the order they were picked.
+    pub fn selection_order(&self) -> Vec<Item> {
+        self.picked.iter().filter(|item| self.selection.contains(item)).copied().collect()
     }
 
     /// The solve state of the active sketch: degrees of freedom, what is free, what is redundant.
@@ -379,11 +387,16 @@ impl Session {
             }
             ToolOutput::Select { item, extend } => match (item, extend) {
                 (Some(item), true) => {
+                    self.picked.retain(|p| *p != item);
                     if !self.selection.remove(&item) {
                         self.selection.insert(item);
+                        self.picked.push(item);
                     }
                 }
-                (Some(item), false) => self.selection = BTreeSet::from([item]),
+                (Some(item), false) => {
+                    self.selection = BTreeSet::from([item]);
+                    self.picked = vec![item];
+                }
                 (None, true) => {}
                 (None, false) => self.selection.clear(),
             },

@@ -592,6 +592,66 @@ fn waypoints_follow_a_work_frame() {
     }
 }
 
+/// A frame from two points picked in order: origin, then the point the X axis points to. The panel shows
+/// its six numbers, in the world and in the robot's base frame.
+#[test]
+fn a_frame_from_picked_points_shows_its_six_numbers() {
+    use gc_sketch::GeoConstraint;
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("로봇").click();
+    harness.run();
+    harness.get_by_label("UR5e 로봇").click();
+    harness.run();
+    let app = harness.state_mut();
+    let robot = app.session.doc().robots().iter().next().unwrap().0;
+    // The robot stands 100 mm to the side, so that base and world numbers differ.
+    let placement = gc_doc::Placement { xyz: [0.0, -0.1, 0.0], rpy: [0.0; 3] };
+    app.session.execute(&gc_doc::Command::Cell(gc_doc::CellOp::PlaceRobot { id: robot, placement })).unwrap();
+    let sketch = app.session.create_sketch("XY").unwrap();
+    for pos in [[0.4, 0.1, 0.0], [0.6, 0.3, 0.0]] {
+        let created = app
+            .session
+            .execute(&gc_doc::Command::Sketch { sketch, op: gc_doc::SketchOp::AddPoint { pos } })
+            .unwrap();
+        let gc_doc::Created::Point(point) = created[0] else { panic!("no point") };
+        let fix = gc_doc::SketchOp::AddConstraint(GeoConstraint::Fix(point));
+        app.session.execute(&gc_doc::Command::Sketch { sketch, op: fix }).unwrap();
+    }
+    app.session.set_tool(ToolKind::Select);
+    click(app, [0.4, 0.1]);
+    app.session.tool_event(ToolEvent::Move { pos: [0.6, 0.3], px: PX, suppress_snap: false });
+    app.session.tool_event(ToolEvent::Click { pos: [0.6, 0.3], px: PX, modifier: true });
+    harness.run();
+    harness.get_by_label("좌표계").click();
+    harness.run();
+    let session = &harness.state().session;
+    let (_, frame) = session.doc().work_frames().iter().next().unwrap();
+    assert!(frame.x_point.is_some() && frame.xy_point.is_none());
+
+    // Open the frame in the panel: X axis at 45 degrees, origin at (400, 100) in the world and (400, 200)
+    // from the robot's base.
+    let header = harness.query_all_by_label("Frame1").last().unwrap();
+    header.click();
+    harness.run();
+    harness.get_by_label("X 400.0  Y 100.0  Z 0.0 mm");
+    harness.get_by_label("X 400.0  Y 200.0  Z 0.0 mm");
+    assert_eq!(
+        harness.query_all_by_label("R 0.00°  P 0.00°  Y 45.00°").count(),
+        2,
+        "turned 45 degrees about Z"
+    );
+    harness.get_by_label("X축 방향 점");
+    if gpu {
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        harness.render().unwrap().save(out.join("review-13-frame-axes.png")).unwrap();
+    }
+}
+
 /// With worker threads, planning does not finish inside the click: the window shows "planning" and picks
 /// the result up when the job reports back.
 #[test]

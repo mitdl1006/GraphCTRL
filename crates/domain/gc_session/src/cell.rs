@@ -455,11 +455,32 @@ fn frame_pose_of(doc: &Document, frame: &WorkFrame) -> Option<DPose3> {
     let sketch = doc.get(frame.sketch)?;
     let (Space::Planar(base) | Space::Spatial(base)) = sketch.space;
     let base = doc.frame_world_pose(Id::from_raw(base.raw))?;
-    let origin = base.translation + base.rotation * DVec3::from_array(sketch.points.get(&frame.point)?.pos);
-    Some(DPose3::from_parts(
-        origin,
-        base.rotation * gc_math::quat_from_rpy(frame.rpy[0], frame.rpy[1], frame.rpy[2]),
-    ))
+    let world = |point: Id<SkPoint>| {
+        Some(base.translation + base.rotation * DVec3::from_array(sketch.points.get(&point)?.pos))
+    };
+    let origin = world(frame.point)?;
+    let axes = match frame.x_point {
+        None => base.rotation,
+        Some(x_point) => {
+            // Points closer than a micrometre, or within a microradian of one line, give no direction.
+            let towards = world(x_point)? - origin;
+            let x = towards.try_normalize().filter(|_| towards.length() > 1e-6)?;
+            // The XY plane: through the third point, or square to the sketch's normal.
+            let z = match frame.xy_point {
+                Some(xy_point) => {
+                    let side = world(xy_point)? - origin;
+                    let normal = x.cross(side);
+                    normal.try_normalize().filter(|_| normal.length() > 1e-6 * side.length().max(1e-6))?
+                }
+                None => {
+                    let normal = base.rotation * DVec3::Z;
+                    (normal - x * normal.dot(x)).try_normalize()?
+                }
+            };
+            DQuat::from_mat3(&gc_math::DMat3::from_cols(x, z.cross(x), z)).normalize()
+        }
+    };
+    Some(DPose3::from_parts(origin, axes * gc_math::quat_from_rpy(frame.rpy[0], frame.rpy[1], frame.rpy[2])))
 }
 
 /// The world pose of the tool centre point at a waypoint target that does not need the robot.
@@ -716,18 +737,71 @@ impl Session {
         sketch: Id<Sketch>,
         point: Id<SkPoint>,
     ) -> Result<Id<WorkFrame>, EditError> {
-        let stored = self.doc.get(sketch).ok_or(EditError::BadValue)?;
-        // The report of the sketch as stored says which points can still move.
-        let report = stored.clone().solve().map_err(|_unsolved| EditError::Underconstrained)?;
-        if report.point_is_free(point) {
-            self.last_error = Some(EditError::Underconstrained);
-            return Err(EditError::Underconstrained);
-        }
+        self.add_work_frame_by_points(sketch, &[point])
+    }
+
+    /// Makes a work frame from one to three fully constrained points of a sketch, in this order: the
+    /// origin, the point the X axis points to, a point on the positive-Y side of the XY plane.
+    pub fn add_work_frame_by_points(
+        &mut self,
+        sketch: Id<Sketch>,
+        points: &[Id<SkPoint>],
+    ) -> Result<Id<WorkFrame>, EditError> {
+        let (Some(&point), true) = (points.first(), points.len() <= 3) else {
+            return Err(EditError::BadValue);
+        };
         let name = format!("Frame{}", self.doc.work_frames().len() + 1);
-        match self.cell_op(CellOp::AddFrame(WorkFrame { name, sketch, point, rpy: [0.0; 3] }))?.first() {
+        let frame = WorkFrame {
+            name,
+            sketch,
+            point,
+            x_point: points.get(1).copied(),
+            xy_point: points.get(2).copied(),
+            rpy: [0.0; 3],
+        };
+        if let Err(error) = self.check_frame(&frame) {
+            self.last_error = Some(error.clone());
+            return Err(error);
+        }
+        match self.cell_op(CellOp::AddFrame(frame))?.first() {
             Some(Created::Frame(id)) => Ok(*id),
             _ => Err(EditError::BadValue),
         }
+    }
+
+    /// Why a frame cannot be used: a point that can still move, or axis points that give no frame.
+    fn check_frame(&self, frame: &WorkFrame) -> Result<(), EditError> {
+        let stored = self.doc.get(frame.sketch).ok_or(EditError::BadValue)?;
+        // The report of the sketch as stored says which points can still move.
+        let report = stored.clone().solve().map_err(|_unsolved| EditError::Underconstrained)?;
+        let points = [Some(frame.point), frame.x_point, frame.xy_point];
+        if points.iter().flatten().any(|p| report.point_is_free(*p)) {
+            return Err(EditError::Underconstrained);
+        }
+        let distinct = frame.x_point != Some(frame.point)
+            && frame.xy_point != Some(frame.point)
+            && (frame.xy_point.is_none() || frame.xy_point != frame.x_point);
+        if !distinct || frame_pose_of(&self.doc, frame).is_none() {
+            return Err(EditError::DegenerateFrame);
+        }
+        Ok(())
+    }
+
+    /// Changes the points that set a work frame's axes (`None` for the sketch's own axes).
+    pub fn set_frame_axes(
+        &mut self,
+        id: Id<WorkFrame>,
+        x_point: Option<Id<SkPoint>>,
+        xy_point: Option<Id<SkPoint>>,
+    ) -> Result<(), EditError> {
+        let mut frame = self.doc.get(id).ok_or(EditError::BadValue)?.clone();
+        frame.x_point = x_point;
+        frame.xy_point = xy_point.filter(|_| x_point.is_some());
+        if let Err(error) = self.check_frame(&frame) {
+            self.last_error = Some(error.clone());
+            return Err(error);
+        }
+        self.cell_op(CellOp::SetFrame { id, frame }).map(|_| ())
     }
 
     /// The world pose of a work frame as it is shown (with the preview of its angles).

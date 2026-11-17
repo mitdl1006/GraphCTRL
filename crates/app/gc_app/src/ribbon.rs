@@ -249,12 +249,26 @@ fn robot_tab(
         {
             drop(session.add_waypoint(robot, WaypointTarget::SketchPoint { sketch, point }));
         }
-        // The same selected point, fully constrained, can become the origin of a work frame.
-        if ribbon_button(ui, Icon::Text("+F"), tr!(lang, CmdWorkFrame), false, point.is_some()).clicked()
-            && let Some((sketch, point)) = point
+        // One to three selected points, fully constrained, become a work frame. In the order they were
+        // picked: the origin, the point the X axis points to, a point on the positive-Y side of XY.
+        let order = session.selection_order();
+        let frame_points: Vec<_> = order
+            .iter()
+            .filter_map(|item| match item {
+                Item::Point(point) => Some(*point),
+                _ => None,
+            })
+            .collect();
+        let frame_sketch = session
+            .active_sketch()
+            .map(|(id, _)| id)
+            .filter(|_| (1..=3).contains(&frame_points.len()) && frame_points.len() == order.len());
+        if ribbon_button(ui, Icon::Text("+F"), tr!(lang, CmdWorkFrame), false, frame_sketch.is_some())
+            .clicked()
+            && let Some(sketch) = frame_sketch
         {
-            // A refusal (the point can still move) is explained in the status bar.
-            cell.frame = session.add_work_frame(sketch, point).ok();
+            // A refusal (a point can still move, or the points give no axes) is explained in the status bar.
+            cell.frame = session.add_work_frame_by_points(sketch, &frame_points).ok();
         }
         let frame = cell.active_frame(session);
         let enabled = robot.is_some() && frame.is_some();

@@ -247,6 +247,9 @@ pub enum EditError {
     /// A work frame's origin must be fully constrained, so that the frame is where the dimensions say.
     #[error("the origin point is not fully constrained")]
     Underconstrained,
+    /// The points that set a work frame's axes coincide with its origin or lie on one line with it.
+    #[error("the axis points do not give a frame")]
+    DegenerateFrame,
     /// A value is not a finite number, not positive where it must be, or of the wrong length.
     #[error("a value is out of range")]
     BadValue,

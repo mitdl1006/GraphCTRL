@@ -397,7 +397,8 @@ messages! {
     StateJointLimit => ("관절 한계 초과: {0}", "Joint beyond its limit: {0}"),
     /// The state of the robot could not be checked.
     StateUnknown => ("이 자세는 검사할 수 없습니다", "This pose could not be checked"),
-    /// Command: make the selected, fully constrained sketch point the origin of a work frame.
+    /// Command: make the selected, fully constrained sketch points (origin, X axis point, XY plane point,
+    /// in the order picked) a work frame.
     CmdWorkFrame => ("좌표계", "Work Frame"),
     /// Command: add a waypoint at the robot's current pose, stored relative to a work frame.
     CmdWaypointInFrame => ("좌표계 기준", "In Frame"),
@@ -409,8 +410,22 @@ messages! {
     PropInFrame => ("{0} (기준: {1})", "{0} (in {1})"),
     /// Label: the frame waypoints are taught in. `{0}` is its name.
     PropTeachFrame => ("기준 좌표계: {0}", "Teach in: {0}"),
+    /// Edit refused: the axis points of a work frame coincide with its origin or lie on one line.
+    ErrDegenerateFrame => ("축을 정할 점이 원점과 겹치거나 원점과 한 직선 위에 있습니다", "The axis points coincide with the origin or lie on one line with it"),
+    /// Work frame: the point the X axis points to.
+    PropXPoint => ("X축 방향 점", "X axis towards"),
+    /// Work frame: a point on the positive-Y side of the XY plane.
+    PropXyPoint => ("XY 평면 위 점(+Y 쪽)", "Point in XY (+Y side)"),
+    /// Work frame: no point chosen; the sketch's own axes are used.
+    PropSketchAxes => ("스케치 축", "Sketch axes"),
+    /// Work frame: its pose in the world, as X, Y, Z (mm) and roll, pitch, yaw (deg).
+    PropPoseWorld => ("월드 기준", "In the world"),
+    /// Work frame: its pose in the robot's base frame.
+    PropPoseBase => ("로봇 베이스 기준", "In the robot base"),
+    /// Rotation as a rotation vector, the form UR controllers show.
+    PropRotvec => ("회전 벡터(UR)", "Rotation vector (UR)"),
     /// Edit refused: a work frame's origin must be fully constrained.
-    ErrUnderconstrained => ("원점이 될 점이 완전히 구속되지 않았습니다(치수나 고정 구속을 추가하세요)", "The origin point is not fully constrained (add dimensions or fix it)"),
+    ErrUnderconstrained => ("좌표계를 정할 점이 완전히 구속되지 않았습니다(치수나 고정 구속을 추가하세요)", "A point of the frame is not fully constrained (add dimensions or fix it)"),
 
     PlanPlanning => ("계획 중...", "Planning..."),
     /// Plan status: up to date.

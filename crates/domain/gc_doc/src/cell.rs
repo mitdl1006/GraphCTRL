@@ -106,9 +106,12 @@ impl Entity for Robot {
     fn refs(&self, _: &mut Vec<AnyId>) {}
 }
 
-/// A work coordinate frame: its origin is a point of a sketch, its axes are the sketch's axes turned by
-/// `rpy`. Waypoints defined in it move with it when the sketch changes. The origin point is meant to be
-/// fully constrained, so that the frame is where the dimensions say.
+/// A work coordinate frame defined by up to three points of a sketch, as robot controllers define user
+/// frames: the origin; a point the X axis points to; a point on the positive-Y side of the XY plane.
+/// Without the X point the axes are the sketch's; without the XY point the Z axis is the sketch's normal
+/// (in a 3D sketch, world Z). The axes found are then turned by `rpy`. Waypoints defined in the frame move
+/// and turn with it when the sketch changes; the points are meant to be fully constrained, so that the
+/// frame is where the dimensions say.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WorkFrame {
     /// Name shown in the browser.
@@ -117,7 +120,13 @@ pub struct WorkFrame {
     pub sketch: Id<Sketch>,
     /// The origin.
     pub point: Id<SkPoint>,
-    /// Roll, pitch, yaw of the frame's axes relative to the sketch's axes.
+    /// The point the X axis points to.
+    #[serde(default)]
+    pub x_point: Option<Id<SkPoint>>,
+    /// A point on the positive-Y side of the frame's XY plane.
+    #[serde(default)]
+    pub xy_point: Option<Id<SkPoint>>,
+    /// Roll, pitch, yaw applied on top of the axes the points give.
     pub rpy: [f64; 3],
 }
 
@@ -296,7 +305,13 @@ fn placed(placement: &Placement) -> Result<(), EditError> {
 
 fn frame_ok(txn: &Txn<'_>, frame: &WorkFrame) -> Result<(), EditError> {
     let sketch = txn.doc().get(frame.sketch).ok_or(DocError::Missing(frame.sketch.erase()))?;
-    if !sketch.points.contains_key(&frame.point) || !finite(&frame.rpy) {
+    let points = [Some(frame.point), frame.x_point, frame.xy_point];
+    let all_there = points.iter().flatten().all(|p| sketch.points.contains_key(p));
+    let distinct = frame.x_point != Some(frame.point)
+        && frame.xy_point != Some(frame.point)
+        && (frame.xy_point.is_none() || frame.xy_point != frame.x_point);
+    if !all_there || !distinct || (frame.xy_point.is_some() && frame.x_point.is_none()) || !finite(&frame.rpy)
+    {
         return Err(EditError::BadValue);
     }
     Ok(())

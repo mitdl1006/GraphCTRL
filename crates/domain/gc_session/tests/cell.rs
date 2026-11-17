@@ -551,3 +551,102 @@ fn waypoints_in_a_work_frame_follow_its_origin() {
     assert_eq!(reopened.doc().work_frames().len(), 2);
     assert!((reopened.waypoint_pose(taught).unwrap().translation - moved).length() < 1e-9);
 }
+
+/// The axes of a work frame set by sketch points: the frame turns with them, and so does everything in it.
+#[test]
+fn a_work_frame_turns_with_its_axis_points() {
+    use gc_doc::{EditError, WaypointTarget};
+    use gc_math::DVec3;
+    use gc_sketch::{DimKind, GeoConstraint, Item};
+    use gc_tools::ToolEvent;
+    let mut session = Session::new();
+    let robot = session.add_robot("Robot1", &six_axis()).unwrap();
+    let sketch = session.create_sketch("XY").unwrap();
+    let sketch_origin = *session.active_sketch().unwrap().1.points.keys().next().unwrap();
+    let add_point = |session: &mut Session, pos: [f64; 3]| {
+        let created = session.execute(&Command::Sketch { sketch, op: SketchOp::AddPoint { pos } }).unwrap();
+        let gc_doc::Created::Point(point) = created[0] else { panic!("no point") };
+        point
+    };
+    let dimension = |session: &mut Session, kind, source: &str| {
+        let op = SketchOp::AddDimension { kind, source: source.to_owned(), text_pos: [0.0; 2] };
+        let created = session.execute(&Command::Sketch { sketch, op }).unwrap();
+        let gc_doc::Created::Dimension(id) = created[0] else { panic!("no dimension") };
+        id
+    };
+    // The origin at (400, 100) mm; the X point 200 mm along and 100 mm up from it.
+    let origin = add_point(&mut session, [0.39, 0.11, 0.0]);
+    dimension(&mut session, DimKind::HDistance { p: sketch_origin, q: origin, sign: 1.0 }, "400 mm");
+    dimension(&mut session, DimKind::VDistance { p: sketch_origin, q: origin, sign: 1.0 }, "100 mm");
+    let x_point = add_point(&mut session, [0.61, 0.19, 0.0]);
+    dimension(&mut session, DimKind::HDistance { p: origin, q: x_point, sign: 1.0 }, "200 mm");
+    let rise = dimension(&mut session, DimKind::VDistance { p: origin, q: x_point, sign: 1.0 }, "100 mm");
+
+    // Picked in order with Ctrl: origin, then the X point.
+    session.set_tool(gc_tools::ToolKind::Select);
+    for (at, extend) in [([0.4, 0.1], false), ([0.6, 0.2], true)] {
+        session.tool_event(ToolEvent::Move { pos: at, px: 1e-4, suppress_snap: false });
+        session.tool_event(ToolEvent::Click { pos: at, px: 1e-4, modifier: extend });
+    }
+    assert_eq!(session.selection_order(), vec![Item::Point(origin), Item::Point(x_point)]);
+    let frame = session.add_work_frame_by_points(sketch, &[origin, x_point]).unwrap();
+    let pose = session.work_frame_pose(frame).unwrap();
+    let x_axis = DVec3::new(2.0, 1.0, 0.0).normalize();
+    assert!((pose.translation - DVec3::new(0.4, 0.1, 0.0)).length() < 1e-9);
+    assert!((pose.rotation * DVec3::X - x_axis).length() < 1e-9);
+    assert!((pose.rotation * DVec3::Z - DVec3::Z).length() < 1e-9, "Z stays the sketch's normal");
+
+    // A waypoint 100 mm along the frame's X, 400 mm up.
+    let offset = Placement { xyz: [0.1, 0.0, 0.4], rpy: [std::f64::consts::PI, 0.0, 0.0] };
+    let waypoint = session.add_waypoint(robot, WaypointTarget::InFrame { frame, offset }).unwrap();
+    let expected = |axis: DVec3| DVec3::new(0.4, 0.1, 0.4) + axis * 0.1;
+    assert!((session.waypoint_pose(waypoint).unwrap().translation - expected(x_axis)).length() < 1e-9);
+
+    // The X point rises to 200 mm: the frame turns to 45 degrees and the waypoint turns with it.
+    session.edit_dimension(rise, "200 mm").unwrap();
+    let turned = DVec3::new(1.0, 1.0, 0.0).normalize();
+    assert!((session.work_frame_pose(frame).unwrap().rotation * DVec3::X - turned).length() < 1e-9);
+    assert!((session.waypoint_pose(waypoint).unwrap().translation - expected(turned)).length() < 1e-9);
+
+    // A free point is refused, and so is a third point on the line through the first two.
+    let free = add_point(&mut session, [0.1, 0.4, 0.0]);
+    assert_eq!(session.add_work_frame_by_points(sketch, &[origin, free]), Err(EditError::Underconstrained));
+    let on_line = add_point(&mut session, [0.8, 0.5, 0.0]);
+    session
+        .execute(&Command::Sketch { sketch, op: SketchOp::AddConstraint(GeoConstraint::Fix(on_line)) })
+        .unwrap();
+    assert_eq!(
+        session.add_work_frame_by_points(sketch, &[origin, x_point, on_line]),
+        Err(EditError::DegenerateFrame)
+    );
+    assert_eq!(session.add_work_frame_by_points(sketch, &[origin, origin]), Err(EditError::DegenerateFrame));
+    session.finish_sketch();
+
+    // Three points in a 3D sketch give all six numbers: the frame stands on a slope.
+    let spatial = session.create_sketch_3d().unwrap();
+    let fixed = |session: &mut Session, pos: [f64; 3]| {
+        let created =
+            session.execute(&Command::Sketch { sketch: spatial, op: SketchOp::AddPoint { pos } }).unwrap();
+        let gc_doc::Created::Point(point) = created[0] else { panic!("no point") };
+        session
+            .execute(&Command::Sketch {
+                sketch: spatial,
+                op: SketchOp::AddConstraint(GeoConstraint::Fix(point)),
+            })
+            .unwrap();
+        point
+    };
+    let o = fixed(&mut session, [0.5, 0.0, 0.2]);
+    let x = fixed(&mut session, [0.5, 0.3, 0.2]);
+    let xy = fixed(&mut session, [0.3, 0.0, 0.4]);
+    let slope = session.add_work_frame_by_points(spatial, &[o, x, xy]).unwrap();
+    let pose = session.work_frame_pose(slope).unwrap();
+    let (ex, ey, ez) = (pose.rotation * DVec3::X, pose.rotation * DVec3::Y, pose.rotation * DVec3::Z);
+    assert!((ex - DVec3::Y).length() < 1e-9);
+    assert!((ey - DVec3::new(-1.0, 0.0, 1.0).normalize()).length() < 1e-9, "{ey:?}");
+    assert!((ez - DVec3::new(1.0, 0.0, 1.0).normalize()).length() < 1e-9, "{ez:?}");
+
+    // The axis points can be changed later: back to the sketch's axes.
+    session.set_frame_axes(slope, None, None).unwrap();
+    assert!((session.work_frame_pose(slope).unwrap().rotation * DVec3::X - DVec3::X).length() < 1e-9);
+}

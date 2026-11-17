@@ -171,6 +171,79 @@ fn millimetres(ui: &mut Ui, value: &mut f64, name: &str, least: f64) -> bool {
     changed
 }
 
+/// The points that set a frame's axes, chosen among the points of its sketch.
+fn frame_axes(
+    ui: &mut Ui,
+    session: &mut Session,
+    lang: Lang,
+    id: gc_core::Id<gc_doc::WorkFrame>,
+    frame: &gc_doc::WorkFrame,
+) {
+    let Some(sketch) = session.doc().get(frame.sketch) else { return };
+    let mm = |v: f64| format!("{:.1}", v * 1000.0);
+    let points: Vec<(gc_core::Id<gc_sketch::SkPoint>, String)> = sketch
+        .points
+        .iter()
+        .filter(|(point, _)| **point != frame.point)
+        .map(|(point, p)| (*point, format!("({}, {}, {})", mm(p.pos[0]), mm(p.pos[1]), mm(p.pos[2]))))
+        .collect();
+    let label = |chosen: Option<gc_core::Id<gc_sketch::SkPoint>>| {
+        chosen
+            .and_then(|c| points.iter().find(|(p, _)| *p == c))
+            .map_or_else(|| tr!(lang, PropSketchAxes).to_owned(), |(_, text)| text.clone())
+    };
+    let (mut x_point, mut xy_point) = (frame.x_point, frame.xy_point);
+    for (title, chosen, salt) in
+        [(tr!(lang, PropXPoint), &mut x_point, "x"), (tr!(lang, PropXyPoint), &mut xy_point, "xy")]
+    {
+        egui::ComboBox::new(("gc_frame_axis", id.raw(), salt), title).selected_text(label(*chosen)).show_ui(
+            ui,
+            |ui| {
+                ui.selectable_value(chosen, None, tr!(lang, PropSketchAxes));
+                for (point, text) in &points {
+                    ui.selectable_value(chosen, Some(*point), text);
+                }
+            },
+        );
+    }
+    if (x_point, xy_point) != (frame.x_point, frame.xy_point) {
+        // A refusal is explained in the status bar.
+        drop(session.set_frame_axes(id, x_point, xy_point));
+    }
+}
+
+/// The six numbers of a frame's pose: in the world and in the first robot's base frame.
+fn frame_pose(ui: &mut Ui, session: &Session, lang: Lang, id: gc_core::Id<gc_doc::WorkFrame>) {
+    let Some(world) = session.work_frame_pose(id) else { return };
+    let mut rows = vec![(tr!(lang, PropPoseWorld), world)];
+    if let Some((robot, _)) = session.doc().robots().iter().next()
+        && let Some(base) = session.shown_base(robot)
+    {
+        let base = gc_math::pose_from_xyz_rpy(base.xyz, base.rpy);
+        rows.push((tr!(lang, PropPoseBase), base.inverse() * world));
+    }
+    egui::Grid::new(("gc_frame_pose", id.raw())).show(ui, |ui| {
+        for (title, pose) in rows {
+            // Values that round to zero are shown as 0, not -0.
+            let clean = |v: f64| if v.abs() < 5e-7 { 0.0 } else { v };
+            let t = (pose.translation * 1000.0).to_array().map(clean);
+            let t = gc_math::DVec3::from_array(t);
+            let [r, p, y] = gc_math::rpy_from_quat(pose.rotation).map(|a| clean(a.to_degrees()));
+            let v =
+                gc_math::DVec3::from_array(gc_math::rotvec_from_quat(pose.rotation).to_array().map(clean));
+            ui.label(title);
+            ui.label(format!("X {:.1}  Y {:.1}  Z {:.1} mm", t.x, t.y, t.z));
+            ui.end_row();
+            ui.label("");
+            ui.label(format!("R {r:.2}°  P {p:.2}°  Y {y:.2}°"));
+            ui.end_row();
+            ui.label(tr!(lang, PropRotvec));
+            ui.label(format!("Rx {:.4}  Ry {:.4}  Rz {:.4} rad", v.x, v.y, v.z));
+            ui.end_row();
+        }
+    });
+}
+
 /// The work frames (which one new waypoints are taught in, and how each is turned) and the waypoints
 /// defined in them, whose positions are edited here.
 fn frames(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) {
@@ -196,6 +269,8 @@ fn frames(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) {
         let Some(mut frame) = session.shown_frame(*id) else { continue };
         let mut changed = false;
         egui::CollapsingHeader::new(name).id_salt(("gc_frame", id.raw())).show(ui, |ui| {
+            frame_axes(ui, session, lang, *id, &frame);
+            frame_pose(ui, session, lang, *id);
             ui.label(tr!(lang, PropRotation));
             ui.horizontal(|ui| {
                 for (value, axis) in frame.rpy.iter_mut().zip(["R", "P", "Y"]) {
