@@ -2295,6 +2295,12 @@ fn measure_gives_the_minimum_distance_between_two_components() {
     harness.get_by_label("중심 간 거리").click();
     harness.run();
     harness.get_by_label(&format!("중심 간 거리: {:.3} mm", expected.centre_to_centre * 1000.0));
+    // Maximum Distance: never below the minimum.
+    harness.get_by_label("최대 거리").click();
+    harness.run();
+    let farthest = expected.maximum.unwrap().distance;
+    assert!(farthest > gap);
+    harness.get_by_label(&format!("최대 거리: {:.3} mm", farthest * 1000.0));
 
     // A click on a blank area (nothing selected) restarts.
     harness.state_mut().session.select_item(None);

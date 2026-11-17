@@ -808,6 +808,7 @@ messages! {
     MeasurePosition => ("위치 X {0}  Y {1}  Z {2} mm", "Position X {0}  Y {1}  Z {2} mm"),
     MeasureMinimum => ("최소 거리", "Minimum Distance"),
     MeasureCentres => ("중심 간 거리", "Center to Center"),
+    MeasureMaximum => ("최대 거리", "Maximum Distance"),
     /// Measure: the delta between the origins. `{0}`, `{1}`, `{2}` dx, dy, dz in mm.
     MeasureDelta => ("Δ X {0}  Y {1}  Z {2} mm", "Δ X {0}  Y {1}  Z {2} mm"),
     /// Measure: angle between the Z axes. `{0}` degrees.

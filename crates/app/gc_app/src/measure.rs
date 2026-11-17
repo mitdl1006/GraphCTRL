@@ -21,6 +21,8 @@ pub(crate) enum DistanceKind {
     Minimum,
     /// The distance between the origins.
     CentreToCentre,
+    /// The largest distance between the shapes.
+    Maximum,
 }
 
 /// What a click selects (Inventor's selection priority in an assembly).
@@ -277,6 +279,15 @@ impl Measure {
                     Group::Distance,
                     pair.centre_to_centre,
                 )),
+                (DistanceKind::Maximum, _) => match pair.maximum {
+                    Some(maximum) => lines.push(valued(
+                        text,
+                        format!("{}: {} mm", tr!(lang, MeasureMaximum), mm(maximum.distance)),
+                        Group::Distance,
+                        maximum.distance,
+                    )),
+                    None => lines.push(line(text, tr!(lang, MeasureNoMinimum).to_owned())),
+                },
             }
             let [dx, dy, dz] = pair.delta.map(mm);
             lines.push(line(text, tr!(lang, MeasureDelta, dx, dy, dz)));
@@ -320,6 +331,7 @@ impl Measure {
                             DistanceKind::CentreToCentre,
                             tr!(lang, MeasureCentres),
                         );
+                        ui.selectable_value(&mut self.kind, DistanceKind::Maximum, tr!(lang, MeasureMaximum));
                     });
                 }
                 ui.separator();
@@ -488,6 +500,7 @@ impl Measure {
         let Some(pair) = &self.pair else { return };
         let ends = match (self.kind, pair.minimum) {
             (DistanceKind::Minimum, Some(minimum)) => Some((minimum.on_first, minimum.on_second)),
+            (DistanceKind::Maximum, _) => pair.maximum.map(|m| (m.on_first, m.on_second)),
             (DistanceKind::CentreToCentre, _) => self.first.zip(self.second).and_then(|(a, b)| {
                 Some((session.measure_item(a)?.position, session.measure_item(b)?.position))
             }),
