@@ -223,6 +223,12 @@ fn a_robot_path_is_planned_through_the_ribbon() {
     harness.run_steps(2);
     assert_eq!(harness.state().session.doc().revision(), revision);
 
+    // The waypoint is used by the path and stays; the status bar says why.
+    harness.get_by_label("P1 삭제").click();
+    harness.run();
+    assert_eq!(harness.state().session.doc().waypoints().len(), 1);
+    harness.get_by_label("아직 사용 중이라 삭제할 수 없습니다");
+
     // Moving the box makes the plan stale: a live preview first, one undo step when it ends.
     let app = harness.state_mut();
     app.session.set_playback(None);
@@ -239,6 +245,16 @@ fn a_robot_path_is_planned_through_the_ribbon() {
     assert_eq!(app.session.history().undo_depth(), depth + 1);
     harness.run();
     harness.get_by_label("Path1 (오래됨(다시 계획 필요))");
+
+    // Path, then waypoint, then robot can be deleted from the browser; each is one undo step.
+    for (label, left) in [("Path1 삭제", (1, 1, 0)), ("P1 삭제", (1, 0, 0)), ("6R_1 삭제", (0, 0, 0))] {
+        harness.get_by_label(label).click();
+        harness.run();
+        let doc = harness.state().session.doc();
+        assert_eq!((doc.robots().len(), doc.waypoints().len(), doc.paths().len()), left, "{label}");
+    }
+    assert!(harness.state_mut().session.undo());
+    assert_eq!(harness.state().session.doc().robots().len(), 1);
 }
 
 /// The robot cell rendered: the 3D solids come from the GPU, the trace and waypoints are drawn over them.

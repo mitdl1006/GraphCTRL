@@ -505,9 +505,17 @@ impl eframe::App for GraphCtrlApp {
         });
         egui::Panel::left("browser").show(ui, |ui| {
             ui.set_min_width(190.0);
-            if let Some(BrowserAction::EditSketch(id)) = gc_panels::browser(ui, &self.session, lang) {
-                self.session.enter_sketch(id);
-                self.tab = Tab::Sketch;
+            match gc_panels::browser(ui, &self.session, lang) {
+                Some(BrowserAction::EditSketch(id)) => {
+                    self.session.enter_sketch(id);
+                    self.tab = Tab::Sketch;
+                }
+                // What is still in use cannot be deleted; the status bar says so.
+                Some(BrowserAction::Delete(op)) => {
+                    self.cell.playing = false;
+                    drop(self.session.execute(&gc_doc::Command::Cell(op)));
+                }
+                None => {}
             }
         });
         egui::Panel::right("properties").show(ui, |ui| {

@@ -236,6 +236,10 @@ messages! {
     ErrUnsolved => ("이 변경으로는 스케치를 풀 수 없습니다", "The sketch cannot be solved with this change"),
     /// Status: any other refusal.
     ErrOther => ("적용할 수 없습니다", "This cannot be applied"),
+    /// Edit refused: something else still uses the item.
+    ErrInUse => ("아직 사용 중이라 삭제할 수 없습니다", "It is still in use and cannot be deleted"),
+    /// Edit refused: a number is out of range.
+    ErrBadValue => ("값이 범위를 벗어났습니다", "A value is out of range"),
     /// Question: add an over-constraining dimension as a reference dimension?
     AskReference => ("이 치수는 스케치를 과구속합니다. 참조 치수로 넣을까요?", "This dimension over-constrains the sketch. Add it as a reference dimension?"),
     /// Menu: Korean input test window.
@@ -336,6 +340,8 @@ messages! {
     ColChecks => ("검사 수", "Checks"),
     /// Comparison note: computed for an earlier state of the cell.
     CompareStale => ("이전 상태 기준 결과", "Computed for an earlier state"),
+    /// Button beside a browser item: delete it. `{0}` is the item's name.
+    CmdDeleteItem => ("{0} 삭제", "Delete {0}"),
     /// Plan status: being computed.
     PlanPlanning => ("계획 중...", "Planning..."),
     /// Plan status: up to date.

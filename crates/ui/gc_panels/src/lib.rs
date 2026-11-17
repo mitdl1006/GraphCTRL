@@ -14,10 +14,12 @@ use gc_ui::colors;
 pub use cell::{CellUi, cell, status_text};
 
 /// What the user asked for in the browser.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum BrowserAction {
     /// Edit this sketch.
     EditSketch(Id<Sketch>),
+    /// Delete this item of the robot cell.
+    Delete(gc_doc::CellOp),
 }
 
 /// The model browser: origin geometry and sketches. Double-click a sketch to edit it.
@@ -39,23 +41,60 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang) -> Option<BrowserActi
             }
         }
     });
+    // Cell items: name and a small button that deletes the item.
     let doc = session.doc();
-    let section = |ui: &mut Ui, title: &str, names: Vec<String>| {
-        if !names.is_empty() {
-            egui::CollapsingHeader::new(title).default_open(true).show(ui, |ui| {
-                for name in names {
-                    ui.label(name);
-                }
-            });
+    let mut section = |ui: &mut Ui, title: &str, items: Vec<(String, String, gc_doc::CellOp)>| {
+        if items.is_empty() {
+            return;
         }
+        egui::CollapsingHeader::new(title).default_open(true).show(ui, |ui| {
+            for (name, shown, delete) in items {
+                ui.horizontal(|ui| {
+                    ui.label(shown);
+                    let button = ui.small_button("x").on_hover_text(tr!(lang, CmdDeleteItem, name));
+                    button.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::Role::Button, true, tr!(lang, CmdDeleteItem, name))
+                    });
+                    if button.clicked() {
+                        action = Some(BrowserAction::Delete(delete));
+                    }
+                });
+            }
+        });
     };
-    section(ui, tr!(lang, BrowserBodies), doc.bodies().iter().map(|(_, b)| b.name.clone()).collect());
-    section(ui, tr!(lang, BrowserRobots), doc.robots().iter().map(|(_, r)| r.name.clone()).collect());
-    section(ui, tr!(lang, BrowserWaypoints), doc.waypoints().iter().map(|(_, w)| w.name.clone()).collect());
+    use gc_doc::CellOp;
+    let plain = |name: &str| (name.to_owned(), name.to_owned());
+    section(
+        ui,
+        tr!(lang, BrowserBodies),
+        doc.bodies()
+            .iter()
+            .map(|(id, b)| (plain(&b.name).0, plain(&b.name).1, CellOp::DeleteBody(id)))
+            .collect(),
+    );
+    section(
+        ui,
+        tr!(lang, BrowserRobots),
+        doc.robots()
+            .iter()
+            .map(|(id, r)| (plain(&r.name).0, plain(&r.name).1, CellOp::DeleteRobot(id)))
+            .collect(),
+    );
+    section(
+        ui,
+        tr!(lang, BrowserWaypoints),
+        doc.waypoints()
+            .iter()
+            .map(|(id, w)| (plain(&w.name).0, plain(&w.name).1, CellOp::DeleteWaypoint(id)))
+            .collect(),
+    );
     let paths = doc
         .paths()
         .iter()
-        .map(|(id, p)| format!("{} ({})", p.name, status_text(lang, session.plan_status(id))))
+        .map(|(id, p)| {
+            let shown = format!("{} ({})", p.name, status_text(lang, session.plan_status(id)));
+            (p.name.clone(), shown, CellOp::DeletePath(id))
+        })
         .collect();
     section(ui, tr!(lang, BrowserPaths), paths);
     action
@@ -161,6 +200,8 @@ pub fn status_bar(ui: &mut Ui, session: &Session, lang: Lang, gpu: bool, notice:
                     Msg::ErrExpression
                 }
                 gc_doc::EditError::Sketch(SketchError::Unsolved(_)) => Msg::ErrUnsolved,
+                gc_doc::EditError::InUse => Msg::ErrInUse,
+                gc_doc::EditError::BadValue => Msg::ErrBadValue,
                 _ => Msg::ErrOther,
             };
             ui.separator();
