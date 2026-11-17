@@ -226,6 +226,13 @@ impl Document {
                 let r = self.get(robot)?;
                 placed(&r.placement) * *r.link_frames().get(index as usize)?
             }
+            Occurrence::Tool { robot } => {
+                // The flange (tip link) frame, then the tool's placement on it.
+                let r = self.get(robot)?;
+                let tool = r.tool.as_ref()?;
+                let tip = r.links.iter().position(|l| l.name == r.tip_link)?;
+                placed(&r.placement) * *r.link_frames().get(tip)? * placed(&tool.placement)
+            }
         };
         Some(ComponentOrigin { pose })
     }

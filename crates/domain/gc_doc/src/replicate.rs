@@ -206,6 +206,7 @@ fn map_selection(
         Occurrence::Item(_) => Occurrence::Item(copy),
         Occurrence::Part { index, .. } => Occurrence::Part { assembly: Id::from_raw(copy.raw), index },
         Occurrence::Link { index, .. } => Occurrence::Link { robot: Id::from_raw(copy.raw), index },
+        Occurrence::Tool { .. } => Occurrence::Tool { robot: Id::from_raw(copy.raw) },
     };
     let Some(axis) = mapping.flipped else {
         return Some(Selection { occurrence, geometry: selection.geometry });

@@ -194,3 +194,75 @@ fn suppressed_bodies_and_robots_are_kept_but_not_drawn_checked_or_planned() {
     session.undo();
     assert!(session.shown_body(body).is_some());
 }
+
+#[test]
+fn the_tool_is_a_sub_component_on_the_flange_with_its_own_origin() {
+    use gc_doc::{ComponentFlag, Tool};
+    let mut session = Session::new();
+    let robot = session.add_robot("Robot1", &six_axis()).unwrap();
+    let tool = Tool { solid: Solid::Box { size: [0.04, 0.04, 0.1] }, placement: Placement::default() };
+    session.execute(&Command::Cell(CellOp::SetTool { id: robot, tool: Some(tool) })).unwrap();
+    // Mounted by its top face centre (0.05 up in its own frame, Z out of the face) on the flange.
+    let mount = Geometry::Frame { origin: [0.0, 0.0, 0.05], z: [0.0, 0.0, 1.0], x: [1.0, 0.0, 0.0] };
+    session.mount_tool(robot, mount, false).unwrap();
+
+    // In the tree: under the tip link, after the links.
+    let nodes = session.robot_links(robot);
+    let node = nodes.last().unwrap();
+    assert_eq!(node.occurrence, Occurrence::Tool { robot });
+    let tip = session.doc().get(robot).unwrap().tip_link.clone();
+    let links = &session.doc().get(robot).unwrap().links;
+    let tip_index = u32::try_from(links.iter().position(|l| l.name == tip).unwrap()).unwrap();
+    assert_eq!(node.parent, Some(Occurrence::Link { robot, index: tip_index }));
+
+    // Its origin: the mount face on the flange, Z axes opposed — for any joint values, and where the
+    // session's own kinematics put the flange.
+    let check = |session: &Session| {
+        let tool = session.component_origin(Occurrence::Tool { robot }).unwrap();
+        let flange = session.component_origin(Occurrence::Link { robot, index: tip_index }).unwrap();
+        let face = tool.pose.translation + tool.pose.rotation * DVec3::new(0.0, 0.0, 0.05);
+        assert!(close(face, flange.point()), "{face} vs {}", flange.point());
+        assert!(close(tool.axis(2), -flange.axis(2)));
+        let model = session.robot_model(robot).unwrap();
+        let poses = session.link_poses(robot).unwrap();
+        assert!(close(flange.point(), poses[model.model.link(&tip).unwrap()].translation));
+    };
+    check(&session);
+    session
+        .execute(&Command::Cell(CellOp::SetJoints {
+            id: robot,
+            joints: vec![0.4, -0.7, 1.0, 0.2, 0.5, -0.1],
+        }))
+        .unwrap();
+    check(&session);
+
+    // States: it can be hidden, not grounded on its own.
+    let occurrence = Occurrence::Tool { robot };
+    session.set_component(occurrence, ComponentFlag::Visible, false).unwrap();
+    assert!(!session.doc().component_flag(occurrence, ComponentFlag::Visible));
+    assert!(session.set_component(occurrence, ComponentFlag::Grounded, true).is_err());
+
+    // A part jointed to the tool's origin follows the arm; a sketch goes on the tool's XY plane.
+    let part = session
+        .add_body(Solid::Box { size: [0.02; 3] }, Placement { xyz: [2.0, 0.0, 0.0], rpy: [0.0; 3] })
+        .unwrap();
+    session
+        .add_relationship(Relationship::new(
+            "Rigid:1",
+            RelationKind::Rigid { flip: true },
+            Selection { occurrence: Occurrence::Item(part.erase()), geometry: Geometry::origin_frame() },
+            Selection { occurrence, geometry: Geometry::origin_frame() },
+        ))
+        .unwrap();
+    session.execute(&Command::Cell(CellOp::SetJoints { id: robot, joints: vec![0.0; 6] })).unwrap();
+    let at = DVec3::from_array(session.doc().get(part).unwrap().placement.xyz);
+    assert!(close(at, session.component_origin(occurrence).unwrap().point()));
+    assert!(session.create_sketch_on_component(occurrence, OriginPlane::Xy).is_ok());
+    session.finish_sketch();
+
+    // Taking the tool off: its occurrence and its relationships go; the part stays where it was.
+    session.execute(&Command::Cell(CellOp::SetTool { id: robot, tool: None })).unwrap();
+    assert!(!session.doc().has_occurrence(occurrence));
+    assert!(session.relationships().is_empty());
+    assert!(session.doc().get(part).is_some());
+}

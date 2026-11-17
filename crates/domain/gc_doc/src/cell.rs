@@ -1352,6 +1352,26 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
                 return Err(EditError::BadValue);
             }
             txn.modify(*id, |r: &mut Robot, _| r.tool = tool.clone().map(Box::new))?;
+            if tool.is_none() {
+                // The tool's relationships go with it, as a deleted component's do.
+                let on_tool = crate::design::Occurrence::Tool { robot: *id };
+                let gone: Vec<Id<crate::relate::Relationship>> = txn
+                    .doc()
+                    .relationships()
+                    .iter()
+                    .filter(|(_, r)| {
+                        r.first.occurrence == on_tool
+                            || r.second.occurrence == on_tool
+                            || r.third().is_some_and(|t| t.occurrence == on_tool)
+                    })
+                    .map(|(id, _)| id)
+                    .collect();
+                for relationship in gone {
+                    txn.remove(relationship)?;
+                }
+            }
+            // What is tied to the tool follows a new mount.
+            settle_holding(txn, &[id.erase()])?;
             Ok((Vec::new(), "Set tool"))
         }
         CellOp::SetTcpSpeed { id, speed } => {

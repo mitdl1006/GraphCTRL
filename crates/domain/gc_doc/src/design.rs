@@ -373,6 +373,12 @@ pub enum Occurrence {
         /// Index into [`crate::cell::Robot::links`].
         index: u32,
     },
+    /// The tool a robot carries (a gripper, a screwdriver): mounted on the flange (the tip link), it
+    /// moves with the arm.
+    Tool {
+        /// The robot.
+        robot: Id<crate::cell::Robot>,
+    },
 }
 
 impl Occurrence {
@@ -381,7 +387,7 @@ impl Occurrence {
         match *self {
             Occurrence::Item(item) => item,
             Occurrence::Part { assembly, .. } => assembly.erase(),
-            Occurrence::Link { robot, .. } => robot.erase(),
+            Occurrence::Link { robot, .. } | Occurrence::Tool { robot } => robot.erase(),
         }
     }
 }

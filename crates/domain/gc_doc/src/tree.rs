@@ -151,6 +151,7 @@ impl Document {
             Occurrence::Link { robot, index } => {
                 self.get(robot).is_some_and(|r| (index as usize) < r.links.len())
             }
+            Occurrence::Tool { robot } => self.get(robot).is_some_and(|r| r.tool.is_some()),
         }
     }
 
@@ -161,15 +162,16 @@ impl Document {
             (ComponentFlag::Grounded, _) => listed(&state.grounded, occurrence),
             (ComponentFlag::Enabled, _) => !listed(&state.disabled, occurrence),
             (ComponentFlag::Visible, Occurrence::Item(item)) => self.is_visible(item),
-            (ComponentFlag::Visible, Occurrence::Part { .. } | Occurrence::Link { .. }) => {
-                !listed(&state.hidden, occurrence)
-            }
+            (
+                ComponentFlag::Visible,
+                Occurrence::Part { .. } | Occurrence::Link { .. } | Occurrence::Tool { .. },
+            ) => !listed(&state.hidden, occurrence),
             (ComponentFlag::Suppressed, Occurrence::Item(item)) if item.kind == Kind::Assembly => {
                 self.timeline().is_some_and(|(_, t)| t.suppressed.contains(&item))
             }
             (ComponentFlag::Suppressed, Occurrence::Item(_)) => listed(&state.suppressed, occurrence),
             (ComponentFlag::Suppressed, Occurrence::Part { .. }) => listed(&state.suppressed, occurrence),
-            (ComponentFlag::Suppressed, Occurrence::Link { .. }) => false,
+            (ComponentFlag::Suppressed, Occurrence::Link { .. } | Occurrence::Tool { .. }) => false,
         }
     }
 
@@ -225,7 +227,8 @@ impl Document {
     }
 
     /// A robot's links as sub-components, root first, each under its parent link (the root under the
-    /// robot). Empty when the robot's link tree is not known. Not part of [`Document::components`], which
+    /// robot), then its tool (if it carries one) under the tip link. Empty when the robot's link tree is
+    /// not known. Not part of [`Document::components`], which
     /// lists what was placed in the cell.
     pub fn robot_links(&self, robot: Id<Robot>) -> Vec<ComponentNode> {
         let links = self.get(robot).map(|r| r.links.clone()).unwrap_or_default();
@@ -241,7 +244,21 @@ impl Document {
                 };
                 self.node(occurrence, Some(parent), link.name.clone())
             })
+            .chain(self.tool_node(robot))
             .collect()
+    }
+
+    /// The robot's tool as a sub-component under the link it is mounted on (the tip link).
+    fn tool_node(&self, robot: Id<Robot>) -> Option<ComponentNode> {
+        let r = self.get(robot)?;
+        r.tool.as_ref()?;
+        let parent = r
+            .links
+            .iter()
+            .position(|l| l.name == r.tip_link)
+            .and_then(|i| u32::try_from(i).ok())
+            .map_or(Occurrence::Item(robot.erase()), |index| Occurrence::Link { robot, index });
+        Some(self.node(Occurrence::Tool { robot }, Some(parent), "Tool".to_owned()))
     }
 
     fn node(&self, occurrence: Occurrence, parent: Option<Occurrence>, name: String) -> ComponentNode {
@@ -326,7 +343,10 @@ pub(crate) fn set_component(
     flag: ComponentFlag,
     on: bool,
 ) -> Outcome {
-    if !txn.doc().has_occurrence(occurrence) {
+    // A tool moves with the flange: it cannot be grounded on its own.
+    if !txn.doc().has_occurrence(occurrence)
+        || matches!((flag, occurrence), (ComponentFlag::Grounded, Occurrence::Tool { .. }))
+    {
         return Err(EditError::BadValue);
     }
     let toggle = |list: &mut Vec<Occurrence>, present: bool| {
@@ -359,8 +379,13 @@ pub(crate) fn set_component(
             crate::cell::set_timeline(txn, |t| toggle(&mut t.components.disabled, !on))?;
             if on { "Enable" } else { "Disable" }
         }
-        (ComponentFlag::Suppressed, Occurrence::Link { .. }) => return Err(EditError::BadValue),
-        (ComponentFlag::Visible, Occurrence::Part { .. } | Occurrence::Link { .. }) => {
+        (ComponentFlag::Suppressed, Occurrence::Link { .. } | Occurrence::Tool { .. }) => {
+            return Err(EditError::BadValue);
+        }
+        (
+            ComponentFlag::Visible,
+            Occurrence::Part { .. } | Occurrence::Link { .. } | Occurrence::Tool { .. },
+        ) => {
             crate::cell::set_timeline(txn, |t| toggle(&mut t.components.hidden, !on))?;
             if on { "Show" } else { "Hide" }
         }
