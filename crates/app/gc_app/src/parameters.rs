@@ -71,8 +71,13 @@ impl Parameters {
                 };
                 let (unit, value) = unit_and_value(&dimension.kind, dimension.value);
                 let driving = dimension.driving;
+                // The model parameter name (d0, d1, … as Inventor names them), with where it is as a hint;
+                // a dimension the document has not named yet shows where it is instead.
+                let place = tr!(lang, ParamDimension, sketch.name, kind, index + 1);
+                let name =
+                    if dimension.name.is_empty() { place } else { format!("{} ({place})", dimension.name) };
                 rows.push(Row {
-                    name: tr!(lang, ParamDimension, sketch.name, kind, index + 1),
+                    name,
                     unit,
                     source: if driving {
                         dimension.source.clone()

@@ -153,7 +153,10 @@ fn relation_unit(session: &Session, id: gc_core::Id<gc_doc::Relationship>) -> Op
         gc_doc::RelationKind::Mate { .. }
         | gc_doc::RelationKind::Flush { .. }
         | gc_doc::RelationKind::Insert { .. } => Some((1000.0, "mm")),
-        gc_doc::RelationKind::Rotational { .. } => Some((180.0 / std::f64::consts::PI, "°")),
+        gc_doc::RelationKind::Rotational { .. } | gc_doc::RelationKind::Angle { .. } => {
+            Some((180.0 / std::f64::consts::PI, "°"))
+        }
+        gc_doc::RelationKind::Tangent { .. } => Some((1000.0, "mm")),
         gc_doc::RelationKind::Rigid { .. } => None,
         // Kinds still to come are not driven until this dialog learns them.
         #[allow(unreachable_patterns, reason = "room for relationship kinds still to come")]
@@ -167,8 +170,10 @@ fn relation_offset(session: &Session, id: gc_core::Id<gc_doc::Relationship>) -> 
         Some(
             gc_doc::RelationKind::Mate { offset, .. }
             | gc_doc::RelationKind::Flush { offset }
-            | gc_doc::RelationKind::Insert { offset, .. },
+            | gc_doc::RelationKind::Insert { offset, .. }
+            | gc_doc::RelationKind::Tangent { offset, .. },
         ) => offset,
+        Some(gc_doc::RelationKind::Angle { angle, .. }) => angle,
         _ => 0.0,
     }
 }
@@ -209,9 +214,14 @@ impl Drive {
         session.end_drive_relationship();
         self.stopped_by = None;
         if let Some(id) = self.relation {
-            let (factor, unit_name) = relation_unit(session, id).unwrap_or((1.0, ""));
-            // An offset starts where it is; a rotational joint turns from where it stands.
-            let now = if unit_name == "mm" { relation_offset(session, id) } else { 0.0 };
+            let (factor, _) = relation_unit(session, id).unwrap_or((1.0, ""));
+            // An offset or an angle constraint starts where it is; a rotational joint turns from where it
+            // stands.
+            let rotational = matches!(
+                session.doc().get(id).map(|r| r.kind),
+                Some(gc_doc::RelationKind::Rotational { .. })
+            );
+            let now = if rotational { 0.0 } else { relation_offset(session, id) };
             self.start = (now * factor * 1000.0).round() / 1000.0;
             self.end = self.start + 10.0;
             self.index = 0;

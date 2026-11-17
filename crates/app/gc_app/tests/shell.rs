@@ -2642,7 +2642,7 @@ fn the_parameters_dialog_lists_and_edits_parameters() {
     harness.get_by_label("매개변수").click();
     harness.run();
     harness.get_by_label("모델 매개변수");
-    let first = "Sketch1 · 거리 1";
+    let first = "d0 (Sketch1 · 거리 1)";
     assert!(harness.query_all_by_label(first).count() >= 1);
     harness.get_by_label("450");
 
@@ -2669,7 +2669,7 @@ fn the_parameters_dialog_lists_and_edits_parameters() {
     harness.run();
     harness.get_by_role_and_label(egui::accesskit::Role::TextInput, "검색").type_text("Param");
     harness.run();
-    assert!(harness.query_by_label("Sketch1 · 거리 2").is_none());
+    assert!(harness.query_by_label("d1 (Sketch1 · 거리 2)").is_none());
     harness.get_by_role_and_label(egui::accesskit::Role::Label, "Param").click_secondary();
     harness.run();
     harness.get_by_label("매개변수 삭제").click();
