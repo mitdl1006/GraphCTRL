@@ -58,6 +58,8 @@
 
 - DOF 기호(리드 큐): 뷰 탭 > 가시성 > "자유도" 버튼이 모든 컴포넌트의 기호를 켜고 끔(`session.set_dof_shown`). 뷰포트(`gc_viewport/src/dof.rs`)가 `session.dof_symbols()`를 컴포넌트 원점에 그림: 미끄러질 수 있는 방향마다 양쪽 파란 화살표, 돌 수 있는 축마다 4분의 3 원호(주황, 끝에 화살촉), 구속 상대가 미구속이면 작은 와이어 큐브. 모양·색은 내 선택(원문에 그림 없음; 백엔드가 적은 원문 GUID-3BCBF614-CF92-4980-A965-80AEAFEF768E, GUID-6E131E5A-438B-4008-94F3-D3A3E92EF44C는 읽지 못함). 미구현: 컴포넌트별 'DOF 표시' 우클릭 항목, 큐브에 커서를 올리면 상대 부품 강조, 기호 크기 조절(카메라 거리의 12%). 스크린샷 `docs/evidence/img/review-42-dof.png`, 테스트 `degrees_of_freedom_symbols_are_shown_from_the_view_tab`.
 
+- 접촉 세트·접촉 솔버(리드 큐): 브라우저 바디·로봇 행 우클릭 > "접촉 세트"(체크, `BrowserAction::ContactSet` → `set_contact_set`), 검사 탭 분석 그룹 "접촉 솔버" 메뉴(끔/접촉 세트만/모든 컴포넌트 = 문서 설정의 Interactive Contact 선택지, `set_contact_solver`; 켜져 있으면 버튼이 눌린 상태). 원문 Detect contact between assembly components(GUID-FA1A8282-3A7E-45BE-8DB3-F637FB1C3292)와 About the Contact Solver(GUID-0BBD4ACE-7BD1-40BF-A011-74416B229035) 확인: 리본 위치(Inspect 탭 > Interference 패널 > Activate Contact Solver)와 우클릭 Contact Set은 원문대로. 원문과 다른 점·미구현: iProperties > Occurrence 탭의 Contact Set, 문서 설정 대화상자(Surface Complexity), Visibility/Enabled 해제 시 분석 제외 표시, 여러 컴포넌트 동시 선택 적용(한 행씩), 접촉 세트 구성원 표식(브라우저 아이콘), Drive 대화상자의 Collision Detection 옵션. 접촉으로 멈춘 구동은 리드의 drive.rs(`contact_stop`)가 표시. 스크린샷 `docs/evidence/img/review-43-contact-solver.png`, 테스트 `the_contact_set_and_the_contact_solver_are_set_from_the_ui`.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

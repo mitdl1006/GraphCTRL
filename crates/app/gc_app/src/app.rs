@@ -1214,6 +1214,9 @@ impl eframe::App for GraphCtrlApp {
                         Some(BrowserAction::DriveRelationship(id)) => {
                             self.drive.start_relationship(&mut self.session, id)
                         }
+                        Some(BrowserAction::ContactSet(item, on)) => {
+                            drop(self.session.set_contact_set(&[item], on));
+                        }
                         Some(BrowserAction::SuppressRelationship(id, suppressed)) => {
                             drop(self.session.set_relationship_suppressed(id, suppressed));
                         }
