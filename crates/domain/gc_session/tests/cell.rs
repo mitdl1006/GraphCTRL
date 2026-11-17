@@ -845,3 +845,41 @@ fn a_tool_on_the_flange_is_checked_for_collisions() {
     session.undo();
     assert!(session.robot_problem(robot).is_none());
 }
+
+#[test]
+fn a_straight_move_keeps_to_the_tool_speed_limit() {
+    let mut session = Session::new();
+    let robot = session.add_robot("Robot1", &six_axis()).unwrap();
+    session.jog(robot, &[0.6, 0.2, 0.3, 0.0, 0.5, 0.0]);
+    session.end_jog();
+    let there = session.add_waypoint_here(robot).unwrap();
+    session.jog(robot, &[-0.6, 0.2, 0.3, 0.0, 0.5, 0.0]);
+    session.end_jog();
+    let path = session.add_path(robot, vec![there]).unwrap();
+    session.execute(&Command::Cell(CellOp::SetLinear { id: path, index: 0, linear: true })).unwrap();
+    assert_eq!(session.plan(path), PlanStatus::Ready, "{:?}", session.plan_error(path));
+    let (fast, peak) = {
+        let planned = session.planned(path).unwrap();
+        (planned.duration(), planned.peak_tcp_speed())
+    };
+    assert!(peak > 0.1, "{peak}");
+
+    // Half the speed it reached: the limit is an edit, and the same line takes twice as long.
+    let speed = |speed| Command::Cell(CellOp::SetTcpSpeed { id: path, speed });
+    session.execute(&speed(Some(peak / 2.0))).unwrap();
+    assert_eq!(session.plan_status(path), PlanStatus::Stale);
+    assert_eq!(session.plan(path), PlanStatus::Ready, "{:?}", session.plan_error(path));
+    let planned = session.planned(path).unwrap();
+    assert!((planned.duration() / fast - 2.0).abs() < 1e-6, "{} vs {fast}", planned.duration());
+    assert!(planned.peak_tcp_speed() <= peak / 2.0 + 1e-9);
+    // The joints stay within their limits: slower everywhere, and the end is still reached.
+    let end = planned.sample(planned.duration());
+    assert!(end.iter().zip([0.6, 0.2, 0.3, 0.0, 0.5, 0.0]).all(|(a, b)| (a - b).abs() < 1e-6), "{end:?}");
+
+    // A limit above what the move reaches changes nothing; zero or negative limits are refused.
+    session.execute(&speed(Some(peak * 10.0))).unwrap();
+    session.plan(path);
+    assert!((session.planned(path).unwrap().duration() - fast).abs() < 1e-9);
+    assert!(session.execute(&speed(Some(0.0))).is_err());
+    assert!(session.execute(&speed(Some(-1.0))).is_err());
+}

@@ -331,6 +331,7 @@ mod tests {
             linear: Vec::new(),
             planner: "rrt_connect".into(),
             seed: 7,
+            tcp_speed: None,
         };
         cell(&mut doc, CellOp::AddPath(path));
         doc

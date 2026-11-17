@@ -218,6 +218,8 @@ fn a_robot_path_is_planned_through_the_ribbon() {
     harness.state_mut().session.end_jog();
 
     // The comparison runs every planner and lists them.
+    harness.get_by_label("알고리즘 비교").scroll_to_me();
+    harness.run();
     harness.get_by_label("알고리즘 비교").click();
     harness.run();
     let (rows, current) = harness.state().session.comparison(path).unwrap();
@@ -245,6 +247,15 @@ fn a_robot_path_is_planned_through_the_ribbon() {
     harness.run();
     assert_eq!(harness.state().session.doc().get(path).unwrap().waypoints, vec![p1]);
     harness.get_by_label("Path1 (계획됨)");
+
+    // The tool speed on straight moves is limited with a checkbox; 250 mm/s is offered first.
+    harness.get_by_label("직선 이동 TCP 속도 제한").click();
+    harness.run();
+    assert_eq!(harness.state().session.doc().get(path).unwrap().tcp_speed, Some(0.25));
+    harness.get_by_label("직선 이동 TCP 속도 제한").click();
+    harness.run();
+    assert_eq!(harness.state().session.doc().get(path).unwrap().tcp_speed, None);
+    assert!(harness.query_by_label_contains("최대 TCP 속도").is_some());
 
     // Playing advances the shown robot along the motion without touching the document.
     let revision = harness.state().session.doc().revision();

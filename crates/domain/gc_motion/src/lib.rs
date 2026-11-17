@@ -14,7 +14,7 @@ mod scene;
 
 use std::sync::Arc;
 
-use gc_math::DPose3;
+use gc_math::{DPose3, DVec3};
 use gc_plan::{
     Algorithm, Control, Failure, Options, Request, Rng, Space, Stats, Validity, path_cost, plan, shortcut,
     validate,
@@ -56,6 +56,9 @@ pub struct MotionRequest {
     pub max_acc: Vec<f64>,
     /// Move the tool tip to the goal in a straight line, turning evenly, instead of planning freely.
     pub linear: bool,
+    /// For a straight move: the fastest the tool tip may go, m/s. The motion is slowed down evenly
+    /// until it keeps to it.
+    pub max_tcp_speed: Option<f64>,
 }
 
 /// A planned and validated motion.
@@ -77,6 +80,8 @@ pub struct MotionPlan {
     pub min_clearance: f64,
     /// The padding added on top of the required one while planning (smaller in tight cells).
     pub planning_margin: f64,
+    /// The highest speed of the tool tip along the trajectory, m/s.
+    pub peak_tcp_speed: f64,
 }
 
 /// Why no motion was produced.
@@ -269,7 +274,18 @@ fn finish(
             min_clearance = min_clearance.min(scene.clearance(&q));
         }
     }
+    // The tip's positions are evenly spaced in time.
+    let dt = trajectory.duration() / samples as f64;
+    let peak_tcp_speed = if dt > 0.0 {
+        tip_path
+            .windows(2)
+            .map(|pair| DVec3::from_array(pair[0]).distance(DVec3::from_array(pair[1])) / dt)
+            .fold(0.0, f64::max)
+    } else {
+        0.0
+    };
     Ok(MotionPlan {
+        peak_tcp_speed,
         cost: path_cost(space, &path),
         path,
         trajectory,
@@ -348,7 +364,15 @@ fn linear(
     }
     let checker = scene.strict_checker();
     // Small blends: the tip stays on the line within a fraction of a millimetre.
-    finish(scene, space, limits, path, &checker, 0.002, false, Stats::default())
+    let mut plan = finish(scene, space, limits, path, &checker, 0.002, false, Stats::default())?;
+    if let Some(cap) = request.max_tcp_speed.filter(|v| v.is_finite() && *v > 0.0)
+        && plan.peak_tcp_speed > cap
+    {
+        let factor = plan.peak_tcp_speed / cap;
+        plan.trajectory = plan.trajectory.slowed(factor);
+        plan.peak_tcp_speed = cap;
+    }
+    Ok(plan)
 }
 
 fn add(total: &mut Stats, run: &Stats) {

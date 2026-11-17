@@ -594,6 +594,7 @@ fn paths(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) {
         drop(session.execute(&Command::Cell(CellOp::SetPlanner { id: path_id, planner, seed })));
     }
     steps(ui, session, lang, path_id, &path);
+    tcp_speed(ui, session, lang, path_id, path.tcp_speed);
     let status = session.plan_status(path_id);
     let color = match status {
         PlanStatus::Ready => colors::TRACE,
@@ -611,6 +612,7 @@ fn paths(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) {
     };
     let duration = planned.duration();
     ui.label(tr!(lang, PlanDuration, format!("{duration:.2}")));
+    ui.label(tr!(lang, PlanPeakTcp, format!("{:.0}", planned.peak_tcp_speed() * 1000.0)));
     let clearance = planned.min_clearance();
     if clearance.is_finite() {
         ui.label(tr!(lang, PlanClearance, format!("{:.1}", clearance * 1000.0)));
@@ -722,6 +724,44 @@ fn steps(
         drop(session.execute(&Command::Cell(CellOp::SetPathSteps { id: path_id, waypoints, linear })));
     }
 }
+
+/// The speed limit of the tool tip on a path's straight moves, like a UR program's linear speed. The
+/// value is stored when the user lets go of it.
+fn tcp_speed(
+    ui: &mut Ui,
+    session: &mut Session,
+    lang: Lang,
+    path: gc_core::Id<gc_doc::MotionPath>,
+    stored: Option<f64>,
+) {
+    let mut limited = stored.is_some();
+    let id = ui.scope_id().with(("gc_tcp_speed", path.raw()));
+    let mut speed: f64 =
+        ui.data(|d| d.get_temp(id)).unwrap_or_else(|| stored.unwrap_or(DEFAULT_TCP_SPEED) * 1000.0);
+    let mut commit = false;
+    ui.horizontal(|ui| {
+        commit |= ui.checkbox(&mut limited, tr!(lang, PropTcpLimit)).changed();
+        if limited {
+            let response = ui.add(egui::DragValue::new(&mut speed).range(1.0..=5000.0).suffix(" mm/s"));
+            if response.changed() {
+                ui.data_mut(|d| d.insert_temp(id, speed));
+            }
+            commit |= response.drag_stopped()
+                || response.lost_focus()
+                || (response.changed() && !response.dragged());
+        }
+    });
+    if commit {
+        ui.data_mut(|d| d.remove::<f64>(id));
+        let speed = limited.then_some(speed / 1000.0);
+        if speed != stored {
+            drop(session.execute(&Command::Cell(CellOp::SetTcpSpeed { id: path, speed })));
+        }
+    }
+}
+
+/// The limit offered when a path's tool speed is first limited, m/s.
+const DEFAULT_TCP_SPEED: f64 = 0.25;
 
 /// What a button next to a waypoint of a path does.
 #[derive(Clone, Copy)]

@@ -57,6 +57,7 @@ fn a_cell_is_built_undone_and_redone() {
         linear: Vec::new(),
         planner: "rrt_connect".into(),
         seed: 1,
+        tcp_speed: None,
     };
     let Created::Path(path_id) = cell(&mut doc, &mut history, CellOp::AddPath(path)).unwrap()[0] else {
         panic!()
@@ -93,6 +94,7 @@ fn what_is_in_use_stays_and_bad_values_change_nothing() {
         linear: Vec::new(),
         planner: "rrt".into(),
         seed: 0,
+        tcp_speed: None,
     };
     let Created::Path(path_id) = cell(&mut doc, &mut history, CellOp::AddPath(path.clone())).unwrap()[0]
     else {

@@ -153,6 +153,8 @@ pub struct Trajectory<State> {
     times: Vec<f64>,
     /// The motion when it passes the waypoints on blends instead of stopping at them.
     blended: Option<blend::Timed>,
+    /// How much slower than computed the motion is driven (1 = as computed).
+    scale: f64,
     state: PhantomData<State>,
 }
 
@@ -171,7 +173,7 @@ impl Trajectory<Unvalidated> {
             times.push(times[times.len() - 1] + profile.duration);
             profiles.push(profile);
         }
-        Ok(Self { waypoints: path.to_vec(), profiles, times, blended: None, state: PhantomData })
+        Ok(Self { waypoints: path.to_vec(), profiles, times, blended: None, scale: 1.0, state: PhantomData })
     }
 
     /// Times a motion that passes the interior waypoints without stopping: every corner is rounded by a
@@ -200,6 +202,7 @@ impl Trajectory<Unvalidated> {
             profiles: Vec::new(),
             times,
             blended: Some(timed),
+            scale: 1.0,
             state: PhantomData,
         })
     }
@@ -242,14 +245,30 @@ impl Trajectory<Unvalidated> {
             profiles: self.profiles,
             times: self.times,
             blended: self.blended,
+            scale: self.scale,
             state: PhantomData,
         })
     }
 }
 
 impl<State> Trajectory<State> {
+    /// The same motion driven `factor` times slower (a factor below 1 is taken as 1). Speeds divide by
+    /// the factor and accelerations by its square, so a trajectory within its limits stays within them.
+    #[must_use]
+    pub fn slowed(mut self, factor: f64) -> Self {
+        if factor.is_finite() && factor > 1.0 {
+            self.scale *= factor;
+        }
+        self
+    }
+
     /// Total time in seconds.
     pub fn duration(&self) -> f64 {
+        self.scale * self.computed_duration()
+    }
+
+    /// Total time as computed, before any slowing down.
+    fn computed_duration(&self) -> f64 {
         match &self.blended {
             Some(timed) => timed.duration(),
             None => self.times.last().copied().unwrap_or(0.0),
@@ -267,12 +286,21 @@ impl<State> Trajectory<State> {
     }
 
     /// The time at which each waypoint is reached.
-    pub fn waypoint_times(&self) -> &[f64] {
-        &self.times
+    pub fn waypoint_times(&self) -> Vec<f64> {
+        self.times.iter().map(|t| t * self.scale).collect()
     }
 
     /// Position, velocity and acceleration at time `t` (clamped to the trajectory).
     pub fn sample(&self, t: f64) -> Sample {
+        let k = self.scale;
+        let mut sample = self.computed_sample(t / k);
+        sample.qd.iter_mut().for_each(|v| *v /= k);
+        sample.qdd.iter_mut().for_each(|a| *a /= k * k);
+        sample
+    }
+
+    /// The sample at time `t` of the motion as computed.
+    fn computed_sample(&self, t: f64) -> Sample {
         if let Some(timed) = &self.blended {
             // The ends are the given waypoints exactly, not what the path's arithmetic arrives at.
             let end = if t <= 0.0 {
@@ -287,7 +315,7 @@ impl<State> Trajectory<State> {
                 None => timed.sample(t),
             };
         }
-        let t = t.clamp(0.0, self.duration());
+        let t = t.clamp(0.0, self.computed_duration());
         // The segment that contains t: the last one starting at or before it.
         let segment = self
             .times

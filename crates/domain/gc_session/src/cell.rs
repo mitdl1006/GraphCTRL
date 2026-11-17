@@ -185,6 +185,11 @@ pub struct PlannedPath {
 }
 
 impl PlannedPath {
+    /// The highest speed of the tool tip over the whole motion, m/s.
+    pub fn peak_tcp_speed(&self) -> f64 {
+        self.segments.iter().map(|s| s.peak_tcp_speed).fold(0.0, f64::max)
+    }
+
     /// Total duration in seconds.
     pub fn duration(&self) -> f64 {
         self.segments.iter().map(|s| s.trajectory.duration()).sum()
@@ -1256,6 +1261,7 @@ impl Session {
             linear: Vec::new(),
             planner: PLANNERS[0].0.to_owned(),
             seed: 1,
+            tcp_speed: None,
         };
         match self.cell_op(CellOp::AddPath(path))?.first() {
             Some(Created::Path(id)) => Ok(*id),
@@ -1296,7 +1302,15 @@ impl Session {
         }
         let name = format!("Path{}", self.doc.paths().len() + 1);
         let linear = stops.iter().map(|(_, linear)| *linear).collect();
-        let path = MotionPath { name, robot, waypoints, linear, planner: PLANNERS[0].0.to_owned(), seed: 1 };
+        let path = MotionPath {
+            name,
+            robot,
+            waypoints,
+            linear,
+            planner: PLANNERS[0].0.to_owned(),
+            seed: 1,
+            tcp_speed: None,
+        };
         match self.cell_op(CellOp::AddPath(path))?.first() {
             Some(Created::Path(id)) => Ok(*id),
             _ => Err(EditError::BadValue),
@@ -1323,7 +1337,7 @@ impl Session {
         let bodies: Vec<(&Placement, &Solid)> =
             doc.bodies().iter().map(|(_, b)| (&b.placement, &b.solid)).collect();
         Some(format!(
-            "{} {:?} {} {} {:?} {:?} {:?} {} {bodies:?} {targets:?} {:?} {} {}",
+            "{} {:?} {} {} {:?} {:?} {:?} {} {bodies:?} {targets:?} {:?} {} {} {:?}",
             robot.urdf.len(),
             robot.tool,
             robot.base_link,
@@ -1334,7 +1348,8 @@ impl Session {
             robot.max_acc,
             linear,
             path.planner,
-            path.seed
+            path.seed,
+            path.tcp_speed
         ))
     }
 
@@ -1582,6 +1597,7 @@ fn plan_path(
             runs,
             max_acc: vec![robot.max_acc; start.len()],
             linear: path.linear.get(index).copied().unwrap_or(false),
+            max_tcp_speed: path.tcp_speed,
         };
         let plan = plan_motion(&scene, &request, control).map_err(|e| format!("{}: {e}", waypoint.name))?;
         if let Some(end) = plan.path.last() {

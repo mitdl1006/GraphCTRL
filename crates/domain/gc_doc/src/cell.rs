@@ -243,6 +243,9 @@ pub struct MotionPath {
     pub planner: String,
     /// Seed of the planner's random numbers.
     pub seed: u64,
+    /// The fastest the tool tip may go on straight moves, m/s; `None` for as fast as the joints allow.
+    #[serde(default)]
+    pub tcp_speed: Option<f64>,
 }
 
 impl Entity for MotionPath {
@@ -370,6 +373,13 @@ pub enum CellOp {
         id: Id<Robot>,
         /// The tool; `None` for none.
         tool: Option<Tool>,
+    },
+    /// Limits the tool tip's speed on a path's straight moves, or lifts the limit.
+    SetTcpSpeed {
+        /// The path.
+        id: Id<MotionPath>,
+        /// m/s, positive; `None` for no limit.
+        speed: Option<f64>,
     },
     /// Deletes a path.
     DeletePath(Id<MotionPath>),
@@ -577,6 +587,13 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
             }
             txn.modify(*id, |r: &mut Robot, _| r.tool = tool.clone().map(Box::new))?;
             Ok((Vec::new(), "Set tool"))
+        }
+        CellOp::SetTcpSpeed { id, speed } => {
+            if speed.is_some_and(|v| !(v.is_finite() && v > 0.0)) {
+                return Err(EditError::BadValue);
+            }
+            txn.modify(*id, |p: &mut MotionPath, _| p.tcp_speed = *speed)?;
+            Ok((Vec::new(), "Limit tool speed"))
         }
         CellOp::DeletePath(id) => {
             txn.remove(*id)?;
