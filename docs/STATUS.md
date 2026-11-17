@@ -12,6 +12,20 @@
 | 5a–5f 앱 조립 | 진행 중 | 5c 첫 조각: 로봇 탭(샘플 로봇·바디·웨이포인트·경로·계획·재생)이 화면에서 동작 |
 | 6. 하드닝 | 대기 | |
 
+## 팀 구성 (2026-11-17~)
+
+리드 세션이 작업을 나누고 역할별 브랜치를 검사(`cargo xtask gate`) 후 `claude/ur-robot-control-simulator-jsmhze`로 병합한다.
+각 세션은 `docs/handoff/<역할>.md`에 진행 상황과 리드에게 요청할 것을 남긴다. 공용 파일(루트 `Cargo.toml`·`Cargo.lock`,
+`crates/api/*`, `docs/STATUS.md`·`PLAN.md`)은 리드만 바꾸고, `gc_i18n` 문자열은 역할별 주석 아래 블록 끝에만 추가한다.
+
+| 역할 | 모델 | 브랜치 | 범위 |
+|---|---|---|---|
+| 리드/통합 | Opus 5.5 | `claude/ur-robot-control-simulator-jsmhze` | 배분·병합·계약·전체 검사 |
+| 백엔드(로보틱스·도메인) | Opus 5.5 | `…-backend` | `crates/domain`, `plugins`, `bench-quality` |
+| 프론트엔드(UI·뷰포트) | Sonnet 5.5 | `…-frontend` | `crates/ui`, `render`, `gc_app` |
+| QA·빌드 | Sonnet 5.5 | `…-qa` | 테스트, `xtask`, CI (제품 코드는 고치지 않고 버그 보고) |
+| 문서·UX | Haiku 5.5 | `…-docs` | `README.md`, `docs/guide`, `docs/ux` |
+
 ## 작업 순서
 
 스케치 쪽을 먼저 화면까지 완성했고(2D → 3D), 이어서 로봇·경로 계획 쪽을 화면까지 연결했다. 지금은 두 쪽이 이어져
