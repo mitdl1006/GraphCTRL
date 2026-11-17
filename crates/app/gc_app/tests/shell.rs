@@ -2574,7 +2574,7 @@ fn measure_gives_a_cylinders_diameter() {
         )
         .unwrap();
     harness.run();
-    harness.get_by_label("도구").click();
+    harness.get_by_label("검사").click();
     harness.run();
     harness.get_by_label("측정").click();
     harness.run();
