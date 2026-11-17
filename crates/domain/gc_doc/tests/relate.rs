@@ -417,3 +417,161 @@ fn place_at_component_origin_aligns_and_constrains_to_the_other_origin() {
     bench.cell(CellOp::SetBody { id: table, body: moved }).unwrap();
     assert!(close(bench.pose(block).translation, DVec3::new(1.0, 1.0, 0.5)));
 }
+
+fn xz() -> Geometry {
+    Geometry::origin(OriginElement::Plane(OriginPlane::Xz))
+}
+
+fn yaw(bench: &Bench, body: Id<Body>) -> f64 {
+    let x = bench.pose(body).rotation * DVec3::X;
+    gc_math::fm::atan2(x.y, x.x)
+}
+
+#[test]
+fn angle_constraints_turn_by_the_angle_with_the_chosen_sense() {
+    use gc_doc::AngleSolution;
+    let deg30 = 30f64.to_radians();
+    for (solution, expected) in [
+        (AngleSolution::Directed, None),
+        (AngleSolution::Undirected, None),
+        // Measured from the box's normal to the table's about the table's +Z: the box turns by −30°.
+        (
+            AngleSolution::Explicit(Selection {
+                occurrence: Occurrence::Item(
+                    Id::<Body>::from_raw(std::num::NonZeroU64::new(5).unwrap()).erase(),
+                ),
+                geometry: Geometry::origin(OriginElement::Plane(OriginPlane::Xy)),
+            }),
+            Some(-deg30),
+        ),
+    ] {
+        let mut bench = Bench::new();
+        let (table, block) = table_and_box(&mut bench);
+        assert_eq!(table.erase().raw.get(), 5, "the explicit reference above names the table");
+        bench
+            .relate(Relationship {
+                name: "Mate:1".into(),
+                kind: RelationKind::Mate { offset: 0.0, sense: AxisSense::Opposed },
+                first: on(block, bottom(0.2)),
+                second: on(table, top(1.0)),
+            })
+            .unwrap();
+        bench
+            .relate(Relationship {
+                name: "Angle:1".into(),
+                kind: RelationKind::Angle { angle: deg30, solution },
+                first: on(block, xz()),
+                second: on(table, xz()),
+            })
+            .unwrap();
+        let turned = yaw(&bench, block);
+        assert!((turned.abs() - deg30).abs() < 1e-6, "{solution:?}: {}", turned.to_degrees());
+        if let Some(expected) = expected {
+            assert!((turned - expected).abs() < 1e-6, "{solution:?}: {}", turned.to_degrees());
+        }
+        // Mate (3 left) and an angle: sliding on the table is all that is left.
+        assert_eq!(bench.doc.component_dof(block.erase()).unwrap(), gc_doc::Dof { total: 2, translation: 2 });
+    }
+}
+
+#[test]
+fn tangent_puts_a_ball_and_a_roller_on_the_table_inside_or_outside() {
+    let mut bench = Bench::new();
+    let table = bench.body("Table", [2.0, 1.0, 1.0], Placement { xyz: [0.0, 0.0, 0.5], rpy: [0.0; 3] });
+    let ball = bench.body("Ball", [0.2; 3], Placement { xyz: [0.2, 0.1, 2.0], rpy: [0.0; 3] });
+    let roller = bench.body("Roller", [0.2; 3], Placement { xyz: [-0.3, 0.0, 1.7], rpy: [0.3, 0.2, 0.0] });
+    let sphere = Geometry::Sphere { centre: [0.0; 3], radius: 0.1 };
+    bench
+        .relate(Relationship {
+            name: "Tangent:1".into(),
+            kind: RelationKind::Tangent { offset: 0.0, inside: false },
+            first: on(ball, sphere),
+            second: on(table, top(1.0)),
+        })
+        .unwrap();
+    assert!((bench.pose(ball).translation.z - 1.1).abs() < 1e-7, "resting on the top");
+    let cylinder = Geometry::Cylinder { point: [0.0; 3], direction: [1.0, 0.0, 0.0], radius: 0.05 };
+    bench
+        .relate(Relationship {
+            name: "Tangent:2".into(),
+            kind: RelationKind::Tangent { offset: 0.0, inside: false },
+            first: on(roller, cylinder),
+            second: on(table, top(1.0)),
+        })
+        .unwrap();
+    let pose = bench.pose(roller);
+    assert!((pose.translation.z - 1.05).abs() < 1e-7);
+    assert!((pose.rotation * DVec3::X).z.abs() < 1e-7, "its axis lies flat");
+    // Inside: the ball under the table top plane.
+    let id = bench.doc.relationships().iter().next().unwrap().0;
+    let inside = Relationship {
+        name: "Tangent:1".into(),
+        kind: RelationKind::Tangent { offset: 0.0, inside: true },
+        first: on(ball, sphere),
+        second: on(table, top(1.0)),
+    };
+    bench.cell(CellOp::SetRelationship { id, relationship: inside }).unwrap();
+    assert!((bench.pose(ball).translation.z - 0.9).abs() < 1e-7);
+}
+
+#[test]
+fn symmetry_mirrors_one_component_across_a_plane() {
+    let mut bench = Bench::new();
+    let table = bench.body("Table", [2.0, 1.0, 1.0], Placement { xyz: [0.0, 0.0, 0.5], rpy: [0.0; 3] });
+    let left = bench.body("Left", [0.1; 3], Placement { xyz: [-0.4, 0.2, 1.2], rpy: [0.0; 3] });
+    let right = bench.body("Right", [0.1; 3], Placement { xyz: [0.7, -0.1, 1.0], rpy: [0.0; 3] });
+    let ground = Command::SetComponent {
+        occurrence: Occurrence::Item(left.erase()),
+        flag: ComponentFlag::Grounded,
+        on: true,
+    };
+    apply(&mut bench.doc, &ground).unwrap();
+    bench
+        .relate(Relationship {
+            name: "Symmetry:1".into(),
+            kind: RelationKind::Symmetry {
+                plane: on(table, Geometry::origin(OriginElement::Plane(OriginPlane::Yz))),
+            },
+            first: on(left, Geometry::Point([0.0; 3])),
+            second: on(right, Geometry::Point([0.0; 3])),
+        })
+        .unwrap();
+    assert!(
+        close(bench.pose(right).translation, DVec3::new(0.4, 0.2, 1.2)),
+        "{:?}",
+        bench.pose(right).translation
+    );
+    // The plane's component cannot be deleted while it is used.
+    assert!(bench.cell(CellOp::DeleteBody(table)).is_err());
+}
+
+#[test]
+fn slider_cylindrical_and_ball_joints_leave_their_freedoms() {
+    use gc_doc::Dof;
+    for (kind, dof) in [
+        (RelationKind::Slider { flip: true }, Dof { total: 1, translation: 1 }),
+        (RelationKind::Cylindrical { flip: true }, Dof { total: 2, translation: 1 }),
+        (RelationKind::Ball, Dof { total: 3, translation: 0 }),
+    ] {
+        let mut bench = Bench::new();
+        let (table, block) = table_and_box(&mut bench);
+        bench
+            .relate(Relationship {
+                name: "Joint".into(),
+                kind,
+                first: on(block, Geometry::origin_frame()),
+                second: on(table, table_frame()),
+            })
+            .unwrap();
+        assert_eq!(bench.doc.component_dof(block.erase()).unwrap(), dof, "{kind:?}");
+        let (pose, frame) = (bench.pose(block), DVec3::new(0.5, 0.0, 1.0));
+        match kind {
+            RelationKind::Ball => assert!(close(pose.translation, frame)),
+            _ => {
+                // On the vertical line through the joint origin, upright.
+                assert!((pose.translation.x - 0.5).abs() < 1e-7 && pose.translation.y.abs() < 1e-7);
+                assert!(close(pose.rotation * DVec3::Z, DVec3::Z));
+            }
+        }
+    }
+}

@@ -1,5 +1,20 @@
 # 백엔드 인계 (2026-11-17)
 
+## 2026-11-18 — P2-17 구속 완성(Angle·Tangent·Symmetry) · P2-18 조인트 완성(Slider·Cylindrical·Ball)
+
+근거(원문): To Place Angle Constraints `GUID-AD4679FD-EE9B-47C0-9E32-04B990BDD29E.htm`(Directed = 항상 오른손 법칙, 축은 선택에서 추론;
+Undirected = 어느 쪽이든; Explicit Reference Vector = 세 번째 선택이 외적(Z) 방향), Place Tangent constraints
+`GUID-FF270566-CA9E-420A-A00A-F52DD0FDFD8E.htm`(면·평면·원통·구, Inside/Outside, 오프셋), Place Symmetry constraints
+`GUID-237E701E-A16B-49D5-95C2-FB6528E41217.htm`(두 대상이 평면 기준 대칭), Create Joints Reference `GUID-6AA68E8F-…`(Slider = 병진 1,
+Cylindrical = 병진 1 + 회전 1, Ball = 회전 3).
+- `RelationKind::{Angle{angle, solution: AngleSolution::{Directed, Undirected, Explicit(Selection)}}, Tangent{offset, inside},
+  Symmetry{plane: Selection}, Slider{flip}, Cylindrical{flip}, Ball}`; `Geometry::{Cylinder{point, direction, radius}, Sphere{centre, radius}}`
+  (Mate에서는 원통 = 축, 구 = 중심). `Relationship::third()` = 대칭 평면·명시 기준. 세 번째 선택의 컴포넌트도 삭제 보호(refs).
+- 각도는 평면 법선·모서리/축 방향 사이(rad). Directed의 축은 풀이 시작 때 두 방향의 외적으로 읽는다.
+- `drive_relationship`: Angle(각도)·Tangent(오프셋)도 구동.
+- 아직: 한계(Maximum/Minimum/Resting) — 관계 구조체에 필드를 늘리면 app의 리터럴이 깨지므로 리드와 표현 합의 후.
+- 테스트 `gc_doc/tests/relate.rs`(각도 3방식·자유도, 공·롤러 접선·inside, 대칭, 세 조인트 자유도).
+
 ## 2026-11-18 — P2-16 Ground and Root(원점에 고정) · Place at Component Origin
 
 근거(원문): Ground and Root `GUID-98FA88B2-AA32-4A27-946A-DCECB36A6696.htm`, Place at Component Origin
