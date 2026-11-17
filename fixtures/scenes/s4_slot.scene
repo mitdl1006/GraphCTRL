@@ -1,0 +1,12 @@
+# S4 — slot (plan appendix E). A tool 40 mm wide (cylinder r 20 mm, 120 mm long) goes 100 mm deep
+# into a slot of tool width + 2 x padding + 30 mm = 80 mm between two plates standing on the table.
+title slot
+padding 0.005
+budget 200000
+tool 0.02 0.12
+box table 0 0 -0.03 1.6 1.6 0.04
+box plate_a 0.45 -0.05 0.095 0.2 0.02 0.21
+box plate_b 0.45 0.05 0.095 0.2 0.02 0.21
+# TCP (0.3, -0.4, 0.3) with the tool, tool down.
+start -1.1972 -1.4835 1.9784 -2.0657 -1.5708 0.3736
+goal_pose 0.45 0 0.10 180 0 0

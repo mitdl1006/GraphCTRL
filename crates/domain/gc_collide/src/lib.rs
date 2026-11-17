@@ -10,12 +10,12 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(test, allow(clippy::float_cmp, reason = "tests compare exactly representable values"))]
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use gc_math::{DPose3, DQuat, DVec3};
 use gc_mesh::MeshData;
-use parry3d_f64::query;
+use parry3d_f64::query::{self, ClosestPoints};
 use parry3d_f64::shape::SharedShape;
 
 /// A shape to build a body from. Sizes are metres; every shape is centred on its own origin.
@@ -36,6 +36,20 @@ pub enum ShapeDesc {
     Hull(Vec<[f64; 3]>),
     /// A triangle mesh, used as it is (may be concave). Meant for static bodies.
     Mesh(Arc<MeshData>),
+}
+
+impl ShapeDesc {
+    /// The largest distance of a point of the shape from its origin.
+    pub fn radius(&self) -> f64 {
+        let norm = |p: [f64; 3]| (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt();
+        match self {
+            Self::Ball(radius) => *radius,
+            Self::Box(size) => norm(size.map(|s| s / 2.0)),
+            Self::Cylinder { radius, length } => (radius * radius + length * length / 4.0).sqrt(),
+            Self::Hull(points) => points.iter().map(|p| norm(*p)).fold(0.0, f64::max),
+            Self::Mesh(mesh) => mesh.positions().iter().map(|p| norm(p.map(f64::from))).fold(0.0, f64::max),
+        }
+    }
 }
 
 /// Why a body could not be built or a query could not be answered.
@@ -85,6 +99,16 @@ pub struct Hit {
 struct Part {
     local: DPose3,
     shape: SharedShape,
+    /// Centre and half extents of the shape's bounds in its own frame.
+    centre: DVec3,
+    half: DVec3,
+}
+
+impl Part {
+    fn new(local: DPose3, shape: SharedShape) -> Self {
+        let aabb = shape.compute_local_aabb();
+        Self { local, shape, centre: (aabb.mins + aabb.maxs) / 2.0, half: (aabb.maxs - aabb.mins) / 2.0 }
+    }
 }
 
 #[derive(Clone)]
@@ -103,10 +127,17 @@ impl Body {
     fn refresh_bounds(&mut self) {
         let mut low = DVec3::INFINITY;
         let mut high = DVec3::NEG_INFINITY;
+        // The local bounds turned with the part: a little looser than the shape's own bounds, but it
+        // costs the same for every shape, however many vertices a hull has.
         for part in &self.parts {
-            let aabb = part.shape.compute_aabb(&(self.pose * part.local));
-            low = low.min(aabb.mins);
-            high = high.max(aabb.maxs);
+            let pose = self.pose * part.local;
+            let centre = pose * part.centre;
+            let turn = gc_math::DMat3::from_quat(pose.rotation);
+            let half = turn.x_axis.abs() * part.half.x
+                + turn.y_axis.abs() * part.half.y
+                + turn.z_axis.abs() * part.half.z;
+            low = low.min(centre - half);
+            high = high.max(centre + half);
         }
         (self.low, self.high) = (low, high);
     }
@@ -191,6 +222,8 @@ pub fn hulls_of(mesh: &MeshData) -> Vec<ShapeDesc> {
 pub struct World {
     bodies: Vec<Body>,
     allowed: BTreeSet<(usize, usize)>,
+    /// Pairs checked with a padding of their own instead of the movable body's.
+    pair_padding: BTreeMap<(usize, usize), f64>,
 }
 
 fn proximity(a: &Body, b: &Body, padding: f64) -> Result<Proximity, CollideError> {
@@ -204,19 +237,26 @@ fn proximity(a: &Body, b: &Body, padding: f64) -> Result<Proximity, CollideError
         for part_b in &b.parts {
             let (pose_a, pose_b) = (a.pose * part_a.local, b.pose * part_b.local);
             let unsupported = |_e| CollideError::Unsupported;
-            let overlap = query::intersection_test(&pose_a, &*part_a.shape, &pose_b, &*part_b.shape)
-                .map_err(unsupported)?;
-            if overlap.intersecting {
-                return Ok(Proximity::Colliding);
-            }
             if padding > 0.0 {
-                let gap = query::distance(&pose_a, &*part_a.shape, &pose_b, &*part_b.shape)
+                // One query answers both questions: overlapping, or how close within the padding.
+                match query::closest_points(&pose_a, &*part_a.shape, &pose_b, &*part_b.shape, padding)
                     .map_err(unsupported)?
-                    .distance;
-                let closer = !matches!(closest, Proximity::WithinPadding(d) if d <= gap);
-                if gap <= padding && closer {
-                    closest = Proximity::WithinPadding(gap);
+                {
+                    ClosestPoints::Intersecting => return Ok(Proximity::Colliding),
+                    ClosestPoints::WithinMargin(on_a, on_b) => {
+                        let gap = on_a.distance(on_b);
+                        let closer = !matches!(closest, Proximity::WithinPadding(d) if d <= gap);
+                        if gap <= padding && closer {
+                            closest = Proximity::WithinPadding(gap);
+                        }
+                    }
+                    ClosestPoints::Disjoint => {}
                 }
+            } else if query::intersection_test(&pose_a, &*part_a.shape, &pose_b, &*part_b.shape)
+                .map_err(unsupported)?
+                .intersecting
+            {
+                return Ok(Proximity::Colliding);
             }
         }
     }
@@ -244,7 +284,7 @@ impl World {
         let mut parts = Vec::with_capacity(shapes.len());
         for (pose, desc) in shapes {
             let (correction, shape) = build(desc)?;
-            parts.push(Part { local: *pose * correction, shape });
+            parts.push(Part::new(*pose * correction, shape));
         }
         let mut body = Body {
             name: name.to_owned(),
@@ -300,6 +340,38 @@ impl World {
         self.allowed.remove(&(a.0.min(b.0), a.0.max(b.0)));
     }
 
+    /// Checks this pair with its own padding (`Some`) or with the movable body's again (`None`).
+    pub fn set_pair_padding(&mut self, a: BodyId, b: BodyId, padding: Option<f64>) {
+        let key = (a.0.min(b.0), a.0.max(b.0));
+        match padding {
+            Some(p) => {
+                self.pair_padding.insert(key, p.max(0.0));
+            }
+            None => {
+                self.pair_padding.remove(&key);
+            }
+        }
+    }
+
+    /// The body with this name, if there is one (the first, if several share it).
+    pub fn find(&self, name: &str) -> Option<BodyId> {
+        self.bodies.iter().position(|b| b.name == name).map(BodyId)
+    }
+
+    /// The pairs excluded from checking, by name, each pair ordered and the list sorted.
+    pub fn allowed_pairs(&self) -> Vec<(String, String)> {
+        let mut pairs: Vec<(String, String)> = self
+            .allowed
+            .iter()
+            .map(|(a, b)| {
+                let (a, b) = (self.name(BodyId(*a)).to_owned(), self.name(BodyId(*b)).to_owned());
+                if a <= b { (a, b) } else { (b, a) }
+            })
+            .collect();
+        pairs.sort();
+        pairs
+    }
+
     /// True when the pair is excluded from checking.
     pub fn is_allowed(&self, a: BodyId, b: BodyId) -> bool {
         self.allowed.contains(&(a.0.min(b.0), a.0.max(b.0)))
@@ -312,6 +384,9 @@ impl World {
             return Ok(Proximity::Clear);
         };
         let padding = match (first.movable, second.movable) {
+            _ if self.pair_padding.contains_key(&(a.0.min(b.0), a.0.max(b.0))) => {
+                self.pair_padding[&(a.0.min(b.0), a.0.max(b.0))]
+            }
             (true, false) => first.padding,
             (false, true) => second.padding,
             _ => 0.0,

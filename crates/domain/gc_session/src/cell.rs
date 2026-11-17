@@ -16,7 +16,9 @@ use gc_doc::{
 use gc_jobs::{CancelToken, Executor, JobHandle, JobOutcome};
 use gc_math::{DPose3, DQuat, DVec3, pose_from_xyz_rpy, rpy_from_quat};
 use gc_mesh::MeshData;
-use gc_motion::{Goal, MotionPlan, MotionRequest, Obstacle, RobotScene, StateProblem, plan_motion};
+use gc_motion::{
+    Goal, Guarantee, LinkPair, MotionPlan, MotionRequest, Obstacle, PairReason, RobotScene, StateProblem,
+};
 use gc_plan::{Algorithm, Control, Options};
 use gc_robot::{Chain, RobotModel, Shape};
 use gc_sketch::{SkPoint, Space};
@@ -239,9 +241,29 @@ impl LoadedRobot {
 pub struct PlannedPath {
     /// One motion per waypoint, in order.
     pub segments: Vec<MotionPlan>,
+    /// The planner id and seed it was planned with.
+    strategy: (String, u64),
 }
 
 impl PlannedPath {
+    /// What the final checks establish for the whole path: the weakest of its motions' guarantees (the
+    /// smallest padding and clearance, the largest step), with the number of states summed. `None` for a
+    /// path without motions.
+    pub fn guarantee(&self) -> Option<Guarantee> {
+        let mut all = self.segments.iter().map(|s| &s.guarantee);
+        let first = all.next()?.clone();
+        Some(all.fold(first, |acc, g| Guarantee {
+            padding_nominal: acc.padding_nominal.min(g.padding_nominal),
+            padding_min: acc.padding_min.min(g.padding_min),
+            step_deg: acc.step_deg.max(g.step_deg),
+            step_mm: acc.step_mm.max(g.step_mm),
+            clearance: acc.clearance.min(g.clearance),
+            states: acc.states + g.states,
+            model: acc.model,
+            acm_hash: acc.acm_hash,
+        }))
+    }
+
     /// The highest speed of the tool tip over the whole motion, m/s.
     pub fn peak_tcp_speed(&self) -> f64 {
         self.segments.iter().map(|s| s.peak_tcp_speed).fold(0.0, f64::max)
@@ -381,6 +403,8 @@ pub(crate) struct CellState {
     resources: Option<Resources>,
     /// Plugins that offer closed-form inverse kinematics.
     kinematics: Vec<Arc<dyn gc_robotics_api::KinematicsFactory>>,
+    /// Planners from plugins (`MOTION_PLANNERS`), used for ids the built-in table does not have.
+    planners: Vec<Arc<dyn gc_robotics_api::MotionPlanner>>,
     /// The robot library folder, where `library://` resource folders point.
     library: Option<std::path::PathBuf>,
     /// The collision scene of the cell as it is shown, with what it was built from, and the last
@@ -418,6 +442,7 @@ impl Default for CellState {
             playback: None,
             resources: None,
             kinematics: Vec::new(),
+            planners: Vec::new(),
             library: None,
             files: BTreeMap::new(),
             meshes: BTreeMap::new(),
@@ -708,6 +733,27 @@ impl Session {
         self.execute(&Command::Cell(op))
     }
 
+    /// Gives the session the planners plugins offer (`MOTION_PLANNERS`). A path whose planner id is not
+    /// one of the built-in [`PLANNERS`] is planned with the registered planner of that id. (The built-in
+    /// ids keep running `gc_plan` directly: same paths, and budgets that count the states a motion check
+    /// examines, which the plugin API cannot tell a planner yet.)
+    pub fn set_planners(&mut self, planners: Vec<Arc<dyn gc_robotics_api::MotionPlanner>>) {
+        self.cell.planners = planners;
+    }
+
+    /// Ids and names (Korean, English) of the planners a path can use: the built-in ones, then those of
+    /// plugins with other ids.
+    pub fn planner_choices(&self) -> Vec<(String, String, String)> {
+        let mut choices: Vec<(String, String, String)> = gc_plugin_planners_names();
+        for planner in &self.cell.planners {
+            let d = planner.descriptor();
+            if !choices.iter().any(|(id, ..)| *id == d.id) {
+                choices.push((d.id.clone(), d.name.ko.clone(), d.name.en.clone()));
+            }
+        }
+        choices
+    }
+
     /// Sets the plugins that offer closed-form inverse kinematics, and reloads the robots.
     pub fn set_kinematics(&mut self, factories: Vec<Arc<dyn gc_robotics_api::KinematicsFactory>>) {
         self.cell.kinematics = factories;
@@ -777,6 +823,7 @@ impl Session {
             max_acc: 5.0,
             look: Default::default(),
             tool: None,
+            acm_overrides: Vec::new(),
         };
         match self.cell_op(CellOp::AddRobot(robot)).map_err(|e| e.to_string())?.first() {
             Some(Created::Robot(id)) => Ok(*id),
@@ -1018,7 +1065,8 @@ impl Session {
         let base = self.shown_base(robot)?;
         let mut obstacles = Vec::new();
         let tool = self.shown_tool(robot)?;
-        let mut built_from = format!("{:?} {} {base:?} {tool:?}", robot, stored.urdf.len());
+        let mut built_from =
+            format!("{:?} {} {base:?} {tool:?} {:?}", robot, stored.urdf.len(), stored.acm_overrides);
         for (id, _) in self.doc.bodies().iter() {
             let body = self.shown_body(id)?;
             // A body whose mesh is not there cannot be checked; it is left out here and stops planning.
@@ -1045,6 +1093,7 @@ impl Session {
                 &tool_shapes(tool.as_ref(), &self.cell.meshes).unwrap_or_default(),
             )
             .ok()?;
+            let built = built.with_pair_choices(&pair_choices(stored));
             *scene = Some((built_from, built));
         }
         let answer = scene.as_ref().and_then(|(_, scene)| scene.state_problem(joints));
@@ -1465,6 +1514,71 @@ impl Session {
         }
     }
 
+    /// Every pair of the robot's links with collision geometry: whether the description excludes it from
+    /// collision checking (and why) and whether it is checked now, after the user's choices.
+    pub fn link_pairs(&self, robot: Id<Robot>) -> Option<Vec<LinkPair>> {
+        let stored = self.doc.get(robot)?;
+        let loaded = self.robot_model(robot)?;
+        let (scene, _) = RobotScene::new(
+            Arc::clone(&loaded.model),
+            loaded.chain.clone(),
+            &stored.tip_link,
+            gc_math::DPose3::IDENTITY,
+            &[],
+            PADDING,
+            &|uri| loaded.file(uri),
+            &tool_shapes(stored.tool.as_deref(), &self.cell.meshes).unwrap_or_default(),
+        )
+        .ok()?;
+        Some(scene.with_pair_choices(&pair_choices(stored)).link_pairs())
+    }
+
+    /// Checks a pair of the robot's links for collisions, or stops checking it (one undo step). A choice
+    /// equal to what the description implies removes the override.
+    pub fn set_pair_checked(
+        &mut self,
+        robot: Id<Robot>,
+        a: &str,
+        b: &str,
+        checked: bool,
+    ) -> Result<(), EditError> {
+        let pairs = self.link_pairs(robot).ok_or(EditError::BadValue)?;
+        let (a, b) = if a <= b { (a, b) } else { (b, a) };
+        let pair = pairs.iter().find(|p| p.a == a && p.b == b).ok_or(EditError::BadValue)?;
+        let by_default = pair.reason == PairReason::Checked;
+        let mut overrides = self.doc.get(robot).ok_or(EditError::BadValue)?.acm_overrides.clone();
+        overrides.retain(|o| !((o.a == a && o.b == b) || (o.a == b && o.b == a)));
+        if checked != by_default {
+            overrides.push(gc_doc::AcmOverride { a: a.to_owned(), b: b.to_owned(), check: checked });
+        }
+        self.cell_op(CellOp::SetAcmOverrides { id: robot, overrides }).map(|_| ())
+    }
+
+    /// Lets a link of the path's robot come closer to an obstacle than the padding near the start and
+    /// end of the motion into waypoint `index` (within 50 mm of them, no touching; one undo step). Edit
+    /// [`gc_doc::ContactAllowance`]s with [`CellOp::SetContacts`] for the other options.
+    pub fn allow_contact(
+        &mut self,
+        path: Id<MotionPath>,
+        index: usize,
+        link: &str,
+        obstacle: Id<Body>,
+    ) -> Result<(), EditError> {
+        let mut contacts = self.doc.get(path).ok_or(EditError::BadValue)?.contacts.clone();
+        if contacts.iter().any(|c| c.index == index && c.link == link && c.obstacle == obstacle) {
+            return Ok(());
+        }
+        contacts.push(gc_doc::ContactAllowance {
+            index,
+            link: link.to_owned(),
+            obstacle,
+            whole_motion: false,
+            radius: 0.05,
+            allow_touch: false,
+        });
+        self.cell_op(CellOp::SetContacts { id: path, contacts }).map(|_| ())
+    }
+
     /// Adds a path of `robot` through `waypoints`, planned with the default planner.
     pub fn add_path(
         &mut self,
@@ -1480,6 +1594,7 @@ impl Session {
             planner: PLANNERS[0].0.to_owned(),
             seed: 1,
             tcp_speed: None,
+            contacts: Vec::new(),
         };
         match self.cell_op(CellOp::AddPath(path))?.first() {
             Some(Created::Path(id)) => Ok(*id),
@@ -1528,6 +1643,7 @@ impl Session {
             planner: PLANNERS[0].0.to_owned(),
             seed: 1,
             tcp_speed: None,
+            contacts: Vec::new(),
         };
         match self.cell_op(CellOp::AddPath(path))?.first() {
             Some(Created::Path(id)) => Ok(*id),
@@ -1555,21 +1671,23 @@ impl Session {
             (0..path.waypoints.len()).map(|index| path.linear.get(index).copied().unwrap_or(false)).collect();
         let bodies: Vec<(&Placement, &Solid)> =
             doc.bodies().iter().map(|(_, b)| (&b.placement, &b.solid)).collect();
-        Some(format!(
-            "{} {:?} {} {} {:?} {:?} {:?} {} {bodies:?} {targets:?} {:?} {} {} {:?}",
-            robot.urdf.len(),
-            robot.tool,
-            robot.base_link,
-            robot.tip_link,
-            robot.placement,
-            robot.tcp,
-            robot.joints,
-            robot.max_acc,
-            linear,
-            path.planner,
-            path.seed,
-            path.tcp_speed
-        ))
+        Some(
+            format!(
+                "{} {:?} {} {} {:?} {:?} {:?} {} {bodies:?} {targets:?} {:?} {} {} {:?}",
+                robot.urdf.len(),
+                robot.tool,
+                robot.base_link,
+                robot.tip_link,
+                robot.placement,
+                robot.tcp,
+                robot.joints,
+                robot.max_acc,
+                linear,
+                path.planner,
+                path.seed,
+                path.tcp_speed,
+            ) + &format!(" {:?} {:?}", robot.acm_overrides, path.contacts),
+        )
     }
 
     /// How the stored plan of a path relates to the document.
@@ -1620,10 +1738,17 @@ impl Session {
         // and the fingerprint tells afterwards whether its result is still current.
         let doc = self.doc.clone();
         let meshes = self.cell.meshes.clone();
+        // The last good plan: a segment that is still valid for the new input is kept (plan 5.8). A new
+        // planner or seed asks for a new plan, so the old one is not offered then.
+        let strategy = self.doc.get(path).map(|p| (p.planner.clone(), p.seed));
+        let previous = self.planned(path).filter(|old| Some(&old.strategy) == strategy.as_ref()).cloned();
+        let planners = self.cell.planners.clone();
         let job = self.cell.executor.spawn("plan", move |ctx| {
             let control = JobControl(ctx.cancel.clone());
             let result = match &loaded {
-                Some(loaded) => plan_path(&doc, loaded, &meshes, path, None, &control),
+                Some(loaded) => {
+                    plan_path(&doc, loaded, &meshes, path, None, previous.as_ref(), &planners, &control)
+                }
                 None => Err("the robot description could not be read".to_owned()),
             };
             (!ctx.cancel.is_cancelled()).then_some(result)
@@ -1663,7 +1788,9 @@ impl Session {
                 let (mut durations, mut costs, mut checks) = (Vec::new(), Vec::new(), Vec::new());
                 for seed in 0..seeds.max(1) {
                     let strategy = Some((*algorithm, seed as u64, 1));
-                    if let Ok(planned) = plan_path(&doc, &loaded, &meshes, path, strategy, &control) {
+                    if let Ok(planned) =
+                        plan_path(&doc, &loaded, &meshes, path, strategy, None, &[], &control)
+                    {
                         durations.push(planned.duration());
                         costs.push(planned.segments.iter().map(|s| s.cost).sum());
                         checks.push(planned.state_checks() as f64);
@@ -1754,23 +1881,72 @@ impl Session {
 
 /// Plans a path of `doc` from its robot's current joint values through its waypoints, with the path's own
 /// planner and seed or with the given algorithm, seed and number of runs.
+/// A robot's choices for link pairs, as the scene takes them.
+fn pair_choices(robot: &Robot) -> Vec<(String, String, bool)> {
+    robot.acm_overrides.iter().map(|o| (o.a.clone(), o.b.clone(), o.check)).collect()
+}
+
+/// The contact allowances of the motion into waypoint `index` of a path; obstacles are found by name.
+fn contacts_of(doc: &Document, path: &MotionPath, index: usize) -> Vec<gc_motion::ContactAllowance> {
+    path.contacts
+        .iter()
+        .filter(|c| c.index == index)
+        .filter_map(|c| {
+            let obstacle = doc.get(c.obstacle)?;
+            Some(gc_motion::ContactAllowance {
+                body: c.link.clone(),
+                obstacle: obstacle.name.clone(),
+                scope: if c.whole_motion {
+                    gc_motion::ContactScope::Segment
+                } else {
+                    gc_motion::ContactScope::Waypoint
+                },
+                radius: c.radius,
+                allow_touch: c.allow_touch,
+            })
+        })
+        .collect()
+}
+
+/// The built-in planners' ids with their names (Korean, English).
+fn gc_plugin_planners_names() -> Vec<(String, String, String)> {
+    let names = [
+        ("RRT-Connect", "RRT-Connect"),
+        ("RRT", "RRT"),
+        ("RRT*", "RRT*"),
+        ("Informed RRT*", "Informed RRT*"),
+        ("PRM", "PRM"),
+    ];
+    PLANNERS
+        .iter()
+        .zip(names)
+        .map(|((id, _), (ko, en))| ((*id).to_owned(), ko.to_owned(), en.to_owned()))
+        .collect()
+}
+
 fn plan_path(
     doc: &Document,
     loaded: &LoadedRobot,
     meshes: &BTreeMap<String, MeshRef>,
     path_id: Id<MotionPath>,
     strategy: Option<(Algorithm, u64, usize)>,
+    previous: Option<&PlannedPath>,
+    registered: &[Arc<dyn gc_robotics_api::MotionPlanner>],
     control: &dyn Control,
 ) -> Result<PlannedPath, String> {
     let path = doc.get(path_id).ok_or("the path no longer exists")?;
     let robot = doc.get(path.robot).ok_or("the robot no longer exists")?;
+    let mut plugin: Option<&dyn gc_robotics_api::MotionPlanner> = None;
     let (algorithm, seed, runs) = match strategy {
         Some(strategy) => strategy,
         None => {
-            let algorithm = PLANNERS
-                .iter()
-                .find(|(id, _)| *id == path.planner)
-                .map(|(_, algorithm)| *algorithm)
+            let builtin =
+                PLANNERS.iter().find(|(id, _)| *id == path.planner).map(|(_, algorithm)| *algorithm);
+            if builtin.is_none() {
+                plugin = registered.iter().find(|p| p.descriptor().id == path.planner).map(|p| p.as_ref());
+            }
+            let algorithm = builtin
+                .or(plugin.map(|_| Algorithm::RrtConnect))
                 .ok_or_else(|| format!("unknown planner `{}`", path.planner))?;
             (algorithm, path.seed, 4)
         }
@@ -1795,7 +1971,7 @@ fn plan_path(
         &tool,
     )
     .map_err(|e| e.to_string())?;
-    let scene = scene.with_tool(pose_of(&robot.tcp));
+    let scene = scene.with_tool(pose_of(&robot.tcp)).with_pair_choices(&pair_choices(robot));
     let mut start = robot.joints.clone();
     let mut segments = Vec::with_capacity(path.waypoints.len());
     for (index, waypoint_id) in path.waypoints.iter().enumerate() {
@@ -1826,12 +2002,17 @@ fn plan_path(
                 Some(world) => analytic_goals(loaded, &scene.flange_target(world), &start),
                 None => Vec::new(),
             },
+            contacts: contacts_of(doc, path, index),
         };
-        let plan = plan_motion(&scene, &request, control).map_err(|e| format!("{}: {e}", waypoint.name))?;
+        let planned = match previous.and_then(|p| p.segments.get(index)) {
+            Some(old) => gc_motion::replan_using(&scene, &request, old, plugin, control),
+            None => gc_motion::plan_motion_using(&scene, &request, plugin, control),
+        };
+        let plan = planned.map_err(|e| format!("{}: {e}", waypoint.name))?;
         if let Some(end) = plan.path.last() {
             start.clone_from(end);
         }
         segments.push(plan);
     }
-    Ok(PlannedPath { segments })
+    Ok(PlannedPath { segments, strategy: (path.planner.clone(), seed) })
 }

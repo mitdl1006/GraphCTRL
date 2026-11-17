@@ -253,6 +253,11 @@ impl Chain {
         jacobian
     }
 
+    /// The model joint (index into [`RobotModel::joints`]) behind each coordinate of `q`.
+    pub fn active_joints(&self) -> &[usize] {
+        &self.active
+    }
+
     /// The sum of the fixed offsets along the chain: an upper bound of how far the tip can be from the base.
     pub fn reach(&self) -> f64 {
         self.steps.iter().map(|s| s.origin.translation.length()).sum::<f64>().max(0.1)

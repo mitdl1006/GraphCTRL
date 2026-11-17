@@ -94,6 +94,34 @@ impl Entity for Body {
     fn refs(&self, _: &mut Vec<AnyId>) {}
 }
 
+/// A link pair of a robot whose collision check the user chose.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AcmOverride {
+    /// One link, by name.
+    pub a: String,
+    /// The other link.
+    pub b: String,
+    /// True: check the pair even though it is excluded by default. False: never check it.
+    pub check: bool,
+}
+
+/// Lets a robot part come closer to an obstacle than the padding (plan 5.7, contact allowance).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ContactAllowance {
+    /// Position in the path of the waypoint whose motion it applies to.
+    pub index: usize,
+    /// The robot link (a tool is part of the link that carries it), by name.
+    pub link: String,
+    /// The obstacle. A body that no longer exists makes the allowance void.
+    pub obstacle: Id<Body>,
+    /// True: along the whole motion. False: only near its start and end (within `radius`).
+    pub whole_motion: bool,
+    /// How near the start or end the tool centre point must be, metres.
+    pub radius: f64,
+    /// Overlap is allowed too, not only a gap below the padding.
+    pub allow_touch: bool,
+}
+
 /// A robot placed in the cell.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Robot {
@@ -125,6 +153,10 @@ pub struct Robot {
     /// What it carries on its tip link, if anything (boxed: most robots carry nothing).
     #[serde(default)]
     pub tool: Option<Box<Tool>>,
+    /// Link pairs whose collision check the user switched on or off, against what is derived from the
+    /// description (neighbouring links, links touching in the zero pose, ...).
+    #[serde(default)]
+    pub acm_overrides: Vec<AcmOverride>,
 }
 
 /// Something a robot carries on its tip link (a gripper, a torch): drawn with the robot and checked for
@@ -257,6 +289,9 @@ pub struct MotionPath {
     /// The fastest the tool tip may go on straight moves, m/s; `None` for as fast as the joints allow.
     #[serde(default)]
     pub tcp_speed: Option<f64>,
+    /// Robot parts allowed closer to obstacles than the padding, per motion.
+    #[serde(default)]
+    pub contacts: Vec<ContactAllowance>,
 }
 
 impl Entity for MotionPath {
@@ -368,6 +403,20 @@ pub enum CellOp {
         index: usize,
         /// True for a straight line of the tool tip.
         linear: bool,
+    },
+    /// Replaces a path's contact allowances.
+    SetContacts {
+        /// The path.
+        id: Id<MotionPath>,
+        /// The allowances; each `index` must be a position of the path.
+        contacts: Vec<ContactAllowance>,
+    },
+    /// Replaces a robot's collision-check choices for link pairs.
+    SetAcmOverrides {
+        /// The robot.
+        id: Id<Robot>,
+        /// The choices, at most one per pair.
+        overrides: Vec<AcmOverride>,
     },
     /// Replaces a path's waypoints and how each is approached: reordering, adding and removing.
     SetPathSteps {
@@ -590,8 +639,30 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
             txn.modify(*id, |p: &mut MotionPath, _| {
                 p.waypoints.clone_from(waypoints);
                 p.linear.clone_from(linear);
+                // Allowances belong to positions; those beyond the new end go.
+                p.contacts.retain(|c| c.index < waypoints.len());
             })?;
             Ok((Vec::new(), "Edit path"))
+        }
+        CellOp::SetContacts { id, contacts } => {
+            let count = txn.doc().get(*id).ok_or(DocError::Missing(id.erase()))?.waypoints.len();
+            let sound = |c: &ContactAllowance| c.index < count && c.radius.is_finite() && c.radius >= 0.0;
+            if !contacts.iter().all(sound) {
+                return Err(EditError::BadValue);
+            }
+            txn.modify(*id, |p: &mut MotionPath, _| p.contacts.clone_from(contacts))?;
+            Ok((Vec::new(), "Allow contact"))
+        }
+        CellOp::SetAcmOverrides { id, overrides } => {
+            let pairs: std::collections::BTreeSet<(&str, &str)> = overrides
+                .iter()
+                .map(|o| if o.a <= o.b { (o.a.as_str(), o.b.as_str()) } else { (o.b.as_str(), o.a.as_str()) })
+                .collect();
+            if pairs.len() != overrides.len() || overrides.iter().any(|o| o.a == o.b) {
+                return Err(EditError::BadValue);
+            }
+            txn.modify(*id, |r: &mut Robot, _| r.acm_overrides.clone_from(overrides))?;
+            Ok((Vec::new(), "Choose collision checks"))
         }
         CellOp::SetTool { id, tool } => {
             if tool.as_ref().is_some_and(|t| !t.is_valid()) {
