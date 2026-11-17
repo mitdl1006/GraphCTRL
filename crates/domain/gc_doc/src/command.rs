@@ -118,6 +118,55 @@ pub enum SketchOp {
     },
     /// Deletes items and everything that depends on them.
     Delete(Vec<Item>),
+    /// Applies an edit and marks the curves it creates as construction geometry (the Format panel's
+    /// Construction toggle held while drawing). One undo step.
+    AsConstruction(Box<SketchOp>),
+    /// Adds an arc that starts at an existing curve end and continues it smoothly (tangent), ending at
+    /// `end`: the line tool's end-point drag and the tangent arc tool.
+    AddTangentArc {
+        /// The end point the arc starts from.
+        from: Id<SkPoint>,
+        /// The curve it continues (a line or an arc ending at `from`).
+        curve: Id<Curve>,
+        /// Where the arc ends.
+        end: [f64; 3],
+        /// What the end was snapped to.
+        snap_end: EndSnap,
+    },
+    /// Adds an arc from `a` to `b` through `through` (the three-point arc).
+    AddArcThrough {
+        /// First end.
+        a: [f64; 3],
+        /// Second end.
+        b: [f64; 3],
+        /// A point the arc passes through between them (sets the side and the radius).
+        through: [f64; 3],
+        /// What the first end was snapped to.
+        snap_a: EndSnap,
+        /// What the second end was snapped to.
+        snap_b: EndSnap,
+    },
+    /// Adds a rectangle at any angle: `a` to `b` is one side, `c` sets the other side's length (the
+    /// three-point rectangle). Four lines, coincident corners, one right angle and two pairs of parallel
+    /// sides.
+    AddRectangle3 {
+        /// First corner.
+        a: [f64; 3],
+        /// Second corner (along the first side).
+        b: [f64; 3],
+        /// A point that sets the width.
+        c: [f64; 3],
+        /// What the first corner was snapped to.
+        snap_a: EndSnap,
+    },
+    /// Makes a dimension driving (it constrains the sketch) or driven (it only shows a measurement).
+    /// Making one driving is refused when the sketch does not allow it (already constrained there).
+    SetDriving {
+        /// The dimension.
+        id: Id<Dimension>,
+        /// True for driving.
+        driving: bool,
+    },
 }
 
 /// An edit of the document.
@@ -381,6 +430,86 @@ fn infer(sketch: &mut Sketch, ids: &mut IdAlloc, constraint: GeoConstraint, crea
     }
 }
 
+/// A value rounded to 6 significant decimals for writing into a dimension's source text.
+fn round_for_display(value: f64) -> f64 {
+    (value * 1e6).round() / 1e6
+}
+
+/// Constraints for an end point from what it was snapped to.
+fn snap_constraint(
+    sketch: &mut Sketch,
+    ids: &mut IdAlloc,
+    end: Id<SkPoint>,
+    snap: &EndSnap,
+    created: &mut Vec<Created>,
+) {
+    if let Some(point) = snap.point {
+        infer(sketch, ids, GeoConstraint::Coincident(point, end), created);
+    } else if let Some(curve) = snap.curve {
+        infer(sketch, ids, GeoConstraint::PointOnCurve(end, curve), created);
+    }
+}
+
+/// The unit direction in which `curve` arrives at its end `at` (for an arc, the tangent there, pointing
+/// away from the arc).
+fn leaving_direction(sketch: &Sketch, curve: Id<Curve>, at: Id<SkPoint>) -> Option<[f64; 2]> {
+    let p = |id| sketch.pos(id).map(|q| [q[0], q[1]]);
+    let unit = |v: [f64; 2]| {
+        let n = gc_math::fm::hypot(v[0], v[1]);
+        (n > 1e-12).then(|| [v[0] / n, v[1] / n])
+    };
+    match sketch.curves.get(&curve)?.geom {
+        gc_sketch::CurveGeom::Line { a, b } => {
+            let (from, to) = if b == at {
+                (a, b)
+            } else if a == at {
+                (b, a)
+            } else {
+                return None;
+            };
+            let (from, to) = (p(from)?, p(to)?);
+            unit([to[0] - from[0], to[1] - from[1]])
+        }
+        gc_sketch::CurveGeom::Arc { c, s, e } => {
+            let (centre, here) = (p(c)?, p(at)?);
+            let radial = [here[0] - centre[0], here[1] - centre[1]];
+            // Counter-clockwise from s to e: leaving at e goes counter-clockwise, at s clockwise.
+            if at == e {
+                unit([-radial[1], radial[0]])
+            } else if at == s {
+                unit([radial[1], -radial[0]])
+            } else {
+                None
+            }
+        }
+        gc_sketch::CurveGeom::Circle { .. } => None,
+    }
+}
+
+/// The circle through three points: centre and radius; `None` when they lie on a line.
+fn circle_through(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> Option<([f64; 2], f64)> {
+    let d = 2.0 * (a[0] * (b[1] - c[1]) + b[0] * (c[1] - a[1]) + c[0] * (a[1] - b[1]));
+    let scale = (a[0] - c[0]).abs().max((a[1] - c[1]).abs()).max((b[0] - c[0]).abs()).max(1e-12);
+    if d.abs() < 1e-9 * scale * scale {
+        return None;
+    }
+    let sq = |p: [f64; 2]| p[0] * p[0] + p[1] * p[1];
+    let ux = (sq(a) * (b[1] - c[1]) + sq(b) * (c[1] - a[1]) + sq(c) * (a[1] - b[1])) / d;
+    let uy = (sq(a) * (c[0] - b[0]) + sq(b) * (a[0] - c[0]) + sq(c) * (b[0] - a[0])) / d;
+    Some(([ux, uy], gc_math::fm::hypot(a[0] - ux, a[1] - uy)))
+}
+
+/// Adds a constraint that the edit needs; refused or conflicting means the edit fails.
+fn require(
+    sketch: &mut Sketch,
+    ids: &mut IdAlloc,
+    constraint: GeoConstraint,
+    created: &mut Vec<Created>,
+) -> Result<(), EditError> {
+    created.push(Created::Constraint(added(sketch.try_add_constraint(ids, constraint)?)?));
+    Ok(())
+}
+
 fn sketch_op(
     sketch: &mut Sketch,
     ids: &mut IdAlloc,
@@ -488,6 +617,127 @@ fn sketch_op(
         SketchOp::SetConstruction { curve, construction } => {
             sketch.curves.get_mut(curve).ok_or(SketchError::MissingCurve)?.construction = *construction;
             "Construction"
+        }
+        SketchOp::AsConstruction(inner) => {
+            if matches!(**inner, SketchOp::AsConstruction(_)) {
+                return Err(SketchError::InvalidValue.into());
+            }
+            let (inner_created, label) = sketch_op(sketch, ids, inner, scope)?;
+            for item in &inner_created {
+                if let Created::Curve(curve) = item
+                    && let Some(c) = sketch.curves.get_mut(curve)
+                {
+                    c.construction = true;
+                }
+            }
+            created.extend(inner_created);
+            label
+        }
+        SketchOp::AddTangentArc { from, curve, end, snap_end } => {
+            let start = sketch.pos(*from).ok_or(SketchError::MissingPoint)?;
+            let t = leaving_direction(sketch, *curve, *from).ok_or(SketchError::InvalidValue)?;
+            // The centre lies on the normal at the start: c = start + n·r with r = |d|² / (2 d·n).
+            let n = [-t[1], t[0]];
+            let d = [end[0] - start[0], end[1] - start[1]];
+            let along = d[0] * n[0] + d[1] * n[1];
+            if along.abs() < 1e-9 * gc_math::fm::hypot(d[0], d[1]).max(1e-12) {
+                return Err(SketchError::InvalidValue.into()); // straight ahead: a line, not an arc
+            }
+            let r = (d[0] * d[0] + d[1] * d[1]) / (2.0 * along);
+            let centre = [start[0] + n[0] * r, start[1] + n[1] * r, 0.0];
+            // Turning left (r > 0) the arc runs counter-clockwise from the start.
+            let (s_pos, e_pos) =
+                if r > 0.0 { ([start[0], start[1], 0.0], *end) } else { (*end, [start[0], start[1], 0.0]) };
+            let arc = sketch.add_arc(ids, centre, s_pos, e_pos)?;
+            created.push(Created::Curve(arc));
+            let gc_sketch::CurveGeom::Arc { s, e, .. } = sketch.curves[&arc].geom else {
+                return Err(SketchError::InvalidValue.into());
+            };
+            let (joined, free_end) = if r > 0.0 { (s, e) } else { (e, s) };
+            require(sketch, ids, GeoConstraint::Coincident(*from, joined), &mut created)?;
+            let tangent = match sketch.line(*curve) {
+                Some(_) => {
+                    let side = if r > 0.0 { 1.0 } else { -1.0 };
+                    GeoConstraint::Tangent { a: *curve, b: arc, side, external: true }
+                }
+                None => GeoConstraint::Tangent { a: *curve, b: arc, side: 1.0, external: true },
+            };
+            infer(sketch, ids, tangent, &mut created);
+            snap_constraint(sketch, ids, free_end, snap_end, &mut created);
+            "Arc"
+        }
+        SketchOp::AddArcThrough { a, b, through, snap_a, snap_b } => {
+            let (centre, _) = circle_through([a[0], a[1]], [b[0], b[1]], [through[0], through[1]])
+                .ok_or(SketchError::InvalidValue)?;
+            // Counter-clockwise from a to b passes through `through` when it lies left of a→b... seen
+            // from the centre: compare the angles.
+            let angle = |p: &[f64; 3]| gc_math::fm::atan2(p[1] - centre[1], p[0] - centre[0]);
+            let tau = std::f64::consts::TAU;
+            let ccw = |from: f64, to: f64| (to - from).rem_euclid(tau);
+            let a_first = ccw(angle(a), angle(through)) < ccw(angle(a), angle(b));
+            let (first, last) = if a_first { (a, b) } else { (b, a) };
+            let arc = sketch.add_arc(ids, [centre[0], centre[1], 0.0], *first, *last)?;
+            created.push(Created::Curve(arc));
+            let gc_sketch::CurveGeom::Arc { s, e, .. } = sketch.curves[&arc].geom else {
+                return Err(SketchError::InvalidValue.into());
+            };
+            let (end_a, end_b) = if a_first { (s, e) } else { (e, s) };
+            snap_constraint(sketch, ids, end_a, snap_a, &mut created);
+            snap_constraint(sketch, ids, end_b, snap_b, &mut created);
+            "Arc"
+        }
+        SketchOp::AddRectangle3 { a, b, c, snap_a } => {
+            let side = [b[0] - a[0], b[1] - a[1]];
+            let length = gc_math::fm::hypot(side[0], side[1]);
+            if length < 1e-12 {
+                return Err(SketchError::InvalidValue.into());
+            }
+            let n = [-side[1] / length, side[0] / length];
+            let width = (c[0] - b[0]) * n[0] + (c[1] - b[1]) * n[1];
+            if width.abs() < 1e-12 {
+                return Err(SketchError::InvalidValue.into());
+            }
+            let corners = [
+                [a[0], a[1], 0.0],
+                [b[0], b[1], 0.0],
+                [b[0] + n[0] * width, b[1] + n[1] * width, 0.0],
+                [a[0] + n[0] * width, a[1] + n[1] * width, 0.0],
+            ];
+            let lines: Vec<Id<Curve>> =
+                (0..4).map(|i| sketch.add_line(ids, corners[i], corners[(i + 1) % 4])).collect();
+            let ends: Vec<(Id<SkPoint>, Id<SkPoint>)> =
+                lines.iter().filter_map(|l| sketch.line(*l)).collect();
+            created.extend(lines.iter().map(|l| Created::Curve(*l)));
+            for i in 0..ends.len() {
+                require(
+                    sketch,
+                    ids,
+                    GeoConstraint::Coincident(ends[i].1, ends[(i + 1) % 4].0),
+                    &mut created,
+                )?;
+            }
+            require(sketch, ids, GeoConstraint::Perpendicular(lines[0], lines[1]), &mut created)?;
+            require(sketch, ids, GeoConstraint::Parallel(lines[0], lines[2]), &mut created)?;
+            require(sketch, ids, GeoConstraint::Parallel(lines[1], lines[3]), &mut created)?;
+            if let Some((corner, _)) = ends.first() {
+                snap_constraint(sketch, ids, *corner, snap_a, &mut created);
+            }
+            "Rectangle"
+        }
+        SketchOp::SetDriving { id, driving } => {
+            if *driving {
+                let kind = sketch.dimensions.get(id).ok_or(SketchError::MissingItem)?.kind;
+                let measured = sketch.measure(&kind).ok_or(SketchError::InvalidValue)?;
+                // The current measurement, written the way a user would type it.
+                let source = match field_unit(&kind) {
+                    Unit::Deg => format!("{} deg", round_for_display(measured.to_degrees())),
+                    _ => format!("{} mm", round_for_display(measured * 1000.0)),
+                };
+                added(sketch.set_driving(*id, Some((&source, measured)))?)?;
+            } else {
+                sketch.set_driving(*id, None)?;
+            }
+            if *driving { "Driving dimension" } else { "Driven dimension" }
         }
         SketchOp::Delete(items) => {
             sketch.delete(items);

@@ -296,6 +296,38 @@ impl Sketch {
         id
     }
 
+    /// Makes a dimension driven (`None`: it only shows the measurement) or driving with the given source
+    /// text and value. Making it driving is checked like adding it: refused (with the items in the way)
+    /// when it would be redundant or conflicting.
+    pub fn set_driving(
+        &mut self,
+        id: Id<Dimension>,
+        driving: Option<(&str, f64)>,
+    ) -> Result<AddResult<Dimension>, SketchError> {
+        let dimension = self.dimensions.get(&id).ok_or(SketchError::MissingItem)?.clone();
+        let Some((source, value)) = driving else {
+            if let Some(d) = self.dimensions.get_mut(&id) {
+                d.driving = false;
+            }
+            let binding = self.bind(None)?;
+            let solved = binding.sys.clone().solve();
+            return Ok(AddResult::Added { id, report: self.report(&binding, &solved) });
+        };
+        if dimension.driving {
+            return Err(SketchError::InvalidValue);
+        }
+        let mut binding = self.bind(None)?;
+        let lowered = binding.lower_dimension(self, &dimension.kind, value)?;
+        let outcome = binding.sys.try_add(solver_id(id), lowered);
+        self.add_outcome(&binding, id, outcome, |sketch| {
+            if let Some(d) = sketch.dimensions.get_mut(&id) {
+                d.driving = true;
+                d.value = value;
+                source.clone_into(&mut d.source);
+            }
+        })
+    }
+
     /// Changes the value of a driving dimension. The geometry follows continuously; if the new value
     /// cannot be reached the sketch is left unchanged and the error says why.
     pub fn set_dimension(
