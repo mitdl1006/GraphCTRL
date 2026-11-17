@@ -29,7 +29,7 @@ pub use cell::{
 pub use design::WorkShape;
 use gc_core::{Id, Revision};
 use gc_doc::{Applied, Command, Created, Document, EditError, History, Sketch, SketchOp, apply};
-pub use gc_motion::StateProblem;
+pub use gc_motion::{Guarantee, LinkPair, PairReason, StateProblem};
 pub use gc_persist::PersistError;
 use gc_sketch::{Curve, DimKind, Dimension, FrameOutcome, Item, SkPoint, SketchDrag, SketchReport};
 use gc_tools::{Preview, Prompt, Tool, ToolEvent, ToolKind, ToolOutput};
@@ -336,6 +336,67 @@ impl Session {
             }
             _ => Err(gc_sketch::SketchError::MissingItem.into()),
         }
+    }
+
+    /// Renames a model-tree item (one undo step). Empty names and names another item of the same kind
+    /// has are refused (`EditError::NameTaken`).
+    pub fn rename(&mut self, item: gc_core::AnyId, name: &str) -> Result<(), EditError> {
+        self.execute(&Command::Rename { item, name: name.to_owned() }).map(|_| ())
+    }
+
+    /// Shows or hides any model-tree item (one undo step). Hidden items are neither drawn nor picked.
+    pub fn set_visible(&mut self, item: gc_core::AnyId, visible: bool) -> Result<(), EditError> {
+        self.execute(&Command::SetVisible { item, visible }).map(|_| ())
+    }
+
+    /// True when the item is shown.
+    pub fn is_visible(&self, item: gc_core::AnyId) -> bool {
+        self.doc.is_visible(item)
+    }
+
+    /// Suppresses a design item, waypoint or path, or brings it back (one undo step).
+    pub fn set_suppressed(&mut self, item: gc_core::AnyId, suppressed: bool) -> Result<(), EditError> {
+        self.execute(&Command::Cell(gc_doc::CellOp::SetSuppressed { item, suppressed })).map(|_| ())
+    }
+
+    /// True when the item is suppressed or stands after the rollback marker (kept, not computed).
+    pub fn is_suppressed(&self, item: gc_core::AnyId) -> bool {
+        self.doc.is_inactive(item)
+    }
+
+    /// What deleting the item would affect: everything that depends on it, directly first.
+    pub fn dependents_of(&self, item: gc_core::AnyId) -> Vec<gc_core::AnyId> {
+        self.doc.dependents_of(item)
+    }
+
+    /// The design items of the model tree in order (sketches, work features, features, assemblies).
+    pub fn model_order(&self) -> Vec<gc_core::AnyId> {
+        self.doc.model_order()
+    }
+
+    /// Moves a design item to just before another (`None`: to the end). Refused (`EditError::InUse`)
+    /// when it would come before what it depends on or after what depends on it.
+    pub fn move_item(
+        &mut self,
+        item: gc_core::AnyId,
+        before: Option<gc_core::AnyId>,
+    ) -> Result<(), EditError> {
+        self.execute(&Command::Cell(gc_doc::CellOp::MoveInTree { item, before })).map(|_| ())
+    }
+
+    /// Where the rollback marker stands: `Some(i)` when the items after position `i` of
+    /// [`Session::model_order`] are rolled back, `None` at the end.
+    pub fn rollback_index(&self) -> Option<usize> {
+        self.doc.rollback_index()
+    }
+
+    /// Puts the rollback marker after position `index` of [`Session::model_order`] (`None`: at the end).
+    pub fn set_rollback(&mut self, index: Option<usize>) -> Result<(), EditError> {
+        let after = match index {
+            Some(i) => Some(*self.doc.model_order().get(i).ok_or(EditError::BadValue)?),
+            None => None,
+        };
+        self.execute(&Command::Cell(gc_doc::CellOp::SetRollback { after })).map(|_| ())
     }
 
     /// Creates a 2D sketch on a work plane and starts editing it. The sketch follows the plane.

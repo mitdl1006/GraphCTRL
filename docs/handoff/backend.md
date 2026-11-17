@@ -18,6 +18,11 @@ tip 링크의 접촉 허용은 툴에도 적용 ③ `library::scan`이 `..`·절
 | 롤백 위치 | `doc.rollback_index() -> Option<usize>`(model_order에서 마커가 선 항목의 위치), 옮기기 `CellOp::SetRollback { after }` |
 | 3D 스케치 점 드래그 | `session.spatial_drag_start(point, cursor3) -> bool`, `spatial_drag_move(cursor3) -> Option<FrameOutcome>`, `spatial_drag_end()`(실행 취소 1단계), `spatial_drag_cancel()`. 미리보기는 `point_pos`. 하위: `Sketch::begin_drag_3d`, `SketchDrag::update_3d`, `gc_solver::Grab::Point3`·`begin_drag_3d`·`update_3d` |
 
+**프론트엔드와 합의한 세션 래퍼**(항목 id는 모두 `gc_core::AnyId` — `CellItem`/`SketchRef` 대신 하나로; `Id::erase()`로 얻음):
+`session.rename(item, name)`, `set_visible(item, bool)`/`is_visible(item)`, `set_suppressed(item, bool)`/`is_suppressed(item)`(억제 또는 롤백 뒤),
+`dependents_of(item) -> Vec<AnyId>`, `model_order()`, `move_item(item, before: Option<AnyId>)`, `rollback_index()`/`set_rollback(Option<usize>)`,
+`spatial_drag_start/move/end/cancel`. 이름 중복은 같은 종류 안에서만 금지. `gc_session`이 `Guarantee, LinkPair, PairReason, StateProblem`을 re-export.
+
 **13 임의 면·작업 평면 위 스케치**: `session.create_sketch_on_work_plane(id)`, `session.create_sketch_on_face(assembly, part, mesh, triangle)`
 (피킹한 삼각형: 원점=삼각형 중심, 법선=앞면, X=첫 모서리). 스케치 평면 프레임이 `Frame::source`(`PlaneSource::Work | Face`)로 붙어
 작업 평면·설비가 움직이면 따라가고, 저장·재열기 후에도 유지, 쓰는 동안 그 작업 평면·설비는 삭제 거부, 스케치를 지우면 프레임도 지워짐.
