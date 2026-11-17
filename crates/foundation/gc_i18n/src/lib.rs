@@ -520,6 +520,46 @@ messages! {
     /// Plan metric: the move was possible in a straight joint-space line.
     PlanStraight => ("직선 이동(플래너 불필요)", "Straight move (no planner needed)"),
     // --- frontend ---
+    /// Ribbon: the Constrain command; the dialog's title.
+    ConstrainTitle => ("구속", "Constrain"),
+    /// Constrain dialog: the Mate type.
+    ConstrainMate => ("맞춤", "Mate"),
+    /// Constrain dialog: the Flush type.
+    ConstrainFlush => ("플러시", "Flush"),
+    /// Constrain dialog: the Insert type.
+    ConstrainInsert => ("삽입", "Insert"),
+    /// Constrain dialog: Predict Offset and Orientation.
+    ConstrainPredict => ("오프셋 및 방향 예측", "Predict offset and orientation"),
+    /// Constrain dialog: the first selection.
+    ConstrainFirst => ("첫 번째 선택", "First selection"),
+    /// Constrain dialog: the second selection.
+    ConstrainSecond => ("두 번째 선택", "Second selection"),
+    /// Constrain dialog: nothing picked yet.
+    ConstrainPick => ("뷰에서 선택", "pick in the view"),
+    /// Constrain dialog: axis direction solutions.
+    ConstrainOpposed => ("반대", "Opposed"),
+    /// Constrain dialog: axis direction solutions.
+    ConstrainAligned => ("정렬", "Aligned"),
+    /// Constrain dialog: axis direction solutions.
+    ConstrainUndirected => ("방향 없음", "Undirected"),
+    /// Constrain dialog: the offset field.
+    ConstrainOffset => ("오프셋", "Offset"),
+    /// Constrain dialog buttons.
+    ConstrainOk => ("확인", "OK"),
+    /// Constrain dialog buttons.
+    ConstrainApply => ("적용", "Apply"),
+    /// Constrain dialog buttons.
+    ConstrainCancel => ("취소", "Cancel"),
+    /// Kinds of selected geometry.
+    ConstrainPlane => ("평면", "plane"),
+    /// Kinds of selected geometry.
+    ConstrainAxis => ("축", "axis"),
+    /// Kinds of selected geometry.
+    ConstrainPoint => ("점", "point"),
+    /// Kinds of selected geometry.
+    ConstrainCircle => ("원", "circle"),
+    /// Status bar: the constraint cannot be solved with the others.
+    ErrUnsolvable => ("구속을 풀 수 없습니다", "The constraints cannot be solved"),
     /// Status bar: the number of occurrences (components) in the document.
     StatusOccurrences => ("구성요소 {0}", "Occurrences {0}"),
     /// Status bar: the number of documents open.

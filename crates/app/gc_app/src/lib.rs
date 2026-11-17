@@ -2,6 +2,7 @@
 
 mod agent;
 mod app;
+mod constrain;
 mod diagnostics;
 mod drive;
 mod example;

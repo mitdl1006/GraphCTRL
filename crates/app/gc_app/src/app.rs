@@ -253,6 +253,8 @@ pub struct GraphCtrlApp {
     interference: crate::interference::Interference,
     /// The Drive dialog.
     drive: crate::drive::Drive,
+    /// The Constrain dialog.
+    constrain: crate::constrain::Constrain,
     expression: String,
     ime: ImeTest,
     /// Whether the licence notices window is open.
@@ -337,6 +339,7 @@ impl GraphCtrlApp {
             measure: crate::measure::Measure::default(),
             interference: crate::interference::Interference::default(),
             drive: crate::drive::Drive::default(),
+            constrain: crate::constrain::Constrain::default(),
             expression: String::new(),
             ime: ImeTest { dimension: "25 mm".to_owned(), ..ImeTest::default() },
             notices: false,
@@ -954,6 +957,7 @@ impl eframe::App for GraphCtrlApp {
             Some(ribbon::RibbonAction::StartMeasure) => self.measure.start(&self.session),
             Some(ribbon::RibbonAction::StartInterference) => self.interference.start(&self.session),
             Some(ribbon::RibbonAction::StartDrive) => self.drive.start(&mut self.session),
+            Some(ribbon::RibbonAction::StartConstrain) => self.constrain.start(),
             _ => {}
         }
         if ribbon_action == Some(ribbon::RibbonAction::ImportRobot)
@@ -1106,6 +1110,14 @@ impl eframe::App for GraphCtrlApp {
                 });
             },
         );
+        // The Constrain dialog picks origin planes, axes and points in the view.
+        self.viewport.constrain_mode = self.constrain.picking();
+        if let Some((occurrence, element)) = self.viewport.take_constrain_pick() {
+            self.constrain.pick(&self.session, occurrence, element);
+        }
+        if self.constrain.open {
+            self.constrain.window(&ctx, &mut self.session, lang);
+        }
         self.reference_question(&ctx);
         self.unsaved_question(&ctx);
         self.recover_question(&ctx);

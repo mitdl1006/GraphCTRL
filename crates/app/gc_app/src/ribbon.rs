@@ -62,6 +62,8 @@ pub(crate) enum RibbonAction {
     StartInterference,
     /// Open the drive dialog.
     StartDrive,
+    /// Open the Constrain dialog.
+    StartConstrain,
 }
 
 pub(crate) fn show(
@@ -246,6 +248,9 @@ fn robot_tab(
     let path = cell.active_path(session);
     // Failures of these commands are shown in the status bar.
     ribbon_group(ui, tr!(lang, GroupRelationships), |ui| {
+        if ribbon_button(ui, Icon::Frame, tr!(lang, ConstrainTitle), false, true).clicked() {
+            action = Some(RibbonAction::StartConstrain);
+        }
         if ribbon_button(ui, Icon::Play, tr!(lang, MenuDrive), false, robot.is_some()).clicked() {
             action = Some(RibbonAction::StartDrive);
         }

@@ -81,6 +81,10 @@ enum NavTool {
 pub struct Viewport {
     /// Whether the frame time and draw statistics are shown in the corner.
     pub perf_overlay: bool,
+    /// The Constrain dialog is open: every origin element is drawn and a click picks one for it.
+    pub constrain_mode: bool,
+    /// What the last click picked for the Constrain dialog.
+    constrain_pick: Option<(gc_doc::Occurrence, gc_doc::OriginElement)>,
     /// The navigation tool chosen on the navigation bar: it works with the left button until it ends.
     nav_tool: Option<NavTool>,
     /// The origin element (plane, axis, point) of a component that is selected in the view or the browser.
@@ -138,6 +142,8 @@ impl Viewport {
             perf_overlay: false,
             clear: None,
             spatial_drag: None,
+            constrain_mode: false,
+            constrain_pick: None,
             nav_tool: None,
             origin_selected: None,
             origin_menu: None,
@@ -378,7 +384,7 @@ impl Viewport {
                 #[allow(clippy::cast_possible_truncation, reason = "screen coordinates fit f32")]
                 Some(egui::pos2(rect.left() + p[0] as f32, rect.top() + p[1] as f32))
             };
-            origin::paint(&ui.painter_at(rect), &screen, session, self.origin_selected);
+            origin::paint(&ui.painter_at(rect), &screen, session, self.origin_selected, self.constrain_mode);
         }
         if self.hud_on && active.is_some() && !session.sketch_is_spatial() {
             self.hud.show(ui.ctx(), session, cursor, lang);
@@ -416,6 +422,11 @@ impl Viewport {
         painter.rect_filled(frame, 4.0, egui::Color32::from_black_alpha(170));
         painter.galley(frame.min + egui::vec2(6.0, 3.0), galley, egui::Color32::WHITE);
         ui.ctx().request_repaint();
+    }
+
+    /// The origin element the last click picked for the Constrain dialog, once.
+    pub fn take_constrain_pick(&mut self) -> Option<(gc_doc::Occurrence, gc_doc::OriginElement)> {
+        self.constrain_pick.take()
     }
 
     /// The navigation bar under the view cube: zoom all, pan, zoom, orbit and look at, with a home button
@@ -989,13 +1000,16 @@ impl Viewport {
         if session.hover_item(hovered) {
             ui.ctx().request_repaint();
         }
-        if self.measure_features && response.clicked_by(PointerButton::Primary) {
+        if self.constrain_mode && response.clicked_by(PointerButton::Primary) {
+            let at = response.interact_pointer_pos().map(to_view);
+            self.constrain_pick = at.and_then(|at| origin::pick(&self.camera, size, session, at, true));
+        } else if self.measure_features && response.clicked_by(PointerButton::Primary) {
             let at = response.interact_pointer_pos().map(to_view);
             self.measure_pick = Some(at.and_then(|at| self.pick_feature(session, at, size)));
         } else if !on_handles && response.clicked_by(PointerButton::Primary) {
             // Origin planes, axes and points that are shown come before the solids behind them.
             let at = response.interact_pointer_pos().map(to_view);
-            self.origin_selected = at.and_then(|at| origin::pick(&self.camera, size, session, at));
+            self.origin_selected = at.and_then(|at| origin::pick(&self.camera, size, session, at, false));
             let picked = if self.origin_selected.is_some() {
                 None
             } else {
@@ -1005,7 +1019,7 @@ impl Viewport {
         }
         if response.secondary_clicked() {
             let at = response.interact_pointer_pos().map(to_view);
-            self.origin_menu = at.and_then(|at| origin::pick(&self.camera, size, session, at));
+            self.origin_menu = at.and_then(|at| origin::pick(&self.camera, size, session, at, false));
             if self.origin_menu.is_some() {
                 self.origin_selected = self.origin_menu;
                 self.context_item = None;

@@ -1,0 +1,235 @@
+//! The Constrain dialog (Inventor's Assemble tab, Relationships panel, Constrain): pick the first and
+//! second geometry in the view, choose Mate, Flush or Insert, set the offset, press Apply or OK.
+//! Reference: Inventor 2026 help, To Place Mate or Flush Constraints in Assemblies
+//! (GUID-0F500089-4F69-41C5-AFE8-B58AC9E8E15E).
+
+use gc_doc::{AxisSense, Geometry, Occurrence, OriginElement, RelationKind, Relationship, Selection};
+use gc_i18n::{Lang, tr};
+use gc_session::Session;
+
+/// Which kind of constraint is being placed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Type {
+    Mate,
+    Flush,
+    Insert,
+}
+
+/// The dialog's state.
+pub(crate) struct Constrain {
+    pub(crate) open: bool,
+    kind: Type,
+    first: Option<Selection>,
+    second: Option<Selection>,
+    /// The selection the next pick fills: 0 first, 1 second.
+    slot: usize,
+    offset: String,
+    predict: bool,
+    sense: AxisSense,
+    aligned: bool,
+    name: String,
+}
+
+impl Default for Constrain {
+    fn default() -> Self {
+        Self {
+            open: false,
+            kind: Type::Mate,
+            first: None,
+            second: None,
+            slot: 0,
+            offset: "0".to_owned(),
+            predict: false,
+            sense: AxisSense::Opposed,
+            aligned: false,
+            name: String::new(),
+        }
+    }
+}
+
+impl Constrain {
+    /// Opens the dialog with nothing picked.
+    pub(crate) fn start(&mut self) {
+        *self = Self { open: true, ..Self::default() };
+    }
+
+    /// A pick in the view: it fills the active selection, then the other one.
+    pub(crate) fn pick(&mut self, session: &Session, occurrence: Occurrence, element: OriginElement) {
+        let selection = Selection { occurrence, geometry: Geometry::origin(element) };
+        if self.slot == 0 {
+            self.first = Some(selection);
+            self.slot = 1;
+        } else {
+            self.second = Some(selection);
+        }
+        if self.predict
+            && let (Some(first), Some(second)) = (&self.first, &self.second)
+            && let Some(kind) = session.predict_relationship(first, second)
+        {
+            self.apply_prediction(kind);
+        }
+    }
+
+    /// Predict Offset and Orientation: the current distance and the solution the layout suggests.
+    fn apply_prediction(&mut self, kind: RelationKind) {
+        match kind {
+            RelationKind::Mate { offset, sense } => {
+                self.kind = Type::Mate;
+                self.sense = sense;
+                self.offset = format!("{:.3}", offset * 1000.0);
+            }
+            RelationKind::Flush { offset } => {
+                self.kind = Type::Flush;
+                self.offset = format!("{:.3}", offset * 1000.0);
+            }
+            RelationKind::Insert { offset, aligned } => {
+                self.kind = Type::Insert;
+                self.aligned = aligned;
+                self.offset = format!("{:.3}", offset * 1000.0);
+            }
+        }
+    }
+
+    /// The constraint the dialog describes, or `None` while a selection or the offset is missing.
+    fn relationship(&self, session: &Session) -> Option<Relationship> {
+        let (first, second) = (self.first?, self.second?);
+        let offset = self.offset.trim().parse::<f64>().ok()? / 1000.0;
+        let kind = match self.kind {
+            Type::Mate => RelationKind::Mate { offset, sense: self.sense },
+            Type::Flush => RelationKind::Flush { offset },
+            Type::Insert => RelationKind::Insert { offset, aligned: self.aligned },
+        };
+        let name = if self.name.trim().is_empty() {
+            let word = match self.kind {
+                Type::Mate => "Mate",
+                Type::Flush => "Flush",
+                Type::Insert => "Insert",
+            };
+            format!("{word}:{}", session.relationships().len() + 1)
+        } else {
+            self.name.trim().to_owned()
+        };
+        Some(Relationship { name, kind, first, second })
+    }
+
+    /// Whether the view is picking for the dialog.
+    pub(crate) fn picking(&self) -> bool {
+        self.open
+    }
+
+    /// The dialog window. Applies and closes as the buttons say.
+    pub(crate) fn window(&mut self, ctx: &egui::Context, session: &mut Session, lang: Lang) {
+        let mut open = self.open;
+        let mut apply = false;
+        let mut ok = false;
+        let mut cancel = false;
+        // Over the properties panel at the right: out of the way of what is being picked in the view.
+        let screen = ctx.content_rect();
+        let start = egui::pos2(screen.right() - 330.0, screen.top() + 200.0);
+        egui::Window::new(tr!(lang, ConstrainTitle))
+            .open(&mut open)
+            .default_pos(start)
+            .default_width(300.0)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    for (kind, name) in [
+                        (Type::Mate, tr!(lang, ConstrainMate)),
+                        (Type::Flush, tr!(lang, ConstrainFlush)),
+                        (Type::Insert, tr!(lang, ConstrainInsert)),
+                    ] {
+                        if ui.selectable_label(self.kind == kind, name).clicked() {
+                            self.kind = kind;
+                        }
+                    }
+                });
+                ui.checkbox(&mut self.predict, tr!(lang, ConstrainPredict));
+                for (slot, label, selection) in
+                    [(0, tr!(lang, ConstrainFirst), self.first), (1, tr!(lang, ConstrainSecond), self.second)]
+                {
+                    ui.horizontal(|ui| {
+                        let text = match selection {
+                            Some(selection) => describe(session, &selection, lang),
+                            None => tr!(lang, ConstrainPick).to_owned(),
+                        };
+                        let name = format!("{label}: {text}");
+                        let button = ui.selectable_label(self.slot == slot, name.clone());
+                        button.widget_info(|| {
+                            egui::WidgetInfo::selected(egui::Role::Button, true, self.slot == slot, &name)
+                        });
+                        if button.clicked() {
+                            self.slot = slot;
+                        }
+                    });
+                }
+                if self.kind == Type::Mate {
+                    ui.horizontal(|ui| {
+                        for (sense, name) in [
+                            (AxisSense::Opposed, tr!(lang, ConstrainOpposed)),
+                            (AxisSense::Aligned, tr!(lang, ConstrainAligned)),
+                            (AxisSense::Undirected, tr!(lang, ConstrainUndirected)),
+                        ] {
+                            if ui.selectable_label(self.sense == sense, name).clicked() {
+                                self.sense = sense;
+                            }
+                        }
+                    });
+                }
+                if self.kind == Type::Insert {
+                    ui.checkbox(&mut self.aligned, tr!(lang, ConstrainAligned));
+                }
+                ui.horizontal(|ui| {
+                    let label = ui.label(tr!(lang, ConstrainOffset));
+                    let field = ui.add(egui::TextEdit::singleline(&mut self.offset).desired_width(80.0));
+                    field.labelled_by(label.id);
+                    ui.label("mm");
+                });
+                let ready = self.relationship(session).is_some();
+                ui.horizontal(|ui| {
+                    if ui.add_enabled(ready, egui::Button::new(tr!(lang, ConstrainOk))).clicked() {
+                        ok = true;
+                    }
+                    if ui.add_enabled(ready, egui::Button::new(tr!(lang, ConstrainApply))).clicked() {
+                        apply = true;
+                    }
+                    if ui.button(tr!(lang, ConstrainCancel)).clicked() {
+                        cancel = true;
+                    }
+                });
+            });
+        if (ok || apply)
+            && let Some(relationship) = self.relationship(session)
+        {
+            // A constraint that cannot be solved is refused; the status bar says why.
+            if session.add_relationship(relationship).is_ok() {
+                // Apply goes on with the next constraint, OK closes.
+                self.first = None;
+                self.second = None;
+                self.slot = 0;
+                self.name.clear();
+                if ok {
+                    open = false;
+                }
+            }
+        }
+        if cancel {
+            open = false;
+        }
+        self.open = open;
+    }
+}
+
+/// "Body1:1 · XY plane" for a selection.
+fn describe(session: &Session, selection: &Selection, lang: Lang) -> String {
+    let name = session
+        .components()
+        .iter()
+        .find(|node| node.occurrence == selection.occurrence)
+        .map_or_else(|| "?".to_owned(), |node| format!("{}:1", node.name));
+    let what = match selection.geometry {
+        Geometry::Plane { .. } => tr!(lang, ConstrainPlane),
+        Geometry::Axis { .. } => tr!(lang, ConstrainAxis),
+        Geometry::Point(_) => tr!(lang, ConstrainPoint),
+        Geometry::Circle { .. } => tr!(lang, ConstrainCircle),
+    };
+    format!("{name} · {what}")
+}
