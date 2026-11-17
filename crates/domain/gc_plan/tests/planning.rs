@@ -117,7 +117,7 @@ fn failures_say_what_went_wrong() {
     let world = wall();
     let space = arena();
     let request = |start: &'static [f64], goals: &'static [Vec<f64>]| Request {
-        space: &arena_static(),
+        space: arena_static(),
         start,
         goals,
         algorithm: Algorithm::RrtConnect,
@@ -154,7 +154,7 @@ fn failures_say_what_went_wrong() {
             Err(Failure::NoPath { stats, nearest_goal_distance }) => {
                 assert!(stats.iterations <= 800, "{algorithm:?}: the budget bounds the work");
                 assert!(
-                    nearest_goal_distance >= 3.5 && nearest_goal_distance < 9.0,
+                    (3.5..9.0).contains(&nearest_goal_distance),
                     "{algorithm:?}: {nearest_goal_distance}"
                 );
             }
