@@ -160,22 +160,27 @@ fn screenshots_for_review() {
 const LEFT: [f64; 6] = [-1.0, 0.2, 0.3, 0.0, 0.5, 0.0];
 const RIGHT: [f64; 6] = [1.0, 0.2, 0.3, 0.0, 0.5, 0.0];
 
-/// Builds a small cell through the ribbon: the sample robot, a pillar in its way, a waypoint on the other
-/// side and a planned path around the pillar.
-fn build_cell(harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>) {
+/// Builds a small cell through the ribbon: a robot, a pillar in its way, a waypoint on the other side
+/// and a planned path around the pillar.
+fn build_cell(
+    harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>,
+    robot: &str,
+    from: [f64; 6],
+    to: [f64; 6],
+) {
     harness.get_by_label("로봇").click();
     harness.run();
-    harness.get_by_label("샘플 로봇").click();
+    harness.get_by_label(robot).click();
     harness.run();
     let robot = harness.state().session.doc().robots().iter().next().unwrap().0;
     let app = harness.state_mut();
-    app.session.jog(robot, &RIGHT);
+    app.session.jog(robot, &to);
     app.session.end_jog();
     harness.run();
     harness.get_by_label("현재 자세").click();
     harness.run();
     let app = harness.state_mut();
-    app.session.jog(robot, &LEFT);
+    app.session.jog(robot, &from);
     app.session.end_jog();
     harness.get_by_label("상자").click();
     harness.run();
@@ -193,7 +198,7 @@ fn a_robot_path_is_planned_through_the_ribbon() {
         .with_pixels_per_point(1.0)
         .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
     harness.run();
-    build_cell(&mut harness);
+    build_cell(&mut harness, "6R 로봇", LEFT, RIGHT);
     let session = &harness.state().session;
     let path = session.doc().paths().iter().next().unwrap().0;
     assert_eq!(session.plan_status(path), gc_session::PlanStatus::Ready, "{:?}", session.plan_error(path));
@@ -243,7 +248,7 @@ fn robot_cell_renders_with_gpu() {
         .wgpu()
         .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
     harness.run();
-    build_cell(&mut harness);
+    build_cell(&mut harness, "6R 로봇", LEFT, RIGHT);
     let image = harness.render().unwrap();
     image.save(out.join("review-5-robot-path.png")).unwrap();
     // Somewhere in the viewport the dark and the orange links of the robot are visible.
@@ -263,6 +268,43 @@ fn robot_cell_renders_with_gpu() {
     app.session.set_playback(Some((path, duration * 0.5)));
     harness.run();
     harness.render().unwrap().save(out.join("review-6-playback.png")).unwrap();
+}
+
+/// The packaged UR5e: its meshes are drawn and a path around the pillar is planned with them.
+#[test]
+fn ur5e_cell_renders_with_gpu() {
+    if gc_test_support::gpu_or_skip("ur5e_cell_renders_with_gpu").is_none() {
+        return;
+    }
+    let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+    std::fs::create_dir_all(&out).unwrap();
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .wgpu()
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    // Elbow up on one side of the pillar, then on the other.
+    let from = [-0.9, -1.3, 1.5, -1.8, -1.57, 0.0];
+    let to = [0.9, -1.3, 1.5, -1.8, -1.57, 0.0];
+    build_cell(&mut harness, "UR5e 로봇", from, to);
+    let session = &harness.state().session;
+    let (robot, _) = session.doc().robots().iter().next().unwrap();
+    let loaded = session.robot_model(robot).unwrap();
+    assert!(loaded.missing.is_empty(), "{:?}", loaded.missing);
+    let path = session.doc().paths().iter().next().unwrap().0;
+    assert_eq!(session.plan_status(path), gc_session::PlanStatus::Ready, "{:?}", session.plan_error(path));
+    assert!(!session.planned(path).unwrap().segments[0].straight, "the pillar is in the way");
+    // The seven link meshes and the pillar: eight draw calls, thousands of triangles.
+    let stats = harness.state().viewport().background().stats();
+    assert_eq!(stats.draw_calls, 8);
+    assert!(stats.triangles > 7000, "{stats:?}");
+    harness.render().unwrap().save(out.join("review-7-ur5e-path.png")).unwrap();
+    let app = harness.state_mut();
+    let duration = app.session.planned(path).unwrap().duration();
+    app.session.set_playback(Some((path, duration * 0.5)));
+    harness.run();
+    harness.render().unwrap().save(out.join("review-8-ur5e-playback.png")).unwrap();
 }
 
 /// File dialogs that always answer with one path.

@@ -59,6 +59,44 @@ struct ImeTest {
     last_shortcut: String,
 }
 
+/// The built-in plugins. Their contributions reach the application only through the registry, the same
+/// way a third-party plugin's would.
+fn builtin_plugins() -> Vec<Box<dyn gc_plugin_api::Plugin>> {
+    vec![Box::new(gc_plugin_ur::UrPlugin)]
+}
+
+/// The bundled sample robot: a six-axis arm described with basic solids.
+const SAMPLE_ROBOT: &str = include_str!("../../../../fixtures/urdf/six_axis.urdf");
+
+/// The robots plugins offer (name and description) and a resolver for the files they refer to.
+fn robot_library() -> (Vec<(String, String)>, gc_session::Resources) {
+    let mut registry = gc_plugin_api::Registry::default();
+    for plugin in builtin_plugins() {
+        if let Err(error) = registry.load(plugin.as_ref()) {
+            log::error!("plugin `{}` was not loaded: {error}", plugin.manifest().id);
+        }
+    }
+    let providers = registry.get(gc_robotics_api::ROBOT_MODEL_PROVIDERS);
+    let mut library = Vec::new();
+    let mut models = Vec::new();
+    for provider in &providers {
+        for info in provider.catalog() {
+            match provider.urdf(&info.id) {
+                Ok(urdf) => {
+                    library.push((info.name.clone(), urdf));
+                    models.push((std::sync::Arc::clone(provider), info.id));
+                }
+                Err(error) => log::error!("robot `{}` is not available: {error}", info.id),
+            }
+        }
+    }
+    library.push(("6R".to_owned(), SAMPLE_ROBOT.to_owned()));
+    let resources: gc_session::Resources = std::sync::Arc::new(move |uri: &str| {
+        models.iter().find_map(|(provider, model)| provider.resource(model, uri).ok())
+    });
+    (library, resources)
+}
+
 /// The application state.
 pub struct GraphCtrlApp {
     options: RunOptions,
@@ -69,6 +107,8 @@ pub struct GraphCtrlApp {
     lang: Lang,
     tab: Tab,
     cell: gc_panels::CellUi,
+    /// The robots that can be added: name and description.
+    library: Vec<(String, String)>,
     expression: String,
     ime: ImeTest,
     dialogs: Box<dyn FileDialogs>,
@@ -84,14 +124,18 @@ impl GraphCtrlApp {
     pub fn new(cc: &eframe::CreationContext<'_>, options: RunOptions) -> Self {
         gc_ui::fonts::install(&cc.egui_ctx);
         gc_ui::install_theme(&cc.egui_ctx);
+        let (library, resources) = robot_library();
+        let mut session = Session::new();
+        session.set_resources(resources);
         Self {
             options,
             frames: 0,
-            session: Session::new(),
+            session,
             viewport: Viewport::new(cc.wgpu_render_state.clone()),
             lang: Lang::default(),
             tab: Tab::Model,
             cell: gc_panels::CellUi::default(),
+            library,
             expression: String::new(),
             ime: ImeTest { dimension: "25 mm".to_owned(), ..ImeTest::default() },
             dialogs: Box::new(NativeDialogs),
@@ -100,6 +144,11 @@ impl GraphCtrlApp {
             quitting: false,
             title: String::new(),
         }
+    }
+
+    /// The viewport, for inspecting what it drew.
+    pub fn viewport(&self) -> &Viewport {
+        &self.viewport
     }
 
     /// Replaces the file dialogs, so that tests can answer them.
@@ -398,7 +447,15 @@ impl eframe::App for GraphCtrlApp {
 
         egui::Panel::top("menu").show(ui, |ui| self.menu(ui));
         egui::Panel::top("ribbon").show(ui, |ui| {
-            ribbon::show(ui, &mut self.tab, &mut self.session, &mut self.viewport, &mut self.cell, lang);
+            ribbon::show(
+                ui,
+                &mut self.tab,
+                &mut self.session,
+                &mut self.viewport,
+                &mut self.cell,
+                &self.library,
+                lang,
+            );
         });
         egui::Panel::bottom("status").show(ui, |ui| {
             gc_panels::status_bar(

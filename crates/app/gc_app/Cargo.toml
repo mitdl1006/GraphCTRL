@@ -20,6 +20,7 @@ gc_sketch.workspace = true
 gc_tools.workspace = true
 gc_draw.workspace = true
 gc_plugin_api.workspace = true
+gc_plugin_ur.workspace = true
 gc_robotics_api.workspace = true
 gc_ui.workspace = true
 gc_viewport.workspace = true

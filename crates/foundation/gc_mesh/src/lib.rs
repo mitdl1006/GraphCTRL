@@ -9,6 +9,7 @@
 mod bvh;
 mod data;
 pub mod primitives;
+pub mod stl;
 mod store;
 
 pub use bvh::{MeshBvh, RayHit};

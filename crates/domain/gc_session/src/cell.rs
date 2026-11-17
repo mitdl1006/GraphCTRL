@@ -14,9 +14,10 @@ use gc_doc::{
     Waypoint, WaypointTarget,
 };
 use gc_math::{DPose3, DQuat, DVec3, pose_from_xyz_rpy};
+use gc_mesh::MeshData;
 use gc_motion::{Goal, MotionPlan, MotionRequest, Obstacle, RobotScene, plan_motion};
 use gc_plan::{Algorithm, NeverCancel, Options};
-use gc_robot::{Chain, RobotModel};
+use gc_robot::{Chain, RobotModel, Shape};
 use gc_sketch::{SkPoint, Space};
 
 use crate::Session;
@@ -33,6 +34,20 @@ pub const PLANNERS: [(&str, Algorithm); 5] = [
 /// The distance robot links keep from obstacles, metres.
 pub const PADDING: f64 = 0.005;
 
+/// Supplies the bytes of a file a robot description refers to (e.g. `package://.../forearm.stl`).
+pub type Resources = Arc<dyn Fn(&str) -> Option<Vec<u8>> + Send + Sync>;
+
+/// A mesh of a robot link, ready to draw.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MeshRef {
+    /// Equal for equal meshes: the content hash.
+    pub key: u64,
+    /// The radius of a sphere around the mesh's origin that contains it.
+    pub radius: f64,
+    /// The triangles.
+    pub data: Arc<MeshData>,
+}
+
 /// A robot description that was read successfully.
 #[derive(Debug)]
 pub struct LoadedRobot {
@@ -41,6 +56,66 @@ pub struct LoadedRobot {
     pub model: Arc<RobotModel>,
     /// The chain that is jogged and planned for.
     pub chain: Chain,
+    /// Mesh files as stored, by the name the description uses.
+    files: BTreeMap<String, Arc<MeshData>>,
+    /// Meshes at the scale a geometry asks for, by name and scale.
+    scaled: BTreeMap<String, MeshRef>,
+    /// Mesh files the description refers to that could not be supplied or read.
+    pub missing: Vec<String>,
+}
+
+fn scaled_key(uri: &str, scale: [f64; 3]) -> String {
+    format!("{uri}|{scale:?}")
+}
+
+impl LoadedRobot {
+    /// A mesh file as stored.
+    pub fn file(&self, uri: &str) -> Option<Arc<MeshData>> {
+        self.files.get(uri).cloned()
+    }
+
+    /// A mesh at the scale a geometry asks for.
+    pub fn mesh(&self, uri: &str, scale: [f64; 3]) -> Option<&MeshRef> {
+        self.scaled.get(&scaled_key(uri, scale))
+    }
+
+    fn read_meshes(&mut self, resources: Option<&Resources>) {
+        let model = Arc::clone(&self.model);
+        let geometries = model.links.iter().flat_map(|link| link.visuals.iter().chain(&link.collisions));
+        for geometry in geometries {
+            let Shape::Mesh { uri, scale } = &geometry.shape else { continue };
+            if self.missing.contains(uri) || self.scaled.contains_key(&scaled_key(uri, *scale)) {
+                continue;
+            }
+            let file = match self.files.get(uri) {
+                Some(file) => Some(Arc::clone(file)),
+                None => resources
+                    .and_then(|resolve| resolve(uri))
+                    .and_then(|bytes| gc_mesh::stl::parse(&bytes).ok())
+                    .map(Arc::new),
+            };
+            let Some(file) = file else {
+                self.missing.push(uri.clone());
+                continue;
+            };
+            self.files.insert(uri.clone(), Arc::clone(&file));
+            #[allow(clippy::cast_possible_truncation, reason = "mesh coordinates are f32")]
+            let factors = scale.map(|f| f as f32);
+            let positions: Vec<[f32; 3]> = file
+                .positions()
+                .iter()
+                .map(|p| [p[0] * factors[0], p[1] * factors[1], p[2] * factors[2]])
+                .collect();
+            let Ok(data) = MeshData::new(positions, file.indices().to_vec()) else {
+                self.missing.push(uri.clone());
+                continue;
+            };
+            let bounds = data.aabb();
+            let radius = bounds.min.abs().max(bounds.max.abs()).length();
+            let mesh = MeshRef { key: data.content_hash(), radius, data: Arc::new(data) };
+            self.scaled.insert(scaled_key(uri, *scale), mesh);
+        }
+    }
 }
 
 /// A planned motion through all waypoints of a path.
@@ -111,6 +186,7 @@ pub(crate) struct CellState {
     body: Option<(Id<Body>, Body)>,
     plans: BTreeMap<Id<MotionPath>, Planned>,
     playback: Option<(Id<MotionPath>, f64)>,
+    resources: Option<Resources>,
 }
 
 impl CellState {
@@ -119,7 +195,8 @@ impl CellState {
         self.robots.retain(|id, loaded| doc.get(*id).is_some_and(|r| r.urdf == loaded.urdf));
         for (id, robot) in doc.robots().iter() {
             if !self.robots.contains_key(&id)
-                && let Ok(loaded) = load(&robot.urdf, Some((&robot.base_link, &robot.tip_link)))
+                && let Ok(loaded) =
+                    load(&robot.urdf, Some((&robot.base_link, &robot.tip_link)), self.resources.as_ref())
             {
                 self.robots.insert(id, Arc::new(loaded.0));
             }
@@ -138,7 +215,11 @@ impl CellState {
 }
 
 /// Reads a robot description and picks its planning chain. Returns the tip link's name with it.
-fn load(urdf: &str, chain: Option<(&str, &str)>) -> Result<(LoadedRobot, String, String), String> {
+fn load(
+    urdf: &str,
+    chain: Option<(&str, &str)>,
+    resources: Option<&Resources>,
+) -> Result<(LoadedRobot, String, String), String> {
     let (model, _) = gc_robot::import(urdf).map_err(|findings| {
         findings.iter().map(|f| format!("{}:{}: {}", f.line, f.col, f.message)).collect::<Vec<_>>().join("\n")
     })?;
@@ -162,7 +243,16 @@ fn load(urdf: &str, chain: Option<(&str, &str)>) -> Result<(LoadedRobot, String,
             (chain, root, tip)
         }
     };
-    Ok((LoadedRobot { urdf: urdf.to_owned(), model: Arc::new(model), chain }, base, tip))
+    let mut loaded = LoadedRobot {
+        urdf: urdf.to_owned(),
+        model: Arc::new(model),
+        chain,
+        files: BTreeMap::new(),
+        scaled: BTreeMap::new(),
+        missing: Vec::new(),
+    };
+    loaded.read_meshes(resources);
+    Ok((loaded, base, tip))
 }
 
 fn pose_of(placement: &Placement) -> DPose3 {
@@ -184,6 +274,13 @@ impl Session {
         self.execute(&Command::Cell(op))
     }
 
+    /// Sets where the files robot descriptions refer to come from, and reloads the robots.
+    pub fn set_resources(&mut self, resources: Resources) {
+        self.cell.resources = Some(resources);
+        self.cell.robots.clear();
+        self.cell.sync(&self.doc);
+    }
+
     /// The loaded model of a robot; `None` when its description could not be read.
     pub fn robot_model(&self, robot: Id<Robot>) -> Option<&Arc<LoadedRobot>> {
         self.cell.robots.get(&robot)
@@ -192,7 +289,7 @@ impl Session {
     /// Adds a robot from a description (URDF text) at the world origin. The error lists what is wrong
     /// with the description.
     pub fn add_robot(&mut self, name: &str, urdf: &str) -> Result<Id<Robot>, String> {
-        let (loaded, base_link, tip_link) = load(urdf, None)?;
+        let (loaded, base_link, tip_link) = load(urdf, None, self.cell.resources.as_ref())?;
         let robot = Robot {
             name: name.to_owned(),
             urdf: urdf.to_owned(),
@@ -426,7 +523,7 @@ impl Session {
             pose_of(&robot.placement),
             &obstacles,
             PADDING,
-            &|_| None,
+            &|uri| loaded.file(uri),
         )
         .map_err(|e| e.to_string())?;
         let mut start = robot.joints.clone();

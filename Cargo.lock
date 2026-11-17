@@ -1335,6 +1335,7 @@ dependencies = [
  "gc_jobs",
  "gc_panels",
  "gc_plugin_api",
+ "gc_plugin_ur",
  "gc_render",
  "gc_robotics_api",
  "gc_session",
@@ -1526,6 +1527,7 @@ dependencies = [
  "gc_math",
  "gc_mesh",
  "gc_plugin_api",
+ "gc_robot",
  "gc_robotics_api",
  "thiserror 2.0.21",
 ]

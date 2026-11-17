@@ -24,6 +24,9 @@ pub enum MeshError {
     /// A coordinate is NaN or infinite.
     #[error("vertex {0} has a coordinate that is not a finite number")]
     NonFinite(usize),
+    /// A mesh file could not be read.
+    #[error("the mesh file could not be read: {0}")]
+    Unreadable(&'static str),
     /// There are normals, but not one per vertex.
     #[error("{normals} normals for {vertices} vertices")]
     NormalCount {

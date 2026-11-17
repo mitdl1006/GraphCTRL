@@ -31,3 +31,10 @@
 - 이전: `gc_motion`은 플래너를 `MotionPlanner` 트레잇 객체로만 호출하고, 내장 플래너는 `gc_plugin_planners`가 등록한다.
 - 변경: 지금은 `gc_motion`이 `gc_plan`을 직접 호출하고, 경로 문서에는 플래너 id 문자열(`rrt_connect` 등)만 저장한다. 계획도 작업 스레드가 아니라 호출한 자리에서 동기로 돈다.
 - 근거: 로봇·경로가 화면에 보이는 세로 조각을 먼저 끝내기 위해서다. 문서에는 id만 들어가므로 나중에 레지스트리 조회로 바꿔도 파일 형식은 그대로다.
+
+## 2026-11-17 — UR5e 기술 파일을 `gen-ur` 없이 먼저 넣음
+
+- 이전: `cargo xtask gen-ur`가 공식 YAML 4종에서 UR3e/5e/10e/16e URDF를 결정적으로 생성하고, STL은 `gc_plugin_mesh`(mesh-loader)가 읽는다.
+- 변경: UR5e 하나만, 검증된 기구학 픽스처에 `visual_parameters.yaml`의 메시 오프셋을 붙인 URDF(`assets/ur/urdf/ur5e.urdf`)를 커밋했다. STL은 `gc_mesh::stl`의 자체 리더로 읽는다(의존성 없음).
+- 근거: 사용자의 첫 대상인 UR을 화면에서 계획·재생까지 먼저 확인하기 위해서다. 메시 배치는 테스트가 기하로 검증한다. 나머지 기종과 생성기는 그대로 할 일로 남는다.
+

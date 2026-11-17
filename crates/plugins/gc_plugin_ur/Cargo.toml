@@ -17,3 +17,6 @@ gc_math.workspace = true
 gc_linalg.workspace = true
 gc_mesh.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+gc_robot.workspace = true

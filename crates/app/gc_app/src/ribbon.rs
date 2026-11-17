@@ -42,6 +42,7 @@ pub(crate) fn show(
     session: &mut Session,
     viewport: &mut Viewport,
     cell: &mut CellUi,
+    library: &[(String, String)],
     lang: Lang,
 ) {
     let sketching = session.active_sketch().is_some();
@@ -116,7 +117,7 @@ pub(crate) fn show(
                     }
                 });
             }
-            Tab::Robot => robot_tab(ui, session, viewport, cell, lang),
+            Tab::Robot => robot_tab(ui, session, viewport, cell, library, lang),
             Tab::View => {
                 ribbon_group(ui, tr!(lang, GroupViews), |ui| {
                     for (view, label) in [
@@ -147,26 +148,28 @@ pub(crate) fn show(
     });
 }
 
-/// The bundled sample robot: a six-axis arm described with basic solids.
-const SAMPLE_ROBOT: &str = include_str!("../../../../fixtures/urdf/six_axis.urdf");
-
 fn robot_tab(
     ui: &mut egui::Ui,
     session: &mut Session,
     viewport: &mut Viewport,
     cell: &mut CellUi,
+    library: &[(String, String)],
     lang: Lang,
 ) {
     let robot = session.doc().robots().iter().next().map(|(id, _)| id);
     let path = session.doc().paths().iter().last().map(|(id, _)| id);
     // Failures of these commands are shown in the status bar.
     ribbon_group(ui, tr!(lang, GroupAdd), |ui| {
-        if ribbon_button(ui, Icon::View, tr!(lang, CmdAddRobot), false, robot.is_none()).clicked() {
-            let name = format!("Robot{}", session.doc().robots().len() + 1);
-            if let Err(error) = session.add_robot(&name, SAMPLE_ROBOT) {
-                log::error!("the sample robot could not be added: {error}");
+        // One robot per cell for now: the panels show the first one.
+        for (name, urdf) in library {
+            let label = tr!(lang, CmdAddRobot, name);
+            if ribbon_button(ui, Icon::View, &label, false, robot.is_none()).clicked() {
+                let name = format!("{name}_{}", session.doc().robots().len() + 1);
+                if let Err(error) = session.add_robot(&name, urdf) {
+                    log::error!("the robot could not be added: {error}");
+                }
+                viewport.fit(session, [1000.0, 700.0]);
             }
-            viewport.fit(session, [1000.0, 700.0]);
         }
         let at = |x: f64, z: f64| Placement { xyz: [x, 0.0, z], rpy: [0.0; 3] };
         for (icon, label, solid, placement) in [

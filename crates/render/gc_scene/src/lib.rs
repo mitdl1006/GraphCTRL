@@ -5,11 +5,13 @@
 
 #![forbid(unsafe_code)]
 
+use std::sync::Arc;
+
 use gc_doc::Solid;
 use gc_math::{Aabb, DPose3, DVec3, pose_from_xyz_rpy};
 use gc_mesh::{MeshData, MeshError, primitives};
 use gc_robot::Shape;
-use gc_session::{PlanStatus, Session};
+use gc_session::{MeshRef, PlanStatus, Session};
 
 /// A basic solid, centred on its own origin. Solids with equal sizes share one uploaded mesh.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -63,11 +65,46 @@ impl Primitive {
     }
 }
 
+/// What a solid looks like.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Shape3 {
+    /// A basic solid.
+    Primitive(Primitive),
+    /// A mesh from a file.
+    Mesh(MeshRef),
+}
+
+impl Shape3 {
+    /// A key that is equal for equal shapes; the renderer uploads each key once.
+    pub fn key(&self) -> u64 {
+        match self {
+            Self::Primitive(primitive) => primitive.key(),
+            Self::Mesh(mesh) => mesh.key,
+        }
+    }
+
+    /// The triangles of the shape.
+    pub fn mesh(&self) -> Result<Arc<MeshData>, MeshError> {
+        match self {
+            Self::Primitive(primitive) => primitive.mesh().map(Arc::new),
+            Self::Mesh(mesh) => Ok(Arc::clone(&mesh.data)),
+        }
+    }
+
+    /// The radius of a sphere around the origin that contains the shape.
+    pub fn radius(&self) -> f64 {
+        match self {
+            Self::Primitive(primitive) => primitive.radius(),
+            Self::Mesh(mesh) => mesh.radius,
+        }
+    }
+}
+
 /// One solid to draw.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Solid3 {
     /// Its shape.
-    pub shape: Primitive,
+    pub shape: Shape3,
     /// Its pose in the world.
     pub pose: DPose3,
     /// Linear RGBA.
@@ -120,7 +157,7 @@ impl Scene {
                 Solid::Sphere { radius } => Primitive::Sphere(radius),
             };
             let pose = pose_from_xyz_rpy(body.placement.xyz, body.placement.rpy);
-            scene.solids.push(Solid3 { shape, pose, color: BODY });
+            scene.solids.push(Solid3 { shape: Shape3::Primitive(shape), pose, color: BODY });
         }
         for (id, _) in doc.robots().iter() {
             let (Some(loaded), Some(poses)) = (session.robot_model(id), session.link_poses(id)) else {
@@ -131,13 +168,16 @@ impl Scene {
                 let color = if index % 2 == 0 { LINK_DARK } else { LINK_LIGHT };
                 for geometry in geometries {
                     let shape = match &geometry.shape {
-                        Shape::Box(size) => Primitive::Box(*size),
+                        Shape::Box(size) => Shape3::Primitive(Primitive::Box(*size)),
                         Shape::Cylinder { radius, length } => {
-                            Primitive::Cylinder { radius: *radius, length: *length }
+                            Shape3::Primitive(Primitive::Cylinder { radius: *radius, length: *length })
                         }
-                        Shape::Sphere(radius) => Primitive::Sphere(*radius),
-                        // Mesh files are drawn once the mesh importer supplies them.
-                        Shape::Mesh { .. } => continue,
+                        Shape::Sphere(radius) => Shape3::Primitive(Primitive::Sphere(*radius)),
+                        // A mesh file that could not be supplied is listed as missing and not drawn.
+                        Shape::Mesh { uri, scale } => match loaded.mesh(uri, *scale) {
+                            Some(mesh) => Shape3::Mesh(mesh.clone()),
+                            None => continue,
+                        },
                     };
                     scene.solids.push(Solid3 { shape, pose: *link_pose * geometry.pose, color });
                 }

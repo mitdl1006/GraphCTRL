@@ -3,7 +3,7 @@
 #![allow(clippy::float_cmp, clippy::unwrap_used, clippy::panic, reason = "test code")]
 
 use gc_doc::{Placement, Solid};
-use gc_scene::{Primitive, Scene};
+use gc_scene::{Primitive, Scene, Shape3};
 use gc_session::Session;
 
 #[test]
@@ -20,7 +20,7 @@ fn robot_links_bodies_and_waypoints_are_placed_in_the_world() {
     let scene = Scene::of(&session);
     // One solid per link with geometry (seven) and the body.
     assert_eq!(scene.solids.len(), 8);
-    assert_eq!(scene.solids[0].shape, Primitive::Sphere(0.1));
+    assert_eq!(scene.solids[0].shape, Shape3::Primitive(Primitive::Sphere(0.1)));
     assert_eq!(scene.solids[0].pose.translation.to_array(), [1.0, 2.0, 3.0]);
     // The last link's solid sits just below the tool tip, which is where the waypoint is.
     let tip = session.waypoint_pose(waypoint).unwrap().translation;

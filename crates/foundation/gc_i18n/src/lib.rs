@@ -268,8 +268,8 @@ messages! {
     GroupAdd => ("추가", "Add"),
     /// Ribbon group: waypoints and paths.
     GroupPath => ("경로", "Path"),
-    /// Command: add the bundled sample robot.
-    CmdAddRobot => ("샘플 로봇", "Sample Robot"),
+    /// Command: add a robot from the library. `{0}` is the model name.
+    CmdAddRobot => ("{0} 로봇", "{0} Robot"),
     /// Command: add a box.
     CmdAddBox => ("상자", "Box"),
     /// Command: add a cylinder.
