@@ -114,7 +114,7 @@ fn screenshots_for_review() {
         .with_pixels_per_point(1.0)
         .wgpu()
         .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
-    let mut shot = |harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, name: &str| {
+    let shot = |harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, name: &str| {
         harness.run();
         harness.render().unwrap().save(out.join(name)).unwrap();
     };
