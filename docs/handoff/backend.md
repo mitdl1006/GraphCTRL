@@ -1,5 +1,30 @@
 # 백엔드 인계 (2026-11-17)
 
+## 구속 오류 대화상자(Design Doctor식) — 프론트엔드용 사용 예
+
+관계 추가·수정·배치 변경이 `EditError::Unsolvable{ids, names}`로 거부되면:
+
+```rust
+match session.add_relationship(candidate.clone()) {
+    Ok(_) => {}
+    Err(EditError::Unsolvable { names, .. }) => {
+        // 1. 무엇이 문제인지: 거부 메시지(이름 포함)와, 하나만 억제하면 풀리는 기존 관계들.
+        let culprits = session.conflicting_relationships(Some(&candidate));
+        // 2. 대화상자: "Mate:1, Flush:2를 함께 만족할 수 없습니다" + culprits 행마다 [억제] [편집] [삭제].
+        //    culprits가 비면 "한 관계만으로는 풀리지 않음 — 새 관계를 바꾸세요"(둘 이상이 엉킨 경우).
+        // 3. [억제]: session.set_relationship_suppressed(id, true) 뒤 다시 add_relationship(candidate).
+        //    [편집]: 구속 대화상자를 그 관계로 열기. [삭제]: session.delete_relationship(id).
+    }
+    Err(other) => { /* 다른 오류 */ }
+}
+```
+
+- 배치 이동(기즈모·숫자)이 거부된 경우는 `conflicting_relationships(None)`이 비어 있다(지금 상태는 만족되므로) — 그 이동이 고정된 관계와
+  맞지 않는다는 뜻이니 "이 컴포넌트는 구속돼 있어 그 위치로 갈 수 없음"과 `relationships()` 중 그 컴포넌트를 쓰는 것을 보여 주면 된다
+  (`r.first.occurrence.owner() == item || r.second.occurrence.owner() == item`).
+- 억제된 관계는 `doc.is_inactive(id.erase())`가 true — Relationships 폴더에서 회색·취소선(원문 A60: 억제 요소 표시).
+- 브라우저 상태 점은 `component_status(item)`(Full/Under/Unknown), 관계 행 표시는 `relationship_status(id)`(Full/Under/Sick).
+
 ## 2026-11-18 — 구속 한계(Limits) · 구속 오류 회복
 
 - `Relationship.limits: Option<Limits{min, max, resting}>`(+`Relationship::new(name, kind, first, second)` — app·테스트 리터럴을 생성자로 바꿈,
