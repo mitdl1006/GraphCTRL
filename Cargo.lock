@@ -1906,6 +1906,7 @@ version = "0.1.0"
 dependencies = [
  "egui",
  "egui-notify",
+ "egui_kittest",
  "egui_ltreeview",
  "egui_tiles",
  "gc_i18n",
