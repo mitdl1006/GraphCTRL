@@ -34,9 +34,9 @@ pub use command::{
     Applied, Command, Created, DimSlot, EditError, EndSnap, SketchOp, TangentArc, apply, tangent_arc,
 };
 pub use design::{
-    Assembly, AssemblyMesh, AssemblyPart, ComponentFlag, Components, Extent, Extrude, Feature, FeatureKind,
-    Occurrence, OriginElement, OriginPlane, PlaneRef, PlaneSource, PointRef, Timeline, WorkFeature,
-    WorkGeometry,
+    Assembly, AssemblyMesh, AssemblyPart, ComponentFlag, Components, ContactSolver, Extent, Extrude, Feature,
+    FeatureKind, Occurrence, OriginElement, OriginPlane, PlaneRef, PlaneSource, PointRef, Timeline,
+    WorkFeature, WorkGeometry,
 };
 pub use document::{ChangeSet, Contents, DocDelta, Document, Frame, FrameKind, Param, Store, Table};
 pub use gc_sketch::Sketch;
@@ -45,8 +45,8 @@ pub use pattern::{ComponentPattern, PatternDirection, PatternElement, PatternLay
 pub use placement::{ComponentOrigin, WorkShape};
 pub use project::ProjectSource;
 pub use relate::{
-    AngleSolution, AxisSense, ComponentStatus, Dof, Geometry, Limits, RelationKind, RelationStatus,
-    Relationship, Selection, Unsolved,
+    AngleSolution, AxisSense, ComponentStatus, Dof, DofAxis, DofSymbol, Geometry, Limits, RelationKind,
+    RelationStatus, Relationship, Selection, Unsolved,
 };
 pub use replicate::Replacement;
 pub use representation::{PositionalRepresentation, Representations, ViewRepresentation};

@@ -1,5 +1,49 @@
 # 백엔드 인계 (2026-11-17)
 
+## 2026-11-18 — 대형 메시 성능(리드 ③)
+
+`bench_scene`에 "Large meshes" 표 추가(`--meshes 20 --triangles 100000` 기본, `cargo xtask bench-quality`가 보고서에 덧붙임).
+처음 돌렸을 때 접촉 구동 한 단계 21 s, Measure 103 ms, Interference(190쌍) 200 s — 원인과 수정:
+- gc_collide가 질의마다 TriMesh(BVH)를 새로 만들었다 → 메시별 공유 캐시(`MESH_SHAPES`, 메시가 사라지면 항목도 정리),
+  세션이 메시 파일을 읽을 때 `gc_collide::prepare_mesh`로 미리 만든다(드래그·구동 중이 아니라 불러올 때 비용).
+- 간섭이 `closest`(여백 무한, 큰 메시 둘 사이 전체 거리 계산)로 겹침을 판정 → `Geometry::intersects`(AABB 선검사 + intersection_test).
+  `penetration`도 AABB 선검사.
+- 접촉 솔버: 솔버가 반올림만큼 건드린 컴포넌트까지 "움직임"으로 셌다 → 실제로 움직인 것만; 이미 겹쳐 있던 쌍은 더 깊어질 때만 접촉.
+결과(이 샌드박스, release): 프레임 질의 p95 0.09 ms, 드래그 0.06 ms, 풀이 0.01 ms, 접촉 구동 한 단계 2.5–4 ms, Measure 0.05 ms,
+Interference 190쌍 ~0.12–0.15 s(명령), 0.15 m 구동을 한 번에(2 mm × ~50 단계, 접촉 정지) ~0.26 s.
+남은 것: 메시 20개 추가(파일 읽기 + BVH) ~1.3 s가 동기 — 불러오기 작업(job)으로 옮기면 좋다. 구동 대화상자는 프레임마다 값을 조금씩 넘길 것.
+어셈블리(GLB/STEP) 부품은 세션의 간섭·측정·접촉 대상이 아니라 이 표에 없음(구속 풀이는 포즈만 써서 메시 크기와 무관).
+
+## 2026-11-18 — 자유도(DOF) 기호 API(리드 ②)
+
+근거(원문): Degrees of freedom in assemblies `GUID-6E131E5A-438B-4008-94F3-D3A3E92EF44C.htm`,
+View degrees of freedom in assemblies `GUID-3BCBF614-CF92-4980-A965-80AEAFEF768E.htm`.
+- `doc.dof_symbol(item) / session.dof_symbol(item) -> Option<DofSymbol{origin, translations: Vec<[f64;3]>(단위 방향),
+  rotations: Vec<DofAxis{point, direction}>, relative_to: Vec<AnyId>}>`. 다른 컴포넌트는 고정으로 보고, 구속 야코비안의 영공간에서
+  순수 이동 방향을 먼저 뽑고, 남은 운동을 나사축(점 = 원점 + ω×v/|ω|²)으로 낸다 — 힌지는 축이 힌지 선 위에 온다. 개수는 `component_dof`와 같다.
+  `relative_to` = 원문의 큐브(덜 구속된 부품에 상대 구속된 경우, 그 부품들).
+- 표시 상태: iProperties Occurrence 탭 체크 = `CellOp::SetDofShown{items, on}`(세션 `set_dof_shown`), View 탭 전체 = `CellOp::SetDofShownAll(bool)`.
+  `doc.dof_shown(item)`, 그릴 것: `session.dof_symbols() -> Vec<(item, DofSymbol)>`(억제 제외).
+- 기호 모양(화살표·원호)은 원문에 그림만 있어 프론트엔드 결정. 성능: 기호 하나마다 관계를 모으므로 수백 개를 동시에 켜면 느릴 수 있음(필요하면 캐시).
+- 테스트 `gc_session/tests/dof_symbol.rs`(4).
+
+## 2026-11-18 — 접촉 솔버(Contact Solver, 리드 ①)
+
+근거(원문): Detect contact between assembly components `GUID-FA1A8282-3A7E-45BE-8DB3-F637FB1C3292.htm`,
+About the Contact Solver and Component Collision `GUID-0BBD4ACE-7BD1-40BF-A011-74416B229035.htm`.
+- 저장: `Components.contact_set`(Occurrence), `Components.contact_solver: ContactSolver::{Off(기본), ContactSet, All}`(Interactive Contact).
+  `CellOp::SetContactSet{items, on}`, `CellOp::SetContactSolver(mode)`; 세션 `set_contact_set`, `set_contact_solver`.
+  문서 `contact_set()`, `contact_solver()`, `in_contact_set(item)`, `contact_participants()`(숨김·비활성·억제 제외 — 원문).
+- 구동: 솔버가 켜져 있고 참가자가 둘 이상이면 `drive_relationship`이 현재 값에서 목표까지 2 mm/1° 단계로 진행.
+  접촉 시 밀 수 있는 컴포넌트(바디, 접지 아님, 활성 관계 없음)는 침투 깊이만큼 법선 방향으로 밀고(연쇄 가능),
+  밀 수 없으면(접지·관계로 묶임·구동 중·로봇) 직전 값에서 멈춤. `session.contact_stop() -> Option<ContactStop{value, first, second}>`,
+  `contact_pushed()`. 원문: "contact can push another component … exception … cannot move (grounded) → stops".
+- 드래그: `preview_body`가 집합 안 바디면 같은 규칙(멈추면 미리보기 위치 유지), `end_body_preview`가 밀린 것까지 `CellOp::MoveComponents` 한 undo로 커밋.
+- gc_collide `Geometry::penetration(&other, tol) -> Option<Penetration{depth, normal}>`(parry contact).
+- 아직: 어셈블리 메시 참가(세션에 형상 없음), 밀린 부품의 회전(병진만), Surface Complexity 설정, 별도 Collision Detection 옵션(구동 시 충돌 정지 —
+  접촉 솔버 밖의 간섭으로 멈추기)은 프론트엔드 Drive 대화상자 설계 후.
+- 테스트 `gc_session/tests/contact.rs`(3), gc_collide `penetration_gives_the_depth_and_the_way_out`.
+
 ## 2026-11-18 — 컴포넌트 미러·복사·교체(리드 ②③)
 
 근거(원문, `https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/`):

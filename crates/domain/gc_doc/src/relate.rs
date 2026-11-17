@@ -1202,6 +1202,90 @@ fn rank(jac: &[f64], m: usize, n: usize, columns: &[usize]) -> usize {
     basis.len()
 }
 
+/// The Jacobian (row-major, `m × 6`) of the residuals of the relationships on a component with respect
+/// to a small slide (world X, Y, Z) and turn (about world axes through its origin); `None` when no
+/// relationship touches it.
+fn dof_jacobian(gathered: Option<&(Vec<Owner>, Vec<Term>)>, item: AnyId) -> Option<(Vec<f64>, usize)> {
+    let (owners, terms) = gathered?;
+    let index = owners.iter().position(|o| o.item == item)?;
+    let terms: Vec<&Term> = terms.iter().filter(|t| t.owners.contains(&index)).collect();
+    let mut poses: Vec<DPose3> = owners.iter().map(|o| o.pose).collect();
+    let residuals =
+        |poses: &[DPose3]| -> Vec<f64> { terms.iter().flat_map(|t| term_residuals(t, poses)).collect() };
+    let base = residuals(&poses);
+    let m = base.len();
+    let h = 1e-7;
+    let mut jac = vec![0.0; m * 6];
+    for p in 0..6 {
+        let mut step = [0.0; 6];
+        step[p] = h;
+        let saved = poses[index];
+        poses[index] = stepped(&saved, &step);
+        let moved = residuals(&poses);
+        poses[index] = saved;
+        for row in 0..m {
+            jac[row * 6 + p] = (moved[row] - base[row]) / h;
+        }
+    }
+    Some((jac, m))
+}
+
+/// An orthonormal basis of the vectors (of length `n`) that every row leaves at zero, by Gram–Schmidt with
+/// the same tolerance as [`rank`]; the basis comes from the unit vectors in order, so it is stable.
+fn null_space(rows: &[Vec<f64>], n: usize) -> Vec<Vec<f64>> {
+    let mut basis: Vec<Vec<f64>> = Vec::new();
+    let orthogonalise = |v: &mut Vec<f64>, basis: &[Vec<f64>]| {
+        for b in basis {
+            let dot: f64 = v.iter().zip(b).map(|(x, y)| x * y).sum();
+            v.iter_mut().zip(b).for_each(|(x, y)| *x -= dot * y);
+        }
+        v.iter().map(|x| x * x).sum::<f64>().sqrt()
+    };
+    for row in rows {
+        let scale = row.iter().map(|x| x * x).sum::<f64>().sqrt();
+        if scale < 1e-6 {
+            continue;
+        }
+        let mut v: Vec<f64> = row.iter().map(|x| x / scale).collect();
+        let norm = orthogonalise(&mut v, &basis);
+        if norm > 1e-6 {
+            basis.push(v.iter().map(|x| x / norm).collect());
+        }
+    }
+    let fixed = basis.len();
+    for k in 0..n {
+        let mut v = vec![0.0; n];
+        v[k] = 1.0;
+        let norm = orthogonalise(&mut v, &basis);
+        if norm > 1e-6 {
+            basis.push(v.iter().map(|x| x / norm).collect());
+        }
+    }
+    basis.split_off(fixed)
+}
+
+/// An axis a component can still turn about: a point on it and its direction (world).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DofAxis {
+    /// A point on the axis.
+    pub point: [f64; 3],
+    /// Its unit direction.
+    pub direction: [f64; 3],
+}
+
+/// What the degrees-of-freedom symbol of a component shows.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DofSymbol {
+    /// Where the symbol stands: the component's origin (world).
+    pub origin: [f64; 3],
+    /// Unit directions it can still slide along (0 to 3).
+    pub translations: Vec<[f64; 3]>,
+    /// Axes it can still turn about (0 to 3).
+    pub rotations: Vec<DofAxis>,
+    /// Components it is constrained to that are not fully constrained themselves (the symbol's cube).
+    pub relative_to: Vec<AnyId>,
+}
+
 impl Document {
     /// The freedom a component has left under the relationships, the other components held still.
     /// Grounded: none; untouched by relationships: all six. `None` when it is not a component that moves.
@@ -1216,32 +1300,88 @@ impl Document {
         if self.component_flag(Occurrence::Item(item), ComponentFlag::Grounded) {
             return Dof { total: 0, translation: 0 };
         }
-        let free = Dof { total: 6, translation: 3 };
-        let Some((owners, terms)) = gathered else { return free };
-        let Some(index) = owners.iter().position(|o| o.item == item) else { return free };
-        let terms: Vec<&Term> = terms.iter().filter(|t| t.owners.contains(&index)).collect();
-        let mut poses: Vec<DPose3> = owners.iter().map(|o| o.pose).collect();
-        let residuals =
-            |poses: &[DPose3]| -> Vec<f64> { terms.iter().flat_map(|t| term_residuals(t, poses)).collect() };
-        let base = residuals(&poses);
-        let m = base.len();
-        let h = 1e-7;
-        let mut jac = vec![0.0; m * 6];
-        for p in 0..6 {
-            let mut step = [0.0; 6];
-            step[p] = h;
-            let saved = poses[index];
-            poses[index] = stepped(&saved, &step);
-            let moved = residuals(&poses);
-            poses[index] = saved;
-            for row in 0..m {
-                jac[row * 6 + p] = (moved[row] - base[row]) / h;
-            }
-        }
+        let Some((jac, m)) = dof_jacobian(gathered, item) else { return Dof { total: 6, translation: 3 } };
         let fixed = rank(&jac, m, 6, &[0, 1, 2, 3, 4, 5]);
         let fixed_translation = rank(&jac, m, 6, &[0, 1, 2]);
         #[allow(clippy::cast_possible_truncation, reason = "ranks are at most 6")]
         Dof { total: (6 - fixed) as u8, translation: (3 - fixed_translation) as u8 }
+    }
+
+    /// The degrees-of-freedom symbol of a component (Inventor 2026 help, View degrees of freedom in
+    /// assemblies, GUID-3BCBF614-CF92-4980-A965-80AEAFEF768E; Degrees of freedom in assemblies,
+    /// GUID-6E131E5A-438B-4008-94F3-D3A3E92EF44C): the directions it can still slide along, the axes it can
+    /// still turn about, and the under-constrained components it is constrained to (the symbol's cube).
+    /// The other components are held still. `None` when it is not a component that moves.
+    pub fn dof_symbol(&self, item: AnyId) -> Option<DofSymbol> {
+        let pose = self.owner_pose(item)?;
+        let origin = pose.translation;
+        let mut symbol = DofSymbol {
+            origin: origin.to_array(),
+            translations: Vec::new(),
+            rotations: Vec::new(),
+            relative_to: Vec::new(),
+        };
+        if self.component_flag(Occurrence::Item(item), ComponentFlag::Grounded) {
+            return Some(symbol);
+        }
+        let gathered = self.gather().ok();
+        let (jac, m) = dof_jacobian(gathered.as_ref(), item).unwrap_or_default();
+        let rows: Vec<[f64; 6]> = (0..m)
+            .map(|r| {
+                let mut row = [0.0; 6];
+                row.copy_from_slice(&jac[r * 6..r * 6 + 6]);
+                row
+            })
+            .collect();
+        // Pure translations: what the rows' translation parts leave free.
+        let translation_rows: Vec<Vec<f64>> = rows.iter().map(|r| r[..3].to_vec()).collect();
+        let slides = null_space(&translation_rows, 3);
+        for slide in &slides {
+            symbol.translations.push(DVec3::new(slide[0], slide[1], slide[2]).normalize().to_array());
+        }
+        // Turns: the free motions left once the slides are taken out, as screw axes.
+        let full_rows: Vec<Vec<f64>> = rows
+            .iter()
+            .map(|r| r.to_vec())
+            .chain(slides.iter().map(|t| vec![t[0], t[1], t[2], 0.0, 0.0, 0.0]))
+            .collect();
+        for twist in null_space(&full_rows, 6) {
+            let v = DVec3::new(twist[0], twist[1], twist[2]);
+            let w = DVec3::new(twist[3], twist[4], twist[5]);
+            if w.length() < 1e-9 {
+                continue;
+            }
+            let point = origin + w.cross(v) / w.length_squared();
+            symbol.rotations.push(DofAxis { point: point.to_array(), direction: w.normalize().to_array() });
+        }
+        // The cube: components it is constrained to that can still move themselves.
+        for (id, relationship) in self.relationships().iter() {
+            if self.is_inactive(id.erase()) {
+                continue;
+            }
+            let (a, b) = (relationship.first.occurrence.owner(), relationship.second.occurrence.owner());
+            let other = if a == item {
+                b
+            } else if b == item {
+                a
+            } else {
+                continue;
+            };
+            if other != item
+                && !symbol.relative_to.contains(&other)
+                && self.dof_in(gathered.as_ref(), other).total > 0
+            {
+                symbol.relative_to.push(other);
+            }
+        }
+        Some(symbol)
+    }
+
+    /// Components whose degrees-of-freedom symbol is shown (iProperties, Occurrence tab, Degrees of
+    /// Freedom), or all of them when the assembly's symbol is on (View tab, Degrees of Freedom).
+    pub fn dof_shown(&self, item: AnyId) -> bool {
+        let state = self.timeline().map(|(_, t)| t.components.clone()).unwrap_or_default();
+        state.dof_all || state.dof_shown.contains(&Occurrence::Item(item))
     }
 
     /// The constraint status dot of a component.
@@ -1313,6 +1453,15 @@ impl Document {
 }
 
 impl Document {
+    /// The value Drive starts from for a relationship: its offset or angle as defined, and 0 for a
+    /// Rotational joint (whose drive value is a turn from where it stands).
+    pub fn drive_start(&self, id: Id<Relationship>) -> Option<f64> {
+        match self.get(id)?.kind {
+            RelationKind::Rotational { .. } => Some(0.0),
+            kind => value_of(&kind),
+        }
+    }
+
     /// Drive: where the components would stand with a relationship driven to `value`, without changing
     /// the document (Inventor's Drive dialog plays a constraint or joint through values). The value is the
     /// offset (metres) of a Mate, Flush or Insert, or the turn (radians, from where the moving component

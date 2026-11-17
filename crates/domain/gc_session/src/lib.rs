@@ -24,8 +24,8 @@ use std::path::{Path, PathBuf};
 
 pub use assembly::{AssemblyReader, Imported, Importer, ShownAssemblyPart};
 pub use cell::{
-    CellItem, CompareRow, Ghost, LoadedRobot, MeshRef, PADDING, PLANNERS, PlanStatus, PlannedPath, Reference,
-    Resources, Shown, ShownPart,
+    CellItem, CompareRow, ContactStop, Ghost, LoadedRobot, MeshRef, PADDING, PLANNERS, PlanStatus,
+    PlannedPath, Reference, Resources, Shown, ShownPart,
 };
 pub use design::WorkShape;
 pub use gc_collide::{Closest, Interference};
@@ -748,6 +748,41 @@ impl Session {
     ) -> Result<Vec<String>, EditError> {
         let items = if all { self.doc.same_source(item) } else { vec![item] };
         self.replicate(gc_doc::CellOp::ReplaceComponents { items, with })
+    }
+
+    /// Adds components to the contact set, or takes them out. One undo step.
+    pub fn set_contact_set(&mut self, items: &[gc_core::AnyId], on: bool) -> Result<(), EditError> {
+        self.execute(&Command::Cell(gc_doc::CellOp::SetContactSet { items: items.to_vec(), on })).map(|_| ())
+    }
+
+    /// Interactive Contact: Activate Contact Solver is `ContactSolver::ContactSet`; `All` analyses every
+    /// component; `Off` turns it off. One undo step.
+    pub fn set_contact_solver(&mut self, mode: gc_doc::ContactSolver) -> Result<(), EditError> {
+        self.execute(&Command::Cell(gc_doc::CellOp::SetContactSolver(mode))).map(|_| ())
+    }
+
+    /// The degrees-of-freedom symbol of a component: directions it can slide along, axes it can turn
+    /// about, and the under-constrained components it is constrained to (the cube).
+    pub fn dof_symbol(&self, item: gc_core::AnyId) -> Option<gc_doc::DofSymbol> {
+        self.doc.dof_symbol(item)
+    }
+
+    /// The symbols to draw this frame: every component whose symbol is shown.
+    pub fn dof_symbols(&self) -> Vec<(gc_core::AnyId, gc_doc::DofSymbol)> {
+        let doc = &self.doc;
+        doc.bodies()
+            .iter()
+            .map(|(id, _)| id.erase())
+            .chain(doc.robots().iter().map(|(id, _)| id.erase()))
+            .chain(doc.assemblies().iter().map(|(id, _)| id.erase()))
+            .filter(|item| doc.dof_shown(*item) && !doc.is_component_suppressed(*item))
+            .filter_map(|item| Some((item, doc.dof_symbol(item)?)))
+            .collect()
+    }
+
+    /// Shows or hides the degrees-of-freedom symbol of components. One undo step.
+    pub fn set_dof_shown(&mut self, items: &[gc_core::AnyId], on: bool) -> Result<(), EditError> {
+        self.execute(&Command::Cell(gc_doc::CellOp::SetDofShown { items: items.to_vec(), on })).map(|_| ())
     }
 
     /// A component's origin folder in the world: centre point, axes and planes (assembly P1-2).

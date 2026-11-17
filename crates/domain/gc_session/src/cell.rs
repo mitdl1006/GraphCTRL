@@ -382,6 +382,23 @@ pub struct Ghost {
     pub analytic: Option<String>,
 }
 
+/// Where the contact solver stopped a drive or a drag (Inventor 2026 help, About the Contact Solver,
+/// GUID-0BBD4ACE-7BD1-40BF-A011-74416B229035: contact pushes components that can move; when one that must
+/// push cannot, the motion stops).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ContactStop {
+    /// For a drive: the value reached before contact.
+    pub value: Option<f64>,
+    /// The component that was moving.
+    pub first: gc_core::AnyId,
+    /// The component it met, which could not give way.
+    pub second: gc_core::AnyId,
+}
+
+/// Component poses, as a list and as a map.
+type Poses = Vec<(gc_core::AnyId, DPose3)>;
+type PoseMap = BTreeMap<gc_core::AnyId, DPose3>;
+
 pub(crate) struct CellState {
     executor: Executor,
     job: Option<PlanJob>,
@@ -397,6 +414,12 @@ pub(crate) struct CellState {
     /// Components shown where Drive puts an assembly relationship (never committed): their placements.
     relation_drive: BTreeMap<gc_core::AnyId, Placement>,
     driven_bodies: BTreeMap<Id<Body>, Body>,
+    /// The relationship Drive shows and the value it stands at (after contact).
+    drive_value: Option<(Id<gc_doc::Relationship>, f64)>,
+    /// Components pushed by contact during the current drive or drag.
+    contact_pushed: BTreeMap<gc_core::AnyId, DPose3>,
+    /// Where contact stopped the last drive or drag step.
+    contact_stop: Option<ContactStop>,
     body: Option<(Id<Body>, Body)>,
     base: Option<(Id<Robot>, Placement)>,
     tcp: Option<(Id<Robot>, Placement)>,
@@ -444,6 +467,9 @@ impl Default for CellState {
             drive: None,
             relation_drive: BTreeMap::new(),
             driven_bodies: BTreeMap::new(),
+            drive_value: None,
+            contact_pushed: BTreeMap::new(),
+            contact_stop: None,
             body: None,
             base: None,
             tcp: None,
@@ -554,6 +580,9 @@ impl CellState {
         if let Ok(data) = stored
             && let Some(mesh) = scaled(data, [*scale; 3])
         {
+            // Build its collision shape now, while the file is being read anyway, rather than in the
+            // middle of a drag or drive (tens of milliseconds for a large mesh).
+            gc_collide::prepare_mesh(&mesh.data);
             self.meshes.insert(key, mesh);
         }
     }
@@ -1099,17 +1128,61 @@ impl Session {
 
     /// Previews an edit of a body without touching the document.
     pub fn preview_body(&mut self, id: Id<Body>, body: Body) {
-        if self.doc.get(id).is_some() && body.solid.is_valid() {
-            self.cell.read_body_mesh(&body.solid);
-            self.cell.body = Some((id, body));
+        if self.doc.get(id).is_none() || !body.solid.is_valid() {
+            return;
         }
+        self.cell.read_body_mesh(&body.solid);
+        self.cell.contact_stop = None;
+        let participants = self.doc.contact_participants();
+        if participants.len() >= 2 && participants.contains(&id.erase()) {
+            // The contact solver: a dragged body pushes free components of the set, and stops where
+            // something cannot give way (it stays where it last was).
+            let mut pushed = self.cell.contact_pushed.clone();
+            let moves = [(id.erase(), pose_of(&body.placement))];
+            match self.resolve_contacts(&participants, &moves, &mut pushed) {
+                Ok(()) => {
+                    self.cell.contact_pushed = pushed;
+                    let shown: Vec<(gc_core::AnyId, DPose3)> =
+                        self.cell.contact_pushed.iter().map(|(i, p)| (*i, *p)).collect();
+                    self.show_relation_drive(shown);
+                }
+                Err((first, second)) => {
+                    self.cell.contact_stop = Some(ContactStop { value: None, first, second });
+                    return;
+                }
+            }
+        }
+        self.cell.body = Some((id, body));
     }
 
     /// Commits the body preview as one undo step.
     pub fn end_body_preview(&mut self) {
-        if let Some((id, body)) = self.cell.body.take()
-            && self.doc.get(id).is_some_and(|b| *b != body)
+        let pushed = std::mem::take(&mut self.cell.contact_pushed);
+        self.cell.contact_stop = None;
+        if !pushed.is_empty() {
+            self.cell.relation_drive.clear();
+            self.cell.driven_bodies.clear();
+        }
+        let Some((id, body)) = self.cell.body.take() else { return };
+        let Some(stored) = self.doc.get(id) else { return };
+        if !pushed.is_empty()
+            && stored.solid == body.solid
+            && stored.look == body.look
+            && stored.name == body.name
         {
+            // A drag that pushed others: everything moves in one undo step.
+            let mut moves = vec![(id.erase(), body.placement)];
+            moves.extend(pushed.iter().map(|(item, pose)| {
+                (
+                    *item,
+                    Placement {
+                        xyz: pose.translation.to_array(),
+                        rpy: gc_math::rpy_from_quat(pose.rotation),
+                    },
+                )
+            }));
+            self.last_error = self.cell_op(CellOp::MoveComponents(moves)).err();
+        } else if *stored != body {
             self.last_error = self.cell_op(CellOp::SetBody { id, body }).err();
         }
     }
@@ -1152,7 +1225,63 @@ impl Session {
     /// joint, from where it stands), without changing the document, until [`Self::end_drive_relationship`].
     /// Refused for a Rigid joint or a value the relationships cannot reach; the shown positions then stay.
     pub fn drive_relationship(&mut self, id: Id<gc_doc::Relationship>, value: f64) -> Result<(), EditError> {
-        let moves = self.doc.driven(id, value)?;
+        self.cell.contact_stop = None;
+        let participants = self.doc.contact_participants();
+        if participants.len() < 2 {
+            let moves = self.doc.driven(id, value)?;
+            self.show_relation_drive(moves);
+            self.cell.drive_value = Some((id, value));
+            return Ok(());
+        }
+        // With the contact solver on, play the drive through in small steps from where it stands, pushing
+        // free components of the set and stopping where something cannot give way.
+        let continuing = matches!(self.cell.drive_value, Some((d, _)) if d == id);
+        let start = match self.cell.drive_value {
+            Some((d, v)) if d == id => v,
+            _ => self.doc.drive_start(id).unwrap_or(0.0),
+        };
+        if !continuing {
+            self.cell.contact_pushed.clear();
+        }
+        let angular = matches!(
+            self.doc.get(id).map(|r| r.kind),
+            Some(gc_doc::RelationKind::Rotational { .. } | gc_doc::RelationKind::Angle { .. })
+        );
+        let step = if angular { 1f64.to_radians() } else { 0.002 };
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "clamped small count")]
+        let steps = ((value - start).abs() / step).ceil().clamp(1.0, 500.0) as usize;
+        let mut pushed = self.cell.contact_pushed.clone();
+        let mut good: Option<(f64, Poses, PoseMap)> = None;
+        for k in 1..=steps {
+            #[allow(clippy::cast_precision_loss, reason = "at most 500 steps")]
+            let v = start + (value - start) * (k as f64 / steps as f64);
+            let moves = match self.doc.driven(id, v) {
+                Ok(moves) => moves,
+                Err(e) if good.is_none() => return Err(e),
+                Err(_) => break,
+            };
+            match self.resolve_contacts(&participants, &moves, &mut pushed) {
+                Ok(()) => good = Some((v, moves, pushed.clone())),
+                Err((first, second)) => {
+                    let at = good.as_ref().map_or(start, |g| g.0);
+                    self.cell.contact_stop = Some(ContactStop { value: Some(at), first, second });
+                    break;
+                }
+            }
+        }
+        if let Some((v, moves, pushed)) = good {
+            let mut shown: BTreeMap<gc_core::AnyId, DPose3> = pushed.clone();
+            shown.extend(moves);
+            self.show_relation_drive(shown.into_iter().collect());
+            self.cell.drive_value = Some((id, v));
+            self.cell.contact_pushed = pushed;
+        } else if !continuing {
+            self.cell.drive_value = Some((id, start));
+        }
+        Ok(())
+    }
+
+    fn show_relation_drive(&mut self, moves: Vec<(gc_core::AnyId, DPose3)>) {
         self.cell.relation_drive = moves
             .into_iter()
             .map(|(item, pose)| {
@@ -1175,13 +1304,134 @@ impl Session {
                 Some((id, body))
             })
             .collect();
-        Ok(())
+    }
+
+    /// Where the contact solver stopped the last drive or drag step: the value reached (for a drive) and
+    /// the two components that met. `None` when nothing stopped it.
+    pub fn contact_stop(&self) -> Option<ContactStop> {
+        self.cell.contact_stop
+    }
+
+    /// The components the contact solver has pushed during the current drive or drag, where they stand.
+    pub fn contact_pushed(&self) -> Vec<(gc_core::AnyId, Placement)> {
+        self.cell
+            .contact_pushed
+            .iter()
+            .map(|(item, pose)| {
+                (
+                    *item,
+                    Placement {
+                        xyz: pose.translation.to_array(),
+                        rpy: gc_math::rpy_from_quat(pose.rotation),
+                    },
+                )
+            })
+            .collect()
+    }
+
+    /// A component's shapes at a pose, for the contact solver: bodies at the pose, robots as shown
+    /// (they are obstacles, never pushed). Assemblies are not analysed yet.
+    fn contact_geometry(&self, item: gc_core::AnyId, pose: &DPose3) -> Option<gc_collide::Geometry> {
+        match item.kind {
+            gc_core::Kind::Body => {
+                let body = self.doc.get(Id::<Body>::from_raw(item.raw))?;
+                let shape = shape_of(&body.solid, &self.cell.meshes)?;
+                gc_collide::Geometry::from_shapes(&[(*pose, shape)]).ok()
+            }
+            gc_core::Kind::RobotInstance => self.item_geometry(CellItem::Robot(Id::from_raw(item.raw))),
+            _ => None,
+        }
+    }
+
+    /// True when contact may push a component: a body that is not grounded and that no active
+    /// relationship holds.
+    fn pushable(&self, item: gc_core::AnyId) -> bool {
+        item.kind == gc_core::Kind::Body
+            && !self.doc.component_flag(gc_doc::Occurrence::Item(item), gc_doc::ComponentFlag::Grounded)
+            && !self.doc.relationships().iter().any(|(id, r)| {
+                !self.doc.is_inactive(id.erase())
+                    && (r.first.occurrence.owner() == item
+                        || r.second.occurrence.owner() == item
+                        || r.third().is_some_and(|t| t.occurrence.owner() == item))
+            })
+    }
+
+    /// Settles contact among the participants with `moves` imposed: overlapped free components are
+    /// pushed out (added to `pushed`); `Err` with the pair when something that cannot give way is hit.
+    fn resolve_contacts(
+        &self,
+        participants: &[gc_core::AnyId],
+        moves: &[(gc_core::AnyId, DPose3)],
+        pushed: &mut BTreeMap<gc_core::AnyId, DPose3>,
+    ) -> Result<(), (gc_core::AnyId, gc_core::AnyId)> {
+        const TOLERANCE: f64 = 1e-6;
+        let stored =
+            |item: gc_core::AnyId| self.doc.component_origin(gc_doc::Occurrence::Item(item)).map(|o| o.pose);
+        // Only what really moves counts: the solver can report components it touched by a rounding error.
+        let imposed: BTreeMap<gc_core::AnyId, DPose3> = moves
+            .iter()
+            .copied()
+            .filter(|(item, pose)| {
+                stored(*item).is_none_or(|was| {
+                    (was.translation - pose.translation).length() > 1e-9
+                        || was.rotation.angle_between(pose.rotation) > 1e-9
+                })
+            })
+            .collect();
+        let pose = |item: gc_core::AnyId, pushed: &BTreeMap<gc_core::AnyId, DPose3>| {
+            imposed.get(&item).or_else(|| pushed.get(&item)).copied().or_else(|| stored(item))
+        };
+        // How deep a pair already overlapped where the document has it: only going deeper is contact.
+        let depth_before = |a: gc_core::AnyId, b: gc_core::AnyId| -> f64 {
+            let (Some(pa), Some(pb)) = (stored(a), stored(b)) else { return 0.0 };
+            let (Some(ga), Some(gb)) = (self.contact_geometry(a, &pa), self.contact_geometry(b, &pb)) else {
+                return 0.0;
+            };
+            ga.penetration(&gb, 0.0).ok().flatten().map_or(0.0, |p| p.depth)
+        };
+        let mut last = None;
+        for _round in 0..32 {
+            let mut changed = false;
+            let moving: Vec<gc_core::AnyId> = participants
+                .iter()
+                .copied()
+                .filter(|i| imposed.contains_key(i) || pushed.contains_key(i))
+                .collect();
+            for a in moving {
+                let Some(geometry_a) = pose(a, pushed).and_then(|p| self.contact_geometry(a, &p)) else {
+                    continue;
+                };
+                for b in participants.iter().copied().filter(|b| *b != a) {
+                    let Some(pose_b) = pose(b, pushed) else { continue };
+                    let Some(geometry_b) = self.contact_geometry(b, &pose_b) else { continue };
+                    let Ok(Some(hit)) = geometry_a.penetration(&geometry_b, TOLERANCE) else { continue };
+                    if hit.depth <= depth_before(a, b) + TOLERANCE {
+                        continue;
+                    }
+                    if imposed.contains_key(&b) || !self.pushable(b) {
+                        return Err((a, b));
+                    }
+                    let shift = DVec3::from_array(hit.normal) * (hit.depth + TOLERANCE);
+                    pushed.insert(b, DPose3::from_parts(pose_b.translation + shift, pose_b.rotation));
+                    last = Some((a, b));
+                    changed = true;
+                }
+            }
+            if !changed {
+                return Ok(());
+            }
+        }
+        // Pushing went round without settling: treat as stuck.
+        last.map_or(Ok(()), Err)
     }
 
     /// Ends Drive for a relationship: the components are shown as the document has them again.
     pub fn end_drive_relationship(&mut self) {
         self.cell.relation_drive.clear();
         self.cell.driven_bodies.clear();
+        self.cell.drive_value = None;
+        self.cell.contact_pushed.clear();
+        self.cell.contact_stop = None;
     }
 
     /// Where Drive shows a component (body, robot or assembly) right now, if it moves it.

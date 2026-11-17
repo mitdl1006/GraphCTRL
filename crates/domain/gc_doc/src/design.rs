@@ -418,6 +418,39 @@ pub struct Components {
     /// Origin elements shown in the viewport (all are hidden by default).
     #[serde(default)]
     pub origins_shown: Vec<(Occurrence, OriginElement)>,
+    /// Components in the contact set (Inventor 2026 help, About the Contact Solver,
+    /// GUID-0BBD4ACE-7BD1-40BF-A011-74416B229035): they push one another, or stop, while dragged or driven.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contact_set: Vec<Occurrence>,
+    /// Components whose degrees-of-freedom symbol is shown (iProperties, Occurrence tab).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dof_shown: Vec<Occurrence>,
+    /// The degrees-of-freedom symbol is shown for every component (View tab, Visibility panel).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub dof_all: bool,
+    /// Interactive Contact: which components the contact solver analyses.
+    #[serde(default, skip_serializing_if = "ContactSolver::is_off")]
+    pub contact_solver: ContactSolver,
+}
+
+/// Interactive Contact (Document Settings, Modeling tab): the contact solver off, on for the contact set
+/// only, or on for all components.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ContactSolver {
+    /// Contact Solver Off.
+    #[default]
+    Off,
+    /// Contact Set Only.
+    ContactSet,
+    /// All Components.
+    All,
+}
+
+impl ContactSolver {
+    /// True for [`ContactSolver::Off`].
+    pub fn is_off(&self) -> bool {
+        *self == Self::Off
+    }
 }
 
 /// An element of a component's origin folder.
@@ -439,6 +472,10 @@ impl Components {
             && self.hidden.is_empty()
             && self.suppressed.is_empty()
             && self.origins_shown.is_empty()
+            && self.contact_set.is_empty()
+            && self.contact_solver.is_off()
+            && self.dof_shown.is_empty()
+            && !self.dof_all
     }
 }
 
