@@ -39,6 +39,10 @@ pub struct ParamsUi {
     pub name: String,
     /// The expression being typed.
     pub source: String,
+    /// The browser item being renamed, and the name typed so far.
+    pub rename: Option<(gc_core::AnyId, String)>,
+    /// The rename has just begun: the field takes the keyboard focus.
+    pub rename_fresh: bool,
 }
 
 /// The named parameters: a list, and one editor that adds a parameter or, when the name exists, changes
@@ -57,6 +61,9 @@ fn params(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi) -> O
                 selected: state.name == param.name,
                 visible: None,
                 delete: Some(&delete),
+                edit: None,
+                focus: false,
+                dim: false,
             };
             let result = gc_ui::panel::tree_row(ui, row);
             if result.row.clicked() {
@@ -114,39 +121,48 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
                 selected: false,
                 visible: None,
                 delete: None,
+                edit: None,
+                focus: false,
+                dim: false,
             };
             gc_ui::panel::tree_row(ui, row);
         }
     });
+    // F2 renames the selected node when the mouse is over the browser (over the 3D view, F2 pans).
+    let hovering = ui.rect_contains_pointer(ui.max_rect());
+    if hovering && ui.input(|i| i.key_pressed(egui::Key::F2)) {
+        let target = session
+            .selected_item()
+            .map(cell_any)
+            .or_else(|| session.active_sketch().map(|(id, _)| id.erase()));
+        if let Some(target) = target
+            && let Some(name) = name_of(session, target)
+        {
+            state.rename = Some((target, name));
+            state.rename_fresh = true;
+        }
+    }
     egui::CollapsingHeader::new(tr!(lang, BrowserSketches)).default_open(true).show(ui, |ui| {
         let active = session.active_sketch().map(|(id, _)| id);
         ui.spacing_mut().item_spacing.y = 1.0;
         for (id, sketch) in session.doc().sketches().iter() {
-            let selected = active == Some(id);
-            let delete = tr!(lang, CmdDeleteItem, sketch.name);
-            let row = TreeRow {
+            let node = Node {
                 icon: Icon::Sketch,
+                name: &sketch.name,
                 text: &sketch.name,
-                selected,
-                visible: None,
-                delete: Some(&delete),
+                any: id.erase(),
+                selected: active == Some(id),
+                delete: gc_doc::Command::DeleteSketch { id },
+                suppressible: true,
             };
-            let result = gc_ui::panel::tree_row(ui, row);
-            if result.row.double_clicked() {
-                action = Some(BrowserAction::EditSketch(id));
-            }
-            result.row.context_menu(|ui| {
+            let result = node_row(ui, session, lang, state, &node, &mut action, |ui, action| {
                 if ui.button(tr!(lang, CmdEditSketch)).clicked() {
-                    action = Some(BrowserAction::EditSketch(id));
-                    ui.close();
-                }
-                if ui.button(delete.as_str()).clicked() {
-                    action = Some(BrowserAction::Edit(Box::new(gc_doc::Command::DeleteSketch { id })));
+                    *action = Some(BrowserAction::EditSketch(id));
                     ui.close();
                 }
             });
-            if result.deleted {
-                action = Some(BrowserAction::Edit(Box::new(gc_doc::Command::DeleteSketch { id })));
+            if result.double_clicked() {
+                action = Some(BrowserAction::EditSketch(id));
             }
         }
     });
@@ -165,11 +181,6 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
         egui::CollapsingHeader::new(title).default_open(true).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 1.0;
             for (name, shown, item) in items {
-                // Bodies and robots can be hidden; they stay obstacles for planning.
-                let look = item.shown().and_then(|shown| Some((shown, session.shown_look(shown)?)));
-                let mut visible = look.is_some_and(|(_, look)| !look.hidden);
-                let show_label = tr!(lang, ShowItem, name);
-                let delete_label = tr!(lang, CmdDeleteItem, name);
                 let icon = match item {
                     CellItem::Body(_) => Icon::Cuboid,
                     CellItem::Robot(_) => Icon::Robot,
@@ -177,43 +188,25 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
                     CellItem::Waypoint(_) => Icon::Waypoint,
                     CellItem::Path(_) => Icon::Path,
                 };
-                let row = TreeRow {
+                let node = Node {
                     icon,
+                    name: &name,
                     text: &shown,
+                    any: cell_any(item),
                     selected: selected == Some(item),
-                    visible: look.map(|_| (&mut visible, show_label.as_str())),
-                    delete: Some(&delete_label),
+                    delete: gc_doc::Command::Cell(item.delete_op()),
+                    suppressible: matches!(item, CellItem::Waypoint(_) | CellItem::Path(_)),
                 };
-                let result = gc_ui::panel::tree_row(ui, row);
-                if let (true, Some((shown, _))) = (result.toggled, look) {
-                    action = Some(BrowserAction::Show(shown, visible));
-                }
-                if result.row.clicked() || result.row.secondary_clicked() {
-                    action = Some(BrowserAction::Select(Some(item)));
-                }
-                result.row.context_menu(|ui| {
-                    ui.label(RichText::new(&name).strong());
-                    ui.separator();
-                    if let Some((shown, look)) = look {
-                        let text = if look.hidden { tr!(lang, CmdShow) } else { tr!(lang, CmdHide) };
-                        if ui.button(text).clicked() {
-                            action = Some(BrowserAction::Show(shown, look.hidden));
-                            ui.close();
-                        }
-                    }
+                let result = node_row(ui, session, lang, state, &node, &mut action, |ui, action| {
                     if let CellItem::Path(path) = item
                         && ui.button(tr!(lang, CmdPlan)).clicked()
                     {
-                        action = Some(BrowserAction::Plan(path));
-                        ui.close();
-                    }
-                    if ui.button(delete_label.as_str()).clicked() {
-                        action = Some(BrowserAction::Edit(Box::new(gc_doc::Command::Cell(item.delete_op()))));
+                        *action = Some(BrowserAction::Plan(path));
                         ui.close();
                     }
                 });
-                if result.deleted {
-                    action = Some(BrowserAction::Edit(Box::new(gc_doc::Command::Cell(item.delete_op()))));
+                if result.clicked() || result.secondary_clicked() {
+                    action = Some(BrowserAction::Select(Some(item)));
                 }
             }
         });
@@ -249,6 +242,129 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
         .collect();
     section(ui, tr!(lang, BrowserPaths), paths);
     action
+}
+
+/// The id of a cell item, whatever its kind.
+fn cell_any(item: gc_session::CellItem) -> gc_core::AnyId {
+    use gc_session::CellItem;
+    match item {
+        CellItem::Body(id) => id.erase(),
+        CellItem::Robot(id) => id.erase(),
+        CellItem::Waypoint(id) => id.erase(),
+        CellItem::Frame(id) => id.erase(),
+        CellItem::Path(id) => id.erase(),
+    }
+}
+
+/// The name of a renamable browser item.
+fn name_of(session: &Session, item: gc_core::AnyId) -> Option<String> {
+    use gc_core::Kind;
+    let doc = session.doc();
+    match item.kind {
+        Kind::Sketch => doc.get(item.downcast()?).map(|s: &Sketch| s.name.clone()),
+        Kind::Body => doc.get(item.downcast()?).map(|b: &gc_doc::Body| b.name.clone()),
+        Kind::RobotInstance => doc.get(item.downcast()?).map(|r: &gc_doc::Robot| r.name.clone()),
+        Kind::Waypoint => doc.get(item.downcast()?).map(|w: &gc_doc::Waypoint| w.name.clone()),
+        Kind::Path => doc.get(item.downcast()?).map(|p: &gc_doc::MotionPath| p.name.clone()),
+        Kind::WorkFrame => doc.get(item.downcast()?).map(|f: &gc_doc::WorkFrame| f.name.clone()),
+        _ => None,
+    }
+}
+
+/// A row of the browser tree.
+struct Node<'a> {
+    icon: Icon,
+    /// The name, for commands and accessible names.
+    name: &'a str,
+    /// The text shown (the name, and for paths the plan status).
+    text: &'a str,
+    any: gc_core::AnyId,
+    selected: bool,
+    /// The edit that deletes it.
+    delete: gc_doc::Command,
+    /// Whether it can be suppressed.
+    suppressible: bool,
+}
+
+/// One row of the tree with everything the browser offers on a node: a visibility check box, rename in
+/// place (F2, a second click, the menu), suppress, delete and the node's own menu entries.
+fn node_row(
+    ui: &mut Ui,
+    session: &Session,
+    lang: Lang,
+    state: &mut ParamsUi,
+    node: &Node<'_>,
+    action: &mut Option<BrowserAction>,
+    menu: impl FnOnce(&mut Ui, &mut Option<BrowserAction>),
+) -> egui::Response {
+    let doc = session.doc();
+    let mut visible = doc.is_visible(node.any);
+    let inactive = doc.is_inactive(node.any);
+    let show_label = tr!(lang, ShowItem, node.name);
+    let delete_label = tr!(lang, CmdDeleteItem, node.name);
+    let renaming = state.rename.as_ref().is_some_and(|(id, _)| *id == node.any);
+    let fresh = renaming && std::mem::take(&mut state.rename_fresh);
+    let row = TreeRow {
+        icon: node.icon,
+        text: node.text,
+        selected: node.selected,
+        visible: Some((&mut visible, show_label.as_str())),
+        delete: Some(&delete_label),
+        edit: state.rename.as_mut().filter(|_| renaming).map(|(_, text)| text),
+        focus: fresh,
+        dim: inactive,
+    };
+    let result = gc_ui::panel::tree_row(ui, row);
+    match result.edited {
+        Some(true) => {
+            if let Some((item, name)) = state.rename.take() {
+                *action = Some(BrowserAction::Edit(Box::new(gc_doc::Command::Rename { item, name })));
+            }
+        }
+        Some(false) => state.rename = None,
+        None => {}
+    }
+    if result.toggled {
+        let command = gc_doc::Command::SetVisible { item: node.any, visible };
+        *action = Some(BrowserAction::Edit(Box::new(command)));
+    }
+    if result.row.clicked() && node.selected && !result.row.double_clicked() && !renaming {
+        // A second click on the selected node edits its name.
+        state.rename = Some((node.any, node.name.to_owned()));
+        state.rename_fresh = true;
+    }
+    result.row.context_menu(|ui| {
+        ui.label(RichText::new(node.name).strong());
+        ui.separator();
+        menu(ui, action);
+        if name_of(session, node.any).is_some() && ui.button(tr!(lang, CmdRename)).clicked() {
+            state.rename = Some((node.any, node.name.to_owned()));
+            state.rename_fresh = true;
+            ui.close();
+        }
+        let text = if visible { tr!(lang, CmdHide) } else { tr!(lang, CmdShow) };
+        if ui.button(text).clicked() {
+            let command = gc_doc::Command::SetVisible { item: node.any, visible: !visible };
+            *action = Some(BrowserAction::Edit(Box::new(command)));
+            ui.close();
+        }
+        if node.suppressible {
+            let text = if inactive { tr!(lang, CmdUnsuppress) } else { tr!(lang, CmdSuppress) };
+            if ui.button(text).clicked() {
+                let op = gc_doc::CellOp::SetSuppressed { item: node.any, suppressed: !inactive };
+                *action = Some(BrowserAction::Edit(Box::new(gc_doc::Command::Cell(op))));
+                ui.close();
+            }
+        }
+        if ui.button(delete_label.as_str()).clicked() {
+            *action = Some(BrowserAction::Edit(Box::new(node.delete.clone())));
+            ui.close();
+        }
+    });
+    if result.deleted {
+        *action = Some(BrowserAction::Edit(Box::new(node.delete.clone())));
+    }
+    result.row
 }
 
 /// The properties of the selection. A selected dimension can be edited here.
@@ -336,12 +452,29 @@ fn prompt_text(lang: Lang, prompt: Prompt) -> &'static str {
 
 /// The status bar: what the tool expects next, why the last edit was refused, a notice from the
 /// application (file saved, file error) and how constrained the sketch is.
-pub fn status_bar(ui: &mut Ui, session: &Session, lang: Lang, gpu: bool, notice: Option<&str>) {
+pub fn status_bar(
+    ui: &mut Ui,
+    session: &Session,
+    lang: Lang,
+    gpu: bool,
+    notice: Option<&str>,
+    slice: Option<&mut bool>,
+) {
     ui.horizontal(|ui| {
         if session.active_sketch().is_some() {
             ui.label(prompt_text(lang, session.prompt()));
         } else {
             ui.label(tr!(lang, StatusReady));
+        }
+        // Slice Graphics (F7): offered while a 2D sketch is edited.
+        if let Some(slice) = slice {
+            ui.separator();
+            let label = tr!(lang, StatusSlice);
+            let button = ui.selectable_label(*slice, label);
+            button.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, *slice, label));
+            if button.clicked() {
+                *slice = !*slice;
+            }
         }
         if session.sketch_is_spatial() {
             let plane = ["YZ", "ZX", "XY"][session.spatial_plane() % 3];
@@ -357,6 +490,7 @@ pub fn status_bar(ui: &mut Ui, session: &Session, lang: Lang, gpu: bool, notice:
                 }
                 gc_doc::EditError::Sketch(SketchError::Unsolved(_)) => Msg::ErrUnsolved,
                 gc_doc::EditError::InUse => Msg::ErrInUse,
+                gc_doc::EditError::NameTaken => Msg::ErrNameTaken,
                 gc_doc::EditError::BadValue => Msg::ErrBadValue,
                 gc_doc::EditError::Underconstrained => Msg::ErrUnderconstrained,
                 gc_doc::EditError::DegenerateFrame => Msg::ErrDegenerateFrame,

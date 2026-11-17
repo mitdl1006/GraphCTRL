@@ -18,10 +18,10 @@ pub fn title(ui: &mut Ui, kind: &str, name: &str) {
             egui::Align2::LEFT_CENTER,
             kind,
             egui::FontId::proportional(11.0),
-            colors::MUTED,
+            colors::muted(),
         );
     }
-    ui.label(RichText::new(name).size(18.0).strong().color(colors::TEXT));
+    ui.label(RichText::new(name).size(18.0).strong().color(colors::text()));
     ui.add_space(2.0);
 }
 
@@ -31,10 +31,10 @@ pub fn section(ui: &mut Ui, title: &str) {
     ui.horizontal(|ui| {
         let (bar, _) = ui.allocate_exact_size(vec2(3.0, 14.0), Sense::hover());
         ui.painter().rect_filled(bar, 1.5, colors::ACCENT);
-        ui.label(RichText::new(title).size(12.5).strong().color(colors::TEXT));
+        ui.label(RichText::new(title).size(12.5).strong().color(colors::text()));
     });
     let (line, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
-    ui.painter().rect_filled(line, 0.0, colors::BORDER);
+    ui.painter().rect_filled(line, 0.0, colors::border());
     ui.add_space(4.0);
 }
 
@@ -49,30 +49,30 @@ pub fn fixed_label(ui: &mut Ui, width: f32, text: &str) -> egui::Response {
     let layout = egui::Layout::left_to_right(egui::Align::Center);
     ui.allocate_ui_with_layout(size, layout, |ui| {
         ui.set_min_size(size);
-        ui.add(egui::Label::new(RichText::new(text).size(12.0).color(colors::MUTED)).truncate())
+        ui.add(egui::Label::new(RichText::new(text).size(12.0).color(colors::muted())).truncate())
     })
     .inner
 }
 
 /// A small muted note under a value.
 pub fn note(ui: &mut Ui, text: &str) {
-    ui.label(RichText::new(text).size(11.5).color(colors::MUTED));
+    ui.label(RichText::new(text).size(11.5).color(colors::muted()));
 }
 
 /// The header of a side panel: its name, and a hairline under it.
 pub fn header(ui: &mut Ui, text: &str) {
     ui.add_space(2.0);
-    ui.label(RichText::new(text).size(14.0).strong().color(colors::TEXT));
+    ui.label(RichText::new(text).size(14.0).strong().color(colors::text()));
     let (line, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
-    ui.painter().rect_filled(line, 0.0, colors::BORDER);
+    ui.painter().rect_filled(line, 0.0, colors::border());
     ui.add_space(2.0);
 }
 
 /// A card: a white, rounded box with a hairline border, for grouped read-outs such as plan results.
 pub fn card<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     egui::Frame::new()
-        .fill(colors::CARD)
-        .stroke(egui::Stroke::new(1.0, colors::BORDER))
+        .fill(colors::card())
+        .stroke(egui::Stroke::new(1.0, colors::border()))
         .corner_radius(8)
         .inner_margin(egui::Margin::symmetric(10, 8))
         .show(ui, |ui| {
@@ -105,6 +105,12 @@ pub struct TreeRow<'a> {
     pub visible: Option<(&'a mut bool, &'a str)>,
     /// The accessible name of the delete button, when the item can be deleted.
     pub delete: Option<&'a str>,
+    /// The text is being renamed: the buffer to edit, in place of the text.
+    pub edit: Option<&'a mut String>,
+    /// Take the keyboard focus into the edit field (the first frame of a rename).
+    pub focus: bool,
+    /// The item is not computed (suppressed or after the rollback marker): its text is dimmed.
+    pub dim: bool,
 }
 
 /// What happened to a [`tree_row`].
@@ -115,6 +121,8 @@ pub struct TreeRowResult {
     pub deleted: bool,
     /// The visibility check box changed.
     pub toggled: bool,
+    /// A rename ended: `Some(true)` with Enter, `Some(false)` with Escape or by leaving the field.
+    pub edited: Option<bool>,
 }
 
 /// One row of the browser tree: a kind icon, the text, an optional visibility check box and an optional
@@ -128,7 +136,7 @@ pub fn tree_row(ui: &mut Ui, row: TreeRow<'_>) -> TreeRowResult {
     if row.selected {
         painter.rect_filled(rect, 4.0, with_alpha(colors::ACCENT, 34));
     } else if hovered {
-        painter.rect_filled(rect, 4.0, with_alpha(colors::TEXT, 14));
+        painter.rect_filled(rect, 4.0, with_alpha(colors::text(), 14));
     }
     let mut x = rect.left() + 4.0;
     let mut toggled = false;
@@ -139,19 +147,48 @@ pub fn tree_row(ui: &mut Ui, row: TreeRow<'_>) -> TreeRowResult {
         toggled = check.changed();
         x += HEIGHT + 2.0;
     }
-    let tint = if row.selected { colors::ACCENT } else { colors::MUTED };
+    let tint = if row.selected { colors::ACCENT } else { colors::muted() };
     let icon_rect = egui::Rect::from_center_size(egui::pos2(x + 8.0, rect.center().y), vec2(16.0, 16.0));
     row.icon.paint(ui.painter(), icon_rect, tint);
     x += 22.0;
     let right = rect.right() - if row.delete.is_some() { HEIGHT + 2.0 } else { 4.0 };
     let clip = egui::Rect::from_min_max(egui::pos2(x, rect.top()), egui::pos2(right, rect.bottom()));
-    ui.painter().with_clip_rect(clip).text(
-        egui::pos2(x, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        row.text,
-        egui::FontId::proportional(13.0),
-        colors::TEXT,
-    );
+    let mut edited = None;
+    if let Some(buffer) = row.edit {
+        let id = egui::Id::unique(("gc_rename_field", row.text));
+        if row.focus {
+            // The whole name is selected, so that typing replaces it.
+            let mut state = egui::TextEdit::load_state(ui.ctx(), id).unwrap_or_default();
+            let end = buffer.chars().count();
+            state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
+                egui::text::CCursor::new(0),
+                egui::text::CCursor::new(end),
+            )));
+            state.store(ui.ctx(), id);
+        }
+        let field = ui.put(
+            clip.shrink2(vec2(0.0, 1.0)),
+            egui::TextEdit::singleline(buffer).id(id).font(egui::FontId::proportional(13.0)),
+        );
+        field.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, "name"));
+        if row.focus {
+            field.request_focus();
+        }
+        if field.lost_focus() {
+            edited = Some(ui.input(|i| i.key_pressed(egui::Key::Enter)));
+        } else if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            edited = Some(false);
+        }
+    } else {
+        let color = if row.dim { colors::muted() } else { colors::text() };
+        ui.painter().with_clip_rect(clip).text(
+            egui::pos2(x, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            row.text,
+            egui::FontId::proportional(13.0),
+            color,
+        );
+    }
     response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, row.selected, row.text));
     let mut deleted = false;
     if let Some(name) = row.delete {
@@ -160,14 +197,14 @@ pub fn tree_row(ui: &mut Ui, row: TreeRow<'_>) -> TreeRowResult {
             vec2(HEIGHT, HEIGHT),
         );
         let shown = hovered || row.selected;
-        let color = if shown { colors::MUTED } else { egui::Color32::TRANSPARENT };
+        let color = if shown { colors::muted() } else { egui::Color32::TRANSPARENT };
         let cross = egui::Button::new(RichText::new("×").size(14.0).color(color)).frame(false);
         let button = ui.put(cross_rect, cross);
         button.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, name));
         let button = if shown { button.on_hover_text(name) } else { button };
         deleted = button.clicked();
     }
-    TreeRowResult { row: response, deleted, toggled }
+    TreeRowResult { row: response, deleted, toggled, edited }
 }
 
 fn with_alpha(color: egui::Color32, alpha: u8) -> egui::Color32 {

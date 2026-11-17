@@ -64,6 +64,8 @@ pub(crate) fn show(
     viewport: &mut Viewport,
     cell: &mut CellUi,
     library: &[crate::app::LibraryRobot],
+    translucent: &mut bool,
+    dark: &mut bool,
     lang: Lang,
 ) -> Option<RibbonAction> {
     let mut action = None;
@@ -90,12 +92,17 @@ pub(crate) fn show(
                         let label = tr!(lang, CmdSketchOn, plane);
                         if ribbon_button(ui, Icon::Sketch, &label, false, !sketching).clicked() {
                             // A failure is shown in the status bar.
-                            drop(session.create_sketch(plane));
+                            // A new sketch starts with the line tool, as drawing is what comes first.
+                            if session.create_sketch(plane).is_ok() {
+                                session.set_tool(ToolKind::Line);
+                            }
                             *tab = Tab::Sketch;
                         }
                     }
                     if ribbon_button(ui, Icon::Line, tr!(lang, CmdSketch3d), false, !sketching).clicked() {
-                        drop(session.create_sketch_3d());
+                        if session.create_sketch_3d().is_ok() {
+                            session.set_tool(ToolKind::Line);
+                        }
                         *tab = Tab::Sketch;
                     }
                 });
@@ -145,8 +152,8 @@ pub(crate) fn show(
                 ribbon_group(ui, tr!(lang, GroupExit), |ui| {
                     if ribbon_button(ui, Icon::Finish, tr!(lang, CmdFinishSketch), false, sketching).clicked()
                     {
+                        // The tab that was open before the sketch comes back on its own.
                         session.finish_sketch();
-                        *tab = Tab::Model;
                     }
                 });
                 // Planned tools, after the rest so that nothing else moves when they arrive.
@@ -188,6 +195,16 @@ pub(crate) fn show(
                         .clicked()
                     {
                         viewport.camera.ortho = false;
+                    }
+                });
+                ribbon_group(ui, tr!(lang, GroupPanels), |ui| {
+                    if ribbon_button(ui, Icon::View, tr!(lang, ViewPanelsSeeThrough), *translucent, true)
+                        .clicked()
+                    {
+                        *translucent = !*translucent;
+                    }
+                    if ribbon_button(ui, Icon::View, tr!(lang, ViewDarkTheme), *dark, true).clicked() {
+                        *dark = !*dark;
                     }
                 });
             }

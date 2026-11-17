@@ -285,13 +285,15 @@ impl Scene {
             push_robot(&mut scene, loaded, &poses, tool.as_ref(), None, &shown);
         }
         scene.tool_points = doc.robots().iter().filter_map(|(id, _)| session.tcp_pose(id)).collect();
-        for (id, frame) in doc.work_frames().iter() {
+        // Hidden, suppressed and rolled-back items are kept in the document but not drawn.
+        let drawn = |item: gc_core::AnyId| doc.is_visible(item) && !doc.is_inactive(item);
+        for (id, frame) in doc.work_frames().iter().filter(|(id, _)| drawn(id.erase())) {
             if let Some(pose) = session.work_frame_pose(id) {
                 scene.frames.push((frame.name.clone(), pose));
                 scene.frame_items.push((id, highlight(CellItem::Frame(id))));
             }
         }
-        for (id, _) in doc.paths().iter() {
+        for (id, _) in doc.paths().iter().filter(|(id, _)| drawn(id.erase())) {
             if let Some(planned) = session.planned(id) {
                 scene.traces.push(Trace {
                     points: planned.tip_path().map(DVec3::from_array).collect(),
@@ -306,7 +308,7 @@ impl Scene {
             Some(CellItem::Path(path)) => doc.get(path).map(|p| p.waypoints.clone()),
             _ => None,
         };
-        for (id, waypoint) in doc.waypoints().iter() {
+        for (id, waypoint) in doc.waypoints().iter().filter(|(id, _)| drawn(id.erase())) {
             if let Some(pose) = session.waypoint_pose(id) {
                 let steps: Vec<String> = chosen
                     .iter()

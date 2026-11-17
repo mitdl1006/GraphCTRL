@@ -28,6 +28,7 @@ gc_ui.workspace = true
 gc_viewport.workspace = true
 gc_panels.workspace = true
 gc_render.workspace = true
+gc_agent.workspace = true
 eframe.workspace = true
 egui.workspace = true
 rfd.workspace = true

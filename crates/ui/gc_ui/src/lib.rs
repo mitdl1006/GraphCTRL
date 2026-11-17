@@ -12,4 +12,4 @@ mod theme;
 
 pub use icons::Icon;
 pub use ribbon::{ribbon_button, ribbon_group, ribbon_tab};
-pub use theme::{colors, install as install_theme};
+pub use theme::{colors, install as install_theme, panel_fill, panel_frame};

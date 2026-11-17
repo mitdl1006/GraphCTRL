@@ -78,6 +78,8 @@ fn shell_runs_without_gpu() {
     harness.get_by_label("스케치 마무리").click();
     harness.run();
     assert!(harness.state().session.active_sketch().is_none());
+    // The tab that was open before the sketch (the model tab) is back.
+    harness.get_by_label("XY 스케치");
 }
 
 /// With a GPU the whole window is rendered; the PNG is the UI checkpoint shown to the user.
@@ -206,7 +208,46 @@ fn a_robot_path_is_planned_through_the_ribbon() {
     assert_eq!(session.plan_status(path), gc_session::PlanStatus::Ready, "{:?}", session.plan_error(path));
     assert!(!session.planned(path).unwrap().segments[0].straight, "the box is in the way");
     harness.get_by_label("Path1 (계획됨)");
+    harness.get_by_label("Path1 (계획됨)");
     assert!(harness.query_all_by_label("joint_1").count() >= 1, "the jog sliders are shown");
+    // The result card states what the checks guarantee, and the ACM list can be edited.
+    assert!(
+        harness.query_by_label_contains("검사 간격").is_some()
+            || harness.query_by_label_contains("검사한 상태에서만").is_some()
+    );
+    harness.get_by_label("제외: 검사하지 않는 쌍(ACM), 닫힌 메시 안에서 시작한 바디, 컨트롤러 추종 오차");
+    harness.get_by_label("충돌 검사 쌍(ACM)").click();
+    harness.run();
+    let pair = harness
+        .state()
+        .session
+        .link_pairs(harness.state().session.doc().robots().iter().next().unwrap().0)
+        .unwrap();
+    let checked = pair.iter().find(|p| p.checked).unwrap();
+    harness.get_by_label(&format!("{} - {}", checked.a, checked.b)).click();
+    harness.run();
+    harness.get_by_label("Path1 (오래됨(다시 계획 필요))");
+    harness.get_by_label(&format!("{} - {}", checked.a, checked.b)).click();
+    harness.run();
+    harness.get_by_label("Path1 (계획됨)");
+    harness.get_by_label("접촉 허용 추가").scroll_to_me();
+    harness.run();
+    harness.get_by_label("접촉 허용 추가").click();
+    harness.run();
+    let path_id = harness.state().session.doc().paths().iter().next().unwrap().0;
+    assert_eq!(
+        harness.state().session.doc().get(path_id).unwrap().contacts.len(),
+        1,
+        "{:?}",
+        harness.state().session.last_error()
+    );
+    harness.get_by_label("Path1 (오래됨(다시 계획 필요))");
+    harness.get_by_label(&format!("{} 삭제", "1번째 이동: base_link - Body1")).click();
+    harness.run();
+    assert!(harness.state().session.doc().get(path_id).unwrap().contacts.is_empty());
+    harness.get_by_label("계획").click();
+    harness.run();
+    harness.get_by_label("Path1 (계획됨)");
 
     // Jogged into the box, the panel says what collides; back out, the message is gone.
     let app = harness.state_mut();
@@ -426,6 +467,8 @@ fn ur5e_close_up_renders_with_gpu() {
     harness.get_by_label("툴 형상").click();
     harness.run();
     harness.query_all_by_label("원기둥").last().unwrap().click();
+    harness.run();
+    harness.get_by_label("TCP를 툴 끝으로").scroll_to_me();
     harness.run();
     harness.get_by_label("TCP를 툴 끝으로").click();
     harness.run();
@@ -1277,6 +1320,9 @@ fn a_3d_sketch_is_drawn_in_the_viewport() {
         })
         .unwrap();
     let world = app.session.active_sketch().map(|_| app.session.point_pos(q).unwrap()).unwrap();
+    // The panels float over the view now: move the drawing out from under the properties panel.
+    app.viewport_mut().camera.pan([0.0, 0.0], [-300.0, 0.0], [1280.0, 700.0]);
+    harness.run();
     let at = harness.state().viewport().screen_of(gc_math::DVec3::from_array(world)).unwrap();
     // The letters sit up and to the right of the point.
     let glyph = at + egui::vec2(8.0 + 14.0, -14.5);
@@ -1735,4 +1781,440 @@ fn the_performance_overlay_is_switched_in_the_tools_menu() {
         std::fs::create_dir_all(&out).unwrap();
         harness.render().unwrap().save(out.join("review-28-perf-overlay.png")).unwrap();
     }
+}
+
+/// With agent connections allowed in the settings, an agent's MCP call is carried out between frames:
+/// the robot appears in the cell, the status bar and the activity log say what the agent did.
+#[test]
+fn an_agent_adds_a_robot_over_mcp() {
+    use std::io::{Read, Write};
+    let directory = tempfile::tempdir().unwrap();
+    let settings = directory.path().join("settings");
+    let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    std::fs::create_dir_all(&settings).unwrap();
+    std::fs::write(
+        settings.join("settings.json"),
+        format!(r#"{{"agent_enabled": true, "agent_port": {port}, "agent_token": "tok"}}"#),
+    )
+    .unwrap();
+    let options = RunOptions { settings_dir: Some(settings), ..RunOptions::default() };
+    let gpu = gc_test_support::gpu_or_skip("an_agent_adds_a_robot_over_mcp (screenshot)").is_some();
+    let mut builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    if gpu {
+        builder = builder.wgpu();
+    }
+    let mut harness = builder.build_eframe(move |cc| GraphCtrlApp::new(cc, options));
+    harness.run_steps(2);
+
+    let post = move |session: Option<&str>, body: &str| -> String {
+        let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stream.set_read_timeout(Some(std::time::Duration::from_secs(30))).unwrap();
+        let mut request = format!(
+            "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\n\
+             Accept: application/json, text/event-stream\r\nAuthorization: Bearer tok\r\n\
+             Content-Length: {}\r\nConnection: close\r\n",
+            body.len()
+        );
+        if let Some(session) = session {
+            request += &format!("Mcp-Session-Id: {session}\r\nMcp-Protocol-Version: 2025-06-18\r\n");
+        }
+        request += "\r\n";
+        request += body;
+        stream.write_all(request.as_bytes()).unwrap();
+        let mut response = Vec::new();
+        let mut buf = [0u8; 4096];
+        while let Ok(n) = stream.read(&mut buf) {
+            if n == 0 {
+                break;
+            }
+            response.extend_from_slice(&buf[..n]);
+            let text = String::from_utf8_lossy(&response);
+            if text.starts_with("HTTP/1.1 202") || (text.contains("\"result\"") && text.contains("\n\n")) {
+                break;
+            }
+        }
+        String::from_utf8_lossy(&response).into_owned()
+    };
+    let client = std::thread::spawn(move || {
+        let init = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0"}}}"#;
+        let reply = post(None, init);
+        let session = reply
+            .lines()
+            .find_map(|l| {
+                l.to_ascii_lowercase().starts_with("mcp-session-id:").then(|| l[15..].trim().to_owned())
+            })
+            .expect("a session id");
+        post(Some(&session), r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#);
+        post(
+            Some(&session),
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"add_robot","arguments":{"name":"UR5e"}}}"#,
+        )
+    });
+    // The app carries out the call on one of its frames.
+    for _ in 0..400 {
+        if client.is_finished() {
+            break;
+        }
+        harness.step();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let reply = client.join().unwrap();
+    assert!(reply.contains("UR5e_1"), "{reply}");
+    harness.run_steps(2);
+    assert_eq!(harness.state().session.doc().robots().len(), 1);
+    harness.get_by_label("AI 에이전트: add_robot UR5e");
+
+    harness.get_by_label("도구").click();
+    harness.run();
+    harness.get_by_label("AI 에이전트 연결").click();
+    harness.run_steps(4);
+    harness.get_by_label(&format!("주소: http://127.0.0.1:{port}/mcp"));
+    assert!(harness.query_by_label_contains("claude mcp add --transport http graphctrl").is_some());
+    assert!(harness.query_by_label("add_robot UR5e").is_some());
+    if gpu {
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        harness.render().unwrap().save(out.join("review-25-agent-connection.png")).unwrap();
+    }
+}
+
+/// Help > Log shows what was logged.
+#[test]
+fn the_log_window_shows_the_log() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    gc_app::install_diagnostics(None);
+    log::info!("a line for the log window");
+    harness.get_by_label("도움말").click();
+    harness.run();
+    harness.get_by_label("로그").click();
+    harness.run();
+    assert!(harness.query_by_label_contains("a line for the log window").is_some());
+}
+
+/// The browser and the properties float over the 3D view: the view fills the window, the panels can be
+/// folded, the mouse does not reach the view through them, and the view's overlays keep clear of them.
+#[test]
+fn the_side_panels_float_over_the_view() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("파일").click();
+    harness.run();
+    harness.get_by_label("예제 열기 (UR5e 셀)").click();
+    harness.run();
+    harness.get_by_label("뷰").click();
+    harness.run();
+    harness.get_by_label("전체 보기").click();
+    harness.run();
+
+    // The cube sits left of the properties panel (330 wide plus margins), not under it.
+    let (cube, half) = harness.state().viewport().view_cube_placement().unwrap();
+    assert!(cube.x + half < 1280.0 - 330.0 - 16.0, "{cube:?}");
+    // The view fills the window behind the panels.
+    let clear = harness.state().viewport().clear.unwrap();
+    assert!(clear.left() > 200.0 && clear.right() < 960.0, "{clear:?}");
+
+    if gpu {
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        harness.render().unwrap().save(out.join("review-29-floating-panels.png")).unwrap();
+    }
+
+    // A click on the properties panel's empty part is not a click in the view: nothing gets selected.
+    harness.state_mut().session.select_item(None);
+    let on_panel = egui::pos2(1280.0 - 8.0 - 160.0, 700.0);
+    harness.event(egui::Event::PointerMoved(on_panel));
+    harness.run();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: on_panel,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run();
+    }
+    assert!(harness.state().session.selected_item().is_none());
+
+    // Folding the properties gives its room back to the view.
+    harness.get_by_label("속성 접기").click();
+    harness.run();
+    let clear = harness.state().viewport().clear.unwrap();
+    assert!(clear.right() > 1200.0, "{clear:?}");
+    harness.get_by_label("속성 펼치기").click();
+    harness.run();
+    assert!(harness.state().viewport().clear.unwrap().right() < 960.0);
+
+    // The see-through option can be switched off in the View tab.
+    harness.get_by_label("패널 반투명").click();
+    harness.run();
+    harness.get_by_label("패널 반투명").click();
+    harness.run();
+}
+
+/// The dark colour scheme is switched in the View tab and shows in the whole window.
+#[test]
+fn the_dark_theme_is_switched_in_the_view_tab() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("파일").click();
+    harness.run();
+    harness.get_by_label("예제 열기 (UR5e 셀)").click();
+    harness.run();
+    harness.get_by_label("뷰").click();
+    harness.run();
+    assert!(!gc_ui::colors::is_dark());
+    harness.get_by_label("어두운 테마").click();
+    harness.run_steps(3);
+    assert!(gc_ui::colors::is_dark());
+    if gpu {
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        let image = harness.render().unwrap();
+        image.save(out.join("review-30-dark.png")).unwrap();
+        // The window is dark: the status bar is not the light surface colour.
+        let px = image.get_pixel(640, 790);
+        assert!(px[0] < 100 && px[1] < 100, "{px:?}");
+    }
+    harness.get_by_label("어두운 테마").click();
+    harness.run_steps(3);
+    assert!(!gc_ui::colors::is_dark());
+}
+
+/// The browser: a node is renamed in place (F2 or a second click), shown or hidden with its check box,
+/// and a hidden waypoint leaves the 3D view.
+#[test]
+fn browser_nodes_are_renamed_and_hidden() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("파일").click();
+    harness.run();
+    harness.get_by_label("예제 열기 (UR5e 셀)").click();
+    harness.run();
+    let waypoint = harness.state().session.doc().waypoints().iter().next().unwrap().0;
+    assert_eq!(harness.state().session.doc().waypoints().iter().next().unwrap().1.name, "P1");
+
+    // The first click selects, the second one edits the name.
+    harness.query_all_by_label("P1").next().unwrap().click();
+    harness.run();
+    harness.query_all_by_label("P1").next().unwrap().click();
+    harness.run();
+    harness.get_by_label("name").focus();
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.get_by_label("name").type_text("Pick");
+    harness.key_press(egui::Key::Enter);
+    harness.run();
+    assert_eq!(harness.state().session.doc().get(waypoint).unwrap().name, "Pick");
+    // A name another waypoint has is refused and explained.
+    let other = harness.state().session.doc().waypoints().iter().nth(1).unwrap().1.name.clone();
+    harness.query_all_by_label("Pick").next().unwrap().click();
+    harness.run();
+    harness.query_all_by_label("Pick").next().unwrap().click();
+    harness.run();
+    harness.get_by_label("name").focus();
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.get_by_label("name").type_text(&other);
+    harness.key_press(egui::Key::Enter);
+    harness.run();
+    harness.get_by_label("같은 이름이 이미 있습니다");
+
+    // Hiding a waypoint takes its marker out of the scene.
+    let shown = |h: &egui_kittest::Harness<'_, GraphCtrlApp>| {
+        gc_scene::Scene::of(&h.state().session).waypoints.iter().any(|m| m.id == waypoint)
+    };
+    assert!(shown(&harness));
+    harness.get_by_label("Pick 보이기").click();
+    harness.run();
+    assert!(!harness.state().session.doc().is_visible(waypoint.erase()));
+    assert!(!shown(&harness));
+    harness.get_by_label("Pick 보이기").click();
+    harness.run();
+    assert!(shown(&harness));
+}
+
+/// A point of a 3D sketch is dragged with the mouse: the point follows, the constraints hold, and the
+/// drag is one undo step.
+#[test]
+fn a_3d_sketch_point_is_dragged() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("3D 스케치").click();
+    harness.run();
+    let app = harness.state_mut();
+    app.session.set_tool(ToolKind::Line);
+    let origin = *app.session.active_sketch().unwrap().1.points.keys().next().unwrap();
+    app.session.spatial_click([0.0; 3], Some(origin), None);
+    app.session.spatial_click([0.15, 0.0, 0.0], None, Some(0));
+    app.session.tool_event(ToolEvent::Key(gc_tools::Key::Escape));
+    app.session.set_tool(ToolKind::Select);
+    let end = *app.session.active_sketch().unwrap().1.points.keys().last().unwrap();
+    let before = app.session.point_pos(end).unwrap();
+    // Out from under the floating properties panel.
+    app.viewport_mut().camera.pan([0.0, 0.0], [-300.0, 0.0], [1280.0, 700.0]);
+    harness.run();
+    let from = harness.state().viewport().screen_of(gc_math::DVec3::from_array(before)).unwrap();
+    // Along the line (the X axis runs down to the right in the isometric view).
+    let to = from + egui::vec2(50.0, 29.0);
+    harness.event(egui::Event::PointerMoved(from));
+    harness.run();
+    harness.event(egui::Event::PointerButton {
+        pos: from,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run();
+    for step in 1..=6 {
+        harness.event(egui::Event::PointerMoved(from + (to - from) * (step as f32 / 6.0)));
+        harness.run_steps(2);
+    }
+    harness.event(egui::Event::PointerButton {
+        pos: to,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run();
+    let after = harness.state().session.point_pos(end).unwrap();
+    let moved = (0..3).map(|k| (after[k] - before[k]).powi(2)).sum::<f64>().sqrt();
+    assert!(moved > 0.01, "{before:?} -> {after:?}");
+    // The axis constraint of the line holds: the point stays on the X axis through the origin.
+    assert!(after[1].abs() < 1e-6 && after[2].abs() < 1e-6, "{after:?}");
+}
+
+/// Basic sketch handling: a new sketch starts with the line tool, F8/F9 show and hide the constraint
+/// glyphs, a window drag selects what lies wholly inside, a crossing drag what it touches, and the
+/// right-click menu ends the sketch.
+#[test]
+fn sketch_basics_follow_the_cad_conventions() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("XY 스케치").click();
+    harness.run();
+    assert_eq!(harness.state().session.tool(), ToolKind::Line);
+
+    harness.key_press(egui::Key::F9);
+    harness.run();
+    assert!(!harness.state().viewport().show_constraints);
+    harness.key_press(egui::Key::F8);
+    harness.run();
+    assert!(harness.state().viewport().show_constraints);
+
+    draw_sample(harness.state_mut());
+    harness.state_mut().session.set_tool(ToolKind::Select);
+    harness.run();
+    let drag = |harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, from: egui::Pos2, to: egui::Pos2| {
+        harness.event(egui::Event::PointerMoved(from));
+        harness.run();
+        harness.event(egui::Event::PointerButton {
+            pos: from,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run();
+        for step in 1..=4 {
+            harness.event(egui::Event::PointerMoved(from + (to - from) * (step as f32 / 4.0)));
+            harness.run_steps(2);
+        }
+        harness.event(egui::Event::PointerButton {
+            pos: to,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run();
+    };
+    // From the top left to the bottom right of the free area: everything is wholly inside.
+    drag(&mut harness, egui::pos2(236.0, 150.0), egui::pos2(930.0, 760.0));
+    let all = harness.state().session.selection().len();
+    assert!(all >= 6, "{all} items selected by the window");
+    // A tiny crossing box (right to left) over empty space selects nothing and clears the selection.
+    drag(&mut harness, egui::pos2(932.0, 762.0), egui::pos2(925.0, 755.0));
+    assert!(harness.state().session.selection().is_empty());
+    // Right to left over everything is a crossing selection: it takes at least as much.
+    drag(&mut harness, egui::pos2(930.0, 760.0), egui::pos2(236.0, 150.0));
+    assert!(harness.state().session.selection().len() >= all);
+
+    // The right-click menu finishes the sketch.
+    harness.event(egui::Event::PointerMoved(egui::pos2(600.0, 700.0)));
+    harness.run();
+    harness.event(egui::Event::PointerButton {
+        pos: egui::pos2(600.0, 700.0),
+        button: egui::PointerButton::Secondary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.event(egui::Event::PointerButton {
+        pos: egui::pos2(600.0, 700.0),
+        button: egui::PointerButton::Secondary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run();
+    harness.get_by_label("완료");
+    harness.query_all_by_label("스케치 마무리").last().unwrap().click();
+    harness.run();
+    assert!(harness.state().session.active_sketch().is_none());
+}
+
+/// Slice Graphics (F7): a body in front of the sketch plane hides it; F7 cuts it away, and finishing the
+/// sketch brings it back.
+#[test]
+fn slice_graphics_reveals_the_sketch_plane() {
+    let Some(_) = gc_test_support::gpu() else { return };
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .wgpu()
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    // A big box that covers the origin plane's view from above.
+    let solid = gc_doc::Solid::Box { size: [0.6, 0.6, 0.2] };
+    let placement = gc_doc::Placement { xyz: [0.0, 0.0, 0.1], rpy: [0.0; 3] };
+    harness.state_mut().session.add_body(solid, placement).unwrap();
+    harness.get_by_label("XY 스케치").click();
+    harness.run();
+    harness.state_mut().fit_view();
+    harness.run();
+    let covered = harness.render().unwrap();
+    assert!(!harness.state().viewport().slice);
+    harness.key_press(egui::Key::F7);
+    harness.run();
+    assert!(harness.state().viewport().slice);
+    let sliced = harness.render().unwrap();
+    // The box that hid the plane is gone from the picture: it differs a lot.
+    let centre = |image: &image::RgbaImage| -> Vec<image::Rgba<u8>> {
+        (400..700)
+            .flat_map(|x| (250..600).map(move |y| (x, y)))
+            .map(|(x, y)| *image.get_pixel(x, y))
+            .collect()
+    };
+    let different = centre(&covered).iter().zip(centre(&sliced)).filter(|(a, b)| **a != *b).count();
+    assert!(different > 5000, "{different} pixels changed");
+    let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+    std::fs::create_dir_all(&out).unwrap();
+    covered.save(out.join("review-31-slice-off.png")).unwrap();
+    sliced.save(out.join("review-31-slice-on.png")).unwrap();
+    // Finishing the sketch restores it.
+    harness.query_all_by_label("스케치 마무리").last().unwrap().click();
+    harness.run();
+    assert!(!harness.state().viewport().slice);
 }

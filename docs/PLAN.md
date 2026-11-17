@@ -383,7 +383,22 @@ pub trait RobotModelProvider: Send + Sync { fn catalog(&self) -> Vec<RobotModelI
 | 실제 제어 | URSim(도커, 테스트 전용·배포물 제외) 먼저. RTDE·Dashboard·스크립트 전송은 자체 구현(Universal_Robots_Client_Library Apache-2.0, ur_rtde MIT를 이식 참고). 실제 로봇은 명시적 확인·속도 제한을 거친다 |
 | 금지 | `pddl`/`miniplan`(EUPL), `opencascade`(LGPL), python-urx(LGPL). FreeCAD·SolveSpace는 동작만 참고 |
 
-### 9.1 M2-1 인벤터식 설계 환경
+### 9.1 M2-1 인벤터식 설계 환경 — 어셈블리(.iam) 수준
+
+**패러다임(사용자 확정)**: GraphCTRL 문서는 부품 파일(.ipt) 수준이 아니라 **어셈블리 파일(.iam) 수준**이다. 불러온 설비 부품,
+UR 로봇, 툴, 필드는 모두 어셈블리의 **구성요소(occurrence)**다. 인벤터 어셈블리 환경과 같은 경험을 목표로 한다(상세 명세:
+`docs/ux/inventor-assembly-parity.md`, 셸 전반: `inventor-parity.md`, 스케치: `inventor-sketch-parity.md`).
+- **구성요소마다 원점 폴더**: YZ/XZ/XY 평면, X/Y/Z 축, 중심점. 브라우저에서 펼치고, 뷰포트에서 호버·선택하며, 스케치 배치·어셈블리
+  구속·작업 피처·작업 좌표계·측정의 기준으로 쓴다. 로봇은 베이스 원점과 링크별 좌표계(플랜지·TCP 포함)를 같은 방식으로 보인다.
+- **배치·고정·구속**: 구성요소 배치, 자유 이동·회전, 고정(Ground), 어셈블리 구속(메이트·플러시·각도·접선·삽입·대칭)과 조인트(고정·회전·
+  슬라이드 등). UR을 설비 면에 마운트하고 툴을 플랜지에 붙이는 것도 구속·조인트로 한다.
+- **어셈블리에서 스케치**: 구성요소의 면·원점 평면·어셈블리 원점 평면 위 2D 스케치, 형상 투영과 **절단 모서리 투영**, 그래픽 슬라이스(F7).
+- **단면도**: 반·1/4·3/4·끝 단면, 단면 평면 선택과 오프셋, 단면 캡, 구성요소별 단면 참여.
+- **측정·간섭**: 거리·각도·구성요소 간 최소 거리, 간섭 검사.
+
+이 아래 항목은 위 패러다임 안에서 구현한다.
+
+#### 9.1.1 이전 정리(부품 수준 표현에서 이어지는 것)
 - **모델 트리(브라우저)**: 원점(평면·축·중심점) / 스케치 / 작업 피처(작업 평면·축·점·좌표계) / 피처(돌출) / 설비(불러온 어셈블리,
   부품 계층) / 로봇(마운트) / 필드 / 상태 / 작업. 동작: 뷰포트와 선택 동기화, 더블클릭 편집, F2 이름 바꾸기, 우클릭(스케치 편집·
   표시·억제·삭제와 종속 항목 안내), 소비된 스케치는 피처 아래에 접힘, 롤백 마커(파트 끝), 끌어서 순서 바꾸기(종속 검사), 오류 배지,
@@ -449,6 +464,19 @@ pub trait RobotModelProvider: Send + Sync { fn catalog(&self) -> Vec<RobotModelI
 | M2-6 | URScript·RTDE·Dashboard | 연결·모니터 화면 | URSim 통합 테스트 | 안전 안내 |
 - 단계마다: 헤드리스 시나리오 테스트 + kittest 화면 테스트·스크린샷, `cargo xtask gate`, 사용자 PC 확인. 리드는 계약(`gc_robotics_api`,
   문서 스키마)을 먼저 정하고 역할 세션에 배정한다.
+
+### 9.8 AI 에이전트 API (MCP) — 에이전트가 작업에 주도적으로 참여
+- **1단계(완료)**: `crates/app/gc_agent` — 앱 안의 MCP 서버(rmcp, Streamable HTTP). `127.0.0.1`에만 열고 `Authorization: Bearer <토큰>`을
+  요구한다. 기본은 꺼짐(도구 > AI 에이전트 연결에서 허용, 포트·토큰은 `settings.json`). 서버 스레드는 문서를 만지지 않고, 호출은
+  채널로 앱 스레드에 넘어가 프레임 사이에 `gc_agent::execute`가 일반 명령으로 실행한다 → 화면에 바로 보이고 Ctrl+Z로 되돌린다.
+  도구: `overview`, `library_robots`, `add_robot`, `place_robot`, `add_waypoint`(world/base/작업 프레임 기준), `waypoint_info`,
+  `create_path`, `plan_path`, `undo`, `redo`. 단위는 mm·deg. 연결: `claude mcp add --transport http graphctrl http://127.0.0.1:47615/mcp
+  --header "Authorization: Bearer <토큰>"`.
+- **2단계**: 도구를 M2 모델과 함께 넓힌다 — 스케치·구속·치수, 바디/어셈블리 구속, 필드, 작업·상태·이벤트(9.4), 스케줄 실행(9.5),
+  URSim 제어(9.6, 실제 로봇 동작은 사용자 확인 필수). MCP 리소스(셀 스냅샷, 계획 결과)와 프롬프트(“이 셀의 작업을 정의해줘”)도 제공.
+- **3단계 — 주도적 참여**: 서버 → 에이전트 알림(계획 실패, 충돌, 작업 실패·복구 필요), 권한 수준(읽기 전용 / 편집 / 실제 로봇),
+  에이전트 편집 묶음을 한 번에 되돌리기, 앱 안 어시스턴트 패널(Claude Messages API를 HTTP로 직접 호출, 같은 도구 목록으로 도구 루프).
+- 참고: MCP 사양 https://modelcontextprotocol.io/specification , rmcp https://crates.io/crates/rmcp .
 
 ## 부록 A. 의존성과 검증된 API 사실 (2026-11-16)
 - **`=` 고정**: eframe / egui / egui-wgpu / egui_kittest 0.37.0 · wgpu 30.0.2 · egui_tiles 0.18.0 · egui_ltreeview 0.10.0 · glamx 0.3.1(`default-features = false`, `std, f64, libm, scalar-math`; glam 0.33, **0.34 금지**) · parry3d-f64 0.31.1(`enhanced-determinism`; `simd8`·`parallel` 금지).

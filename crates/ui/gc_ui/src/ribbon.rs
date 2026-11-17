@@ -10,7 +10,7 @@ const BUTTON_SIZE: egui::Vec2 = vec2(58.0, 58.0);
 /// A tab of the ribbon: its name, underlined in the accent colour when it is the open one. Returns
 /// true when it was clicked.
 pub fn ribbon_tab(ui: &mut Ui, label: &str, selected: bool) -> bool {
-    let color = if selected { colors::ACCENT } else { colors::MUTED };
+    let color = if selected { colors::ACCENT } else { colors::muted() };
     let text = egui::RichText::new(label).size(13.0).strong().color(color);
     let response = ui.add(egui::Button::selectable(selected, text).frame_when_inactive(false));
     if selected {
@@ -49,7 +49,7 @@ pub fn ribbon_button(ui: &mut Ui, icon: Icon, label: &str, selected: bool, enabl
         let color = if selected {
             colors::ACCENT
         } else if enabled {
-            colors::TEXT
+            colors::text()
         } else {
             egui::Color32::from_rgb(0xA3, 0xA9, 0xB2)
         };
@@ -81,7 +81,7 @@ pub fn ribbon_group(ui: &mut Ui, title: &str, add_buttons: impl FnOnce(&mut Ui))
             egui::Align2::CENTER_CENTER,
             title,
             egui::FontId::proportional(10.5),
-            colors::MUTED,
+            colors::muted(),
         );
     });
     ui.separator();
