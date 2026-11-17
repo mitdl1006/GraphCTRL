@@ -1,5 +1,18 @@
 # 백엔드 인계 (2026-11-17)
 
+## 2026-11-18 — 자유도(DOF) 기호 API(리드 ②)
+
+근거(원문): Degrees of freedom in assemblies `GUID-6E131E5A-438B-4008-94F3-D3A3E92EF44C.htm`,
+View degrees of freedom in assemblies `GUID-3BCBF614-CF92-4980-A965-80AEAFEF768E.htm`.
+- `doc.dof_symbol(item) / session.dof_symbol(item) -> Option<DofSymbol{origin, translations: Vec<[f64;3]>(단위 방향),
+  rotations: Vec<DofAxis{point, direction}>, relative_to: Vec<AnyId>}>`. 다른 컴포넌트는 고정으로 보고, 구속 야코비안의 영공간에서
+  순수 이동 방향을 먼저 뽑고, 남은 운동을 나사축(점 = 원점 + ω×v/|ω|²)으로 낸다 — 힌지는 축이 힌지 선 위에 온다. 개수는 `component_dof`와 같다.
+  `relative_to` = 원문의 큐브(덜 구속된 부품에 상대 구속된 경우, 그 부품들).
+- 표시 상태: iProperties Occurrence 탭 체크 = `CellOp::SetDofShown{items, on}`(세션 `set_dof_shown`), View 탭 전체 = `CellOp::SetDofShownAll(bool)`.
+  `doc.dof_shown(item)`, 그릴 것: `session.dof_symbols() -> Vec<(item, DofSymbol)>`(억제 제외).
+- 기호 모양(화살표·원호)은 원문에 그림만 있어 프론트엔드 결정. 성능: 기호 하나마다 관계를 모으므로 수백 개를 동시에 켜면 느릴 수 있음(필요하면 캐시).
+- 테스트 `gc_session/tests/dof_symbol.rs`(4).
+
 ## 2026-11-18 — 접촉 솔버(Contact Solver, 리드 ①)
 
 근거(원문): Detect contact between assembly components `GUID-FA1A8282-3A7E-45BE-8DB3-F637FB1C3292.htm`,

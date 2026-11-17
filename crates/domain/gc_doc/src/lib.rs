@@ -45,8 +45,8 @@ pub use pattern::{ComponentPattern, PatternDirection, PatternElement, PatternLay
 pub use placement::{ComponentOrigin, WorkShape};
 pub use project::ProjectSource;
 pub use relate::{
-    AngleSolution, AxisSense, ComponentStatus, Dof, Geometry, Limits, RelationKind, RelationStatus,
-    Relationship, Selection, Unsolved,
+    AngleSolution, AxisSense, ComponentStatus, Dof, DofAxis, DofSymbol, Geometry, Limits, RelationKind,
+    RelationStatus, Relationship, Selection, Unsolved,
 };
 pub use replicate::Replacement;
 pub use representation::{PositionalRepresentation, Representations, ViewRepresentation};

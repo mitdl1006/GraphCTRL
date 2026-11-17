@@ -539,6 +539,15 @@ pub enum CellOp {
     },
     /// Moves several components at once (a drag that pushed others through contact): one undo step.
     MoveComponents(Vec<(AnyId, Placement)>),
+    /// Shows or hides the degrees-of-freedom symbol of components (iProperties, Occurrence tab).
+    SetDofShown {
+        /// The components.
+        items: Vec<AnyId>,
+        /// Shown.
+        on: bool,
+    },
+    /// Shows or hides the degrees-of-freedom symbol of every component (View tab, Degrees of Freedom).
+    SetDofShownAll(bool),
     /// Adds components to, or takes them out of, the contact set.
     SetContactSet {
         /// The components (bodies, robots, assemblies).
@@ -750,6 +759,7 @@ pub(crate) fn set_timeline(
                 .chain(&c.hidden)
                 .chain(&c.suppressed)
                 .chain(&c.contact_set)
+                .chain(&c.dof_shown)
                 .copied()
                 .chain(c.origins_shown.iter().map(|(o, _)| *o))
                 .filter(|o| !txn.doc().has_occurrence(*o))
@@ -764,6 +774,7 @@ pub(crate) fn set_timeline(
             }
             c.origins_shown.retain(|(o, _)| !gone.contains(o));
             c.contact_set.retain(|o| !gone.contains(o));
+            c.dof_shown.retain(|o| !gone.contains(o));
         }
         edit(t);
     };
@@ -1204,6 +1215,24 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
             let held: Vec<AnyId> = moves.iter().map(|(i, _)| *i).collect();
             settle_holding(txn, &held)?;
             Ok((Vec::new(), "Move components"))
+        }
+        CellOp::SetDofShown { items, on } => {
+            use crate::design::Occurrence;
+            if items.is_empty() || !items.iter().all(|i| txn.doc().owner_pose(*i).is_some()) {
+                return Err(EditError::BadValue);
+            }
+            set_timeline(txn, |t| {
+                let shown = &mut t.components.dof_shown;
+                shown.retain(|o| !items.iter().any(|i| *o == Occurrence::Item(*i)));
+                if *on {
+                    shown.extend(items.iter().map(|i| Occurrence::Item(*i)));
+                }
+            })?;
+            Ok((Vec::new(), "Degrees of freedom"))
+        }
+        CellOp::SetDofShownAll(on) => {
+            set_timeline(txn, |t| t.components.dof_all = *on)?;
+            Ok((Vec::new(), "Degrees of freedom"))
         }
         CellOp::SetContactSolver(mode) => {
             set_timeline(txn, |t| t.components.contact_solver = *mode)?;

@@ -422,6 +422,12 @@ pub struct Components {
     /// GUID-0BBD4ACE-7BD1-40BF-A011-74416B229035): they push one another, or stop, while dragged or driven.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub contact_set: Vec<Occurrence>,
+    /// Components whose degrees-of-freedom symbol is shown (iProperties, Occurrence tab).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dof_shown: Vec<Occurrence>,
+    /// The degrees-of-freedom symbol is shown for every component (View tab, Visibility panel).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub dof_all: bool,
     /// Interactive Contact: which components the contact solver analyses.
     #[serde(default, skip_serializing_if = "ContactSolver::is_off")]
     pub contact_solver: ContactSolver,
@@ -468,6 +474,8 @@ impl Components {
             && self.origins_shown.is_empty()
             && self.contact_set.is_empty()
             && self.contact_solver.is_off()
+            && self.dof_shown.is_empty()
+            && !self.dof_all
     }
 }
 
