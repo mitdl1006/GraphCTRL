@@ -1,9 +1,12 @@
 //! The ribbon: tabs of command groups. Every button is a view of a session command.
 
 use eframe::egui;
+use gc_doc::{Placement, Solid, WaypointTarget};
 use gc_draw::StandardView;
 use gc_i18n::{Lang, Msg, tr};
+use gc_panels::CellUi;
 use gc_session::Session;
+use gc_sketch::Item;
 use gc_tools::{ConstraintKind, ToolKind};
 use gc_ui::{Icon, ribbon_button, ribbon_group, ribbon_tab};
 use gc_viewport::Viewport;
@@ -13,6 +16,7 @@ use gc_viewport::Viewport;
 pub(crate) enum Tab {
     Model,
     Sketch,
+    Robot,
     View,
 }
 
@@ -37,13 +41,17 @@ pub(crate) fn show(
     tab: &mut Tab,
     session: &mut Session,
     viewport: &mut Viewport,
+    cell: &mut CellUi,
     lang: Lang,
 ) {
     let sketching = session.active_sketch().is_some();
     ui.horizontal(|ui| {
-        for (this, label) in
-            [(Tab::Model, Msg::TabModel), (Tab::Sketch, Msg::TabSketch), (Tab::View, Msg::TabView)]
-        {
+        for (this, label) in [
+            (Tab::Model, Msg::TabModel),
+            (Tab::Sketch, Msg::TabSketch),
+            (Tab::Robot, Msg::TabRobot),
+            (Tab::View, Msg::TabView),
+        ] {
             if ribbon_tab(ui, label.text(lang), *tab == this) {
                 *tab = this;
             }
@@ -108,6 +116,7 @@ pub(crate) fn show(
                     }
                 });
             }
+            Tab::Robot => robot_tab(ui, session, viewport, cell, lang),
             Tab::View => {
                 ribbon_group(ui, tr!(lang, GroupViews), |ui| {
                     for (view, label) in [
@@ -133,6 +142,95 @@ pub(crate) fn show(
                         viewport.camera.ortho = false;
                     }
                 });
+            }
+        }
+    });
+}
+
+/// The bundled sample robot: a six-axis arm described with basic solids.
+const SAMPLE_ROBOT: &str = include_str!("../../../../fixtures/urdf/six_axis.urdf");
+
+fn robot_tab(
+    ui: &mut egui::Ui,
+    session: &mut Session,
+    viewport: &mut Viewport,
+    cell: &mut CellUi,
+    lang: Lang,
+) {
+    let robot = session.doc().robots().iter().next().map(|(id, _)| id);
+    let path = session.doc().paths().iter().last().map(|(id, _)| id);
+    // Failures of these commands are shown in the status bar.
+    ribbon_group(ui, tr!(lang, GroupAdd), |ui| {
+        if ribbon_button(ui, Icon::View, tr!(lang, CmdAddRobot), false, robot.is_none()).clicked() {
+            let name = format!("Robot{}", session.doc().robots().len() + 1);
+            if let Err(error) = session.add_robot(&name, SAMPLE_ROBOT) {
+                log::error!("the sample robot could not be added: {error}");
+            }
+            viewport.fit(session, [1000.0, 700.0]);
+        }
+        let at = |x: f64, z: f64| Placement { xyz: [x, 0.0, z], rpy: [0.0; 3] };
+        for (icon, label, solid, placement) in [
+            (Icon::Rectangle, Msg::CmdAddBox, Solid::Box { size: [0.1, 0.1, 1.4] }, at(0.55, 0.7)),
+            (Icon::Circle, Msg::CmdAddCylinder, Solid::Cylinder { radius: 0.06, length: 0.8 }, at(0.0, 0.4)),
+            (Icon::Circle, Msg::CmdAddSphere, Solid::Sphere { radius: 0.1 }, at(0.0, 0.1)),
+        ] {
+            if ribbon_button(ui, icon, label.text(lang), false, true).clicked() {
+                // New bodies are spread out sideways so that they do not hide each other.
+                let offset = 0.3 * session.doc().bodies().len() as f64;
+                let placement = Placement {
+                    xyz: [placement.xyz[0], placement.xyz[1] - offset, placement.xyz[2]],
+                    ..placement
+                };
+                drop(session.add_body(solid, placement));
+                viewport.fit(session, [1000.0, 700.0]);
+            }
+        }
+    });
+    ribbon_group(ui, tr!(lang, GroupPath), |ui| {
+        if ribbon_button(ui, Icon::Text("+P"), tr!(lang, CmdAddWaypoint), false, robot.is_some()).clicked()
+            && let Some(robot) = robot
+        {
+            drop(session.add_waypoint_here(robot));
+        }
+        // One selected point of the sketch being edited can become a waypoint that follows the sketch.
+        let point = match (session.active_sketch(), session.selection().iter().next()) {
+            (Some((sketch, _)), Some(Item::Point(point))) if session.selection().len() == 1 => {
+                Some((sketch, *point))
+            }
+            _ => None,
+        };
+        let enabled = robot.is_some() && point.is_some();
+        if ribbon_button(ui, Icon::Text("+S"), tr!(lang, CmdWaypointAtPoint), false, enabled).clicked()
+            && let (Some(robot), Some((sketch, point))) = (robot, point)
+        {
+            drop(session.add_waypoint(robot, WaypointTarget::SketchPoint { sketch, point }));
+        }
+        let waypoints: Vec<_> = session
+            .doc()
+            .waypoints()
+            .iter()
+            .filter(|(_, w)| Some(w.robot) == robot)
+            .map(|(id, _)| id)
+            .collect();
+        if ribbon_button(ui, Icon::Line, tr!(lang, CmdMakePath), false, !waypoints.is_empty()).clicked()
+            && let Some(robot) = robot
+        {
+            drop(session.add_path(robot, waypoints));
+        }
+        if ribbon_button(ui, Icon::Finish, tr!(lang, CmdPlan), false, path.is_some()).clicked()
+            && let Some(path) = path
+        {
+            cell.playing = false;
+            session.plan(path);
+        }
+        let planned = path.is_some_and(|p| session.planned(p).is_some());
+        let label = if cell.playing { tr!(lang, CmdStop) } else { tr!(lang, CmdPlay) };
+        if ribbon_button(ui, Icon::Text(">"), label, cell.playing, planned).clicked()
+            && let Some(path) = path
+        {
+            cell.playing = !cell.playing;
+            if cell.playing {
+                session.set_playback(Some((path, 0.0)));
             }
         }
     });

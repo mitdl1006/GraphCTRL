@@ -262,6 +262,72 @@ messages! {
     Ok => ("확인", "OK"),
     /// Button: cancel.
     Cancel => ("취소", "Cancel"),
+    /// Ribbon tab: robot cell.
+    TabRobot => ("로봇", "Robot"),
+    /// Ribbon group: add things to the cell.
+    GroupAdd => ("추가", "Add"),
+    /// Ribbon group: waypoints and paths.
+    GroupPath => ("경로", "Path"),
+    /// Command: add the bundled sample robot.
+    CmdAddRobot => ("샘플 로봇", "Sample Robot"),
+    /// Command: add a box.
+    CmdAddBox => ("상자", "Box"),
+    /// Command: add a cylinder.
+    CmdAddCylinder => ("원기둥", "Cylinder"),
+    /// Command: add a sphere.
+    CmdAddSphere => ("구", "Sphere"),
+    /// Command: add a waypoint at the robot's current pose.
+    CmdAddWaypoint => ("현재 자세", "Current Pose"),
+    /// Command: add a waypoint at the selected sketch point.
+    CmdWaypointAtPoint => ("스케치 점", "Sketch Point"),
+    /// Command: create a path through the waypoints.
+    CmdMakePath => ("경로 만들기", "Create Path"),
+    /// Command: plan the path.
+    CmdPlan => ("계획", "Plan"),
+    /// Command: play the planned motion.
+    CmdPlay => ("재생", "Play"),
+    /// Command: stop playback.
+    CmdStop => ("정지", "Stop"),
+    /// Browser node: bodies.
+    BrowserBodies => ("바디", "Bodies"),
+    /// Browser node: robots.
+    BrowserRobots => ("로봇", "Robots"),
+    /// Browser node: waypoints.
+    BrowserWaypoints => ("웨이포인트", "Waypoints"),
+    /// Browser node: paths.
+    BrowserPaths => ("경로", "Paths"),
+    /// Panel section: jog the robot's joints.
+    PanelJog => ("조그", "Jog"),
+    /// Panel section: placement and size of bodies.
+    PanelBodies => ("바디 배치", "Body Placement"),
+    /// Panel section: path planning.
+    PanelPath => ("경로 계획", "Path Planning"),
+    /// Label: position in millimetres.
+    PropPosition => ("위치 (mm)", "Position (mm)"),
+    /// Label: size in millimetres.
+    PropSize => ("크기 (mm)", "Size (mm)"),
+    /// Label: planner choice.
+    PropPlanner => ("플래너", "Planner"),
+    /// Label: random seed.
+    PropSeed => ("시드", "Seed"),
+    /// Label: playback time.
+    PropTime => ("시간 (s)", "Time (s)"),
+    /// Plan status: never planned.
+    PlanNotPlanned => ("계획 안 됨", "Not planned"),
+    /// Plan status: up to date.
+    PlanReady => ("계획됨", "Planned"),
+    /// Plan status: out of date.
+    PlanStale => ("오래됨(다시 계획 필요)", "Out of date (plan again)"),
+    /// Plan status: failed.
+    PlanFailed => ("실패", "Failed"),
+    /// Plan metric: estimated duration. `{0}` is seconds.
+    PlanDuration => ("예상 시간 {0} s", "Estimated time {0} s"),
+    /// Plan metric: smallest clearance. `{0}` is millimetres.
+    PlanClearance => ("최소 여유 {0} mm", "Minimum clearance {0} mm"),
+    /// Plan metric: planner effort. `{0}` is a count.
+    PlanChecks => ("상태 검사 {0}회", "{0} state checks"),
+    /// Plan metric: the move was possible in a straight joint-space line.
+    PlanStraight => ("직선 이동(플래너 불필요)", "Straight move (no planner needed)"),
 }
 
 impl Msg {

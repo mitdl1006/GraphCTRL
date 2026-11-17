@@ -68,6 +68,7 @@ pub struct GraphCtrlApp {
     viewport: Viewport,
     lang: Lang,
     tab: Tab,
+    cell: gc_panels::CellUi,
     expression: String,
     ime: ImeTest,
     dialogs: Box<dyn FileDialogs>,
@@ -90,6 +91,7 @@ impl GraphCtrlApp {
             viewport: Viewport::new(cc.wgpu_render_state.clone()),
             lang: Lang::default(),
             tab: Tab::Model,
+            cell: gc_panels::CellUi::default(),
             expression: String::new(),
             ime: ImeTest { dimension: "25 mm".to_owned(), ..ImeTest::default() },
             dialogs: Box::new(NativeDialogs),
@@ -396,7 +398,7 @@ impl eframe::App for GraphCtrlApp {
 
         egui::Panel::top("menu").show(ui, |ui| self.menu(ui));
         egui::Panel::top("ribbon").show(ui, |ui| {
-            ribbon::show(ui, &mut self.tab, &mut self.session, &mut self.viewport, lang);
+            ribbon::show(ui, &mut self.tab, &mut self.session, &mut self.viewport, &mut self.cell, lang);
         });
         egui::Panel::bottom("status").show(ui, |ui| {
             gc_panels::status_bar(
@@ -415,8 +417,11 @@ impl eframe::App for GraphCtrlApp {
             }
         });
         egui::Panel::right("properties").show(ui, |ui| {
-            ui.set_min_width(210.0);
-            gc_panels::properties(ui, &mut self.session, lang, &mut self.expression);
+            ui.set_min_width(250.0);
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                gc_panels::properties(ui, &mut self.session, lang, &mut self.expression);
+                gc_panels::cell(ui, &mut self.session, lang, &mut self.cell);
+            });
         });
         egui::CentralPanel::no_frame().show(ui, |ui| self.viewport.ui(ui, &mut self.session, lang));
         self.reference_question(&ctx);

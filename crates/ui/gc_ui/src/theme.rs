@@ -11,6 +11,10 @@ pub mod colors {
     pub const CONSTRAINED: Color32 = Color32::from_rgb(0x10, 0x10, 0x10);
     /// Geometry of sketches that are not being edited.
     pub const INACTIVE: Color32 = Color32::from_rgb(0x60, 0x68, 0x72);
+    /// The tool-tip trace of a planned path that is up to date.
+    pub const TRACE: Color32 = Color32::from_rgb(0x00, 0x8A, 0x4B);
+    /// Waypoint markers and their names.
+    pub const WAYPOINT: Color32 = Color32::from_rgb(0xB0, 0x1E, 0x8C);
     /// Construction geometry.
     pub const CONSTRUCTION: Color32 = Color32::from_rgb(0xB0, 0x70, 0x20);
     /// Selected items.

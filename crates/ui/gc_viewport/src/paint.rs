@@ -5,6 +5,7 @@ use egui::{Align2, Color32, FontId, Painter, Pos2, Rect, Stroke, pos2, vec2};
 use gc_draw::Camera;
 use gc_i18n::Lang;
 use gc_math::{DVec3, fm};
+use gc_scene::Scene;
 use gc_session::Session;
 use gc_sketch::{Curve, CurveGeom, DimKind, Dimension, GeoConstraint, Item, Sketch};
 use gc_tools::SnapKind;
@@ -61,18 +62,35 @@ impl View<'_> {
     }
 }
 
-/// Paints the whole scene into `rect`.
-pub(crate) fn scene(ui: &egui::Ui, rect: Rect, camera: &Camera, session: &Session, _lang: Lang) {
-    let view = View {
+fn view_of<'a>(ui: &egui::Ui, rect: Rect, camera: &'a Camera) -> View<'a> {
+    View {
         painter: ui.painter_at(rect),
         rect,
         camera,
         size: [f64::from(rect.width()), f64::from(rect.height())],
-    };
-    let active = session.active_sketch();
+    }
+}
+
+/// Paints what lies under the solids: the background and the grid.
+pub(crate) fn under(ui: &egui::Ui, rect: Rect, camera: &Camera, session: &Session) {
+    let view = view_of(ui, rect, camera);
+    view.painter.rect_filled(rect, 0.0, colors::BACKGROUND_TOP);
     let world_xy = SketchPlane { origin: DVec3::ZERO, u: DVec3::X, v: DVec3::Y, normal: DVec3::Z };
-    let grid_plane = active.map_or(world_xy, |(_, sketch)| plane_of(session, sketch));
+    let grid_plane = session.active_sketch().map_or(world_xy, |(_, sketch)| plane_of(session, sketch));
     grid(&view, &grid_plane);
+}
+
+/// Paints what lies over the solids: axes, sketches, traces, waypoints and tool previews.
+pub(crate) fn over(
+    ui: &egui::Ui,
+    rect: Rect,
+    camera: &Camera,
+    session: &Session,
+    scene: &Scene,
+    _lang: Lang,
+) {
+    let view = view_of(ui, rect, camera);
+    let active = session.active_sketch();
     axes(&view);
     for (id, sketch) in session.doc().sketches().iter() {
         let plane = plane_of(session, sketch);
@@ -84,6 +102,27 @@ pub(crate) fn scene(ui: &egui::Ui, rect: Rect, camera: &Camera, session: &Sessio
                 curve_path(&view, &plane, curve, |p| sketch.pos(p), None, stroke);
             }
         }
+    }
+    cell(&view, scene);
+}
+
+/// Tool-tip traces of planned paths and the waypoints.
+fn cell(view: &View<'_>, scene: &Scene) {
+    for trace in &scene.traces {
+        let color = if trace.current { colors::TRACE } else { colors::INACTIVE };
+        view.polyline(trace.points.iter().copied(), Stroke::new(2.0, color));
+    }
+    for waypoint in &scene.waypoints {
+        let Some(at) = view.screen(waypoint.position) else { continue };
+        let r = 5.0;
+        let diamond =
+            vec![pos2(at.x, at.y - r), pos2(at.x + r, at.y), pos2(at.x, at.y + r), pos2(at.x - r, at.y)];
+        view.painter.add(egui::Shape::convex_polygon(
+            diamond,
+            colors::WAYPOINT,
+            Stroke::new(1.0, Color32::WHITE),
+        ));
+        view.text(pos2(at.x + 8.0, at.y - 8.0), Align2::LEFT_BOTTOM, &waypoint.name, 13.0, colors::WAYPOINT);
     }
 }
 

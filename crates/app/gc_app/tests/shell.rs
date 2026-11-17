@@ -1,6 +1,12 @@
 //! The application shell through egui_kittest: it must work without a GPU, and with one it is rendered to
 //! PNG files that serve as evidence of what the user sees.
 
+#![allow(
+    clippy::float_cmp,
+    clippy::unwrap_used,
+    reason = "test code: exact values are compared and failures should panic"
+)]
+
 use eframe::egui;
 use egui_kittest::kittest::Queryable as _;
 use gc_app::{GraphCtrlApp, RunOptions};
@@ -149,6 +155,114 @@ fn screenshots_for_review() {
     harness.run();
     harness.get_by_label("홈").click();
     shot(&mut harness, "review-4-home-view.png");
+}
+
+const LEFT: [f64; 6] = [-1.0, 0.2, 0.3, 0.0, 0.5, 0.0];
+const RIGHT: [f64; 6] = [1.0, 0.2, 0.3, 0.0, 0.5, 0.0];
+
+/// Builds a small cell through the ribbon: the sample robot, a pillar in its way, a waypoint on the other
+/// side and a planned path around the pillar.
+fn build_cell(harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>) {
+    harness.get_by_label("로봇").click();
+    harness.run();
+    harness.get_by_label("샘플 로봇").click();
+    harness.run();
+    let robot = harness.state().session.doc().robots().iter().next().unwrap().0;
+    let app = harness.state_mut();
+    app.session.jog(robot, &RIGHT);
+    app.session.end_jog();
+    harness.run();
+    harness.get_by_label("현재 자세").click();
+    harness.run();
+    let app = harness.state_mut();
+    app.session.jog(robot, &LEFT);
+    app.session.end_jog();
+    harness.get_by_label("상자").click();
+    harness.run();
+    harness.get_by_label("경로 만들기").click();
+    harness.run();
+    harness.get_by_label("계획").click();
+    harness.run();
+}
+
+/// The robot workflow works without a GPU: add, jog, waypoint, obstacle, path, plan, play.
+#[test]
+fn a_robot_path_is_planned_through_the_ribbon() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    build_cell(&mut harness);
+    let session = &harness.state().session;
+    let path = session.doc().paths().iter().next().unwrap().0;
+    assert_eq!(session.plan_status(path), gc_session::PlanStatus::Ready, "{:?}", session.plan_error(path));
+    assert!(!session.planned(path).unwrap().segments[0].straight, "the box is in the way");
+    harness.get_by_label("Path1 (계획됨)");
+    assert!(harness.query_all_by_label("joint_1").count() >= 1, "the jog sliders are shown");
+
+    // Playing advances the shown robot along the motion without touching the document.
+    let revision = harness.state().session.doc().revision();
+    harness.get_by_label("재생").click();
+    harness.run_steps(8);
+    let (_, time) = harness.state().session.playback().unwrap();
+    assert!(time > 0.0);
+    harness.get_by_label("정지").click();
+    harness.run_steps(2);
+    assert_eq!(harness.state().session.doc().revision(), revision);
+
+    // Moving the box makes the plan stale: a live preview first, one undo step when it ends.
+    let app = harness.state_mut();
+    app.session.set_playback(None);
+    let (id, body) = app.session.doc().bodies().iter().next().map(|(id, b)| (id, b.clone())).unwrap();
+    let depth = app.session.history().undo_depth();
+    for step in 1..=5 {
+        let mut moved = body.clone();
+        moved.placement.xyz[1] = 0.1 * f64::from(step);
+        app.session.preview_body(id, moved);
+        assert_eq!(app.session.doc().revision(), revision);
+    }
+    assert_eq!(app.session.shown_body(id).unwrap().placement.xyz[1], 0.5);
+    app.session.end_body_preview();
+    assert_eq!(app.session.history().undo_depth(), depth + 1);
+    harness.run();
+    harness.get_by_label("Path1 (오래됨(다시 계획 필요))");
+}
+
+/// The robot cell rendered: the 3D solids come from the GPU, the trace and waypoints are drawn over them.
+#[test]
+fn robot_cell_renders_with_gpu() {
+    if gc_test_support::gpu_or_skip("robot_cell_renders_with_gpu").is_none() {
+        return;
+    }
+    let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+    std::fs::create_dir_all(&out).unwrap();
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .wgpu()
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    build_cell(&mut harness);
+    let image = harness.render().unwrap();
+    image.save(out.join("review-5-robot-path.png")).unwrap();
+    // Somewhere in the viewport the dark and the orange links of the robot are visible.
+    let viewport = (220..1000).flat_map(|x| (130..760).map(move |y| (x, y)));
+    let (mut dark, mut orange) = (0, 0);
+    for (x, y) in viewport {
+        let px = image.get_pixel(x, y);
+        dark += u32::from(px[0] < 110 && px[1] < 110 && px[2] < 120 && px[0].abs_diff(px[2]) < 40);
+        orange += u32::from(px[0] > 150 && px[1] > 60 && px[1] < 150 && px[2] < 80);
+    }
+    assert!(dark > 500 && orange > 500, "dark {dark}, orange {orange}");
+
+    // Half-way through the motion, in perspective.
+    let app = harness.state_mut();
+    let path = app.session.doc().paths().iter().next().unwrap().0;
+    let duration = app.session.planned(path).unwrap().duration();
+    app.session.set_playback(Some((path, duration * 0.5)));
+    harness.run();
+    harness.render().unwrap().save(out.join("review-6-playback.png")).unwrap();
 }
 
 /// File dialogs that always answer with one path.

@@ -1,8 +1,8 @@
 //! The viewport: view navigation, sketch tool input and drawing of the scene.
 //!
-//! The background comes from the renderer's offscreen target when a GPU is present. Sketches, grid,
-//! dimensions and tool previews are drawn on top with egui's painter, through the same camera. Without a
-//! GPU everything still works; only the background is a flat fill.
+//! Solids (bodies, robot links) come from the renderer's offscreen target when a GPU is present. The grid
+//! is painted under that image and sketches, dimensions, traces and tool previews over it with egui's
+//! painter, through the same camera. Without a GPU everything still works; only the solids are missing.
 
 mod paint;
 mod target;
@@ -13,6 +13,7 @@ use gc_doc::Sketch;
 use gc_draw::{Camera, NavAction, NavInput, NavPreset, StandardView, nav_action};
 use gc_i18n::Lang;
 use gc_math::{Aabb, DPose3, DVec3, Plane};
+use gc_scene::Scene;
 use gc_session::Session;
 use gc_sketch::Space;
 use gc_tools::{Key as ToolKey, ToolEvent};
@@ -108,6 +109,10 @@ impl Viewport {
                 bounds = bounds.including(plane.world(point.pos));
             }
         }
+        let scene = Scene::of(session).bounds();
+        if !scene.is_empty() {
+            bounds = bounds.union(&scene);
+        }
         if bounds.is_empty() || bounds.diagonal() < 1e-6 {
             bounds = Aabb::from_points([DVec3::splat(-0.05), DVec3::splat(0.05)]);
         }
@@ -117,7 +122,6 @@ impl Viewport {
     /// Shows the viewport and feeds the user's input to the view and to the session's tool.
     pub fn ui(&mut self, ui: &mut egui::Ui, session: &mut Session, lang: Lang) {
         let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
-        self.background.paint(ui, rect);
         let size = [f64::from(rect.width()), f64::from(rect.height())];
         let to_view = |p: egui::Pos2| [f64::from(p.x - rect.left()), f64::from(p.y - rect.top())];
 
@@ -173,7 +177,10 @@ impl Viewport {
             }
         }
 
-        paint::scene(ui, rect, &self.camera, session, lang);
+        let scene = Scene::of(session);
+        paint::under(ui, rect, &self.camera, session);
+        self.background.paint(ui, rect, &self.camera, &scene);
+        paint::over(ui, rect, &self.camera, session, &scene, lang);
         self.value_box(ui, rect, session, size);
     }
 

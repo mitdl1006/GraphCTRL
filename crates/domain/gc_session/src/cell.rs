@@ -108,6 +108,7 @@ struct Planned {
 pub(crate) struct CellState {
     robots: BTreeMap<Id<Robot>, Arc<LoadedRobot>>,
     jog: Option<(Id<Robot>, Vec<f64>)>,
+    body: Option<(Id<Body>, Body)>,
     plans: BTreeMap<Id<MotionPath>, Planned>,
     playback: Option<(Id<MotionPath>, f64)>,
 }
@@ -126,6 +127,9 @@ impl CellState {
         self.plans.retain(|id, _| doc.get(*id).is_some());
         if self.jog.as_ref().is_some_and(|(id, _)| doc.get(*id).is_none()) {
             self.jog = None;
+        }
+        if self.body.as_ref().is_some_and(|(id, _)| doc.get(*id).is_none()) {
+            self.body = None;
         }
         if self.playback.is_some_and(|(id, _)| doc.get(id).is_none()) {
             self.playback = None;
@@ -213,6 +217,30 @@ impl Session {
         }
     }
 
+    /// A body as it is shown: the preview while it is being edited, else the document's.
+    pub fn shown_body(&self, body: Id<Body>) -> Option<&Body> {
+        match &self.cell.body {
+            Some((id, preview)) if *id == body => Some(preview),
+            _ => self.doc.get(body),
+        }
+    }
+
+    /// Previews an edit of a body without touching the document.
+    pub fn preview_body(&mut self, id: Id<Body>, body: Body) {
+        if self.doc.get(id).is_some() && body.solid.is_valid() {
+            self.cell.body = Some((id, body));
+        }
+    }
+
+    /// Commits the body preview as one undo step.
+    pub fn end_body_preview(&mut self) {
+        if let Some((id, body)) = self.cell.body.take()
+            && self.doc.get(id).is_some_and(|b| *b != body)
+        {
+            self.last_error = self.cell_op(CellOp::SetBody { id, body }).err();
+        }
+    }
+
     /// The joint values a robot is shown with: the playback position, else the jog preview, else the
     /// document's.
     pub fn robot_joints(&self, robot: Id<Robot>) -> Option<Vec<f64>> {
@@ -235,6 +263,22 @@ impl Session {
         let mut poses = Vec::new();
         loaded.model.link_poses(&loaded.chain.expand(&self.robot_joints(robot)?), &mut poses);
         Some(poses.iter().map(|pose| base * *pose).collect())
+    }
+
+    /// The world pose of the tool at a waypoint.
+    pub fn waypoint_pose(&self, waypoint: Id<Waypoint>) -> Option<DPose3> {
+        let waypoint = self.doc.get(waypoint)?;
+        match &waypoint.target {
+            WaypointTarget::SketchPoint { sketch, point } => pose_at_point(&self.doc, *sketch, *point),
+            WaypointTarget::Joints(q) => {
+                let robot = self.doc.get(waypoint.robot)?;
+                let loaded = self.robot_model(waypoint.robot)?;
+                let mut poses = Vec::new();
+                loaded.model.link_poses(&loaded.chain.expand(q), &mut poses);
+                let tip = poses.get(loaded.model.link(&robot.tip_link)?)?;
+                Some(pose_of(&robot.placement) * *tip)
+            }
+        }
     }
 
     /// Previews joint values without touching the document. Values are clamped to the joint limits.

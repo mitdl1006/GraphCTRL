@@ -14,7 +14,14 @@ pub fn ribbon_tab(ui: &mut Ui, label: &str, selected: bool) -> bool {
 /// A large button: icon above, label below. `selected` marks the active tool.
 pub fn ribbon_button(ui: &mut Ui, icon: Icon, label: &str, selected: bool, enabled: bool) -> Response {
     let sense = if enabled { Sense::click() } else { Sense::hover() };
-    let (rect, response) = ui.allocate_exact_size(BUTTON_SIZE, sense);
+    // Wide enough for the label: labels in some languages are longer than the icon is wide.
+    let font = egui::FontId::proportional(11.5);
+    let text_width = ui
+        .fonts_mut(|fonts| fonts.layout_no_wrap(label.to_owned(), font.clone(), egui::Color32::BLACK))
+        .size()
+        .x;
+    let size = vec2(BUTTON_SIZE.x.max(text_width + 10.0), BUTTON_SIZE.y);
+    let (rect, response) = ui.allocate_exact_size(size, sense);
     response.widget_info(|| WidgetInfo::selected(Role::Button, enabled, selected, label));
     if ui.is_rect_visible(rect) {
         let visuals = ui.visuals();
@@ -33,7 +40,7 @@ pub fn ribbon_button(ui: &mut Ui, icon: Icon, label: &str, selected: bool, enabl
             rect.center_bottom() - vec2(0.0, 4.0),
             egui::Align2::CENTER_BOTTOM,
             label,
-            egui::FontId::proportional(11.5),
+            font,
             color,
         );
     }

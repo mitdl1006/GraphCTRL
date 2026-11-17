@@ -1,5 +1,7 @@
 //! The panels around the viewport: model browser, properties and status bar.
 
+mod cell;
+
 use egui::{RichText, Ui};
 use gc_core::Id;
 use gc_doc::{FrameKind, Sketch};
@@ -8,6 +10,8 @@ use gc_session::Session;
 use gc_sketch::{CurveGeom, Item, SketchError};
 use gc_tools::Prompt;
 use gc_ui::colors;
+
+pub use cell::{CellUi, cell, status_text};
 
 /// What the user asked for in the browser.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -35,6 +39,25 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang) -> Option<BrowserActi
             }
         }
     });
+    let doc = session.doc();
+    let section = |ui: &mut Ui, title: &str, names: Vec<String>| {
+        if !names.is_empty() {
+            egui::CollapsingHeader::new(title).default_open(true).show(ui, |ui| {
+                for name in names {
+                    ui.label(name);
+                }
+            });
+        }
+    };
+    section(ui, tr!(lang, BrowserBodies), doc.bodies().iter().map(|(_, b)| b.name.clone()).collect());
+    section(ui, tr!(lang, BrowserRobots), doc.robots().iter().map(|(_, r)| r.name.clone()).collect());
+    section(ui, tr!(lang, BrowserWaypoints), doc.waypoints().iter().map(|(_, w)| w.name.clone()).collect());
+    let paths = doc
+        .paths()
+        .iter()
+        .map(|(id, p)| format!("{} ({})", p.name, status_text(lang, session.plan_status(id))))
+        .collect();
+    section(ui, tr!(lang, BrowserPaths), paths);
     action
 }
 

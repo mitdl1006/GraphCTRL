@@ -19,3 +19,4 @@ gc_doc.workspace = true
 gc_tools.workspace = true
 gc_sketch.workspace = true
 gc_robot.workspace = true
+gc_mesh.workspace = true
