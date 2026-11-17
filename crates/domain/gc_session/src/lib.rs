@@ -13,6 +13,7 @@
 
 mod assembly;
 mod cell;
+mod design;
 pub mod library;
 mod project;
 mod spatial;
@@ -25,6 +26,7 @@ pub use cell::{
     CellItem, CompareRow, Ghost, LoadedRobot, MeshRef, PADDING, PLANNERS, PlanStatus, PlannedPath, Reference,
     Resources, Shown, ShownPart,
 };
+pub use design::WorkShape;
 use gc_core::{Id, Revision};
 use gc_doc::{Applied, Command, Created, Document, EditError, History, Sketch, SketchOp, apply};
 pub use gc_motion::StateProblem;

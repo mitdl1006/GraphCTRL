@@ -1251,3 +1251,49 @@ fn an_assembly_is_imported_by_a_job_and_failures_are_reported() {
     session.import_assembly("broken.glb", Arc::new(|file: &str| Err(format!("{file}: not a glTF file"))));
     assert!(session.import_status().unwrap().as_ref().unwrap_err().contains("broken.glb"));
 }
+
+#[test]
+fn work_features_are_placed_in_the_world() {
+    use gc_doc::{OriginPlane, PlaneRef, PointRef, WorkFeature, WorkGeometry};
+    use gc_session::WorkShape;
+    let mut session = Session::new();
+    let add = |session: &mut Session, geometry| {
+        let feature = WorkFeature { name: "W".into(), geometry, visible: true };
+        match session.execute(&Command::Cell(CellOp::AddWorkFeature(feature))).unwrap()[0] {
+            gc_doc::Created::WorkFeature(id) => id,
+            _ => panic!(),
+        }
+    };
+    // XZ (normal −Y) moved 0.2 m along its normal.
+    let plane = add(
+        &mut session,
+        WorkGeometry::PlaneOffset { base: PlaneRef::Origin(OriginPlane::Xz), distance: 0.2 },
+    );
+    let Some(WorkShape::Plane(pose)) = session.work_shape(plane) else { panic!() };
+    assert!((pose.translation - gc_math::DVec3::new(0.0, -0.2, 0.0)).length() < 1e-12);
+    // A point, and the axis through it normal to that plane.
+    let point = add(&mut session, WorkGeometry::Point { at: PointRef::Fixed([0.1, 0.0, 0.3]) });
+    let axis = add(
+        &mut session,
+        WorkGeometry::AxisNormalToPlane { plane: PlaneRef::Work(plane), through: PointRef::Work(point) },
+    );
+    let Some(WorkShape::Axis { point: p, direction }) = session.work_shape(axis) else { panic!() };
+    assert!((p - gc_math::DVec3::new(0.1, 0.0, 0.3)).length() < 1e-12);
+    assert!((direction - gc_math::DVec3::new(0.0, -1.0, 0.0)).length() < 1e-12);
+    // A plane through three points has its normal along the right-hand rule; points on a line give none.
+    let tilted = add(
+        &mut session,
+        WorkGeometry::PlaneThroughPoints {
+            points: [PointRef::Origin, PointRef::Fixed([1.0, 0.0, 0.0]), PointRef::Fixed([0.0, 1.0, 0.0])],
+        },
+    );
+    let Some(WorkShape::Plane(pose)) = session.work_shape(tilted) else { panic!() };
+    assert!((pose.rotation * gc_math::DVec3::Z - gc_math::DVec3::Z).length() < 1e-12);
+    let line = add(
+        &mut session,
+        WorkGeometry::PlaneThroughPoints {
+            points: [PointRef::Origin, PointRef::Fixed([1.0, 0.0, 0.0]), PointRef::Fixed([2.0, 0.0, 0.0])],
+        },
+    );
+    assert_eq!(session.work_shape(line), None);
+}
