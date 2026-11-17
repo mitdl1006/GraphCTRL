@@ -41,4 +41,5 @@
 | gc_persist | 완료(`.gctrl` v1, 원자적 저장, `.bak`; 자동 저장·복구는 이후) | 4 (save∘load = id, 결정적 출력, 손상·상위 버전 거부) |
 | gc_robot | URDF 리더·검증, 체인, FK, 자코비안, 수치 IK 완료(PlanningProfile·해석 IK 연결은 이후) | 8 (UR5e 공개 자세 FK, API 기준 FK 1e-12, 자코비안, IK, 오류 메시지) |
 | gc_plan | 완료(RRT-Connect·RRT·RRT*·Informed RRT*·PRM, 숏컷·코너 절단·조밀화, 독립 재검증) | 12 (유효성, 시드 재현성, 최적성, 실패 사유, 다중 목표, 취소) |
+| gc_collide | 완료(구·상자·원기둥·볼록 껍질·메시, 패딩 쌍 정책, 허용 쌍; BVH 가속·ACM 자동 생성은 이후) | 6 |
 | 그 외 | 스텁 | |
