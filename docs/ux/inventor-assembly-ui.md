@@ -5,11 +5,10 @@ GraphCTRL의 현재 상태(있음 / 없음 / 다름)를 적었다. 아이콘과 
 
 ## 0. 수집 범위 (먼저 읽을 것)
 
-- **원문으로 읽은 곳**(curl로 `help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/…`를 받아 본문을 확인): 아래 출처 표의 S1–S8.
-- **검색 결과만 본 곳**: 리본 탭별 패널과 명령 전체 목록, ViewCube·내비게이션 막대·상태바 항목, 브라우저 노드 구조 전체는
-  도움말 목차가 자바스크립트 앱이라 목차 데이터를 얻지 못해 **미수집**이다. 아래 표에서 "미수집"으로 표시했다.
-- 따라서 이 문서는 **완성본이 아니다.** 특히 §2(리본 탭별 명령)와 §5(ViewCube·상태바)는 골격만 있다. 다음 단계로 목차 페이지의
-  GUID 목록을 얻어 탭마다 같은 방식으로 채워야 한다(§7).
+- **원문으로 읽은 곳**: 아래 §1 출처 표의 S1–S8, 그리고 추가로 S11–S22(curl로 본문 확인).
+- **검색 결과만 본 곳**: 리본 탭 중 Inspect, Manage의 패널 목록, Tools 탭의 전체 패널 목록. 검색 요약에만 있던 내용은 "검색 요약"으로 표시했다.
+- **미수집**: 리본 탭 전체 패널·명령 목록, 상태바 항목 목록(위치와 역할만 확인), 브라우저 노드 전체.
+- 도움말 목차는 자바스크립트 앱이라 직접 받지 못한다. 대신 상위 페이지(User Interface, Relationships 등)의 하위 링크를 따라갔다.
 
 ## 1. 출처 (GUID)
 
@@ -25,25 +24,37 @@ GraphCTRL의 현재 상태(있음 / 없음 / 다름)를 적었다. 아이콘과 
 | S8 | About the Autodesk Inventor View Interface | [GUID-E13A932A…](https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-E13A932A-6102-46E9-A132-05F205689777.htm) | curl 원문(옛 도구막대 설명) |
 | S9 | Place Constraint Reference (검색 결과) | [GUID-198F05E4…](https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-198F05E4-2973-4818-8F25-A0B8B9796D07.htm) | 미수집 |
 | S10 | About the Ribbon (2022 판, 검색 결과) | [GUID-78BFC5E2…](https://help.autodesk.com/cloudhelp/2022/ENU/Inventor-Help/files/GUID-78BFC5E2-5323-48E3-A704-58DDD1836EFE.htm) | 미수집, 2026 판 아님 |
+| S11 | User Interface (상위 목차) | [GUID-8E3158B6…](https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-8E3158B6-56F5-4D74-9B6A-5D5B6049116A.htm) | curl 원문 — 하위 17개 링크 |
+| S12 | About the Ribbon | [GUID-78BFC5E2…](https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-78BFC5E2-5323-48E3-A704-58DDD1836EFE.htm) | curl 원문 |
+| S13 | To Work with the Navigation Bar | [GUID-FAAB453E…](https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-FAAB453E-31EB-46B8-9A74-3BF7A4D88EC9.htm) | curl 원문 |
+| S14 | About Reorienting the View (ViewCube) | [GUID-4A18A2AC…](https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-4A18A2AC-69F2-44DD-AD07-B8733321E8C9.htm) | curl 원문 |
+| S15 | To Reorient the View | [GUID-94F44C80…](https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-94F44C80-7313-4529-85D1-E64ABF732700.htm) | curl 원문 |
+| S16 | Inventor Browser | [GUID-EDF6B951…](https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-EDF6B951-C309-44A8-868C-B72D99F6D5A7.htm) | curl 원문(앞부분) |
+| S17 | About Graphics Windows | [GUID-7544AABF…](https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-7544AABF-95ED-4062-A27A-6F60AD9379A8.htm) | curl 원문(앞부분) — 상태바 위치 |
+| S18 | Relationships: Constrain (Place Constraint Reference) | [GUID-198F05E4…](https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-198F05E4-2973-4818-8F25-A0B8B9796D07.htm) | curl 원문 — 접근 경로 |
+| S19 | Create Joints Reference | [GUID-6AA68E8F…](https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-6AA68E8F-7C97-4806-8483-3941DE915E70.htm) | curl 원문(앞부분) |
+| S20 | To Place Mate or Flush Constraints in Assemblies | [GUID-0F500089…](https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-0F500089-4F69-41C5-AFE8-B58AC9E8E15E.htm) | curl 원문 |
+| S21 | Reference for Marking Menu Tab of Customize Dialog | [GUID-1A2766FB…](https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-1A2766FB-EB3E-476B-9C44-D500A5137478.htm) | curl 원문(접근 경로만) |
+| S22 | Keyboard Shortcut Reference → Work Environment 하위 | [GUID-DEEB0723…](https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-DEEB0723-DFC7-4B28-95F4-099CC1E1EBF8.htm) | (S4와 같음) |
 
 ## 2. 리본 탭 (Ribbon)
 
-Inventor 2026의 탭 목록(조립·설계·3D 모델·스케치·검사·도구·관리·뷰·환경)은 검색 결과로만 확인했다. 탭별 패널과 명령은 **미수집**.
-S1에 따르면 특수 환경(Studio, BIM 콘텐츠 등)은 **환경(Environments) 탭**에 있고, 들어가면 초록색 문맥 탭이 생기며, 오른쪽 끝의
-종료/마침(Exit/Finish) 명령으로 나온다. 그 밖의 탭별 명령은 목차 확보 후 채운다.
+리본은 작업별 탭이고, 각 탭은 패널로 나뉜다(S12). 탭 목록과 패널 이름은 아래에서 원문으로 확인된 것만 적었다.
+정확한 패널 전체 목록은 목차 확보 후 채운다(§7).
 
-| 탭 | Inventor 2026 | 출처 | GraphCTRL | 상태 |
+| 탭 | 원문으로 확인된 패널·명령 | 출처 | GraphCTRL | 상태 |
 |---|---|---|---|---|
-| 조립 (Assemble) | 구성요소 배치, 구속, 조인트, 패턴 등. 패널명은 미확인 | S3, S5, S6 (명령 일부만) | 탭 없음. 바디 추가·로봇 추가는 "로봇" 탭 | 다름 |
+| 조립 (Assemble) | 관계(Relationships) 패널: 구속(Constrain), 조인트(Joint), 조립(Assemble, 옛 방식). 구성(Component) 패널: 배치 계열(검색 요약, 원문 미확인). 관리(Manage) 패널에 부품 목록(검색 요약) | S18, S19, S20, S6 | "로봇" 탭: 로봇 추가, 바디 추가, 좌표계, 경로, 계획, 재생. 구속·조인트 탭 없음 | 다름 |
 | 설계 (Design) | 미수집 | — | 없음 | 없음 |
-| 3D 모델 | 미수집(3D 스케치 정도) | — | "3D 모델" 탭: 3D 스케치, 3D 구속 | 다름 |
-| 스케치 | 미수집 | — | "스케치" 탭: 선·원·호·사각형·구속·치수·스케치 마무리 | 있음(부분) |
-| 검사 (Inspect) | 미수집 | — | 없음 | 없음 |
-| 도구 (Tools) | 옵션, 단축키 설정 등. 단축키 설정은 S4 | S4 | 메뉴 "도구" (포즈 변환 계산기, 성능 오버레이, AI 에이전트 연결 등). 리본 탭 아님 | 다름 |
-| 관리 (Manage) | 미수집 | — | 없음 | 없음 |
-| 뷰 (View) | 표준 뷰, 표시 설정 | S8 (옛 도구막대 설명) | "뷰" 탭: 홈, 정면, 평면, 우측, 전체 보기, 직교/원근 | 있음(부분) |
-| 환경 (Environments) | 특수 환경 진입, 종료/마침 | S1 | 없음 | 없음 |
-| 로봇 | (Inventor에 없음) | — | "로봇" 탭: 추가, 좌표계, 경로, 계획, 재생 | 추가 기능 |
+| 3D 모델 | 미수집 | — | "3D 모델" 탭: 3D 스케치, 3D 구속 | 다름 |
+| 스케치 | 작성(Create) 패널: 문자(Text) 등. 접근 경로는 Format Text Reference([GUID-23757F14…](https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-23757F14-BE7A-479B-B967-C79A71FBFCF1.htm)). 2D 스케치 명령 전체는 미수집 | — | "스케치" 탭: 선·원·호·사각형, 구속, 치수, 스케치 마무리 | 있음(부분) |
+| 검사 (Inspect) | 원문 미확인(검색으로 전용 페이지를 찾지 못함) | — | 없음. 측정은 도구 메뉴 | 없음 |
+| 도구 (Tools) | 옵션(Options) 패널: 사용자 지정(Customize), 응용 프로그램 옵션(Application Options), 문서 설정(Document Settings), 애드인(Add-ins). 재질·외관(Material and Appearance) 패널: 외관(Appearance) 등([GUID-5F5AB893…](https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-5F5AB893-224F-4F62-BE55-7FD018F059E2.htm)) | S21, 위 링크 | 메뉴 "도구"(포즈 변환 계산기, 측정, 성능 오버레이, AI 에이전트 연결). 리본 탭 아님 | 다름 |
+| 관리 (Manage) | 원문 미확인 | — | 없음 | 없음 |
+| 뷰 (View) | 외형(Appearance), 창(Windows) 패널. 창 패널에 사용자 인터페이스(User Interface) 드롭다운: 탐색 막대, 상태바, 마킹 메뉴 체크 | S13, S17, S21 | "뷰" 탭: 홈, 정면, 평면, 우측, 전체 보기, 직교/원근 | 있음(부분) |
+| 환경 (Environments) | 시작(Begin) 패널: Studio 등 특수 환경 진입. 종료/마침은 오른쪽 끝 | S1, S7 | 없음 | 없음 |
+| 주석 (Annotate) | 표(Table) 패널: 개정 표([GUID-6DB7770F…](https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-6DB7770F-D1A0-44E2-8898-6C39AC57222A.htm)) | 원문 | 없음 | 없음 |
+| 로봇 | (Inventor에 없음) | — | "로봇" 탭 | 추가 기능 |
 
 ## 3. 환경 (Environments)
 
@@ -61,29 +72,45 @@ S1에 따르면 특수 환경(Studio, BIM 콘텐츠 등)은 **환경(Environment
 | 방식 | 그래픽 창에서 우클릭하면 커서 중심의 방사형 메뉴. 항목(노드)은 부채꼴 영역 | S2 | 우클릭 시 일반 컨텍스트 메뉴 | 다름 |
 | 마크 모드 | 메뉴를 열지 않고 항목 쪽으로 획을 긋고 바로 떼면 선택(제스처) | S2 | 없음 | 없음 |
 | 보조 메뉴 | 방사형 메뉴 위나 아래에 짧은 컨텍스트 메뉴(오버플로) | S2 | 없음 | 없음 |
-| 어셈블리 항목 | 구속(Constrain), 부품 배치(Place Component), 이동, 회전 | S2 | 이동·회전은 기즈모로만 가능, 메뉴 항목 없음 | 다름 |
+| 어셈블리 항목 | 구속(Constrain), 부품 배치(Place Component), 이동, 회전 | S2 | 이동·회전은 기즈모로만 가능 | 다름 |
 | 스케치 항목 | 원(중심점), 선, 두 점 사각형, 스케치 마무리 | S2 | 스케치 도구는 리본에만 있음 | 다름 |
-| 끄기 | 도구 > 옵션 설정 (구체 경로는 미확인) | S2 | 없음 | — |
+| 켜고 끄기 | 도구 탭 > 옵션 패널 > 사용자 지정 > 마킹 메뉴 탭(S21). 검색 요약에는 뷰 탭 > 사용자 인터페이스 경로도 있음(원문 미확인) | S21 | 없음 | 없음 |
 
-## 5. 브라우저, 상태바, 뷰큐브, 탐색 막대
+## 5. 브라우저, 상태바, ViewCube, 탐색 막대
 
 ### 5.1 브라우저 (Browser)
 | 항목 | Inventor 2026 | 출처 | GraphCTRL | 상태 |
 |---|---|---|---|---|
-| 구조 | 파일의 계층(부품, 조립품, 프레젠테이션, 도면). 환경마다 다름. 각 노드는 단계 순서로 나열 | S8 | 원점, 스케치, 파라미터, 바디, 로봇, 좌표계, 웨이포인트, 경로 | 다름(셀 전용 노드) |
-| 떼어내기 | 브라우저를 창 밖으로 빼서 화면 가장자리에 붙이기, 항상 위 옵션 | S8 | 떼어내기 없음 | 없음 |
-| 컴포넌트 우클릭 메뉴 | 위치 찾기, 도움말, 상단 구속 선택, 모든 구속 선택, 구성요소 애니메이션, 열기, 구성요소 하위 메뉴, 표시 여부 | S7 | 숨기기/보이기, 삭제, 계획(경로), 스케치 편집 | 다름(항목 수 적음) |
-| 조인트 우클릭 메뉴 | 잠금(Lock), 고정(Ground), 보호(Protect) | S6 | 조인트 개념 없음 | 없음 |
-| 구속 종류 | 맞대기(Mate), 플러시(Flush), 축 2개 (반대/정렬/무방향), 각도(방향/무방향) 등. 한계·정지 위치 설정 가능 | S5 | 2D·3D 스케치 구속 12종 + 3D 구속. 조립 구속 없음 | 없음(부품 간) |
-| 조인트 | 구성요소를 위치시키고 운동을 정의하는 권장 방식. 구속은 옛 방식 | S6 | 로봇 관절은 조그 슬라이더 | 다름 |
+| 구조 | 파일 계층(부품, 조립품, 프레젠테이션, 도면). 환경마다 다름. 특징(feature)은 만든 순서로 나열 | S16, S8 | 원점, 스케치, 파라미터, 바디, 로봇, 좌표계, 웨이포인트, 경로 | 다름(셀 전용 노드) |
+| 패널 구성 | 패널을 끌어 옮기기·합치기·떼기, 여러 모니터 배치, 닫기, 숨은 패널 추가 | S16 | 고정 패널, 떼어내기 없음 | 없음 |
+| 검색·필터 | 빠른 검색(파일 노드, 특징, 관계, iProperty), 필터로 노드 종류 제한 | S16 | 없음(항목은 전부 표시) | 없음 |
+| 환경 전환 | 보기 탭 > 창 패널 > 전환(Switch) 목록으로 문서 전환. 브라우저가 안 보이면 왼쪽 위 아이콘 | S16, S17 | 없음(단일 셀) | 없음 |
+| 우클릭 메뉴(컴포넌트) | 위치 찾기, 도움말, 상단 구속 선택, 모든 구속 선택, 구성요소 애니메이션, 열기, 구성요소 하위 메뉴, 표시 여부 | S7(Studio 페이지 안의 조립 항목) | 숨기기/보이기, 삭제, 계획, 스케치 편집 | 다름(항목 수 적음) |
+| 조인트 메뉴 | 연결을 우클릭하면 잠금(Lock), 고정(Ground), 보호(Protect) | S6 | 조인트 개념 없음 | 없음 |
 | 고정(Ground) | 구성요소를 공간에 고정. 원점에 고정 가능 | S6, S3 | 없음 | 없음 |
 
-### 5.2 상태바, ViewCube, 탐색 막대
+### 5.2 상태바
 | 항목 | Inventor 2026 | 출처 | GraphCTRL | 상태 |
 |---|---|---|---|---|
-| 상태바 | 미수집 (검색 요약: 스케치 완전 구속 여부, 다음 단계 안내 등. 원문 미확인) | — | 안내 문구, "N개 치수 필요"/"완전 구속", GPU 사용, AI 에이전트 알림 | 부분 있음 |
-| ViewCube | 미수집 | — | 있음(면 라벨 평면·정면·우측, 클릭 가능) | 있음 |
-| 탐색 막대 | 미수집 | — | 없음 | 없음 |
+| 위치·역할 | 창 아래 끝. 명령의 상황별 메시지 표시. 보기 탭 > 창 패널 > 사용자 인터페이스 > 상태바 체크로 켜고 끔 | S17 | 아래에 안내 문구, "N개 치수 필요"/"완전 구속", GPU 사용, AI 에이전트 알림 | 있음(역할 비슷) |
+| 항목 목록 | 미수집(스케치 완전 구속 표시 등은 검색 요약, 원문 미확인) | — | 위와 같음 | 부분 |
+
+### 5.3 ViewCube
+| 항목 | Inventor 2026 | 출처 | GraphCTRL | 상태 |
+|---|---|---|---|---|
+| 구성 | 클릭 가능한 26개 부분: 면 6개(위, 아래, 앞, 뒤, 왼쪽, 오른쪽 정투영), 모서리(12), 꼭짓점(8, 3/4 뷰) | S14 | 면 라벨 평면·정면·우측 등 클릭 가능 (정확한 개수 미확인) | 부분 |
+| 면 클릭 | 해당 정투영 뷰 | S14 | 있음 | 있음 |
+| 모서리·꼭짓점 클릭 | 모서리는 반 뷰, 꼭짓점은 3/4 뷰 | S14 | 미확인 | 미확인 |
+| 드래그 | 자유 회전 | S14 | 있음(뷰 조작) | 있음 |
+| 홈 뷰 | 정의·복원 가능 | S14 | 홈(F6) | 있음(이름 다름) |
+| 인접 면 전환 | 면 뷰일 때 네 방향 삼각형으로 인접 면 뷰로 전환 | S14, S15 | 없음 | 없음 |
+
+### 5.4 탐색 막대 (Navigation Bar)
+| 항목 | Inventor 2026 | 출처 | GraphCTRL | 상태 |
+|---|---|---|---|---|
+| 켜고 끄기 | 보기 탭 > 창 패널 > 사용자 인터페이스 > 탐색 막대 | S13 | 없음 | 없음 |
+| 명령 구성 | 탐색 막대 > 사용자 지정 메뉴에서 명령을 붙이거나 뗌(우클릭 > 탐색 막대에서 제거) | S13 | 없음 | 없음 |
+| 위치 | 사용자 지정 > 도킹 위치. ViewCube와 연결하면 함께 움직임. 창 가장자리를 따라 이동 가능 | S13 | 없음 | 없음 |
 
 ## 6. 단축키 (S4의 표, 원문 기준)
 
@@ -122,12 +149,11 @@ GraphCTRL 열은 현재 구현(README, 소스의 키 처리)과 비교한 것이
 
 ## 7. 남은 일 (다음 단계)
 
-1. 도움말 목차(탭별 GUID 목록)를 얻는다. 확인된 방법: `help.autodesk.com/view/INVNTOR/2026/ENU/`는 자바스크립트 앱이고
-   `config/config.json`과 `common.json`만 공개 JSON으로 확인됨. 목차 데이터 위치는 아직 찾지 못했다. 찾지 못하면
-   리본 탭마다 "Ribbon tab reference" 계열 검색으로 GUID를 모은다.
-2. §2의 탭별 패널·명령, §5.2의 ViewCube·탐색 막대·상태바, 브라우저 노드 전체를 같은 형식으로 채운다.
-3. 마킹 메뉴의 실제 항목 배치(방사형 8방향 등)는 S2 원문에 없다. 이미지 없이 쓸 수 있는 범위만 적었다.
-4. §6은 "일부 표"다. 전체 목록은 PDF를 받아 대조한다.
+1. **목차 GUID 찾기**: 검색은 `allowed_domains: ["help.autodesk.com"]`로 "Inventor 2026 help <명령 이름>"을 치면 `cloudhelp/2026/ENU/Inventor-Help/files/GUID-*.htm`이 나온다. 페이지를 curl로 받은 뒤 `Pages in this section`과 `Parent page` 링크를 따라간다(이 방법으로 S11 하위 17개 페이지 확인).
+2. **남은 탭 패널 목록**: Assemble 탭의 구성(Component) 패널 명령 전체, Tools 탭의 Material and Appearance 등, Inspect·Manage·Environments 탭 패널. 검색 "ribbon reference"와 탭 이름으로 찾는다.
+3. **남은 상태바 항목**과 **브라우저 노드 전체**.
+4. §6 단축키는 S4의 "일부 표"다. 전체 목록은 Inventor 키보드 단축키 PDF로 대조한다.
+
 
 ## 8. 요약: 가장 큰 차이
 
