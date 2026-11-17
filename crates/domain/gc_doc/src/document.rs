@@ -224,6 +224,7 @@ tables! {
     features: crate::design::Feature,
     assemblies: crate::design::Assembly,
     timelines: crate::design::Timeline,
+    relationships: crate::relate::Relationship,
 }
 
 /// Everything a stored document consists of, as [`Document::restore`] takes it.
@@ -255,6 +256,8 @@ pub struct Contents {
     pub assemblies: BTreeMap<Id<crate::design::Assembly>, crate::design::Assembly>,
     /// The model tree's order (at most one).
     pub timelines: BTreeMap<Id<crate::design::Timeline>, crate::design::Timeline>,
+    /// Assembly constraints and joints.
+    pub relationships: BTreeMap<Id<crate::relate::Relationship>, crate::relate::Relationship>,
 }
 
 impl Default for Document {
@@ -282,6 +285,7 @@ impl Document {
             features: Store::default(),
             assemblies: Store::default(),
             timelines: Store::default(),
+            relationships: Store::default(),
             ids: IdAlloc::new(),
             revision: Revision::default(),
         };
@@ -325,6 +329,7 @@ impl Document {
             features: Store { items: contents.features },
             assemblies: Store { items: contents.assemblies },
             timelines: Store { items: contents.timelines },
+            relationships: Store { items: contents.relationships },
             ids: IdAlloc::new(),
             revision: Revision::default(),
         };
@@ -342,6 +347,7 @@ impl Document {
         doc.features.items.keys().for_each(|id| raise(id.raw()));
         doc.assemblies.items.keys().for_each(|id| raise(id.raw()));
         doc.timelines.items.keys().for_each(|id| raise(id.raw()));
+        doc.relationships.items.keys().for_each(|id| raise(id.raw()));
         for (id, sketch) in &doc.sketches.items {
             raise(id.raw());
             sketch.points.keys().for_each(|p| raise(p.raw()));
@@ -424,6 +430,11 @@ impl Document {
     /// Imported assemblies.
     pub fn assemblies(&self) -> &Store<crate::design::Assembly> {
         &self.assemblies
+    }
+
+    /// Assembly constraints and joints.
+    pub fn relationships(&self) -> &Store<crate::relate::Relationship> {
+        &self.relationships
     }
 
     /// The stored model-tree order, if any was set (see [`Document::model_order`]).

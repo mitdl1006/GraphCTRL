@@ -45,6 +45,8 @@ pub enum Kind {
     Assembly,
     /// The order of the model tree, with suppression and the rollback marker.
     Timeline,
+    /// An assembly constraint or joint between two components.
+    Relationship,
 }
 
 /// A value stored in a document under an [`Id`].
