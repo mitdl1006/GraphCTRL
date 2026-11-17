@@ -27,3 +27,7 @@ VK_ICD_FILENAMES=$(ls /opt/pw-browsers/chromium-*/chrome-linux*/vk_swiftshader_i
 - 비테스트 코드에서 `unwrap`/`expect`/`panic!`/`todo!` 금지(clippy가 거부).
 - 선택 기준의 우선순위: 큰 장면 3D 성능 → 유지보수 지속성 → 주류 크레이트.
 - 커밋 전 전체 검사는 `cargo xtask gate` 한 번으로 돌릴 수 있다(위 네 단계 + Windows 교차 clippy + GPU 테스트 + 레이어·라이선스 검사).
+- 인벤터와 같은 경험이 목표다. 인벤터 동작을 구현·변경·테스트할 때는 먼저 해당 기능의 Autodesk 공식 도움말 원문
+  (`https://help.autodesk.com/view/INVNTOR/2026/ENU/`, `cloudhelp/2026/ENU/Inventor-Help/files/GUID-*.htm`)을 읽고 근거로 삼는다.
+  이 환경에서는 `curl`로 열린다(WebFetch는 안 열림). 커밋 메시지나 `docs/handoff/<역할>.md`에 참고한 링크를 남긴다.
+  `docs/ux/inventor-*.md` 요약과 원문이 다르면 원문을 따르고 차이를 handoff에 적는다. Autodesk 아이콘·그림·상표는 쓰지 않는다.
