@@ -186,6 +186,7 @@ impl StableHash for Kind {
             Self::Tool => 10,
             Self::Waypoint => 11,
             Self::Path => 12,
+            Self::WorkFrame => 13,
         };
         tag.stable_hash(hasher);
     }

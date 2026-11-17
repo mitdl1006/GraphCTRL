@@ -106,6 +106,28 @@ impl Entity for Robot {
     fn refs(&self, _: &mut Vec<AnyId>) {}
 }
 
+/// A work coordinate frame: its origin is a point of a sketch, its axes are the sketch's axes turned by
+/// `rpy`. Waypoints defined in it move with it when the sketch changes. The origin point is meant to be
+/// fully constrained, so that the frame is where the dimensions say.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct WorkFrame {
+    /// Name shown in the browser.
+    pub name: String,
+    /// The sketch the origin point is in.
+    pub sketch: Id<Sketch>,
+    /// The origin.
+    pub point: Id<SkPoint>,
+    /// Roll, pitch, yaw of the frame's axes relative to the sketch's axes.
+    pub rpy: [f64; 3],
+}
+
+impl Entity for WorkFrame {
+    const KIND: Kind = Kind::WorkFrame;
+    fn refs(&self, out: &mut Vec<AnyId>) {
+        out.push(self.sketch.erase());
+    }
+}
+
 /// Where a waypoint is.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum WaypointTarget {
@@ -118,6 +140,14 @@ pub enum WaypointTarget {
         sketch: Id<Sketch>,
         /// The point in it.
         point: Id<SkPoint>,
+    },
+    /// A pose of the tool centre point given in a work frame. When the frame's origin moves, the
+    /// waypoint moves with it.
+    InFrame {
+        /// The frame.
+        frame: Id<WorkFrame>,
+        /// Position (m) and roll, pitch, yaw of the tool centre point in the frame.
+        offset: Placement,
     },
 }
 
@@ -136,8 +166,10 @@ impl Entity for Waypoint {
     const KIND: Kind = Kind::Waypoint;
     fn refs(&self, out: &mut Vec<AnyId>) {
         out.push(self.robot.erase());
-        if let WaypointTarget::SketchPoint { sketch, .. } = &self.target {
-            out.push(sketch.erase());
+        match &self.target {
+            WaypointTarget::SketchPoint { sketch, .. } => out.push(sketch.erase()),
+            WaypointTarget::InFrame { frame, .. } => out.push(frame.erase()),
+            WaypointTarget::Joints(_) => {}
         }
     }
 }
@@ -208,8 +240,26 @@ pub enum CellOp {
     },
     /// Deletes a robot that no waypoint or path uses.
     DeleteRobot(Id<Robot>),
+    /// Adds a work frame.
+    AddFrame(WorkFrame),
+    /// Replaces a work frame's data.
+    SetFrame {
+        /// The frame.
+        id: Id<WorkFrame>,
+        /// The new data.
+        frame: WorkFrame,
+    },
+    /// Deletes a work frame that no waypoint uses.
+    DeleteFrame(Id<WorkFrame>),
     /// Adds a waypoint.
     AddWaypoint(Waypoint),
+    /// Changes where a waypoint is.
+    SetWaypointTarget {
+        /// The waypoint.
+        id: Id<Waypoint>,
+        /// The new target.
+        target: WaypointTarget,
+    },
     /// Deletes a waypoint that no path uses.
     DeleteWaypoint(Id<Waypoint>),
     /// Adds a path.
@@ -242,6 +292,36 @@ fn finite(values: &[f64]) -> bool {
 
 fn placed(placement: &Placement) -> Result<(), EditError> {
     if finite(&placement.xyz) && finite(&placement.rpy) { Ok(()) } else { Err(EditError::BadValue) }
+}
+
+fn frame_ok(txn: &Txn<'_>, frame: &WorkFrame) -> Result<(), EditError> {
+    let sketch = txn.doc().get(frame.sketch).ok_or(DocError::Missing(frame.sketch.erase()))?;
+    if !sketch.points.contains_key(&frame.point) || !finite(&frame.rpy) {
+        return Err(EditError::BadValue);
+    }
+    Ok(())
+}
+
+fn target_ok(txn: &Txn<'_>, robot: Id<Robot>, target: &WaypointTarget) -> Result<(), EditError> {
+    let robot = txn.doc().get(robot).ok_or(DocError::Missing(robot.erase()))?;
+    match target {
+        WaypointTarget::Joints(q) => {
+            if q.len() != robot.joints.len() || !finite(q) {
+                return Err(EditError::BadValue);
+            }
+        }
+        WaypointTarget::SketchPoint { sketch, point } => {
+            let sketch = txn.doc().get(*sketch).ok_or(DocError::Missing(sketch.erase()))?;
+            if !sketch.points.contains_key(point) {
+                return Err(EditError::BadValue);
+            }
+        }
+        WaypointTarget::InFrame { frame, offset } => {
+            txn.doc().get(*frame).ok_or(DocError::Missing(frame.erase()))?;
+            placed(offset)?;
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'static str), EditError> {
@@ -300,21 +380,35 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
             txn.remove(*id)?;
             Ok((Vec::new(), "Delete robot"))
         }
-        CellOp::AddWaypoint(waypoint) => {
-            let robot = txn.doc().get(waypoint.robot).ok_or(DocError::Missing(waypoint.robot.erase()))?;
-            match &waypoint.target {
-                WaypointTarget::Joints(q) => {
-                    if q.len() != robot.joints.len() || !finite(q) {
-                        return Err(EditError::BadValue);
-                    }
-                }
-                WaypointTarget::SketchPoint { sketch, point } => {
-                    let sketch = txn.doc().get(*sketch).ok_or(DocError::Missing(sketch.erase()))?;
-                    if !sketch.points.contains_key(point) {
-                        return Err(EditError::BadValue);
-                    }
-                }
+        CellOp::AddFrame(frame) => {
+            frame_ok(txn, frame)?;
+            Ok((vec![Created::Frame(txn.insert(frame.clone()))], "Add work frame"))
+        }
+        CellOp::SetFrame { id, frame } => {
+            frame_ok(txn, frame)?;
+            txn.modify(*id, |f: &mut WorkFrame, _| f.clone_from(frame))?;
+            Ok((Vec::new(), "Edit work frame"))
+        }
+        CellOp::DeleteFrame(id) => {
+            let used = txn
+                .doc()
+                .waypoints()
+                .iter()
+                .any(|(_, w)| matches!(w.target, WaypointTarget::InFrame { frame, .. } if frame == *id));
+            if used {
+                return Err(EditError::InUse);
             }
+            txn.remove(*id)?;
+            Ok((Vec::new(), "Delete work frame"))
+        }
+        CellOp::SetWaypointTarget { id, target } => {
+            let robot = txn.doc().get(*id).ok_or(DocError::Missing(id.erase()))?.robot;
+            target_ok(txn, robot, target)?;
+            txn.modify(*id, |w: &mut Waypoint, _| w.target.clone_from(target))?;
+            Ok((Vec::new(), "Move waypoint"))
+        }
+        CellOp::AddWaypoint(waypoint) => {
+            target_ok(txn, waypoint.robot, &waypoint.target)?;
             Ok((vec![Created::Waypoint(txn.insert(waypoint.clone()))], "Add waypoint"))
         }
         CellOp::DeleteWaypoint(id) => {

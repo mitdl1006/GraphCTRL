@@ -441,3 +441,113 @@ fn waypoints_and_paths_are_about_the_tool_centre_point() {
         .unwrap();
     assert_eq!(session.plan_status(path), PlanStatus::Stale);
 }
+
+/// A fully constrained sketch point is the origin of a work frame; waypoints defined in the frame, and
+/// the paths through them, move with it when a dimension changes.
+#[test]
+fn waypoints_in_a_work_frame_follow_its_origin() {
+    use gc_doc::{EditError, WaypointTarget};
+    use gc_math::DVec3;
+    use gc_sketch::{DimKind, GeoConstraint};
+    let mut session = Session::new();
+    let robot = session.add_robot("Robot1", &six_axis()).unwrap();
+    session.jog(robot, &[0.0, 0.3, 0.9, 0.0, 0.4, 0.0]);
+    session.end_jog();
+
+    // A point on the floor (XY plane), 400 mm along X and 100 mm along Y from the origin.
+    let sketch = session.create_sketch("XY").unwrap();
+    let origin = *session.active_sketch().unwrap().1.points.keys().next().unwrap();
+    let created = session
+        .execute(&Command::Sketch { sketch, op: SketchOp::AddPoint { pos: [0.38, 0.12, 0.0] } })
+        .unwrap();
+    let gc_doc::Created::Point(point) = created[0] else { panic!("no point") };
+
+    // Not yet fully constrained: refused.
+    assert_eq!(session.add_work_frame(sketch, point), Err(EditError::Underconstrained));
+    let dimension =
+        |kind, source: &str| SketchOp::AddDimension { kind, source: source.to_owned(), text_pos: [0.0; 2] };
+    let created = session
+        .execute(&Command::Sketch {
+            sketch,
+            op: dimension(DimKind::HDistance { p: origin, q: point, sign: 1.0 }, "400 mm"),
+        })
+        .unwrap();
+    let gc_doc::Created::Dimension(along_x) = created[0] else { panic!("no dimension") };
+    assert_eq!(
+        session.add_work_frame(sketch, point),
+        Err(EditError::Underconstrained),
+        "one direction is still free"
+    );
+    session
+        .execute(&Command::Sketch {
+            sketch,
+            op: dimension(DimKind::VDistance { p: origin, q: point, sign: 1.0 }, "100 mm"),
+        })
+        .unwrap();
+    let frame = session.add_work_frame(sketch, point).unwrap();
+    session.finish_sketch();
+    let at = session.work_frame_pose(frame).unwrap().translation;
+    assert!((at - DVec3::new(0.4, 0.1, 0.0)).length() < 1e-9, "{at:?}");
+
+    // Two waypoints in the frame: 400 mm above the origin, and 100 mm beside that, tool pointing down.
+    let down = Placement { xyz: [0.0, 0.0, 0.4], rpy: [std::f64::consts::PI, 0.0, 0.0] };
+    let above = session.add_waypoint(robot, WaypointTarget::InFrame { frame, offset: down }).unwrap();
+    let beside = Placement { xyz: [0.0, 0.1, 0.4], ..down };
+    let next = session.add_waypoint(robot, WaypointTarget::InFrame { frame, offset: beside }).unwrap();
+    let pose = session.waypoint_pose(above).unwrap();
+    assert!((pose.translation - DVec3::new(0.4, 0.1, 0.4)).length() < 1e-9);
+    assert!((pose.rotation * DVec3::Z - (-DVec3::Z)).length() < 1e-9, "the tool points down");
+    let path = session.add_path(robot, vec![above, next]).unwrap();
+    session.execute(&Command::Cell(CellOp::SetLinear { id: path, index: 1, linear: true })).unwrap();
+    assert_eq!(session.plan(path), PlanStatus::Ready, "{:?}", session.plan_error(path));
+    let end = session.planned(path).unwrap().tip_path().last().unwrap();
+    assert!((DVec3::from_array(end) - DVec3::new(0.4, 0.2, 0.4)).length() < 1e-4, "{end:?}");
+
+    // The origin moves 50 mm along X: both waypoints follow, the path is out of date, and planning
+    // again ends at the moved place.
+    session.enter_sketch(sketch);
+    session.edit_dimension(along_x, "450 mm").unwrap();
+    session.finish_sketch();
+    assert!((session.waypoint_pose(next).unwrap().translation - DVec3::new(0.45, 0.2, 0.4)).length() < 1e-9);
+    assert_eq!(session.plan_status(path), PlanStatus::Stale);
+    assert_eq!(session.plan(path), PlanStatus::Ready, "{:?}", session.plan_error(path));
+    let end = session.planned(path).unwrap().tip_path().last().unwrap();
+    assert!((DVec3::from_array(end) - DVec3::new(0.45, 0.2, 0.4)).length() < 1e-4, "{end:?}");
+
+    // Turning the frame turns everything in it: 90 degrees about its Z, "beside" now lies along -X.
+    let mut turned = session.doc().get(frame).unwrap().clone();
+    turned.rpy = [0.0, 0.0, std::f64::consts::FRAC_PI_2];
+    session.execute(&Command::Cell(CellOp::SetFrame { id: frame, frame: turned })).unwrap();
+    assert!((session.waypoint_pose(next).unwrap().translation - DVec3::new(0.35, 0.1, 0.4)).length() < 1e-9);
+
+    // Teaching: the robot's current tool pose, stored relative to the frame, follows the frame too.
+    let taught = session.add_waypoint_in_frame(robot, frame).unwrap();
+    let here = session.tcp_pose(robot).unwrap();
+    assert!((session.waypoint_pose(taught).unwrap().translation - here.translation).length() < 1e-9);
+    session.enter_sketch(sketch);
+    session.edit_dimension(along_x, "500 mm").unwrap();
+    session.finish_sketch();
+    let moved = session.waypoint_pose(taught).unwrap().translation;
+    assert!((moved - here.translation - DVec3::new(0.05, 0.0, 0.0)).length() < 1e-9);
+
+    // A frame in use cannot be deleted; a fixed point is fully constrained too.
+    assert!(session.execute(&Command::Cell(CellOp::DeleteFrame(frame))).is_err());
+    session.enter_sketch(sketch);
+    let created = session
+        .execute(&Command::Sketch { sketch, op: SketchOp::AddPoint { pos: [0.1, 0.3, 0.0] } })
+        .unwrap();
+    let gc_doc::Created::Point(fixed) = created[0] else { panic!("no point") };
+    session
+        .execute(&Command::Sketch { sketch, op: SketchOp::AddConstraint(GeoConstraint::Fix(fixed)) })
+        .unwrap();
+    assert!(session.add_work_frame(sketch, fixed).is_ok());
+
+    // Saved and opened again, the frame and its waypoints are still there.
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join("frames.gctrl");
+    session.save_as(&file).unwrap();
+    let mut reopened = Session::new();
+    reopened.open(&file).unwrap();
+    assert_eq!(reopened.doc().work_frames().len(), 2);
+    assert!((reopened.waypoint_pose(taught).unwrap().translation - moved).length() < 1e-9);
+}

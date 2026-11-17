@@ -120,6 +120,19 @@ fn cell(view: &View<'_>, scene: &Scene, gpu: bool) {
         let color = if trace.current { colors::TRACE } else { colors::INACTIVE };
         view.polyline(trace.points.iter().copied(), Stroke::new(2.0, color));
     }
+    // Work frames: larger axes with the frame's name.
+    for (name, frame) in &scene.frames {
+        for (axis, color) in [
+            (DVec3::X, Color32::from_rgb(0xD0, 0x30, 0x30)),
+            (DVec3::Y, Color32::from_rgb(0x20, 0xA0, 0x40)),
+            (DVec3::Z, Color32::from_rgb(0x30, 0x50, 0xD0)),
+        ] {
+            view.segment(frame.translation, *frame * (axis * 0.1), Stroke::new(2.5, color));
+        }
+        if let Some(at) = view.screen(frame.translation) {
+            view.text(pos2(at.x - 6.0, at.y + 6.0), Align2::RIGHT_TOP, name, 13.0, colors::DIMENSION);
+        }
+    }
     // The tool centre point of each robot: a small frame, X red, Y green, Z blue.
     for tool in &scene.tool_points {
         let length = 0.05;

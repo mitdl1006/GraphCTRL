@@ -249,6 +249,20 @@ fn robot_tab(
         {
             drop(session.add_waypoint(robot, WaypointTarget::SketchPoint { sketch, point }));
         }
+        // The same selected point, fully constrained, can become the origin of a work frame.
+        if ribbon_button(ui, Icon::Text("+F"), tr!(lang, CmdWorkFrame), false, point.is_some()).clicked()
+            && let Some((sketch, point)) = point
+        {
+            // A refusal (the point can still move) is explained in the status bar.
+            cell.frame = session.add_work_frame(sketch, point).ok();
+        }
+        let frame = cell.active_frame(session);
+        let enabled = robot.is_some() && frame.is_some();
+        if ribbon_button(ui, Icon::Text("+W"), tr!(lang, CmdWaypointInFrame), false, enabled).clicked()
+            && let (Some(robot), Some(frame)) = (robot, frame)
+        {
+            drop(session.add_waypoint_in_frame(robot, frame));
+        }
         let waypoints: Vec<_> = session
             .doc()
             .waypoints()

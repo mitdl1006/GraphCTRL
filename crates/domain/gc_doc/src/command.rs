@@ -192,6 +192,8 @@ pub enum Created {
     Waypoint(Id<crate::cell::Waypoint>),
     /// A path.
     Path(Id<crate::cell::MotionPath>),
+    /// A work frame.
+    Frame(Id<crate::cell::WorkFrame>),
 }
 
 /// The result of a command that was applied.
@@ -242,6 +244,9 @@ pub enum EditError {
     /// Something else still uses this and it cannot be deleted.
     #[error("this is still in use")]
     InUse,
+    /// A work frame's origin must be fully constrained, so that the frame is where the dimensions say.
+    #[error("the origin point is not fully constrained")]
+    Underconstrained,
     /// A value is not a finite number, not positive where it must be, or of the wrong length.
     #[error("a value is out of range")]
     BadValue,

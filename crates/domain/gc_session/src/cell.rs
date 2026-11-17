@@ -11,10 +11,10 @@ use gc_collide::ShapeDesc;
 use gc_core::Id;
 use gc_doc::{
     Body, CellOp, Command, Created, Document, EditError, MotionPath, Placement, Robot, Sketch, Solid,
-    Waypoint, WaypointTarget,
+    Waypoint, WaypointTarget, WorkFrame,
 };
 use gc_jobs::{CancelToken, Executor, JobHandle, JobOutcome};
-use gc_math::{DPose3, DQuat, DVec3, pose_from_xyz_rpy};
+use gc_math::{DPose3, DQuat, DVec3, pose_from_xyz_rpy, rpy_from_quat};
 use gc_mesh::MeshData;
 use gc_motion::{Goal, MotionPlan, MotionRequest, Obstacle, RobotScene, StateProblem, plan_motion};
 use gc_plan::{Algorithm, Control, Options};
@@ -242,6 +242,8 @@ pub(crate) struct CellState {
     body: Option<(Id<Body>, Body)>,
     base: Option<(Id<Robot>, Placement)>,
     tcp: Option<(Id<Robot>, Placement)>,
+    waypoint: Option<(Id<Waypoint>, WaypointTarget)>,
+    frame: Option<(Id<WorkFrame>, WorkFrame)>,
     plans: BTreeMap<Id<MotionPath>, Planned>,
     playback: Option<(Id<MotionPath>, f64)>,
     resources: Option<Resources>,
@@ -268,6 +270,8 @@ impl Default for CellState {
             body: None,
             base: None,
             tcp: None,
+            waypoint: None,
+            frame: None,
             plans: BTreeMap::new(),
             playback: None,
             resources: None,
@@ -302,6 +306,12 @@ impl CellState {
         self.comparisons.retain(|id, _| doc.get(*id).is_some());
         if self.jog.as_ref().is_some_and(|(id, _)| doc.get(*id).is_none()) {
             self.jog = None;
+        }
+        if self.frame.as_ref().is_some_and(|(id, _)| doc.get(*id).is_none()) {
+            self.frame = None;
+        }
+        if self.waypoint.as_ref().is_some_and(|(id, _)| doc.get(*id).is_none()) {
+            self.waypoint = None;
         }
         if self.tcp.as_ref().is_some_and(|(id, _)| doc.get(*id).is_none()) {
             self.tcp = None;
@@ -434,6 +444,31 @@ fn pose_at_point(doc: &Document, sketch: Id<Sketch>, point: Id<SkPoint>) -> Opti
     let pos = sketch.points.get(&point)?.pos;
     let world = frame.translation + frame.rotation * DVec3::from_array(pos);
     Some(DPose3::from_parts(world, frame.rotation * DQuat::from_rotation_x(std::f64::consts::PI)))
+}
+
+/// The world pose of a work frame: at its origin point, with the sketch's axes turned by its angles.
+fn work_frame_pose(doc: &Document, frame: Id<WorkFrame>) -> Option<DPose3> {
+    frame_pose_of(doc, doc.get(frame)?)
+}
+
+fn frame_pose_of(doc: &Document, frame: &WorkFrame) -> Option<DPose3> {
+    let sketch = doc.get(frame.sketch)?;
+    let (Space::Planar(base) | Space::Spatial(base)) = sketch.space;
+    let base = doc.frame_world_pose(Id::from_raw(base.raw))?;
+    let origin = base.translation + base.rotation * DVec3::from_array(sketch.points.get(&frame.point)?.pos);
+    Some(DPose3::from_parts(
+        origin,
+        base.rotation * gc_math::quat_from_rpy(frame.rpy[0], frame.rpy[1], frame.rpy[2]),
+    ))
+}
+
+/// The world pose of the tool centre point at a waypoint target that does not need the robot.
+fn target_pose(doc: &Document, target: &WaypointTarget) -> Option<DPose3> {
+    match target {
+        WaypointTarget::Joints(_) => None,
+        WaypointTarget::SketchPoint { sketch, point } => pose_at_point(doc, *sketch, *point),
+        WaypointTarget::InFrame { frame, offset } => Some(work_frame_pose(doc, *frame)? * pose_of(offset)),
+    }
 }
 
 impl Session {
@@ -674,11 +709,106 @@ impl Session {
         Some(poses.iter().map(|pose| base * *pose).collect())
     }
 
+    /// Makes a fully constrained sketch point the origin of a work frame, with the sketch's axes.
+    /// Waypoints defined in the frame move with the point when the sketch changes.
+    pub fn add_work_frame(
+        &mut self,
+        sketch: Id<Sketch>,
+        point: Id<SkPoint>,
+    ) -> Result<Id<WorkFrame>, EditError> {
+        let stored = self.doc.get(sketch).ok_or(EditError::BadValue)?;
+        // The report of the sketch as stored says which points can still move.
+        let report = stored.clone().solve().map_err(|_unsolved| EditError::Underconstrained)?;
+        if report.point_is_free(point) {
+            self.last_error = Some(EditError::Underconstrained);
+            return Err(EditError::Underconstrained);
+        }
+        let name = format!("Frame{}", self.doc.work_frames().len() + 1);
+        match self.cell_op(CellOp::AddFrame(WorkFrame { name, sketch, point, rpy: [0.0; 3] }))?.first() {
+            Some(Created::Frame(id)) => Ok(*id),
+            _ => Err(EditError::BadValue),
+        }
+    }
+
+    /// The world pose of a work frame as it is shown (with the preview of its angles).
+    pub fn work_frame_pose(&self, frame: Id<WorkFrame>) -> Option<DPose3> {
+        match &self.cell.frame {
+            Some((id, preview)) if *id == frame => frame_pose_of(&self.doc, preview),
+            _ => work_frame_pose(&self.doc, frame),
+        }
+    }
+
+    /// A work frame as it is shown: the preview while it is being edited, else the document's.
+    pub fn shown_frame(&self, frame: Id<WorkFrame>) -> Option<WorkFrame> {
+        match &self.cell.frame {
+            Some((id, preview)) if *id == frame => Some(preview.clone()),
+            _ => self.doc.get(frame).cloned(),
+        }
+    }
+
+    /// Previews a change of a work frame without touching the document.
+    pub fn preview_frame(&mut self, id: Id<WorkFrame>, frame: WorkFrame) {
+        if self.doc.get(id).is_some() {
+            self.cell.frame = Some((id, frame));
+        }
+    }
+
+    /// Commits the work frame preview as one undo step.
+    pub fn end_frame_preview(&mut self) {
+        if let Some((id, frame)) = self.cell.frame.take()
+            && self.doc.get(id).is_some_and(|f| *f != frame)
+        {
+            self.last_error = self.cell_op(CellOp::SetFrame { id, frame }).err();
+        }
+    }
+
+    /// Adds a waypoint in a work frame where the robot's tool centre point is now (teaching): it keeps
+    /// its place relative to the frame when the frame moves.
+    pub fn add_waypoint_in_frame(
+        &mut self,
+        robot: Id<Robot>,
+        frame: Id<WorkFrame>,
+    ) -> Result<Id<Waypoint>, EditError> {
+        let tool = self.tcp_pose(robot).ok_or(EditError::BadValue)?;
+        let origin = self.work_frame_pose(frame).ok_or(EditError::BadValue)?;
+        let local = origin.inverse() * tool;
+        let offset = Placement { xyz: local.translation.to_array(), rpy: rpy_from_quat(local.rotation) };
+        self.add_waypoint(robot, WaypointTarget::InFrame { frame, offset })
+    }
+
+    /// A waypoint's target as it is shown: the preview while it is being edited, else the document's.
+    pub fn shown_target(&self, waypoint: Id<Waypoint>) -> Option<WaypointTarget> {
+        match &self.cell.waypoint {
+            Some((id, target)) if *id == waypoint => Some(target.clone()),
+            _ => self.doc.get(waypoint).map(|w| w.target.clone()),
+        }
+    }
+
+    /// Previews a new target of a waypoint without touching the document.
+    pub fn preview_target(&mut self, waypoint: Id<Waypoint>, target: WaypointTarget) {
+        if self.doc.get(waypoint).is_some() {
+            self.cell.waypoint = Some((waypoint, target));
+        }
+    }
+
+    /// Commits the waypoint preview as one undo step.
+    pub fn end_target_preview(&mut self) {
+        if let Some((id, target)) = self.cell.waypoint.take()
+            && self.doc.get(id).is_some_and(|w| w.target != target)
+        {
+            self.last_error = self.cell_op(CellOp::SetWaypointTarget { id, target }).err();
+        }
+    }
+
     /// The world pose of the tool at a waypoint.
     pub fn waypoint_pose(&self, waypoint: Id<Waypoint>) -> Option<DPose3> {
+        let target = self.shown_target(waypoint)?;
         let waypoint = self.doc.get(waypoint)?;
-        match &waypoint.target {
-            WaypointTarget::SketchPoint { sketch, point } => pose_at_point(&self.doc, *sketch, *point),
+        match &target {
+            WaypointTarget::SketchPoint { .. } => target_pose(&self.doc, &target),
+            WaypointTarget::InFrame { frame, offset } => {
+                Some(self.work_frame_pose(*frame)? * pose_of(offset))
+            }
             WaypointTarget::Joints(q) => {
                 let robot = self.doc.get(waypoint.robot)?;
                 let loaded = self.robot_model(waypoint.robot)?;
@@ -801,9 +931,7 @@ impl Session {
             .iter()
             .map(|w| match doc.get(*w).map(|w| &w.target) {
                 Some(WaypointTarget::Joints(q)) => format!("{q:?}"),
-                Some(WaypointTarget::SketchPoint { sketch, point }) => {
-                    format!("{:?}", pose_at_point(doc, *sketch, *point))
-                }
+                Some(target) => format!("{:?}", target_pose(doc, target)),
                 None => String::new(),
             })
             .collect();
@@ -864,6 +992,8 @@ impl Session {
         self.end_jog();
         self.end_base_preview();
         self.end_tcp_preview();
+        self.end_target_preview();
+        self.end_frame_preview();
         self.end_body_preview();
         self.cell.playback = None;
         self.cancel_planning();
@@ -1050,13 +1180,13 @@ fn plan_path(
     let mut segments = Vec::with_capacity(path.waypoints.len());
     for (index, waypoint_id) in path.waypoints.iter().enumerate() {
         let waypoint = doc.get(*waypoint_id).ok_or("a waypoint no longer exists")?;
-        let goal = match &waypoint.target {
-            WaypointTarget::Joints(q) => Goal::Joints(q.clone()),
-            WaypointTarget::SketchPoint { sketch, point } => Goal::Pose(
-                pose_at_point(doc, *sketch, *point)
-                    .ok_or_else(|| format!("{}: its sketch point no longer exists", waypoint.name))?,
-            ),
-        };
+        let goal =
+            match &waypoint.target {
+                WaypointTarget::Joints(q) => Goal::Joints(q.clone()),
+                target => Goal::Pose(target_pose(doc, target).ok_or_else(|| {
+                    format!("{}: its sketch point or frame no longer exists", waypoint.name)
+                })?),
+            };
         let request = MotionRequest {
             start: start.clone(),
             goal,

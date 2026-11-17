@@ -150,6 +150,14 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
     );
     section(
         ui,
+        tr!(lang, BrowserFrames),
+        doc.work_frames()
+            .iter()
+            .map(|(id, f)| (plain(&f.name).0, plain(&f.name).1, CellOp::DeleteFrame(id)))
+            .collect(),
+    );
+    section(
+        ui,
         tr!(lang, BrowserWaypoints),
         doc.waypoints()
             .iter()
@@ -278,6 +286,7 @@ pub fn status_bar(ui: &mut Ui, session: &Session, lang: Lang, gpu: bool, notice:
                 gc_doc::EditError::Sketch(SketchError::Unsolved(_)) => Msg::ErrUnsolved,
                 gc_doc::EditError::InUse => Msg::ErrInUse,
                 gc_doc::EditError::BadValue => Msg::ErrBadValue,
+                gc_doc::EditError::Underconstrained => Msg::ErrUnderconstrained,
                 _ => Msg::ErrOther,
             };
             ui.separator();

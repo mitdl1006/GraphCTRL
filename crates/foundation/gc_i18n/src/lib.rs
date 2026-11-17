@@ -397,7 +397,21 @@ messages! {
     StateJointLimit => ("관절 한계 초과: {0}", "Joint beyond its limit: {0}"),
     /// The state of the robot could not be checked.
     StateUnknown => ("이 자세는 검사할 수 없습니다", "This pose could not be checked"),
-    /// Plan status: being computed.
+    /// Command: make the selected, fully constrained sketch point the origin of a work frame.
+    CmdWorkFrame => ("좌표계", "Work Frame"),
+    /// Command: add a waypoint at the robot's current pose, stored relative to a work frame.
+    CmdWaypointInFrame => ("좌표계 기준", "In Frame"),
+    /// Browser node: work frames.
+    BrowserFrames => ("좌표계", "Work Frames"),
+    /// Panel section: the work frames and the waypoints defined in them.
+    PanelFrames => ("좌표계 기준 위치", "Positions in Work Frames"),
+    /// Label of a waypoint defined in a work frame. `{0}`: waypoint, `{1}`: frame.
+    PropInFrame => ("{0} (기준: {1})", "{0} (in {1})"),
+    /// Label: the frame waypoints are taught in. `{0}` is its name.
+    PropTeachFrame => ("기준 좌표계: {0}", "Teach in: {0}"),
+    /// Edit refused: a work frame's origin must be fully constrained.
+    ErrUnderconstrained => ("원점이 될 점이 완전히 구속되지 않았습니다(치수나 고정 구속을 추가하세요)", "The origin point is not fully constrained (add dimensions or fix it)"),
+
     PlanPlanning => ("계획 중...", "Planning..."),
     /// Plan status: up to date.
     PlanReady => ("계획됨", "Planned"),

@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 use gc_core::Id;
 use gc_doc::{
     Body, Contents, DocError, Document, Frame, FrameKind, MotionPath, Param, Robot, Sketch, Waypoint,
+    WorkFrame,
 };
 use gc_expr::Unit;
 use serde::{Deserialize, Serialize};
@@ -110,6 +111,8 @@ struct FileV1 {
     waypoints: BTreeMap<Id<Waypoint>, Waypoint>,
     #[serde(default)]
     paths: BTreeMap<Id<MotionPath>, MotionPath>,
+    #[serde(default)]
+    work_frames: BTreeMap<Id<WorkFrame>, WorkFrame>,
 }
 
 /// A loaded document.
@@ -167,6 +170,7 @@ pub fn to_text(doc: &Document) -> Result<String, PersistError> {
         robots: doc.robots().iter().map(|(id, r)| (id, r.clone())).collect(),
         waypoints: doc.waypoints().iter().map(|(id, w)| (id, w.clone())).collect(),
         paths: doc.paths().iter().map(|(id, p)| (id, p.clone())).collect(),
+        work_frames: doc.work_frames().iter().map(|(id, f)| (id, f.clone())).collect(),
     };
     let mut text = serde_json::to_string_pretty(&file)?;
     text.push('\n');
@@ -214,6 +218,7 @@ pub fn from_text(text: &str) -> Result<Loaded, PersistError> {
         robots: file.robots,
         waypoints: file.waypoints,
         paths: file.paths,
+        work_frames: file.work_frames,
     })?;
     let needs_repair = doc
         .sketches()

@@ -482,6 +482,116 @@ fn the_ur5e_follows_a_sketched_polyline() {
     assert!(nearest < 0.01, "the corner moved with the dimension: {nearest}");
 }
 
+/// A work frame on a fully constrained sketch point, waypoints taught in it, and the whole path moving
+/// when the origin's dimension changes.
+#[test]
+fn waypoints_follow_a_work_frame() {
+    use gc_sketch::DimKind;
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("로봇").click();
+    harness.run();
+    harness.get_by_label("UR5e 로봇").click();
+    harness.run();
+
+    // A point on the floor, 500 mm in front of the robot and 200 mm to the side, selected.
+    let app = harness.state_mut();
+    let robot = app.session.doc().robots().iter().next().unwrap().0;
+    let sketch = app.session.create_sketch("XY").unwrap();
+    let origin = *app.session.active_sketch().unwrap().1.points.keys().next().unwrap();
+    let created = app
+        .session
+        .execute(&gc_doc::Command::Sketch { sketch, op: gc_doc::SketchOp::AddPoint { pos: [0.5, 0.2, 0.0] } })
+        .unwrap();
+    let gc_doc::Created::Point(point) = created[0] else { panic!("no point") };
+    app.session.set_tool(ToolKind::Select);
+    click(app, [0.5, 0.2]);
+    assert_eq!(app.session.selection().len(), 1);
+    harness.run();
+
+    // Still free: the frame is refused and the status bar says why.
+    harness.get_by_label("좌표계").click();
+    harness.run();
+    assert!(harness.state().session.doc().work_frames().is_empty());
+    assert_eq!(harness.query_all_by_label_contains("완전히 구속되지 않았습니다").count(), 1);
+
+    let app = harness.state_mut();
+    let add = |kind, source: &str| gc_doc::Command::Sketch {
+        sketch,
+        op: gc_doc::SketchOp::AddDimension { kind, source: source.to_owned(), text_pos: [0.0; 2] },
+    };
+    let created =
+        app.session.execute(&add(DimKind::HDistance { p: origin, q: point, sign: 1.0 }, "500 mm")).unwrap();
+    let gc_doc::Created::Dimension(along_x) = created[0] else { panic!("no dimension") };
+    app.session.execute(&add(DimKind::VDistance { p: origin, q: point, sign: 1.0 }, "200 mm")).unwrap();
+    harness.run();
+    harness.get_by_label("좌표계").click();
+    harness.run();
+    let frame = harness.state().session.doc().work_frames().iter().next().unwrap().0;
+    assert!(harness.query_all_by_label("Frame1").count() >= 1, "listed in the browser");
+
+    // Two waypoints taught relative to the frame: tool down, 300 mm and then 250 mm above the floor.
+    let app = harness.state_mut();
+    app.session.finish_sketch();
+    app.session.jog(robot, &[0.4, -1.3, 1.6, -1.87, -1.57, 0.0]);
+    app.session.end_jog();
+    harness.run();
+    harness.get_by_label("좌표계 기준").click();
+    harness.run();
+    let app = harness.state_mut();
+    app.session.jog(robot, &[0.0, -1.2, 1.6, -1.97, -1.57, 0.0]);
+    app.session.end_jog();
+    harness.run();
+    harness.get_by_label("좌표계 기준").click();
+    harness.run();
+    harness.get_by_label("P1 (기준: Frame1)");
+    let session = &harness.state().session;
+    let waypoints: Vec<_> = session.doc().waypoints().iter().map(|(id, _)| id).collect();
+    let before: Vec<_> = waypoints.iter().map(|w| session.waypoint_pose(*w).unwrap().translation).collect();
+    harness.get_by_label("경로 만들기").click();
+    harness.run();
+    harness.get_by_label("계획").click();
+    harness.run();
+    let path = harness.state().session.doc().paths().iter().next().unwrap().0;
+    let session = &harness.state().session;
+    assert_eq!(session.plan_status(path), gc_session::PlanStatus::Ready, "{:?}", session.plan_error(path));
+
+    // The origin moves 100 mm along X: every waypoint in the frame moves by the same, and the path is out
+    // of date until it is planned again.
+    let app = harness.state_mut();
+    app.session.enter_sketch(sketch);
+    app.session.edit_dimension(along_x, "600 mm").unwrap();
+    app.session.finish_sketch();
+    for (waypoint, was) in waypoints.iter().zip(&before) {
+        let now = app.session.waypoint_pose(*waypoint).unwrap().translation;
+        assert!((now - *was - gc_math::DVec3::new(0.1, 0.0, 0.0)).length() < 1e-9);
+    }
+    assert_eq!(app.session.plan_status(path), gc_session::PlanStatus::Stale);
+    harness.run();
+    harness.get_by_label("계획").click();
+    harness.run();
+    let session = &harness.state().session;
+    assert_eq!(session.plan_status(path), gc_session::PlanStatus::Ready, "{:?}", session.plan_error(path));
+    let end = gc_math::DVec3::from_array(session.planned(path).unwrap().tip_path().last().unwrap());
+    let target = session.waypoint_pose(*waypoints.last().unwrap()).unwrap().translation;
+    assert!((end - target).length() < 1e-4);
+    assert!(session.work_frame_pose(frame).is_some());
+    if gpu {
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        harness.get_by_label("뷰").click();
+        harness.run();
+        harness.get_by_label("홈").click();
+        harness.run();
+        harness.get_by_label("전체 보기").click();
+        harness.run();
+        harness.render().unwrap().save(out.join("review-12-work-frame.png")).unwrap();
+    }
+}
+
 /// With worker threads, planning does not finish inside the click: the window shows "planning" and picks
 /// the result up when the job reports back.
 #[test]

@@ -35,6 +35,8 @@ pub enum Kind {
     Waypoint,
     /// A path through waypoints.
     Path,
+    /// A work coordinate frame whose origin is a sketch point.
+    WorkFrame,
 }
 
 /// A value stored in a document under an [`Id`].

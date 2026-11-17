@@ -16,9 +16,17 @@ pub struct CellUi {
     pub playing: bool,
     /// The path the panel and the ribbon work on; the newest one when unset or deleted.
     pub path: Option<gc_core::Id<gc_doc::MotionPath>>,
+    /// The work frame new waypoints are taught in; the newest one when unset or deleted.
+    pub frame: Option<gc_core::Id<gc_doc::WorkFrame>>,
 }
 
 impl CellUi {
+    /// The work frame new waypoints are taught in.
+    pub fn active_frame(&self, session: &Session) -> Option<gc_core::Id<gc_doc::WorkFrame>> {
+        let frames = session.doc().work_frames();
+        self.frame.filter(|id| frames.get(*id).is_some()).or_else(|| frames.iter().last().map(|(id, _)| id))
+    }
+
     /// The path the panel and the ribbon work on.
     pub fn active_path(&self, session: &Session) -> Option<gc_core::Id<gc_doc::MotionPath>> {
         let paths = session.doc().paths();
@@ -43,12 +51,15 @@ pub fn cell(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) 
     jog(ui, session, lang);
     base(ui, session, lang);
     bodies(ui, session, lang);
+    frames(ui, session, lang, state);
     if !pointer_down && !ui.memory(|m| m.focused().is_some()) {
         // The previews become one undo step each when the mouse is released.
         session.end_jog();
         session.end_base_preview();
         session.end_tcp_preview();
         session.end_body_preview();
+        session.end_target_preview();
+        session.end_frame_preview();
     }
     paths(ui, session, lang, state);
 }
@@ -160,6 +171,58 @@ fn millimetres(ui: &mut Ui, value: &mut f64, name: &str, least: f64) -> bool {
     changed
 }
 
+/// The work frames (which one new waypoints are taught in, and how each is turned) and the waypoints
+/// defined in them, whose positions are edited here.
+fn frames(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) {
+    let frames: Vec<_> = session.doc().work_frames().iter().map(|(id, f)| (id, f.name.clone())).collect();
+    if frames.is_empty() {
+        return;
+    }
+    ui.add_space(8.0);
+    ui.label(RichText::new(tr!(lang, PanelFrames)).strong());
+    if let Some(active) = state.active_frame(session) {
+        let mut chosen = active;
+        let name = frames.iter().find(|(id, _)| *id == active).map(|(_, n)| n.clone()).unwrap_or_default();
+        egui::ComboBox::from_label(tr!(lang, BrowserFrames))
+            .selected_text(tr!(lang, PropTeachFrame, name))
+            .show_ui(ui, |ui| {
+                for (id, name) in &frames {
+                    ui.selectable_value(&mut chosen, *id, name);
+                }
+            });
+        state.frame = Some(chosen);
+    }
+    for (id, name) in &frames {
+        let Some(mut frame) = session.shown_frame(*id) else { continue };
+        let mut changed = false;
+        egui::CollapsingHeader::new(name).id_salt(("gc_frame", id.raw())).show(ui, |ui| {
+            ui.label(tr!(lang, PropRotation));
+            ui.horizontal(|ui| {
+                for (value, axis) in frame.rpy.iter_mut().zip(["R", "P", "Y"]) {
+                    changed |= degrees(ui, value, axis);
+                }
+            });
+        });
+        if changed {
+            session.preview_frame(*id, frame);
+        }
+    }
+    let waypoints: Vec<_> = session.doc().waypoints().iter().map(|(id, w)| (id, w.name.clone())).collect();
+    for (id, name) in waypoints {
+        let Some(gc_doc::WaypointTarget::InFrame { frame, mut offset }) = session.shown_target(id) else {
+            continue;
+        };
+        let frame_name = session.doc().get(frame).map(|f| f.name.clone()).unwrap_or_default();
+        let mut changed = false;
+        egui::CollapsingHeader::new(tr!(lang, PropInFrame, name, frame_name))
+            .id_salt(("gc_in_frame", id.raw()))
+            .show(ui, |ui| changed = placement(ui, lang, &mut offset));
+        if changed {
+            session.preview_target(id, gc_doc::WaypointTarget::InFrame { frame, offset });
+        }
+    }
+}
+
 fn bodies(ui: &mut Ui, session: &mut Session, lang: Lang) {
     let ids: Vec<_> = session.doc().bodies().iter().map(|(id, _)| id).collect();
     if ids.is_empty() {
@@ -222,7 +285,7 @@ fn paths(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) {
     let names: Vec<_> = session.doc().paths().iter().map(|(id, p)| (id, p.name.clone())).collect();
     if names.len() > 1 {
         let mut chosen = path_id;
-        egui::ComboBox::from_id_salt("gc_active_path").selected_text(&path.name).show_ui(ui, |ui| {
+        egui::ComboBox::from_label(tr!(lang, BrowserPaths)).selected_text(&path.name).show_ui(ui, |ui| {
             for (id, name) in names {
                 ui.selectable_value(&mut chosen, id, name);
             }

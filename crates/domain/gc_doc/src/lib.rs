@@ -18,7 +18,7 @@ mod document;
 mod history;
 mod txn;
 
-pub use cell::{Body, CellOp, MotionPath, Placement, Robot, Solid, Waypoint, WaypointTarget};
+pub use cell::{Body, CellOp, MotionPath, Placement, Robot, Solid, Waypoint, WaypointTarget, WorkFrame};
 pub use command::{Applied, Command, Created, EditError, EndSnap, SketchOp, apply};
 pub use document::{ChangeSet, Contents, DocDelta, Document, Frame, FrameKind, Param, Store, Table};
 pub use gc_sketch::Sketch;

@@ -6,7 +6,7 @@ use gc_core::{AnyId, Entity, Id, IdAlloc, Kind, Revision};
 use gc_expr::Unit;
 use gc_sketch::Sketch;
 
-use crate::cell::{Body, MotionPath, Robot, Waypoint};
+use crate::cell::{Body, MotionPath, Robot, Waypoint, WorkFrame};
 
 /// The ids of the entities a commit, undo or redo touched.
 pub type ChangeSet = BTreeSet<AnyId>;
@@ -215,6 +215,7 @@ tables! {
     robots: Robot,
     waypoints: Waypoint,
     paths: MotionPath,
+    work_frames: WorkFrame,
 }
 
 /// Everything a stored document consists of, as [`Document::restore`] takes it.
@@ -236,6 +237,8 @@ pub struct Contents {
     pub waypoints: BTreeMap<Id<Waypoint>, Waypoint>,
     /// Paths.
     pub paths: BTreeMap<Id<MotionPath>, MotionPath>,
+    /// Work frames.
+    pub work_frames: BTreeMap<Id<WorkFrame>, WorkFrame>,
 }
 
 impl Default for Document {
@@ -258,6 +261,7 @@ impl Document {
             robots: Store::default(),
             waypoints: Store::default(),
             paths: Store::default(),
+            work_frames: Store::default(),
             ids: IdAlloc::new(),
             revision: Revision::default(),
         };
@@ -295,6 +299,7 @@ impl Document {
             robots: Store { items: contents.robots },
             waypoints: Store { items: contents.waypoints },
             paths: Store { items: contents.paths },
+            work_frames: Store { items: contents.work_frames },
             ids: IdAlloc::new(),
             revision: Revision::default(),
         };
@@ -307,6 +312,7 @@ impl Document {
         doc.robots.items.keys().for_each(|id| raise(id.raw()));
         doc.waypoints.items.keys().for_each(|id| raise(id.raw()));
         doc.paths.items.keys().for_each(|id| raise(id.raw()));
+        doc.work_frames.items.keys().for_each(|id| raise(id.raw()));
         for (id, sketch) in &doc.sketches.items {
             raise(id.raw());
             sketch.points.keys().for_each(|p| raise(p.raw()));
@@ -369,6 +375,11 @@ impl Document {
     /// All paths.
     pub fn paths(&self) -> &Store<MotionPath> {
         &self.paths
+    }
+
+    /// All work frames.
+    pub fn work_frames(&self) -> &Store<WorkFrame> {
+        &self.work_frames
     }
 
     /// The pose of a frame in the world: its own pose composed with those of its ancestors.
