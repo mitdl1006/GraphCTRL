@@ -532,6 +532,27 @@ messages! {
     MenuPerfOverlay => ("성능 오버레이", "Performance overlay"),
     /// The overlay's text. `{0}` frame time in ms, `{1}` frames per second, `{2}` draw calls, `{3}` triangles.
     PerfStats => ("프레임 {0} ms ({1} fps) · 드로 {2} · 삼각형 {3}", "Frame {0} ms ({1} fps) · draws {2} · triangles {3}"),
+    // --- AI agent API ---
+    /// Tools menu: the window that connects AI agents (MCP).
+    MenuAgent => ("AI 에이전트 연결", "AI agent connection"),
+    /// Agent window: the switch that starts the local MCP server.
+    AgentEnable => ("에이전트 연결 허용 (이 PC에서만)", "Allow agent connections (this PC only)"),
+    /// Agent window: what the server does.
+    AgentExplain => ("Claude Code·Claude Desktop 같은 AI 에이전트가 MCP로 이 창의 셀을 읽고 편집합니다. 모든 편집은 Ctrl+Z로 되돌릴 수 있습니다.", "AI agents such as Claude Code or Claude Desktop read and edit this window's cell over MCP. Every edit can be undone with Ctrl+Z."),
+    /// Agent window: the server's address. `{0}` the URL.
+    AgentAddress => ("주소: {0}", "Address: {0}"),
+    AgentPort => ("포트", "Port"),
+    AgentToken => ("접근 토큰", "Access token"),
+    AgentNewToken => ("새 토큰", "New token"),
+    AgentCopy => ("복사", "Copy"),
+    /// Agent window: heading of the command that registers GraphCTRL with Claude Code.
+    AgentClaudeCode => ("Claude Code에 등록하는 명령", "Command to register with Claude Code"),
+    /// Agent window: heading of the activity log.
+    AgentActivity => ("에이전트 작업 기록", "Agent activity"),
+    /// Agent window: the server could not start. `{0}` the reason.
+    AgentFailed => ("에이전트 서버를 시작하지 못했습니다: {0}", "The agent server could not start: {0}"),
+    /// Status bar: an agent edited the cell. `{0}` what it did.
+    AgentEdited => ("AI 에이전트: {0}", "AI agent: {0}"),
 }
 
 impl Msg {

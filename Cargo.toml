@@ -37,6 +37,7 @@ gc_ui = { path = "crates/ui/gc_ui" }
 gc_viewport = { path = "crates/ui/gc_viewport" }
 gc_panels = { path = "crates/ui/gc_panels" }
 gc_app = { path = "crates/app/gc_app" }
+gc_agent = { path = "crates/app/gc_agent" }
 gc_test_support = { path = "crates/app/gc_test_support" }
 gc_plugin_ur = { path = "crates/plugins/gc_plugin_ur" }
 gc_plugin_mesh = { path = "crates/plugins/gc_plugin_mesh" }
@@ -57,6 +58,12 @@ glamx = { version = "=0.3.1", default-features = false, features = ["std", "f64"
 parry3d-f64 = { version = "=0.31.1", features = ["enhanced-determinism"] }
 mesh-loader = { version = "0.1.13", default-features = false, features = ["stl", "obj"] }
 gltf = { version = "1.4", default-features = false, features = ["import", "names", "utils", "KHR_materials_pbrSpecularGlossiness"] }
+# AI agent API (PLAN 9.8): an MCP server on localhost.
+rmcp = { version = "3.10", default-features = false, features = ["server", "macros", "transport-streamable-http-server"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "macros", "time"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+schemars = "1"
+uuid = { version = "1", features = ["v4"] }
 egui = "=0.37.0"
 eframe = "=0.37.0"
 egui-wgpu = "=0.37.0"

@@ -1,0 +1,28 @@
+[package]
+name = "gc_agent"
+description = "The AI agent API: an MCP server on localhost whose tools edit the open document through the session."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+gc_core.workspace = true
+gc_doc.workspace = true
+gc_math.workspace = true
+gc_session.workspace = true
+rmcp.workspace = true
+tokio.workspace = true
+axum.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+log.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

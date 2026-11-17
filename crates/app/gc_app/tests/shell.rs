@@ -1736,3 +1736,97 @@ fn the_performance_overlay_is_switched_in_the_tools_menu() {
         harness.render().unwrap().save(out.join("review-28-perf-overlay.png")).unwrap();
     }
 }
+
+/// With agent connections allowed in the settings, an agent's MCP call is carried out between frames:
+/// the robot appears in the cell, the status bar and the activity log say what the agent did.
+#[test]
+fn an_agent_adds_a_robot_over_mcp() {
+    use std::io::{Read, Write};
+    let directory = tempfile::tempdir().unwrap();
+    let settings = directory.path().join("settings");
+    let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    std::fs::create_dir_all(&settings).unwrap();
+    std::fs::write(
+        settings.join("settings.json"),
+        format!(r#"{{"agent_enabled": true, "agent_port": {port}, "agent_token": "tok"}}"#),
+    )
+    .unwrap();
+    let options = RunOptions { settings_dir: Some(settings), ..RunOptions::default() };
+    let gpu = gc_test_support::gpu_or_skip("an_agent_adds_a_robot_over_mcp (screenshot)").is_some();
+    let mut builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    if gpu {
+        builder = builder.wgpu();
+    }
+    let mut harness = builder.build_eframe(move |cc| GraphCtrlApp::new(cc, options));
+    harness.run_steps(2);
+
+    let post = move |session: Option<&str>, body: &str| -> String {
+        let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stream.set_read_timeout(Some(std::time::Duration::from_secs(30))).unwrap();
+        let mut request = format!(
+            "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\n\
+             Accept: application/json, text/event-stream\r\nAuthorization: Bearer tok\r\n\
+             Content-Length: {}\r\nConnection: close\r\n",
+            body.len()
+        );
+        if let Some(session) = session {
+            request += &format!("Mcp-Session-Id: {session}\r\nMcp-Protocol-Version: 2025-06-18\r\n");
+        }
+        request += "\r\n";
+        request += body;
+        stream.write_all(request.as_bytes()).unwrap();
+        let mut response = Vec::new();
+        let mut buf = [0u8; 4096];
+        while let Ok(n) = stream.read(&mut buf) {
+            if n == 0 {
+                break;
+            }
+            response.extend_from_slice(&buf[..n]);
+            let text = String::from_utf8_lossy(&response);
+            if text.starts_with("HTTP/1.1 202") || (text.contains("\"result\"") && text.contains("\n\n")) {
+                break;
+            }
+        }
+        String::from_utf8_lossy(&response).into_owned()
+    };
+    let client = std::thread::spawn(move || {
+        let init = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0"}}}"#;
+        let reply = post(None, init);
+        let session = reply
+            .lines()
+            .find_map(|l| {
+                l.to_ascii_lowercase().starts_with("mcp-session-id:").then(|| l[15..].trim().to_owned())
+            })
+            .expect("a session id");
+        post(Some(&session), r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#);
+        post(
+            Some(&session),
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"add_robot","arguments":{"name":"UR5e"}}}"#,
+        )
+    });
+    // The app carries out the call on one of its frames.
+    for _ in 0..400 {
+        if client.is_finished() {
+            break;
+        }
+        harness.step();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let reply = client.join().unwrap();
+    assert!(reply.contains("UR5e_1"), "{reply}");
+    harness.run_steps(2);
+    assert_eq!(harness.state().session.doc().robots().len(), 1);
+    harness.get_by_label("AI 에이전트: add_robot UR5e");
+
+    harness.get_by_label("도구").click();
+    harness.run();
+    harness.get_by_label("AI 에이전트 연결").click();
+    harness.run_steps(4);
+    harness.get_by_label(&format!("주소: http://127.0.0.1:{port}/mcp"));
+    assert!(harness.query_by_label_contains("claude mcp add --transport http graphctrl").is_some());
+    assert!(harness.query_by_label("add_robot UR5e").is_some());
+    if gpu {
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        harness.render().unwrap().save(out.join("review-25-agent-connection.png")).unwrap();
+    }
+}

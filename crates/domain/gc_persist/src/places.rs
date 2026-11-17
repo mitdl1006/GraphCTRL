@@ -63,6 +63,12 @@ pub struct Settings {
     pub version: u32,
     /// The interface language as a code (`ko`, `en`); empty for the default.
     pub language: String,
+    /// Whether the AI agent server (MCP on localhost) starts with the application.
+    pub agent_enabled: bool,
+    /// Its port; 0 for the default.
+    pub agent_port: u16,
+    /// The access token agents must send; empty until one is made.
+    pub agent_token: String,
 }
 
 /// The settings file in the settings folder.

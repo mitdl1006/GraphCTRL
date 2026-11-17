@@ -465,6 +465,19 @@ UR 로봇, 툴, 필드는 모두 어셈블리의 **구성요소(occurrence)**다
 - 단계마다: 헤드리스 시나리오 테스트 + kittest 화면 테스트·스크린샷, `cargo xtask gate`, 사용자 PC 확인. 리드는 계약(`gc_robotics_api`,
   문서 스키마)을 먼저 정하고 역할 세션에 배정한다.
 
+### 9.8 AI 에이전트 API (MCP) — 에이전트가 작업에 주도적으로 참여
+- **1단계(완료)**: `crates/app/gc_agent` — 앱 안의 MCP 서버(rmcp, Streamable HTTP). `127.0.0.1`에만 열고 `Authorization: Bearer <토큰>`을
+  요구한다. 기본은 꺼짐(도구 > AI 에이전트 연결에서 허용, 포트·토큰은 `settings.json`). 서버 스레드는 문서를 만지지 않고, 호출은
+  채널로 앱 스레드에 넘어가 프레임 사이에 `gc_agent::execute`가 일반 명령으로 실행한다 → 화면에 바로 보이고 Ctrl+Z로 되돌린다.
+  도구: `overview`, `library_robots`, `add_robot`, `place_robot`, `add_waypoint`(world/base/작업 프레임 기준), `waypoint_info`,
+  `create_path`, `plan_path`, `undo`, `redo`. 단위는 mm·deg. 연결: `claude mcp add --transport http graphctrl http://127.0.0.1:47615/mcp
+  --header "Authorization: Bearer <토큰>"`.
+- **2단계**: 도구를 M2 모델과 함께 넓힌다 — 스케치·구속·치수, 바디/어셈블리 구속, 필드, 작업·상태·이벤트(9.4), 스케줄 실행(9.5),
+  URSim 제어(9.6, 실제 로봇 동작은 사용자 확인 필수). MCP 리소스(셀 스냅샷, 계획 결과)와 프롬프트(“이 셀의 작업을 정의해줘”)도 제공.
+- **3단계 — 주도적 참여**: 서버 → 에이전트 알림(계획 실패, 충돌, 작업 실패·복구 필요), 권한 수준(읽기 전용 / 편집 / 실제 로봇),
+  에이전트 편집 묶음을 한 번에 되돌리기, 앱 안 어시스턴트 패널(Claude Messages API를 HTTP로 직접 호출, 같은 도구 목록으로 도구 루프).
+- 참고: MCP 사양 https://modelcontextprotocol.io/specification , rmcp https://crates.io/crates/rmcp .
+
 ## 부록 A. 의존성과 검증된 API 사실 (2026-11-16)
 - **`=` 고정**: eframe / egui / egui-wgpu / egui_kittest 0.37.0 · wgpu 30.0.2 · egui_tiles 0.18.0 · egui_ltreeview 0.10.0 · glamx 0.3.1(`default-features = false`, `std, f64, libm, scalar-math`; glam 0.33, **0.34 금지**) · parry3d-f64 0.31.1(`enhanced-determinism`; `simd8`·`parallel` 금지).
 - **캐럿 + lock**: egui-notify 0.24 · rfd 0.18 · roxmltree 0.21 · mesh-loader 0.1.13(`default-features = false`, `stl, obj`) · smallvec 1 · libm 0.2 · bytemuck 1 · pollster 1 · image 0.25(png) · serde 1 · serde_json 1(`float_roundtrip`) · thiserror 2 · anyhow 1 · log 0.4 · tempfile 3 · rayon 1(ACM·시드 스윕 전용 풀) · proptest 1(dev) · insta 1(dev). xtask 전용: yaml 리더는 자체 구현.

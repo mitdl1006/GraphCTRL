@@ -243,6 +243,10 @@ pub struct GraphCtrlApp {
     library: Vec<LibraryRobot>,
     /// What Help > Licences shows.
     licences: Vec<(String, String)>,
+    /// The robot library's packages, for agents that add robots by name.
+    packages: Vec<gc_session::library::Package>,
+    /// The AI agent connection.
+    agent: crate::agent::Agent,
     expression: String,
     ime: ImeTest,
     /// Whether the licence notices window is open.
@@ -275,13 +279,11 @@ impl GraphCtrlApp {
         let (library, resources, kinematics) = robot_library(&packages);
         let recent = options.settings_dir.as_deref().map(gc_persist::places::load_recent).unwrap_or_default();
         let recovery = options.settings_dir.as_deref().and_then(gc_persist::places::pending_autosave);
-        // The language chosen last time, when there are saved settings.
-        let lang = options
-            .settings_dir
-            .as_deref()
-            .map(gc_persist::places::load_settings)
-            .and_then(|settings| Lang::from_code(&settings.language))
-            .unwrap_or_default();
+        // The language and agent connection chosen last time, when there are saved settings.
+        let settings =
+            options.settings_dir.as_deref().map(gc_persist::places::load_settings).unwrap_or_default();
+        let lang = Lang::from_code(&settings.language).unwrap_or_default();
+        let agent = crate::agent::Agent::new(&settings);
         let mut session = Session::new();
         session.set_resources(resources);
         session.set_kinematics(kinematics.factories);
@@ -302,6 +304,8 @@ impl GraphCtrlApp {
             params: gc_panels::ParamsUi::default(),
             library,
             licences,
+            packages,
+            agent,
             expression: String::new(),
             ime: ImeTest { dimension: "25 mm".to_owned(), ..ImeTest::default() },
             notices: false,
@@ -661,6 +665,9 @@ impl GraphCtrlApp {
                 if ui.button(tr!(lang, MenuImeTest)).clicked() {
                     self.ime.open = true;
                 }
+                if ui.button(tr!(lang, MenuAgent)).clicked() {
+                    self.agent.open = true;
+                }
                 ui.menu_button(tr!(lang, MenuLanguage), |ui| {
                     for choice in Lang::ALL {
                         if ui.selectable_label(self.lang == choice, choice.native_name()).clicked() {
@@ -703,8 +710,13 @@ impl GraphCtrlApp {
     /// Saves the settings that outlive a run (the language). A failure is shown in the status bar.
     fn save_settings(&mut self) {
         let Some(dir) = &self.options.settings_dir else { return };
-        let settings =
-            gc_persist::places::Settings { language: self.lang.code().to_owned(), ..Default::default() };
+        let settings = gc_persist::places::Settings {
+            language: self.lang.code().to_owned(),
+            agent_enabled: self.agent.enabled,
+            agent_port: self.agent.port,
+            agent_token: self.agent.token.clone(),
+            ..Default::default()
+        };
         if let Err(error) = gc_persist::places::save_settings(dir, &settings) {
             self.notice = Some(tr!(self.lang, FileError, error));
         }
@@ -797,6 +809,11 @@ impl eframe::App for GraphCtrlApp {
         let lang = self.lang;
         self.shortcuts(&ctx);
         self.session.poll_jobs();
+        // Agents' calls are carried out here, between frames, like the user's own edits.
+        if let Some(edit) = self.agent.serve(&ctx, &mut self.session, &self.packages) {
+            self.cell.playing = false;
+            self.notice = Some(tr!(lang, AgentEdited, edit));
+        }
         // Closing the window with unsaved changes asks first.
         if ctx.input(|i| i.viewport().close_requested()) && self.session.is_dirty() && !self.quitting {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
@@ -911,6 +928,9 @@ impl eframe::App for GraphCtrlApp {
         }
         if self.about {
             self.about_window(&ctx);
+        }
+        if self.agent.open && self.agent.window(&ctx, lang) {
+            self.save_settings();
         }
         if let Some(mut calc) = self.pose_calc.take() {
             let mut open = true;
