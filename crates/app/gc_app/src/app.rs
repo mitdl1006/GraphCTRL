@@ -44,6 +44,10 @@ pub trait FileDialogs {
     fn open_mesh(&mut self) -> Option<PathBuf> {
         None
     }
+    /// The robot description file to import, or `None` when the user cancelled.
+    fn open_urdf(&mut self) -> Option<PathBuf> {
+        None
+    }
 }
 
 struct NativeDialogs;
@@ -58,7 +62,11 @@ impl FileDialogs for NativeDialogs {
     }
 
     fn open_mesh(&mut self) -> Option<PathBuf> {
-        rfd::FileDialog::new().add_filter("STL", &["stl", "STL"]).pick_file()
+        rfd::FileDialog::new().add_filter("STL, COLLADA", &["stl", "STL", "dae", "DAE"]).pick_file()
+    }
+
+    fn open_urdf(&mut self) -> Option<PathBuf> {
+        rfd::FileDialog::new().add_filter("URDF", &["urdf", "URDF", "xml"]).pick_file()
     }
 }
 
@@ -491,6 +499,18 @@ impl eframe::App for GraphCtrlApp {
                 lang,
             );
         });
+        if ribbon_action == Some(ribbon::RibbonAction::ImportRobot)
+            && let Some(path) = self.dialogs.open_urdf()
+        {
+            match self.session.add_robot_file(&path) {
+                Ok(robot) => {
+                    let missing = self.session.robot_model(robot).map_or(0, |loaded| loaded.missing.len());
+                    self.notice = (missing > 0).then(|| tr!(lang, RobotMeshesMissing, missing));
+                    self.viewport.fit(&self.session, [1000.0, 700.0]);
+                }
+                Err(error) => self.notice = Some(tr!(lang, FileError, error)),
+            }
+        }
         if ribbon_action == Some(ribbon::RibbonAction::ImportMesh)
             && let Some(path) = self.dialogs.open_mesh()
         {

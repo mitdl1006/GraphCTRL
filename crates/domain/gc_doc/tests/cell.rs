@@ -17,6 +17,7 @@ fn robot() -> Robot {
     Robot {
         name: "Robot1".into(),
         urdf: "<robot name=\"r\"/>".into(),
+        resource_dir: String::new(),
         base_link: "base_link".into(),
         tip_link: "tool0".into(),
         placement: Placement::default(),

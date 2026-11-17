@@ -41,6 +41,8 @@ const CONSTRAINTS: [(ConstraintKind, &str, Msg); 12] = [
 pub(crate) enum RibbonAction {
     /// Ask for a mesh file and add it as a body.
     ImportMesh,
+    /// Ask for a robot description file and add the robot.
+    ImportRobot,
 }
 
 pub(crate) fn show(
@@ -181,6 +183,9 @@ fn robot_tab(
                 }
                 viewport.fit(session, [1000.0, 700.0]);
             }
+        }
+        if ribbon_button(ui, Icon::View, tr!(lang, CmdImportRobot), false, robot.is_none()).clicked() {
+            action = Some(RibbonAction::ImportRobot);
         }
         if ribbon_button(ui, Icon::View, tr!(lang, CmdImportMesh), false, true).clicked() {
             action = Some(RibbonAction::ImportMesh);

@@ -324,6 +324,10 @@ messages! {
     PropRotation => ("회전 (도)", "Rotation (deg)"),
     /// Label: factor from file units to metres.
     PropScale => ("배율", "Scale"),
+    /// Command: add a robot from a URDF file.
+    CmdImportRobot => ("URDF 불러오기", "Import URDF"),
+    /// Notice after importing a robot whose mesh files were not all found. `{0}` is how many.
+    RobotMeshesMissing => ("메시 파일 {0}개를 찾지 못했습니다(해당 부분은 표시·충돌 검사에서 빠집니다)", "{0} mesh files were not found (those parts are neither drawn nor checked)"),
     /// Command: add a body from a mesh file.
     CmdImportMesh => ("메시 불러오기", "Import Mesh"),
     /// Label: planner choice.

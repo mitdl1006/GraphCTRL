@@ -98,7 +98,7 @@ impl LoadedRobot {
         self.scaled.get(&scaled_key(uri, scale)).map_or(&[], Vec::as_slice)
     }
 
-    fn read_meshes(&mut self, resources: Option<&Resources>) {
+    fn read_meshes(&mut self, resources: Option<&Resources>, resource_dir: &str) {
         let model = Arc::clone(&self.model);
         let geometries = model.links.iter().flat_map(|link| link.visuals.iter().chain(&link.collisions));
         for geometry in geometries {
@@ -107,8 +107,10 @@ impl LoadedRobot {
                 continue;
             }
             if !self.files.contains_key(uri) {
+                let near = || if resource_dir.is_empty() { None } else { read_near(resource_dir, uri) };
                 let read = resources
                     .and_then(|resolve| resolve(uri))
+                    .or_else(near)
                     .and_then(|bytes| gc_mesh::read_parts(&bytes).ok())
                     .and_then(|parts| Some((gc_mesh::merge(&parts).ok()?, parts)));
                 match read {
@@ -275,8 +277,12 @@ impl CellState {
         self.robots.retain(|id, loaded| doc.get(*id).is_some_and(|r| r.urdf == loaded.urdf));
         for (id, robot) in doc.robots().iter() {
             if !self.robots.contains_key(&id)
-                && let Ok(loaded) =
-                    load(&robot.urdf, Some((&robot.base_link, &robot.tip_link)), self.resources.as_ref())
+                && let Ok(loaded) = load(
+                    &robot.urdf,
+                    Some((&robot.base_link, &robot.tip_link)),
+                    self.resources.as_ref(),
+                    &robot.resource_dir,
+                )
             {
                 self.robots.insert(id, Arc::new(loaded.0));
             }
@@ -343,11 +349,32 @@ fn shape_of(solid: &Solid, meshes: &BTreeMap<String, MeshRef>) -> Option<ShapeDe
     })
 }
 
+/// The bytes of a file a robot description refers to, looked for around the folder the description came
+/// from: `file://` and plain paths as they are, `package://name/rest` under that folder and up to four
+/// folders above it, with and without the package name.
+fn read_near(resource_dir: &str, uri: &str) -> Option<Vec<u8>> {
+    use std::path::{Path, PathBuf};
+    let dir = Path::new(resource_dir);
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(rest) = uri.strip_prefix("package://") {
+        let (package, inside) = rest.split_once('/')?;
+        for above in dir.ancestors().take(5) {
+            candidates.push(above.join(inside));
+            candidates.push(above.join(package).join(inside));
+        }
+    } else {
+        let plain = Path::new(uri.strip_prefix("file://").unwrap_or(uri));
+        candidates.push(if plain.is_absolute() { plain.to_path_buf() } else { dir.join(plain) });
+    }
+    candidates.iter().find_map(|path| std::fs::read(path).ok())
+}
+
 /// Reads a robot description and picks its planning chain. Returns the tip link's name with it.
 fn load(
     urdf: &str,
     chain: Option<(&str, &str)>,
     resources: Option<&Resources>,
+    resource_dir: &str,
 ) -> Result<(LoadedRobot, String, String), String> {
     let (model, _) = gc_robot::import(urdf).map_err(|findings| {
         findings.iter().map(|f| format!("{}:{}: {}", f.line, f.col, f.message)).collect::<Vec<_>>().join("\n")
@@ -380,7 +407,7 @@ fn load(
         scaled: BTreeMap::new(),
         missing: Vec::new(),
     };
-    loaded.read_meshes(resources);
+    loaded.read_meshes(resources, resource_dir);
     Ok((loaded, base, tip))
 }
 
@@ -418,10 +445,26 @@ impl Session {
     /// Adds a robot from a description (URDF text) at the world origin. The error lists what is wrong
     /// with the description.
     pub fn add_robot(&mut self, name: &str, urdf: &str) -> Result<Id<Robot>, String> {
-        let (loaded, base_link, tip_link) = load(urdf, None, self.cell.resources.as_ref())?;
+        self.add_robot_from(name, urdf, "")
+    }
+
+    /// Adds a robot from a description file (URDF). Mesh files it refers to are looked for around the
+    /// file's folder; the ones not found are listed in [`LoadedRobot::missing`] and simply not drawn or
+    /// checked.
+    pub fn add_robot_file(&mut self, path: &std::path::Path) -> Result<Id<Robot>, String> {
+        let urdf = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let name =
+            path.file_stem().map_or_else(|| "Robot".to_owned(), |stem| stem.to_string_lossy().into_owned());
+        let dir = path.parent().map(|dir| dir.to_string_lossy().into_owned()).unwrap_or_default();
+        self.add_robot_from(&name, &urdf, &dir).map_err(|e| format!("{}:\n{e}", path.display()))
+    }
+
+    fn add_robot_from(&mut self, name: &str, urdf: &str, resource_dir: &str) -> Result<Id<Robot>, String> {
+        let (loaded, base_link, tip_link) = load(urdf, None, self.cell.resources.as_ref(), resource_dir)?;
         let robot = Robot {
             name: name.to_owned(),
             urdf: urdf.to_owned(),
+            resource_dir: resource_dir.to_owned(),
             base_link,
             tip_link,
             placement: Placement::default(),

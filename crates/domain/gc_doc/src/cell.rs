@@ -81,6 +81,10 @@ pub struct Robot {
     pub name: String,
     /// The robot description (URDF text). Kept in the document so that a file opens anywhere.
     pub urdf: String,
+    /// The folder the description was read from, where the mesh files it refers to are looked for.
+    /// Empty for robots from the library.
+    #[serde(default)]
+    pub resource_dir: String,
     /// The link the planning chain starts at.
     pub base_link: String,
     /// The link the planning chain ends at (the tool flange).

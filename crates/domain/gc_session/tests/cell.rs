@@ -253,3 +253,64 @@ fn placing_the_base_previews_live_and_commits_once() {
     assert!(session.undo());
     assert_eq!(session.doc().get(robot).unwrap().placement.xyz, [0.0; 3]);
 }
+
+#[test]
+fn a_robot_file_finds_its_meshes_around_its_folder() {
+    // The usual layout of a robot package: <package>/urdf/robot.urdf and <package>/meshes/*.stl.
+    let directory = tempfile::tempdir().unwrap();
+    let package = directory.path().join("my_arm");
+    std::fs::create_dir_all(package.join("urdf")).unwrap();
+    std::fs::create_dir_all(package.join("meshes")).unwrap();
+    let column = gc_mesh::primitives::cylinder(0.05, 0.4, 16).unwrap();
+    std::fs::write(package.join("meshes/column.stl"), gc_mesh::stl::to_binary(&column)).unwrap();
+    let urdf = r#"<?xml version="1.0"?>
+<robot name="my_arm">
+  <link name="base_link">
+    <visual><geometry><mesh filename="package://my_arm/meshes/column.stl"/></geometry></visual>
+    <collision><geometry><mesh filename="package://my_arm/meshes/column.stl"/></geometry></collision>
+  </link>
+  <link name="arm">
+    <visual><geometry><mesh filename="package://my_arm/meshes/lost.stl"/></geometry></visual>
+    <collision><origin xyz="0.2 0 0"/><geometry><box size="0.4 0.05 0.05"/></geometry></collision>
+  </link>
+  <joint name="swing" type="revolute">
+    <parent link="base_link"/><child link="arm"/>
+    <origin xyz="0 0 0.25"/><axis xyz="0 0 1"/>
+    <limit lower="-3" upper="3" velocity="2" effort="10"/>
+  </joint>
+</robot>"#;
+    let file = package.join("urdf/my_arm.urdf");
+    std::fs::write(&file, urdf).unwrap();
+
+    let mut session = Session::new();
+    let robot = session.add_robot_file(&file).unwrap();
+    let stored = session.doc().get(robot).unwrap();
+    assert_eq!((stored.name.as_str(), stored.tip_link.as_str(), stored.joints.len()), ("my_arm", "arm", 1));
+    let loaded = session.robot_model(robot).unwrap();
+    assert_eq!(loaded.missing, vec!["package://my_arm/meshes/lost.stl".to_owned()]);
+    assert_eq!(loaded.mesh("package://my_arm/meshes/column.stl", [1.0; 3]).len(), 1);
+    assert_eq!(loaded.file("package://my_arm/meshes/column.stl").unwrap().triangle_count(), 64);
+
+    // It plans like any other robot, and the document remembers where its files are.
+    session.jog(robot, &[2.0]);
+    session.end_jog();
+    let there = session.add_waypoint_here(robot).unwrap();
+    session.jog(robot, &[-2.0]);
+    session.end_jog();
+    let path = session.add_path(robot, vec![there]).unwrap();
+    assert_eq!(session.plan(path), PlanStatus::Ready, "{:?}", session.plan_error(path));
+    let saved = directory.path().join("cell.gctrl");
+    session.save_as(&saved).unwrap();
+    let mut reopened = Session::new();
+    reopened.open(&saved).unwrap();
+    assert_eq!(
+        reopened.robot_model(robot).unwrap().mesh("package://my_arm/meshes/column.stl", [1.0; 3]).len(),
+        1
+    );
+
+    // A description that does not read is refused with the file name and the place of the problem.
+    let broken = package.join("urdf/broken.urdf");
+    std::fs::write(&broken, "<robot name=\"x\"><link/></robot>").unwrap();
+    let error = session.add_robot_file(&broken).unwrap_err();
+    assert!(error.contains("broken.urdf"), "{error}");
+}
