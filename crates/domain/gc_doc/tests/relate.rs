@@ -763,3 +763,35 @@ fn positional_representations_override_values_and_go_back_to_primary() {
         "[Primary] is reserved"
     );
 }
+
+#[test]
+fn assemble_offers_only_the_solutions_the_picked_geometry_allows() {
+    use gc_doc::{AssembleSolution as S, possible_relations};
+    let mut bench = Bench::new();
+    let (table, block) = table_and_box(&mut bench);
+    let plane = Geometry::Plane { point: [0.0; 3], normal: [0.0, 0.0, 1.0] };
+    let circle = Geometry::Circle { centre: [0.0; 3], normal: [0.0, 0.0, 1.0] };
+    let cylinder = Geometry::Cylinder { point: [0.0; 3], direction: [0.0, 0.0, 1.0], radius: 0.05 };
+    let sphere = Geometry::Sphere { centre: [0.0; 3], radius: 0.05 };
+    let axis = Geometry::Axis { point: [0.0; 3], direction: [1.0, 0.0, 0.0] };
+    let offer = |a: Geometry, b: Geometry| possible_relations(&on(block, a), &on(table, b));
+    // Two planes: Mate-Mate, Mate-Flush, Angle-Directed (the help's own example).
+    assert_eq!(offer(plane, plane), [S::MateMate, S::MateFlush, S::AngleDirected]);
+    // Two circular edges: Insert offered, opposed and aligned.
+    let circles = offer(circle, circle);
+    assert!(circles.contains(&S::InsertOpposed) && circles.contains(&S::InsertAligned));
+    assert!(!circles.contains(&S::MateFlush));
+    // A sphere on a plane: tangent, inside or outside, or mate of its centre; no angle.
+    assert_eq!(offer(sphere, plane), [S::MateMate, S::TangentInside, S::TangentOutside]);
+    // Two axes: mate either way and angle; a cylinder on a plane may also be tangent.
+    assert_eq!(offer(axis, axis), [S::MateMate, S::MateAligned, S::AngleDirected]);
+    assert!(offer(cylinder, plane).contains(&S::TangentOutside));
+    assert!(!offer(cylinder, axis).contains(&S::TangentOutside), "the solver has no line tangency");
+    // Both picks on one component, or a joint origin: nothing.
+    assert!(possible_relations(&on(block, plane), &on(block, plane)).is_empty());
+    assert!(offer(Geometry::origin_frame(), plane).is_empty());
+    // A solution gives a kind the solver takes.
+    bench
+        .relate(Relationship::new("Mate:1", S::MateMate.kind(0.0), on(block, top(0.2)), on(table, top(1.0))))
+        .unwrap();
+}

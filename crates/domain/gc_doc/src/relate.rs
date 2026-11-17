@@ -375,6 +375,78 @@ impl Relationship {
     }
 }
 
+/// A solution the Assemble command offers once the geometry is picked (Inventor 2026 help, Create assembly
+/// constraints using the Assemble command, GUID-C1E8D955-784D-47DE-9DD4-C9C695051320: "The geometry you
+/// select determines the available constraint type"). Joints, Symmetry, Angle-Undirected and Explicit
+/// Reference Vector are not offered by Assemble.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AssembleSolution {
+    /// Mate, faces facing (normals or axes opposed).
+    MateMate,
+    /// Flush: faces side by side.
+    MateFlush,
+    /// Mate of two axes pointing the same way.
+    MateAligned,
+    /// Angle, directed (right-hand rule).
+    AngleDirected,
+    /// Tangent, inside.
+    TangentInside,
+    /// Tangent, outside.
+    TangentOutside,
+    /// Insert, opposed.
+    InsertOpposed,
+    /// Insert, aligned.
+    InsertAligned,
+}
+
+impl AssembleSolution {
+    /// The relationship kind for this solution with an offset (metres) or angle (radians).
+    pub fn kind(self, value: f64) -> RelationKind {
+        match self {
+            AssembleSolution::MateMate => RelationKind::Mate { offset: value, sense: AxisSense::Opposed },
+            AssembleSolution::MateFlush => RelationKind::Flush { offset: value },
+            AssembleSolution::MateAligned => RelationKind::Mate { offset: value, sense: AxisSense::Aligned },
+            AssembleSolution::AngleDirected => {
+                RelationKind::Angle { angle: value, solution: AngleSolution::Directed }
+            }
+            AssembleSolution::TangentInside => RelationKind::Tangent { offset: value, inside: true },
+            AssembleSolution::TangentOutside => RelationKind::Tangent { offset: value, inside: false },
+            AssembleSolution::InsertOpposed => RelationKind::Insert { offset: value, aligned: false },
+            AssembleSolution::InsertAligned => RelationKind::Insert { offset: value, aligned: true },
+        }
+    }
+}
+
+/// The solutions Assemble offers for two picked selections, in Inventor's order; empty when nothing fits
+/// (both on one component, a joint origin picked).
+pub fn possible_relations(first: &Selection, second: &Selection) -> Vec<AssembleSolution> {
+    let round = |g: &Geometry| matches!(g, Geometry::Cylinder { .. } | Geometry::Sphere { .. });
+    let linear = |g: &Geometry| {
+        matches!(g, Geometry::Axis { .. } | Geometry::Cylinder { .. } | Geometry::Circle { .. })
+    };
+    let (g1, g2) = (&first.geometry, &second.geometry);
+    let offered = |solution: &AssembleSolution| match solution {
+        AssembleSolution::MateAligned => linear(g1) && linear(g2),
+        AssembleSolution::TangentInside | AssembleSolution::TangentOutside => round(g1) || round(g2),
+        _ => true,
+    };
+    [
+        AssembleSolution::MateMate,
+        AssembleSolution::MateFlush,
+        AssembleSolution::MateAligned,
+        AssembleSolution::AngleDirected,
+        AssembleSolution::TangentInside,
+        AssembleSolution::TangentOutside,
+        AssembleSolution::InsertOpposed,
+        AssembleSolution::InsertAligned,
+    ]
+    .into_iter()
+    .filter(|solution| {
+        offered(solution) && Relationship::new("", solution.kind(0.0), *first, *second).is_valid()
+    })
+    .collect()
+}
+
 /// Geometry in the world.
 #[derive(Clone, Copy, Debug)]
 enum World {

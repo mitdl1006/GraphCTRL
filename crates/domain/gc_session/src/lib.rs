@@ -785,6 +785,15 @@ impl Session {
         self.execute(&Command::Cell(gc_doc::CellOp::SetDofShown { items: items.to_vec(), on })).map(|_| ())
     }
 
+    /// What the Assemble command offers for two picked selections (geometry first, type after).
+    pub fn possible_relations(
+        &self,
+        first: &gc_doc::Selection,
+        second: &gc_doc::Selection,
+    ) -> Vec<gc_doc::AssembleSolution> {
+        gc_doc::possible_relations(first, second)
+    }
+
     /// A component's origin folder in the world: centre point, axes and planes (assembly P1-2).
     pub fn component_origin(&self, occurrence: gc_doc::Occurrence) -> Option<gc_doc::ComponentOrigin> {
         self.doc.component_origin(occurrence)
