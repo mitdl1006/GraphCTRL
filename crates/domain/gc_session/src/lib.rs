@@ -13,7 +13,6 @@
 
 mod assembly;
 mod cell;
-mod cut_edges;
 mod design;
 pub mod library;
 mod measure;

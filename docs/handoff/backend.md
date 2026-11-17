@@ -8,15 +8,9 @@
 - 근거: 원문 A60(억제 요소는 그래픽에 없고 갱신 때 계산되지 않음) — 명세 표 인용.
 - 테스트 `gc_session/tests/robot_links.rs::suppressed_bodies_and_robots_are_kept_but_not_drawn_checked_or_planned`.
 
-## 2026-11-18 — 어셈블리 P1-6 Project Cut Edges(원문대로 스냅샷)
+## 2026-11-18 — P1-6은 리드 구현(e25a650)으로 통일
 
-- `session.project_cut_edges(occurrence, shift) -> Result<usize, EditError>`: 편집 중인 2D 스케치의 평면이 바디(상자·원통·구·메시)·
-  가져온 어셈블리·부품(과 그 아래 부품)의 메시를 자르는 선을 고정 선분으로 추가(끝점마다 `Fix`). 같은 직선으로 이어지는 조각은 합치고
-  중복은 버린다. 0을 돌려주면 평면이 컴포넌트와 안 만남 → 상태바 안내. 구성선 = 토글 XOR Shift. 한 undo 단계.
-  문서 쪽은 `SketchOp::AddFixedSegments{segments, construction}`.
-- 원문(GUID-B8D8B07B…, GUID-B61431DA…): "Projected cut edges are not associative … a snapshot" → 컴포넌트를 옮겨도 갱신하지 않는다.
-  명세 P1-6 수용 기준의 "평면을 옮기면 갱신"과 다름(리드에게 판단 요청함). 로봇 링크 메시는 아직(BadValue).
-- 테스트 `gc_session/tests/project_geometry.rs::project_cut_edges_traces_where_the_plane_cuts_a_box_as_a_fixed_snapshot`.
+- 백엔드의 중복 구현(e1b73ae: session.project_cut_edges, SketchOp::AddFixedSegments)은 리드 결정에 따라 제거했다.
 
 ## 2026-11-18 — 어셈블리 P1-5 Project Geometry
 
