@@ -16,6 +16,7 @@ mod cell;
 mod command;
 mod document;
 mod history;
+mod pattern;
 mod placement;
 mod project;
 mod relate;
@@ -38,6 +39,7 @@ pub use design::{
 pub use document::{ChangeSet, Contents, DocDelta, Document, Frame, FrameKind, Param, Store, Table};
 pub use gc_sketch::Sketch;
 pub use history::History;
+pub use pattern::{ComponentPattern, PatternDirection, PatternElement, PatternLayout};
 pub use placement::{ComponentOrigin, WorkShape};
 pub use project::ProjectSource;
 pub use relate::{

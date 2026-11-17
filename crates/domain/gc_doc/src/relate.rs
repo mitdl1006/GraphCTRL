@@ -583,6 +583,25 @@ impl Document {
         })
     }
 
+    /// A selection as a line in the world: a point and a unit direction (a plane's normal, an axis's or
+    /// cylinder's direction, a circle's normal, a frame's Z). `None` for a point or sphere, or a missing
+    /// component.
+    pub fn selection_axis(&self, selection: &Selection) -> Option<(DVec3, DVec3)> {
+        let geometry = self.in_owner(selection)?;
+        let pose = self.owner_pose(selection.occurrence.owner())?;
+        let direction = (pose.rotation * DVec3::from_array(direction_of(&geometry)?)).normalize_or_zero();
+        let point = match geometry {
+            Geometry::Plane { point, .. }
+            | Geometry::Axis { point, .. }
+            | Geometry::Cylinder { point, .. } => point,
+            Geometry::Circle { centre, .. } => centre,
+            Geometry::Frame { origin, .. } => origin,
+            Geometry::Point(_) | Geometry::Sphere { .. } => return None,
+        };
+        (direction.length() > 0.5)
+            .then(|| (pose.translation + pose.rotation * DVec3::from_array(point), direction))
+    }
+
     /// What Predict Offset and Orientation proposes for two selections as they lie now: Mate when two
     /// planes face each other (normals opposite), otherwise Flush, with their current distance as the
     /// offset; for other geometry a Mate at its current offset (axes: the closer sense). `None` when a

@@ -1,5 +1,19 @@
 # 백엔드 인계 (2026-11-17)
 
+## 2026-11-18 — 컴포넌트 패턴(직사각형·원형, 리드 순서 ②)
+
+근거(원문): Create rectangular patterns of components `GUID-CF627358-120F-4142-A9D0-13217BD3432D.htm`, Create circular patterns of
+components `GUID-FF7B08E3-624B-4382-B4E5-304C0354C048.htm`.
+- `PatternLayout::Rectangular{column: PatternDirection{along: Selection, flip, count, spacing}, row: Option<..>}` — 방향은 원점 축·모서리·작업 축·면
+  (평면 = 법선, 원통 = 축)을 `Selection`으로; `PatternLayout::Circular{axis, flip, count, angle, fitted, rotational, midplane}` —
+  Incremental(사이 각) / Fitted(전체 각, 360°면 count로 나눔), Rotational(돌며 방향도 회전) / Fixed(방향 유지), Midplane(양쪽 번갈아).
+- 명령: `CellOp::{AddPattern{name, parents, layout}, SetPattern{index, layout}, DeletePattern{index, keep_copies},
+  MakePatternElementIndependent{index, element}}`, 세션 `add_pattern`, `patterns() -> Vec<ComponentPattern{name, parents, layout,
+  elements: [PatternElement{index, items}], independent}>`. 복사본은 실제 바디·로봇·어셈블리(이름 `원본:2` …)이고 모든 명령 뒤 부모와 배치를
+  따라간다. 개수 변경 시 추가·삭제, 독립화한 자리는 다시 채우지 않음, 부모가 지워지면 연결만 끊김. 저장: `Timeline.patterns`.
+- 아직: Associative(피처 패턴 연동), Base Point, 요소별 억제(컴포넌트 억제로 대신 가능), 관계 복제. 인덱스로 패턴을 가리키므로 삭제 시 뒤 인덱스가 당겨진다.
+- 테스트 `gc_doc/tests/pattern.rs`.
+
 ## 2026-11-18 — 대형 장면: 프레임당 세션 질의 벤치(리드 순서 ③)
 
 - `cargo run --release -p gc_session --example bench_scene [-- --components N --frames N --append FILE]`; `cargo xtask bench-quality`가

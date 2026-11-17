@@ -651,6 +651,28 @@ impl Session {
         self.set_suppressed(id.erase(), suppressed)
     }
 
+    /// The component patterns (for the browser: each with its parents and occurrences).
+    pub fn patterns(&self) -> Vec<gc_doc::ComponentPattern> {
+        self.doc.patterns()
+    }
+
+    /// Patterns components (Pattern Component: rectangular or circular); the copies follow the parents.
+    /// One undo step. Edit with `CellOp::SetPattern`, remove with `CellOp::DeletePattern`, take an occurrence
+    /// out with `CellOp::MakePatternElementIndependent`.
+    pub fn add_pattern(
+        &mut self,
+        name: &str,
+        parents: &[gc_core::AnyId],
+        layout: gc_doc::PatternLayout,
+    ) -> Result<(), EditError> {
+        self.execute(&Command::Cell(gc_doc::CellOp::AddPattern {
+            name: name.to_owned(),
+            parents: parents.to_vec(),
+            layout,
+        }))
+        .map(|_| ())
+    }
+
     /// A component's origin folder in the world: centre point, axes and planes (assembly P1-2).
     pub fn component_origin(&self, occurrence: gc_doc::Occurrence) -> Option<gc_doc::ComponentOrigin> {
         self.doc.component_origin(occurrence)

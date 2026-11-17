@@ -437,6 +437,36 @@ pub enum CellOp {
     },
     /// Deletes an assembly constraint; the components stay where they are.
     DeleteRelationship(Id<crate::relate::Relationship>),
+    /// Patterns components: copies arranged in columns and rows or round an axis, following the parents.
+    AddPattern {
+        /// Name shown in the browser.
+        name: String,
+        /// The components patterned (bodies, robots, assemblies).
+        parents: Vec<AnyId>,
+        /// The arrangement.
+        layout: crate::pattern::PatternLayout,
+    },
+    /// Changes a pattern's arrangement (count, spacing, direction): occurrences are added or removed.
+    SetPattern {
+        /// Index into the patterns.
+        index: usize,
+        /// The new arrangement.
+        layout: crate::pattern::PatternLayout,
+    },
+    /// Deletes a pattern; its copies go too unless `keep_copies`.
+    DeletePattern {
+        /// Index into the patterns.
+        index: usize,
+        /// Keep the copies as ordinary components.
+        keep_copies: bool,
+    },
+    /// Takes an occurrence out of its pattern: its copies stay where they are as ordinary components.
+    MakePatternElementIndependent {
+        /// Index into the patterns.
+        index: usize,
+        /// The occurrence (1, 2, …).
+        element: u32,
+    },
     /// Ground and Root, "Ground at origin": moves the components (bodies, robots, assemblies) to the
     /// assembly's origin, aligned with it, and grounds them. Refused when constraints then cannot be met.
     GroundAtOrigin(Vec<AnyId>),
@@ -1038,6 +1068,12 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
             txn.remove(*id)?;
             Ok((Vec::new(), "Delete constraint"))
         }
+        CellOp::AddPattern { name, parents, layout } => crate::pattern::add(txn, name, parents, layout),
+        CellOp::SetPattern { index, layout } => crate::pattern::set(txn, *index, layout),
+        CellOp::DeletePattern { index, keep_copies } => crate::pattern::delete(txn, *index, *keep_copies),
+        CellOp::MakePatternElementIndependent { index, element } => {
+            crate::pattern::make_independent(txn, *index, *element)
+        }
         CellOp::GroundAtOrigin(items) => {
             use crate::design::Occurrence;
             if items.is_empty() || !items.iter().all(|i| txn.doc().owner_pose(*i).is_some()) {
@@ -1207,7 +1243,7 @@ pub(crate) fn settle_holding(txn: &mut Txn<'_>, held: &[AnyId]) -> Result<(), Ed
 }
 
 /// Sets the world pose of a body, robot or assembly.
-fn set_owner_pose(txn: &mut Txn<'_>, item: AnyId, pose: gc_math::DPose3) -> Result<(), EditError> {
+pub(crate) fn set_owner_pose(txn: &mut Txn<'_>, item: AnyId, pose: gc_math::DPose3) -> Result<(), EditError> {
     let placement =
         Placement { xyz: pose.translation.to_array(), rpy: gc_math::rpy_from_quat(pose.rotation) };
     match item.kind {

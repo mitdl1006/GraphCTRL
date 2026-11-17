@@ -1372,6 +1372,7 @@ fn run(txn: &mut Txn<'_>, command: &Command) -> Result<(Vec<Created>, &'static s
 pub fn apply(doc: &mut Document, command: &Command) -> Result<Applied, EditError> {
     let mut txn = Txn::new(doc);
     let (created, label) = run(&mut txn, command)?; // an early return drops `txn`, which rolls back
+    crate::pattern::refresh(&mut txn)?;
     crate::project::refresh(&mut txn)?;
     name_dimensions(&mut txn)?;
     let (delta, changed) = txn.commit()?;

@@ -345,6 +345,9 @@ pub struct Timeline {
     /// Component states that are not kept elsewhere (assembly P1-1).
     #[serde(default, skip_serializing_if = "Components::is_empty")]
     pub components: Components,
+    /// Component patterns: copies of components arranged in rows and columns or round an axis.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub patterns: Vec<crate::pattern::ComponentPattern>,
 }
 
 /// An occurrence in the assembly tree (docs/ux/inventor-assembly-parity.md, P1-1): a component placed
