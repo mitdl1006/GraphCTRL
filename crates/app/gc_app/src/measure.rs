@@ -33,6 +33,43 @@ pub(crate) enum Priority {
     Features,
 }
 
+/// The groups of accumulated values (Inventor's Accumulated Properties).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) enum Group {
+    /// Lengths and distances (metres).
+    Distance,
+    /// Areas (square metres).
+    Area,
+    /// Angles (radians).
+    Angle,
+}
+
+impl Group {
+    fn show(self, value: f64) -> String {
+        match self {
+            Self::Distance => format!("{} mm", mm(value)),
+            Self::Area => format!("{:.2} mm²", value * 1e6),
+            Self::Angle => format!("{:.3}°", value.to_degrees()),
+        }
+    }
+}
+
+/// One line of the panel: its colour (`PLACEHOLDER` for results), text, and the value it can add to the
+/// accumulated values.
+struct Line {
+    colour: egui::Color32,
+    text: String,
+    value: Option<(Group, f64)>,
+}
+
+fn line(colour: egui::Color32, text: String) -> Line {
+    Line { colour, text, value: None }
+}
+
+fn valued(colour: egui::Color32, text: String, group: Group, value: f64) -> Line {
+    Line { colour, text, value: Some((group, value)) }
+}
+
 /// The Measure panel's state.
 #[derive(Default)]
 pub(crate) struct Measure {
@@ -48,6 +85,8 @@ pub(crate) struct Measure {
     priority: Priority,
     /// Features picked with the Edges and Faces priority.
     features: Vec<Feature>,
+    /// Accumulated values, signed (a subtraction is negative), in the order they were added.
+    accumulated: Vec<(Group, f64)>,
 }
 
 fn mm(v: f64) -> String {
@@ -69,13 +108,17 @@ impl Measure {
 
     /// Keeps the viewport's picking in step with the priority and takes its feature picks: a third pick
     /// starts again, a click on a blank area restarts.
-    pub(crate) fn follow_view(&mut self, viewport: &mut Viewport) {
+    /// With two points picked, a pick with Shift held adds a third point: the angle at the second.
+    pub(crate) fn follow_view(&mut self, viewport: &mut Viewport, shift: bool) {
         viewport.measure_features = self.open && self.priority == Priority::Features;
         if let Some(pick) = viewport.take_measure_pick() {
             match pick {
                 None => self.restart(),
                 Some((_, feature)) => {
-                    if self.features.len() >= 2 {
+                    let two_points =
+                        matches!(self.features.as_slice(), [Feature::Point(_), Feature::Point(_)]);
+                    let third = shift && two_points && matches!(feature, Feature::Point(_));
+                    if self.features.len() >= 2 && !third {
                         self.features.clear();
                     }
                     self.features.push(feature);
@@ -119,54 +162,92 @@ impl Measure {
     }
 
     /// The values of the picked features, one per line.
-    fn feature_lines(&self, lang: Lang) -> Vec<(egui::Color32, String)> {
+    fn feature_lines(&self, lang: Lang) -> Vec<Line> {
         let mut lines = Vec::new();
         for (colour, title, feature) in [
             (FIRST, tr!(lang, MeasureFirst), self.features.first()),
             (SECOND, tr!(lang, MeasureSecond), self.features.get(1)),
         ] {
             let Some(feature) = feature else { continue };
-            let text = match feature {
+            lines.push(match feature {
                 Feature::Point(p) => {
                     let [x, y, z] = p.map(mm);
-                    tr!(lang, MeasurePoint, x, y, z)
+                    line(colour, format!("{title}: {}", tr!(lang, MeasurePoint, x, y, z)))
                 }
                 Feature::Edge(a, b) => {
-                    tr!(
-                        lang,
-                        MeasureEdge,
-                        mm(gc_math::DVec3::from_array(*a).distance(gc_math::DVec3::from_array(*b)))
+                    let length = gc_math::DVec3::from_array(*a).distance(gc_math::DVec3::from_array(*b));
+                    valued(
+                        colour,
+                        format!("{title}: {}", tr!(lang, MeasureEdge, mm(length))),
+                        Group::Distance,
+                        length,
                     )
                 }
-                Feature::Cylinder { radius, length, .. } => {
-                    tr!(lang, MeasureCylinder, mm(radius * 2.0), mm(*radius), mm(*length))
-                }
-                Feature::Face { area, .. } => tr!(lang, MeasureFace, format!("{:.2}", area * 1e6)),
-            };
-            lines.push((colour, format!("{title}: {text}")));
+                Feature::Cylinder { radius, length, .. } => valued(
+                    colour,
+                    format!(
+                        "{title}: {}",
+                        tr!(lang, MeasureCylinder, mm(radius * 2.0), mm(*radius), mm(*length))
+                    ),
+                    Group::Distance,
+                    radius * 2.0,
+                ),
+                Feature::Face { area, .. } => valued(
+                    colour,
+                    format!("{title}: {}", tr!(lang, MeasureFace, format!("{:.2}", area * 1e6))),
+                    Group::Area,
+                    *area,
+                ),
+            });
         }
-        if let [a, b] = self.features.as_slice() {
+        let text = egui::Color32::PLACEHOLDER;
+        if let [Feature::Point(a), Feature::Point(vertex), Feature::Point(c)] = self.features.as_slice() {
+            // Three points: the angle at the second one.
+            let (a, v, c) = [a, vertex, c].map(|p| gc_math::DVec3::from_array(*p)).into();
+            let (u, w) = (a - v, c - v);
+            let angle = gc_math::fm::atan2(u.cross(w).length(), u.dot(w));
+            lines.push(valued(
+                text,
+                tr!(lang, MeasureFeatureAngle, format!("{:.3}", angle.to_degrees())),
+                Group::Angle,
+                angle,
+            ));
+        } else if let [a, b] = self.features.as_slice() {
             let pair: FeaturePair = gc_session::measure_features(a, b);
-            let text = egui::Color32::PLACEHOLDER;
             if let Some(distance) = pair.distance {
-                lines.push((text, format!("{}: {} mm", tr!(lang, MeasureDistance), mm(distance))));
+                lines.push(valued(
+                    text,
+                    format!("{}: {} mm", tr!(lang, MeasureDistance), mm(distance)),
+                    Group::Distance,
+                    distance,
+                ));
             }
             if let Some(centre) = pair.centre_distance {
-                lines.push((text, format!("{}: {} mm", tr!(lang, MeasureCentres), mm(centre))));
+                lines.push(valued(
+                    text,
+                    format!("{}: {} mm", tr!(lang, MeasureCentres), mm(centre)),
+                    Group::Distance,
+                    centre,
+                ));
             }
             if let Some(delta) = pair.delta {
                 let [dx, dy, dz] = delta.map(mm);
-                lines.push((text, tr!(lang, MeasureDelta, dx, dy, dz)));
+                lines.push(line(text, tr!(lang, MeasureDelta, dx, dy, dz)));
             }
             if let Some(angle) = pair.angle {
-                lines.push((text, tr!(lang, MeasureFeatureAngle, format!("{:.3}", angle.to_degrees()))));
+                lines.push(valued(
+                    text,
+                    tr!(lang, MeasureFeatureAngle, format!("{:.3}", angle.to_degrees())),
+                    Group::Angle,
+                    angle,
+                ));
             }
         }
         lines
     }
 
     /// The values as text, one per line (what Copy All copies).
-    fn lines(&self, session: &Session, lang: Lang) -> Vec<(egui::Color32, String)> {
+    fn lines(&self, session: &Session, lang: Lang) -> Vec<Line> {
         if self.priority == Priority::Features {
             return self.feature_lines(lang);
         }
@@ -176,27 +257,37 @@ impl Measure {
         {
             let Some(measured) = item.and_then(|item| session.measure_item(item)) else { continue };
             let [x, y, z] = measured.position.map(mm);
-            lines.push((colour, format!("{title}: {}", measured.name)));
-            lines.push((colour, tr!(lang, MeasurePosition, x, y, z)));
+            lines.push(line(colour, format!("{title}: {}", measured.name)));
+            lines.push(line(colour, tr!(lang, MeasurePosition, x, y, z)));
         }
         if let Some(pair) = &self.pair {
             let text = egui::Color32::PLACEHOLDER;
             match (self.kind, pair.minimum) {
-                (DistanceKind::Minimum, Some(minimum)) => {
-                    lines.push((text, format!("{}: {} mm", tr!(lang, MeasureMinimum), mm(minimum.distance))));
+                (DistanceKind::Minimum, Some(minimum)) => lines.push(valued(
+                    text,
+                    format!("{}: {} mm", tr!(lang, MeasureMinimum), mm(minimum.distance)),
+                    Group::Distance,
+                    minimum.distance,
+                )),
+                (DistanceKind::Minimum, None) => {
+                    lines.push(line(text, tr!(lang, MeasureNoMinimum).to_owned()))
                 }
-                (DistanceKind::Minimum, None) => lines.push((text, tr!(lang, MeasureNoMinimum).to_owned())),
-                (DistanceKind::CentreToCentre, _) => {
-                    lines.push((
-                        text,
-                        format!("{}: {} mm", tr!(lang, MeasureCentres), mm(pair.centre_to_centre)),
-                    ));
-                }
+                (DistanceKind::CentreToCentre, _) => lines.push(valued(
+                    text,
+                    format!("{}: {} mm", tr!(lang, MeasureCentres), mm(pair.centre_to_centre)),
+                    Group::Distance,
+                    pair.centre_to_centre,
+                )),
             }
             let [dx, dy, dz] = pair.delta.map(mm);
-            lines.push((text, tr!(lang, MeasureDelta, dx, dy, dz)));
+            lines.push(line(text, tr!(lang, MeasureDelta, dx, dy, dz)));
             if let Some(angle) = pair.angle {
-                lines.push((text, tr!(lang, MeasureAngle, format!("{:.3}", angle.to_degrees()))));
+                lines.push(valued(
+                    text,
+                    tr!(lang, MeasureAngle, format!("{:.3}", angle.to_degrees())),
+                    Group::Angle,
+                    angle,
+                ));
             }
         }
         lines
@@ -237,21 +328,33 @@ impl Measure {
                 if self.second.is_none() && self.features.len() < 2 {
                     ui.label(egui::RichText::new(tr!(lang, MeasureHint)).weak());
                 }
-                for (colour, line) in &lines {
-                    let text = egui::RichText::new(line).monospace();
-                    ui.label(if *colour == egui::Color32::PLACEHOLDER {
-                        text.strong()
-                    } else {
-                        text.color(*colour)
+                for shown in &lines {
+                    let text = egui::RichText::new(&shown.text).monospace();
+                    ui.horizontal(|ui| {
+                        ui.label(if shown.colour == egui::Color32::PLACEHOLDER {
+                            text.strong()
+                        } else {
+                            text.color(shown.colour)
+                        });
+                        // Plus and minus add the value to the accumulated values or subtract it.
+                        if let Some((group, value)) = shown.value {
+                            if ui.small_button("+").on_hover_text(tr!(lang, MeasureAdd)).clicked() {
+                                self.accumulated.push((group, value));
+                            }
+                            if ui.small_button("−").on_hover_text(tr!(lang, MeasureSubtract)).clicked() {
+                                self.accumulated.push((group, -value));
+                            }
+                        }
                     });
                 }
+                self.accumulated_ui(ui, lang);
                 ui.separator();
                 ui.horizontal(|ui| {
                     if ui
                         .add_enabled(!lines.is_empty(), egui::Button::new(tr!(lang, MeasureCopyAll)))
                         .clicked()
                     {
-                        let all: Vec<&str> = lines.iter().map(|(_, l)| l.as_str()).collect();
+                        let all: Vec<&str> = lines.iter().map(|l| l.text.as_str()).collect();
                         ui.ctx().copy_text(all.join("\n"));
                     }
                     if ui.button(tr!(lang, MeasureRestart)).clicked() {
@@ -266,6 +369,66 @@ impl Measure {
         self.open = open && !done;
     }
 
+    /// The accumulated values: per group its total, each value with a delete button, a button that
+    /// clears the group, and Copy All for the totals.
+    fn accumulated_ui(&mut self, ui: &mut egui::Ui, lang: Lang) {
+        if self.accumulated.is_empty() {
+            return;
+        }
+        ui.separator();
+        ui.label(egui::RichText::new(tr!(lang, MeasureAccumulated)).strong());
+        let mut remove = None;
+        let mut clear = None;
+        let mut totals = Vec::new();
+        for group in [Group::Distance, Group::Area, Group::Angle] {
+            let values: Vec<(usize, f64)> = self
+                .accumulated
+                .iter()
+                .enumerate()
+                .filter(|(_, (g, _))| *g == group)
+                .map(|(i, (_, v))| (i, *v))
+                .collect();
+            if values.is_empty() {
+                continue;
+            }
+            let name = match group {
+                Group::Distance => tr!(lang, MeasureDistance),
+                Group::Area => tr!(lang, MeasureArea),
+                Group::Angle => tr!(lang, MeasureAngleGroup),
+            };
+            let total = group.show(values.iter().map(|(_, v)| v).sum());
+            totals.push(format!("{name}: {total}"));
+            ui.horizontal(|ui| {
+                egui::CollapsingHeader::new(format!("{name} {total}")).id_salt(("accumulated", group)).show(
+                    ui,
+                    |ui| {
+                        for (index, value) in &values {
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new(group.show(*value)).monospace());
+                                if ui.small_button("×").on_hover_text(tr!(lang, MeasureDeleteValue)).clicked()
+                                {
+                                    remove = Some(*index);
+                                }
+                            });
+                        }
+                    },
+                );
+                if ui.small_button("×").on_hover_text(tr!(lang, MeasureDeleteGroup)).clicked() {
+                    clear = Some(group);
+                }
+            });
+        }
+        if let Some(index) = remove {
+            self.accumulated.remove(index);
+        }
+        if let Some(group) = clear {
+            self.accumulated.retain(|(g, _)| *g != group);
+        }
+        if ui.small_button(tr!(lang, MeasureCopyAll)).clicked() {
+            ui.ctx().copy_text(totals.join("\n"));
+        }
+    }
+
     /// Draws the selections' origins in their colours and, for a pair, the measured distance as a line in
     /// the view.
     pub(crate) fn overlay(&self, painter: &egui::Painter, viewport: &Viewport, session: &Session) {
@@ -274,7 +437,12 @@ impl Measure {
         }
         let screen = |p: [f64; 3]| viewport.screen_of(gc_math::DVec3::from_array(p));
         if self.priority == Priority::Features {
-            for (colour, feature) in [(FIRST, self.features.first()), (SECOND, self.features.get(1))] {
+            // A third point (the Shift angle) is drawn in the second selection's colour.
+            for (colour, feature) in [
+                (FIRST, self.features.first()),
+                (SECOND, self.features.get(1)),
+                (SECOND, self.features.get(2)),
+            ] {
                 match feature {
                     Some(Feature::Point(p)) => {
                         if let Some(at) = screen(*p) {

@@ -621,6 +621,15 @@ messages! {
     /// Measure: the minimum distance could not be measured (a path, or a missing mesh).
     MeasureNoMinimum => ("최소 거리 측정 불가", "Minimum distance not available"),
     MeasureCopyAll => ("모두 복사", "Copy All"),
+    /// Measure: add the value to / subtract it from the accumulated values.
+    MeasureAdd => ("누적 값에 추가", "Add to Accumulated Value"),
+    MeasureSubtract => ("누적 값에서 빼기", "Subtract from Accumulated Value"),
+    /// Measure: heading of the accumulated values.
+    MeasureAccumulated => ("누적 특성", "Accumulated Properties"),
+    MeasureArea => ("면적", "Area"),
+    MeasureAngleGroup => ("각도", "Angle"),
+    MeasureDeleteValue => ("이 값 삭제", "Delete this value"),
+    MeasureDeleteGroup => ("이 그룹 삭제", "Delete this group"),
     /// Measure: selection priority (Inventor: Component / Edges and Faces).
     MeasureByComponent => ("컴포넌트 우선", "Component Priority"),
     MeasureByFeature => ("모서리 및 면 우선", "Edges and Faces"),

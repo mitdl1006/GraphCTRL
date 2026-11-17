@@ -2382,6 +2382,17 @@ fn measure_picks_faces_with_the_edges_and_faces_priority() {
     harness.get_by_label("각도 90.000°");
     // Picking does not select components.
     assert_eq!(harness.state().session.selected_item(), None);
+    // Accumulated Properties: add the angle twice and subtract the top face's area from nothing.
+    let plus = |harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, nth: usize| {
+        harness.query_all_by_label("+").nth(nth).unwrap().click();
+        harness.run();
+    };
+    plus(&mut harness, 2);
+    plus(&mut harness, 2);
+    harness.get_by_label_contains("각도 180.000°");
+    harness.query_all_by_label("−").nth(1).unwrap().click();
+    harness.run();
+    harness.get_by_label_contains("면적 -6400.00 mm²");
     if gpu {
         let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
         harness.render().unwrap().save(out.join("review-27-measure-faces.png")).unwrap();
@@ -2390,6 +2401,23 @@ fn measure_picks_faces_with_the_edges_and_faces_priority() {
     // A blank area restarts.
     click(&mut harness, egui::pos2(700.0, 760.0));
     assert!(harness.query_by_label_contains("선택 1:").is_none());
+
+    // Two corners of the top face, then a third with Shift: the angle at the second corner is 90°.
+    let corner = |harness: &egui_kittest::Harness<'_, GraphCtrlApp>, dx: f64, dy: f64| {
+        let c = at(harness, [dx, dy, 0.45]);
+        let middle = at(harness, [0.0, 0.0, 0.45]);
+        // A few pixels inside the face, so the ray hits it, well within the 8 px of the corner.
+        c + (middle - c).normalized() * 3.0
+    };
+    let (p1, p2, p3) =
+        (corner(&harness, -0.04, -0.04), corner(&harness, 0.04, -0.04), corner(&harness, 0.04, 0.04));
+    click(&mut harness, p1);
+    click(&mut harness, p2);
+    harness.event(egui::Event::ModifiersChanged(egui::Modifiers::SHIFT));
+    click(&mut harness, p3);
+    harness.event(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+    harness.run();
+    harness.get_by_label("각도 90.000°");
     // Back to component priority: clicks select components again.
     harness.get_by_label("컴포넌트 우선").click();
     harness.run();
