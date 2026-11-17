@@ -35,6 +35,6 @@ pub use design::{
 pub use document::{ChangeSet, Contents, DocDelta, Document, Frame, FrameKind, Param, Store, Table};
 pub use gc_sketch::Sketch;
 pub use history::History;
-pub use placement::WorkShape;
+pub use placement::{ComponentOrigin, WorkShape};
 pub use tree::ComponentNode;
 pub use txn::{DocError, Txn};

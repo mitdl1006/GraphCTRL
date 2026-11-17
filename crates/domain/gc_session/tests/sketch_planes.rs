@@ -134,3 +134,68 @@ fn the_tree_wrappers_rename_hide_suppress_reorder_and_roll_back() {
     assert!(session.set_rollback(Some(9)).is_err());
     assert!(session.dependents_of(p).is_empty());
 }
+
+fn machine() -> gc_doc::Assembly {
+    // The table part stands 1 m along X and is turned a quarter about Z.
+    let table = [[0.0, 1.0, 0.0, 0.0], [-1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [1.0, 0.0, 0.0, 1.0]];
+    gc_doc::Assembly {
+        name: "Machine".into(),
+        file: "machine.glb".into(),
+        placement: Placement::default(),
+        parts: vec![gc_doc::AssemblyPart {
+            name: "Table".into(),
+            parent: None,
+            matrix: table,
+            meshes: vec![0],
+        }],
+        meshes: vec![gc_doc::AssemblyMesh { name: "Plate".into(), color: [0.5; 4], triangles: 12 }],
+        look: Default::default(),
+    }
+}
+
+#[test]
+fn every_component_has_an_origin_and_a_sketch_on_its_plane_moves_with_it() {
+    use gc_doc::Occurrence;
+    let mut session = Session::new();
+    let Created::Assembly(id) = session.execute(&Command::Cell(CellOp::AddAssembly(machine()))).unwrap()[0]
+    else {
+        panic!()
+    };
+    let table = Occurrence::Part { assembly: id, index: 0 };
+    let origin = session.component_origin(table).unwrap();
+    assert!((origin.point() - DVec3::new(1.0, 0.0, 0.0)).length() < 1e-12);
+    assert!((origin.axis(0) - DVec3::Y).length() < 1e-12, "the part's X axis is the world's Y");
+    // Its XZ plane: normal along the part's −Y, which is the world's +X.
+    let xz = origin.plane(OriginPlane::Xz);
+    assert!((xz.rotation * DVec3::Z - DVec3::X).length() < 1e-12);
+
+    // A sketch on the part's XY plane follows when the assembly moves.
+    let sketch = session.create_sketch_on_component(table, OriginPlane::Xy).unwrap();
+    session.execute(&Command::Sketch { sketch, op: SketchOp::AddPoint { pos: [0.1, 0.0, 0.0] } }).unwrap();
+    assert!((world(&session, sketch, [0.1, 0.0, 0.0]) - DVec3::new(1.0, 0.1, 0.0)).length() < 1e-12);
+    session.finish_sketch();
+    let placement = Placement { xyz: [0.0, 0.0, 0.5], rpy: [0.0; 3] };
+    session.execute(&Command::Cell(CellOp::PlaceAssembly { id, placement })).unwrap();
+    assert!((world(&session, sketch, [0.1, 0.0, 0.0]) - DVec3::new(1.0, 0.1, 0.5)).length() < 1e-12);
+    // The assembly cannot be deleted while the sketch stands on it.
+    assert!(session.execute(&Command::Cell(CellOp::DeleteAssembly(id))).is_err());
+
+    // A work plane offset from the assembly's own XY plane follows it too.
+    let feature = WorkFeature {
+        name: "Above".into(),
+        geometry: WorkGeometry::PlaneOffset {
+            base: PlaneRef::Component(Occurrence::Item(id.erase()), OriginPlane::Xy),
+            distance: 0.2,
+        },
+        visible: true,
+    };
+    let Created::WorkFeature(above) =
+        session.execute(&Command::Cell(CellOp::AddWorkFeature(feature))).unwrap()[0]
+    else {
+        panic!()
+    };
+    let Some(gc_doc::WorkShape::Plane(pose)) = session.work_shape(above) else { panic!() };
+    assert!((pose.translation - DVec3::new(0.0, 0.0, 0.7)).length() < 1e-12);
+    // A missing component is refused.
+    assert!(session.component_origin(Occurrence::Part { assembly: id, index: 3 }).is_none());
+}
