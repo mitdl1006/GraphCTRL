@@ -343,9 +343,10 @@ pub(crate) fn set_component(
     flag: ComponentFlag,
     on: bool,
 ) -> Outcome {
-    // A tool moves with the flange: it cannot be grounded on its own.
+    // A robot's link or tool moves with the robot: it is not grounded on its own.
     if !txn.doc().has_occurrence(occurrence)
-        || matches!((flag, occurrence), (ComponentFlag::Grounded, Occurrence::Tool { .. }))
+        || (flag == ComponentFlag::Grounded
+            && matches!(occurrence, Occurrence::Link { .. } | Occurrence::Tool { .. }))
     {
         return Err(EditError::BadValue);
     }

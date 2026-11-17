@@ -85,6 +85,24 @@ pub struct Session {
     spatial: spatial::SpatialState,
 }
 
+/// The browser's Representations folder.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RepresentationFolder {
+    /// View representations.
+    pub views: Vec<RepresentationNode>,
+    /// Positional representations, [Primary] first.
+    pub positions: Vec<RepresentationNode>,
+}
+
+/// One representation in the folder.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RepresentationNode {
+    /// Its name.
+    pub name: String,
+    /// Shown checked: the active one.
+    pub active: bool,
+}
+
 impl Default for Session {
     fn default() -> Self {
         Self::new()
@@ -667,6 +685,60 @@ impl Session {
     /// DeleteRepresentation}` through [`Session::execute`].
     pub fn representations(&self) -> gc_doc::Representations {
         self.doc.representations()
+    }
+
+    /// What the browser's Representations folder lists: the view representations and the positional
+    /// ones ([Primary] first), each with its name and whether it is the active one. Indices into the
+    /// lists are what the activate/delete calls take ([Primary] is `None`).
+    pub fn representation_folder(&self) -> RepresentationFolder {
+        let reps = self.doc.representations();
+        let views = reps
+            .views
+            .iter()
+            .enumerate()
+            .map(|(i, v)| RepresentationNode { name: v.name.clone(), active: reps.active_view == Some(i) })
+            .collect();
+        let positions = std::iter::once(RepresentationNode {
+            name: "Primary".to_owned(),
+            active: reps.active_position.is_none(),
+        })
+        .chain(reps.positions.iter().enumerate().map(|(i, p)| RepresentationNode {
+            name: p.name.clone(),
+            active: reps.active_position == Some(i),
+        }))
+        .collect();
+        RepresentationFolder { views, positions }
+    }
+
+    /// Saves what is shown now as a new view representation. One undo step; a taken or empty name is
+    /// refused.
+    pub fn add_view_representation(&mut self, name: &str, camera: Option<String>) -> Result<(), EditError> {
+        let op = gc_doc::CellOp::AddViewRepresentation { name: name.to_owned(), camera, section: None };
+        self.execute(&Command::Cell(op)).map(|_| ())
+    }
+
+    /// Activates a view representation (visibility, enabled state, transparency). One undo step.
+    pub fn activate_view_representation(&mut self, index: usize) -> Result<(), EditError> {
+        self.execute(&Command::Cell(gc_doc::CellOp::ActivateViewRepresentation(index))).map(|_| ())
+    }
+
+    /// Adds a positional representation (a copy of [Primary]). One undo step.
+    pub fn add_positional_representation(&mut self, name: &str) -> Result<(), EditError> {
+        self.execute(&Command::Cell(gc_doc::CellOp::AddPositionalRepresentation(name.to_owned()))).map(|_| ())
+    }
+
+    /// Activates a positional representation, or [Primary] with `None`. One undo step.
+    pub fn activate_positional_representation(&mut self, index: Option<usize>) -> Result<(), EditError> {
+        self.execute(&Command::Cell(gc_doc::CellOp::ActivatePositionalRepresentation(index))).map(|_| ())
+    }
+
+    /// Deletes a view and/or a positional representation (not [Primary]). One undo step.
+    pub fn delete_representation(
+        &mut self,
+        view: Option<usize>,
+        position: Option<usize>,
+    ) -> Result<(), EditError> {
+        self.execute(&Command::Cell(gc_doc::CellOp::DeleteRepresentation { view, position })).map(|_| ())
     }
 
     /// The component patterns (for the browser: each with its parents and occurrences).
