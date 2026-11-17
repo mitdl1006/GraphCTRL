@@ -2,6 +2,9 @@
 //! The assembly model does not exist yet, so every item is `#[ignore]`d with its reason and the steps
 //! to check, taken from the Inventor 2026 help (base
 //! <https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/>; source ids A.. as in the document).
+//! Done and removed from this list (see `qa_relations.rs`, `qa_joints.rs`, `qa_origin_folder.rs`, `qa_assembly_edges.rs`,
+//! `gc_mesh/tests/qa_slice.rs`): P1-9 Mate/Flush/Insert, P1-10 status and DOF (data side), P1-11 joints and tool mount,
+//! P1-6 cut edges (plane_cut). P1-5 project geometry still needs its own acceptance test (see handoff).
 //! When an item lands: remove the `#[ignore]`, write the body against the new session API, and report a
 //! failure in `docs/handoff/qa.md`. Common invariants for all: undo∘redo = identity, save∘load = identity,
 //! a refused edit leaves the document bit-identical, no panic on any input.
@@ -55,22 +58,6 @@ pending!(
 );
 
 pending!(
-    a5_project_geometry_links_component_edges_and_work_features_into_a_sketch,
-    "FEATURE assembly P1-5: project geometry (A38, A39, S20 GUID-B8D8B07B-86F2-4CB7-AB21-3131D94AD1CC)",
-    "Project an edge, a vertex, a work feature and a mesh loop; moving the source updates the projection; \
-     deleting the source turns it into fixed curves; Shift+click makes it construction; projecting nothing \
-     (empty click) changes nothing"
-);
-
-pending!(
-    a6_project_cut_edges_makes_the_intersection_of_a_plane_and_a_mesh,
-    "FEATURE assembly P1-6: project cut edges (A38)",
-    "Box mesh + plane through it -> 4 edges of the intersection, moving the plane updates them within \
-     1e-9 m; a plane that misses the mesh creates nothing and the status bar says why; a plane touching only \
-     a face/edge/vertex produces the documented result (pin it)"
-);
-
-pending!(
     a7_slice_graphics_f7_cuts_away_what_hides_the_sketch_plane,
     "FEATURE assembly P1-7: F7 exists for sketch bodies (shell.rs slice_graphics_...) but not for imported assemblies (A40)",
     "Imported equipment in front of the plane: F7 clips it, the plane is visible; Finish Sketch and starting \
@@ -83,32 +70,6 @@ pending!(
     "Half section of equipment + UR: the cut is visible and the cap fills closed faces (pixel check inside the \
      cut area differs from the background); Flip reverses; value box moves the plane; Delete Section View \
      restores; more than 500 parts hides the caps; a plane that misses everything shows the full model"
-);
-
-pending!(
-    a9_mate_flush_insert_constraints_with_predict_offset,
-    "FEATURE assembly P1-9: no assembly constraints (A19, A22, A28)",
-    "Mate the top face of a box to the base bottom of a robot -> the robot moves there to 1e-9 m; Flush flips \
-     the facing; the Relationships folder lists it with a filled state dot; Predict Offset proposes the \
-     current distance; Show Preview does not change the document; conflicting or redundant constraints are \
-     refused with the reason (Design-Doctor style), document untouched"
-);
-
-pending!(
-    a10_assemble_shows_only_valid_types_and_dof_symbols_show_what_is_left,
-    "FEATURE assembly P1-10: Assemble / Show / DOF symbols (A16, A24, A27, A33)",
-    "Pick two planes -> only Mate-Mate, Mate-Flush and Angle-Directed are offered; after constraining, the \
-     DOF symbol shows the remaining freedoms; Show / Hide All glyphs toggle; state dots: black fully constrained, \
-     hollow under-constrained"
-);
-
-pending!(
-    a11_rigid_and_rotational_joints_and_mounting_a_robot_on_equipment,
-    "FEATURE assembly P1-11: joints (A30, A69)",
-    "Rigid joint from a robot's base origin to a point on a work plane of the equipment -> moving the \
-     equipment moves the robot; a tool origin rigidly joined to the flange frame makes the tool coincide with the \
-     TCP; Rotational shows +/- limits; Flip component / Align / Invert change the result as documented; \
-     jointing a component to itself or closing a loop is refused"
 );
 
 pending!(
