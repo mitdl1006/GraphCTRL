@@ -520,6 +520,18 @@ messages! {
     /// Plan metric: the move was possible in a straight joint-space line.
     PlanStraight => ("직선 이동(플래너 불필요)", "Straight move (no planner needed)"),
     // --- frontend ---
+    /// Heads-up display box names.
+    HudLength => ("길이", "Length"),
+    /// Heads-up display box: direction.
+    HudAngle => ("각도", "Angle"),
+    /// Heads-up display box.
+    HudRadius => ("반지름", "Radius"),
+    /// Heads-up display box.
+    HudDiameter => ("지름", "Diameter"),
+    /// Heads-up display box.
+    HudWidth => ("너비", "Width"),
+    /// Heads-up display box.
+    HudHeight => ("높이", "Height"),
     /// Status bar button: cut away what hides the sketch plane (F7).
     StatusSlice => ("그래픽 자르기 (F7)", "Slice Graphics (F7)"),
     /// Sketch context menu: end the command in progress.

@@ -5,6 +5,7 @@
 //! painter, through the same camera. Without a GPU everything still works; only the solids are missing.
 
 mod gizmo;
+mod hud;
 mod paint;
 mod target;
 
@@ -70,6 +71,10 @@ pub(crate) fn plane_of(session: &Session, sketch: &Sketch) -> SketchPlane {
 pub struct Viewport {
     /// Whether the frame time and draw statistics are shown in the corner.
     pub perf_overlay: bool,
+    /// The heads-up display of the drawing tools.
+    hud: hud::Hud,
+    /// Whether the heads-up display (dynamic input) is on.
+    pub hud_on: bool,
     /// Slice Graphics (F7): the part of the model in front of the sketch plane is cut away while a 2D
     /// sketch is edited.
     pub slice: bool,
@@ -112,6 +117,8 @@ impl Viewport {
             perf_overlay: false,
             clear: None,
             spatial_drag: None,
+            hud: hud::Hud::default(),
+            hud_on: true,
             slice: false,
             show_constraints: true,
             box_select: None,
@@ -338,6 +345,11 @@ impl Viewport {
             self.background.has_gpu(),
             self.show_constraints,
         );
+        if self.hud_on && active.is_some() && !session.sketch_is_spatial() {
+            self.hud.show(ui.ctx(), session, cursor, lang);
+        } else {
+            self.hud.cancel();
+        }
         self.view_cube(ui, rect, lang);
         if self.perf_overlay {
             self.perf(ui, rect, lang);
@@ -885,6 +897,7 @@ impl Viewport {
             return;
         }
         if escape {
+            self.hud.cancel();
             session.tool_event(ToolEvent::Key(ToolKey::Escape));
         }
         if delete {
