@@ -80,6 +80,8 @@ impl FileDialogs for NativeDialogs {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Pending {
     New,
+    /// Open the example cell.
+    Example,
     Open,
     /// Open this project (from the recent list).
     OpenPath(PathBuf),
@@ -334,6 +336,17 @@ impl GraphCtrlApp {
                 self.tab = Tab::Model;
                 self.notice = None;
             }
+            Pending::Example => {
+                let urdf =
+                    self.library.iter().find(|(name, _)| name.contains("UR5e")).map(|(_, urdf)| urdf.clone());
+                let opened = urdf
+                    .ok_or_else(|| "UR5e".to_owned())
+                    .and_then(|urdf| crate::example::open(&mut self.session, &urdf));
+                self.tab = Tab::Robot;
+                self.notice = opened.err().map(|error| tr!(lang, ExampleFailed, error));
+                self.viewport.look(StandardView::Iso);
+                self.viewport.fit(&self.session, [1000.0, 700.0]);
+            }
             Pending::Open | Pending::OpenPath(_) => {
                 let path = match action {
                     Pending::OpenPath(path) => path,
@@ -478,6 +491,9 @@ impl GraphCtrlApp {
                 }
                 if ui.button(tr!(lang, CmdOpen)).clicked() {
                     self.request(Pending::Open, &ctx);
+                }
+                if ui.button(tr!(lang, CmdExample)).clicked() {
+                    self.request(Pending::Example, &ctx);
                 }
                 if ui.button(tr!(lang, CmdSave)).clicked() {
                     self.save(false);

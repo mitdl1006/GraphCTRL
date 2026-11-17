@@ -1440,3 +1440,29 @@ fn save_new_and_open_through_the_file_menu() {
     harness.run();
     assert_eq!(harness.state().session.doc().sketches().len(), 1, "cancelling keeps the document");
 }
+
+/// File > Open example: a UR5e cell with a pillar, a work frame and a planned path around the pillar.
+#[test]
+fn the_example_cell_opens_planned() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("파일").click();
+    harness.run();
+    harness.get_by_label("예제 열기 (UR5e 셀)").click();
+    harness.run();
+    let session = &harness.state().session;
+    assert_eq!(session.doc().robots().len(), 1);
+    assert_eq!(session.doc().work_frames().len(), 1);
+    let path = session.doc().paths().iter().next().unwrap().0;
+    assert_eq!(session.plan_status(path), gc_session::PlanStatus::Ready, "{:?}", session.plan_error(path));
+    assert!(session.planned(path).unwrap().tip_path().count() > 20);
+    assert!(!session.is_dirty() || session.history().undo_depth() > 0);
+    if gpu {
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        harness.render().unwrap().save(out.join("review-19-example.png")).unwrap();
+    }
+}
