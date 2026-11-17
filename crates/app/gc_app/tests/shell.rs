@@ -233,6 +233,19 @@ fn a_robot_path_is_planned_through_the_ribbon() {
     harness.run();
     harness.get_by_label("Path1 (계획됨)");
 
+    // Waypoints are added to the path from a list, and taken out again with their buttons.
+    harness.get_by_label("웨이포인트 추가").click();
+    harness.run();
+    harness.query_all_by_label("P1").last().unwrap().click();
+    harness.run();
+    let p1 = harness.state().session.doc().get(path).unwrap().waypoints[0];
+    assert_eq!(harness.state().session.doc().get(path).unwrap().waypoints, vec![p1, p1]);
+    assert_eq!(harness.query_all_by_label("↑").count(), 2, "one per waypoint");
+    harness.query_all_by_label("빼기").next().unwrap().click();
+    harness.run();
+    assert_eq!(harness.state().session.doc().get(path).unwrap().waypoints, vec![p1]);
+    harness.get_by_label("Path1 (계획됨)");
+
     // Playing advances the shown robot along the motion without touching the document.
     let revision = harness.state().session.doc().revision();
     harness.get_by_label("재생").click();

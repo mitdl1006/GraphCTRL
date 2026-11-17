@@ -477,14 +477,7 @@ fn paths(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) {
         // A refusal is shown in the status bar.
         drop(session.execute(&Command::Cell(CellOp::SetPlanner { id: path_id, planner, seed })));
     }
-    // How each waypoint is approached: freely planned, or in a straight line of the tool tip.
-    for (index, waypoint) in path.waypoints.iter().enumerate() {
-        let Some(name) = session.doc().get(*waypoint).map(|w| w.name.clone()) else { continue };
-        let mut linear = path.linear.get(index).copied().unwrap_or(false);
-        if ui.checkbox(&mut linear, tr!(lang, PropLinear, name)).changed() {
-            drop(session.execute(&Command::Cell(CellOp::SetLinear { id: path_id, index, linear })));
-        }
-    }
+    steps(ui, session, lang, path_id, &path);
     let status = session.plan_status(path_id);
     let color = match status {
         PlanStatus::Ready => colors::TRACE,
@@ -534,6 +527,94 @@ fn paths(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) {
 }
 
 /// The planner comparison of a path: a button to run it, its progress, and the table.
+/// The waypoints of a path in order, each with how it is approached (freely planned, or in a straight
+/// line of the tool tip), buttons to move it up or down or take it out, and a list to add one.
+fn steps(
+    ui: &mut Ui,
+    session: &mut Session,
+    lang: Lang,
+    path_id: gc_core::Id<gc_doc::MotionPath>,
+    path: &gc_doc::MotionPath,
+) {
+    let mut waypoints = path.waypoints.clone();
+    let mut linear: Vec<bool> =
+        (0..waypoints.len()).map(|i| path.linear.get(i).copied().unwrap_or(false)).collect();
+    let count = waypoints.len();
+    let mut changed = false;
+    let mut action = None;
+    for index in 0..count {
+        let Some(name) = waypoints.get(index).and_then(|w| session.doc().get(*w)).map(|w| w.name.clone())
+        else {
+            continue;
+        };
+        ui.horizontal(|ui| {
+            if ui.add_enabled(index > 0, egui::Button::new(tr!(lang, StepUp)).small()).clicked() {
+                action = Some((index, Step::Up));
+            }
+            if ui.add_enabled(index + 1 < count, egui::Button::new(tr!(lang, StepDown)).small()).clicked() {
+                action = Some((index, Step::Down));
+            }
+            if ui.add_enabled(count > 1, egui::Button::new(tr!(lang, StepRemove)).small()).clicked() {
+                action = Some((index, Step::Remove));
+            }
+            if let Some(value) = linear.get_mut(index) {
+                changed |= ui.checkbox(value, tr!(lang, PropLinear, name)).changed();
+            }
+        });
+    }
+    match action {
+        Some((index, Step::Up)) if index > 0 => {
+            waypoints.swap(index, index - 1);
+            linear.swap(index, index - 1);
+            changed = true;
+        }
+        Some((index, Step::Down)) if index + 1 < count => {
+            waypoints.swap(index, index + 1);
+            linear.swap(index, index + 1);
+            changed = true;
+        }
+        Some((index, Step::Remove)) if count > 1 && index < count => {
+            waypoints.remove(index);
+            linear.remove(index);
+            changed = true;
+        }
+        _ => {}
+    }
+    // Any waypoint of the path's robot can be added at the end, also one already in the path.
+    let mut added = None;
+    let candidates: Vec<_> = session
+        .doc()
+        .waypoints()
+        .iter()
+        .filter(|(_, w)| w.robot == path.robot)
+        .map(|(id, w)| (id, w.name.clone()))
+        .collect();
+    egui::ComboBox::from_label(tr!(lang, StepAdd)).selected_text("").show_ui(ui, |ui| {
+        for (id, name) in candidates {
+            if ui.selectable_label(false, name).clicked() {
+                added = Some(id);
+            }
+        }
+    });
+    if let Some(id) = added {
+        waypoints.push(id);
+        linear.push(false);
+        changed = true;
+    }
+    if changed {
+        // A refusal is shown in the status bar.
+        drop(session.execute(&Command::Cell(CellOp::SetPathSteps { id: path_id, waypoints, linear })));
+    }
+}
+
+/// What a button next to a waypoint of a path does.
+#[derive(Clone, Copy)]
+enum Step {
+    Up,
+    Down,
+    Remove,
+}
+
 fn comparison(ui: &mut Ui, session: &mut Session, lang: Lang, path: gc_core::Id<gc_doc::MotionPath>) {
     match session.comparison_progress() {
         Some(progress) => {

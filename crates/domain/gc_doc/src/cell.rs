@@ -335,6 +335,15 @@ pub enum CellOp {
         /// True for a straight line of the tool tip.
         linear: bool,
     },
+    /// Replaces a path's waypoints and how each is approached: reordering, adding and removing.
+    SetPathSteps {
+        /// The path.
+        id: Id<MotionPath>,
+        /// The waypoints in order; at least one, all for the path's robot.
+        waypoints: Vec<Id<Waypoint>>,
+        /// True for a straight line of the tool tip into the waypoint of the same position.
+        linear: Vec<bool>,
+    },
     /// Deletes a path.
     DeletePath(Id<MotionPath>),
 }
@@ -521,6 +530,19 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
                 p.linear[*index] = *linear;
             })?;
             Ok((Vec::new(), "Choose motion"))
+        }
+        CellOp::SetPathSteps { id, waypoints, linear } => {
+            let doc = txn.doc();
+            let robot = doc.get(*id).ok_or(DocError::Missing(id.erase()))?.robot;
+            let same_robot = waypoints.iter().all(|w| doc.get(*w).is_some_and(|w| w.robot == robot));
+            if waypoints.is_empty() || !same_robot || linear.len() != waypoints.len() {
+                return Err(EditError::BadValue);
+            }
+            txn.modify(*id, |p: &mut MotionPath, _| {
+                p.waypoints.clone_from(waypoints);
+                p.linear.clone_from(linear);
+            })?;
+            Ok((Vec::new(), "Edit path"))
         }
         CellOp::DeletePath(id) => {
             txn.remove(*id)?;

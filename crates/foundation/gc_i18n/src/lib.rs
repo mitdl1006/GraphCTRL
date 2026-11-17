@@ -416,6 +416,10 @@ messages! {
     PanelFrames => ("좌표계 기준 위치", "Positions in Work Frames"),
     /// Label of a waypoint defined in a work frame. `{0}`: waypoint, `{1}`: frame.
     PropInFrame => ("{0} (기준: {1})", "{0} (in {1})"),
+    StepUp => ("↑", "↑"),
+    StepDown => ("↓", "↓"),
+    StepRemove => ("빼기", "Remove"),
+    StepAdd => ("웨이포인트 추가", "Add waypoint"),
     ReachOk => ("로봇이 도달합니다(반투명 로봇이 그 자세)", "The robot reaches it (the see-through arm shows how)"),
     ReachOut => ("로봇이 닿지 않습니다", "The robot cannot reach it"),
     ReachProblem => ("도달하지만 문제가 있습니다: {0}", "Reached, but: {0}"),

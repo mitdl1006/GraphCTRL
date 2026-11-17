@@ -769,3 +769,39 @@ fn a_waypoint_shows_how_the_robot_would_stand_there() {
     let ghost = session.waypoint_ghost(waypoint).unwrap();
     assert!(ghost.joints.is_none() && session.ghost_links(&ghost).is_none());
 }
+
+#[test]
+fn a_paths_waypoints_are_reordered_added_and_taken_out() {
+    let mut session = Session::new();
+    let robot = session.add_robot("Robot1", &six_axis()).unwrap();
+    session.jog(robot, &RIGHT);
+    session.end_jog();
+    let right = session.add_waypoint_here(robot).unwrap();
+    session.jog(robot, &LEFT);
+    session.end_jog();
+    let left = session.add_waypoint_here(robot).unwrap();
+    let path = session.add_path(robot, vec![right, left]).unwrap();
+    assert_eq!(session.plan(path), PlanStatus::Ready, "{:?}", session.plan_error(path));
+
+    // Swapped, with the second approached in a straight line: one undo step, and the plan is out of date.
+    let depth = session.history().undo_depth();
+    let steps = |waypoints: Vec<_>, linear: Vec<bool>| {
+        Command::Cell(CellOp::SetPathSteps { id: path, waypoints, linear })
+    };
+    session.execute(&steps(vec![left, right], vec![false, true])).unwrap();
+    let stored = session.doc().get(path).unwrap();
+    assert_eq!((stored.waypoints.clone(), stored.linear.clone()), (vec![left, right], vec![false, true]));
+    assert_eq!(session.history().undo_depth(), depth + 1);
+    assert_eq!(session.plan_status(path), PlanStatus::Stale);
+    session.undo();
+    assert_eq!(session.doc().get(path).unwrap().waypoints, vec![right, left]);
+
+    // A waypoint twice is fine; an empty path, a waypoint of another robot or a wrong count is refused.
+    session.execute(&steps(vec![right, left, right], vec![false; 3])).unwrap();
+    assert!(session.execute(&steps(Vec::new(), Vec::new())).is_err());
+    assert!(session.execute(&steps(vec![right], vec![false, true])).is_err());
+    let other = session.add_robot("Robot2", &six_axis()).unwrap();
+    let theirs = session.add_waypoint_here(other).unwrap();
+    assert!(session.execute(&steps(vec![right, theirs], vec![false; 2])).is_err());
+    assert_eq!(session.doc().get(path).unwrap().waypoints, vec![right, left, right]);
+}
