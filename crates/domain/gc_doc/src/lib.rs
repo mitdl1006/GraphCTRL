@@ -12,13 +12,15 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(test, allow(clippy::float_cmp, reason = "tests compare exactly representable values"))]
 
+mod cell;
 mod command;
 mod document;
 mod history;
 mod txn;
 
+pub use cell::{Body, CellOp, MotionPath, Placement, Robot, Solid, Waypoint, WaypointTarget};
 pub use command::{Applied, Command, Created, EditError, EndSnap, SketchOp, apply};
-pub use document::{ChangeSet, DocDelta, Document, Frame, FrameKind, Param, Store, Table};
+pub use document::{ChangeSet, Contents, DocDelta, Document, Frame, FrameKind, Param, Store, Table};
 pub use gc_sketch::Sketch;
 pub use history::History;
 pub use txn::{DocError, Txn};

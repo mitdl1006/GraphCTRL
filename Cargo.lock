@@ -1593,6 +1593,7 @@ dependencies = [
  "gc_mesh",
  "gc_motion",
  "gc_persist",
+ "gc_plan",
  "gc_plugin_api",
  "gc_robot",
  "gc_robotics_api",

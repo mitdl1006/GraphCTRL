@@ -1,0 +1,307 @@
+//! The robot cell: bodies, robots, waypoints and paths, and the edits that change them.
+
+use gc_core::{AnyId, Entity, Id, Kind};
+use gc_sketch::{SkPoint, Sketch};
+use serde::{Deserialize, Serialize};
+
+use crate::command::{Created, EditError};
+use crate::txn::{DocError, Txn};
+
+/// A pose in the world: position in metres and roll, pitch, yaw in radians (the URDF convention).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Placement {
+    /// Position.
+    pub xyz: [f64; 3],
+    /// Roll, pitch, yaw.
+    pub rpy: [f64; 3],
+}
+
+/// The shape of a simple body, centred on its own origin.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum Solid {
+    /// A box with these edge lengths.
+    Box {
+        /// Edge lengths along X, Y, Z.
+        size: [f64; 3],
+    },
+    /// A cylinder along Z.
+    Cylinder {
+        /// Radius.
+        radius: f64,
+        /// Length.
+        length: f64,
+    },
+    /// A sphere.
+    Sphere {
+        /// Radius.
+        radius: f64,
+    },
+}
+
+impl Solid {
+    /// True when every size is positive and finite.
+    pub fn is_valid(&self) -> bool {
+        let ok = |v: f64| v.is_finite() && v > 0.0;
+        match *self {
+            Self::Box { size } => size.into_iter().all(ok),
+            Self::Cylinder { radius, length } => ok(radius) && ok(length),
+            Self::Sphere { radius } => ok(radius),
+        }
+    }
+}
+
+/// A piece of equipment or an obstacle.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Body {
+    /// Name shown in the browser.
+    pub name: String,
+    /// Where it stands.
+    pub placement: Placement,
+    /// Its shape.
+    pub solid: Solid,
+}
+
+impl Entity for Body {
+    const KIND: Kind = Kind::Body;
+    fn refs(&self, _: &mut Vec<AnyId>) {}
+}
+
+/// A robot placed in the cell.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Robot {
+    /// Name shown in the browser.
+    pub name: String,
+    /// The robot description (URDF text). Kept in the document so that a file opens anywhere.
+    pub urdf: String,
+    /// The link the planning chain starts at.
+    pub base_link: String,
+    /// The link the planning chain ends at (the tool flange).
+    pub tip_link: String,
+    /// Where the robot's root link stands.
+    pub placement: Placement,
+    /// The current joint values of the planning chain.
+    pub joints: Vec<f64>,
+    /// Acceleration limit applied to every joint, rad/s² (robot descriptions carry none).
+    pub max_acc: f64,
+}
+
+impl Entity for Robot {
+    const KIND: Kind = Kind::RobotInstance;
+    fn refs(&self, _: &mut Vec<AnyId>) {}
+}
+
+/// Where a waypoint is.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum WaypointTarget {
+    /// A joint configuration.
+    Joints(Vec<f64>),
+    /// A sketch point: the tool tip goes there, pointing against the sketch plane's normal. The waypoint
+    /// follows the point when dimensions change.
+    SketchPoint {
+        /// The sketch.
+        sketch: Id<Sketch>,
+        /// The point in it.
+        point: Id<SkPoint>,
+    },
+}
+
+/// A place the robot should go to.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Waypoint {
+    /// Name shown in the browser.
+    pub name: String,
+    /// The robot it belongs to.
+    pub robot: Id<Robot>,
+    /// Where it is.
+    pub target: WaypointTarget,
+}
+
+impl Entity for Waypoint {
+    const KIND: Kind = Kind::Waypoint;
+    fn refs(&self, out: &mut Vec<AnyId>) {
+        out.push(self.robot.erase());
+        if let WaypointTarget::SketchPoint { sketch, .. } = &self.target {
+            out.push(sketch.erase());
+        }
+    }
+}
+
+/// A motion of one robot from its current state through waypoints.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MotionPath {
+    /// Name shown in the browser.
+    pub name: String,
+    /// The robot that moves.
+    pub robot: Id<Robot>,
+    /// The waypoints in order.
+    pub waypoints: Vec<Id<Waypoint>>,
+    /// Id of the planner used where the straight move is blocked.
+    pub planner: String,
+    /// Seed of the planner's random numbers.
+    pub seed: u64,
+}
+
+impl Entity for MotionPath {
+    const KIND: Kind = Kind::Path;
+    fn refs(&self, out: &mut Vec<AnyId>) {
+        out.push(self.robot.erase());
+        out.extend(self.waypoints.iter().map(|w| w.erase()));
+    }
+}
+
+/// An edit of the robot cell.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum CellOp {
+    /// Adds a body.
+    AddBody(Body),
+    /// Replaces a body's data.
+    SetBody {
+        /// The body.
+        id: Id<Body>,
+        /// The new data.
+        body: Body,
+    },
+    /// Deletes a body.
+    DeleteBody(Id<Body>),
+    /// Adds a robot.
+    AddRobot(Robot),
+    /// Moves a robot's base.
+    PlaceRobot {
+        /// The robot.
+        id: Id<Robot>,
+        /// The new placement.
+        placement: Placement,
+    },
+    /// Sets a robot's joint values.
+    SetJoints {
+        /// The robot.
+        id: Id<Robot>,
+        /// The values, one per joint of the planning chain.
+        joints: Vec<f64>,
+    },
+    /// Deletes a robot that no waypoint or path uses.
+    DeleteRobot(Id<Robot>),
+    /// Adds a waypoint.
+    AddWaypoint(Waypoint),
+    /// Deletes a waypoint that no path uses.
+    DeleteWaypoint(Id<Waypoint>),
+    /// Adds a path.
+    AddPath(MotionPath),
+    /// Chooses a path's planner and seed.
+    SetPlanner {
+        /// The path.
+        id: Id<MotionPath>,
+        /// Planner id.
+        planner: String,
+        /// Seed.
+        seed: u64,
+    },
+    /// Deletes a path.
+    DeletePath(Id<MotionPath>),
+}
+
+fn finite(values: &[f64]) -> bool {
+    values.iter().all(|v| v.is_finite())
+}
+
+fn placed(placement: &Placement) -> Result<(), EditError> {
+    if finite(&placement.xyz) && finite(&placement.rpy) { Ok(()) } else { Err(EditError::BadValue) }
+}
+
+pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'static str), EditError> {
+    match op {
+        CellOp::AddBody(body) => {
+            placed(&body.placement)?;
+            if !body.solid.is_valid() {
+                return Err(EditError::BadValue);
+            }
+            Ok((vec![Created::Body(txn.insert(body.clone()))], "Add body"))
+        }
+        CellOp::SetBody { id, body } => {
+            placed(&body.placement)?;
+            if !body.solid.is_valid() {
+                return Err(EditError::BadValue);
+            }
+            txn.modify(*id, |b: &mut Body, _| b.clone_from(body))?;
+            Ok((Vec::new(), "Edit body"))
+        }
+        CellOp::DeleteBody(id) => {
+            txn.remove(*id)?;
+            Ok((Vec::new(), "Delete body"))
+        }
+        CellOp::AddRobot(robot) => {
+            placed(&robot.placement)?;
+            if !finite(&robot.joints) || !(robot.max_acc.is_finite() && robot.max_acc > 0.0) {
+                return Err(EditError::BadValue);
+            }
+            Ok((vec![Created::Robot(txn.insert(robot.clone()))], "Add robot"))
+        }
+        CellOp::PlaceRobot { id, placement } => {
+            placed(placement)?;
+            txn.modify(*id, |r: &mut Robot, _| r.placement = *placement)?;
+            Ok((Vec::new(), "Place robot"))
+        }
+        CellOp::SetJoints { id, joints } => {
+            let count = txn.doc().get(*id).ok_or(DocError::Missing(id.erase()))?.joints.len();
+            if joints.len() != count || !finite(joints) {
+                return Err(EditError::BadValue);
+            }
+            txn.modify(*id, |r: &mut Robot, _| r.joints.clone_from(joints))?;
+            Ok((Vec::new(), "Move joints"))
+        }
+        CellOp::DeleteRobot(id) => {
+            let doc = txn.doc();
+            let used = doc.waypoints().iter().any(|(_, w)| w.robot == *id)
+                || doc.paths().iter().any(|(_, p)| p.robot == *id);
+            if used {
+                return Err(EditError::InUse);
+            }
+            txn.remove(*id)?;
+            Ok((Vec::new(), "Delete robot"))
+        }
+        CellOp::AddWaypoint(waypoint) => {
+            let robot = txn.doc().get(waypoint.robot).ok_or(DocError::Missing(waypoint.robot.erase()))?;
+            match &waypoint.target {
+                WaypointTarget::Joints(q) => {
+                    if q.len() != robot.joints.len() || !finite(q) {
+                        return Err(EditError::BadValue);
+                    }
+                }
+                WaypointTarget::SketchPoint { sketch, point } => {
+                    let sketch = txn.doc().get(*sketch).ok_or(DocError::Missing(sketch.erase()))?;
+                    if !sketch.points.contains_key(point) {
+                        return Err(EditError::BadValue);
+                    }
+                }
+            }
+            Ok((vec![Created::Waypoint(txn.insert(waypoint.clone()))], "Add waypoint"))
+        }
+        CellOp::DeleteWaypoint(id) => {
+            if txn.doc().paths().iter().any(|(_, p)| p.waypoints.contains(id)) {
+                return Err(EditError::InUse);
+            }
+            txn.remove(*id)?;
+            Ok((Vec::new(), "Delete waypoint"))
+        }
+        CellOp::AddPath(path) => {
+            let doc = txn.doc();
+            let same_robot =
+                path.waypoints.iter().all(|w| doc.get(*w).is_some_and(|w| w.robot == path.robot));
+            if path.waypoints.is_empty() || !same_robot {
+                return Err(EditError::BadValue);
+            }
+            Ok((vec![Created::Path(txn.insert(path.clone()))], "Add path"))
+        }
+        CellOp::SetPlanner { id, planner, seed } => {
+            txn.modify(*id, |p: &mut MotionPath, _| {
+                p.planner.clone_from(planner);
+                p.seed = *seed;
+            })?;
+            Ok((Vec::new(), "Choose planner"))
+        }
+        CellOp::DeletePath(id) => {
+            txn.remove(*id)?;
+            Ok((Vec::new(), "Delete path"))
+        }
+    }
+}

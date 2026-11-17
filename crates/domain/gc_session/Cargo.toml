@@ -17,6 +17,7 @@ gc_doc.workspace = true
 gc_sketch.workspace = true
 gc_persist.workspace = true
 gc_motion.workspace = true
+gc_plan.workspace = true
 gc_collide.workspace = true
 gc_robot.workspace = true
 gc_jobs.workspace = true

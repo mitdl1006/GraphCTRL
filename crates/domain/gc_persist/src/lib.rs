@@ -19,7 +19,9 @@ use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 
 use gc_core::Id;
-use gc_doc::{DocError, Document, Frame, FrameKind, Param, Sketch};
+use gc_doc::{
+    Body, Contents, DocError, Document, Frame, FrameKind, MotionPath, Param, Robot, Sketch, Waypoint,
+};
 use gc_expr::Unit;
 use serde::{Deserialize, Serialize};
 
@@ -100,6 +102,14 @@ struct FileV1 {
     params: BTreeMap<Id<Param>, ParamV1>,
     frames: BTreeMap<Id<Frame>, FrameV1>,
     sketches: BTreeMap<Id<Sketch>, Sketch>,
+    #[serde(default)]
+    bodies: BTreeMap<Id<Body>, Body>,
+    #[serde(default)]
+    robots: BTreeMap<Id<Robot>, Robot>,
+    #[serde(default)]
+    waypoints: BTreeMap<Id<Waypoint>, Waypoint>,
+    #[serde(default)]
+    paths: BTreeMap<Id<MotionPath>, MotionPath>,
 }
 
 /// A loaded document.
@@ -153,6 +163,10 @@ pub fn to_text(doc: &Document) -> Result<String, PersistError> {
             })
             .collect(),
         sketches: doc.sketches().iter().map(|(id, s)| (id, s.clone())).collect(),
+        bodies: doc.bodies().iter().map(|(id, b)| (id, b.clone())).collect(),
+        robots: doc.robots().iter().map(|(id, r)| (id, r.clone())).collect(),
+        waypoints: doc.waypoints().iter().map(|(id, w)| (id, w.clone())).collect(),
+        paths: doc.paths().iter().map(|(id, p)| (id, p.clone())).collect(),
     };
     let mut text = serde_json::to_string_pretty(&file)?;
     text.push('\n');
@@ -170,24 +184,37 @@ pub fn from_text(text: &str) -> Result<Loaded, PersistError> {
         return Err(PersistError::TooNew { found: header.version, supported: VERSION });
     }
     let file: FileV1 = serde_json::from_str(text)?;
-    let mut params = Vec::with_capacity(file.params.len());
+    let mut params = BTreeMap::new();
     for (id, p) in file.params {
         let unit = if p.unit.is_empty() {
             Unit::Scalar
         } else {
             Unit::from_word(&p.unit).ok_or_else(|| PersistError::UnknownUnit(p.unit.clone()))?
         };
-        params.push((id, Param { name: p.name, source: p.source, unit, value: p.value }));
+        params.insert(id, Param { name: p.name, source: p.source, unit, value: p.value });
     }
-    let frames = file.frames.into_iter().map(|(id, f)| {
-        let kind = match f.kind {
-            FrameKindV1::World => FrameKind::World,
-            FrameKindV1::OriginPlane => FrameKind::OriginPlane,
-            FrameKindV1::User => FrameKind::User,
-        };
-        (id, Frame { name: f.name, kind, parent: f.parent, xyz: f.xyz, quat_xyzw: f.quat_xyzw })
-    });
-    let doc = Document::restore(params, frames, file.sketches, file.next_id)?;
+    let frames = file
+        .frames
+        .into_iter()
+        .map(|(id, f)| {
+            let kind = match f.kind {
+                FrameKindV1::World => FrameKind::World,
+                FrameKindV1::OriginPlane => FrameKind::OriginPlane,
+                FrameKindV1::User => FrameKind::User,
+            };
+            (id, Frame { name: f.name, kind, parent: f.parent, xyz: f.xyz, quat_xyzw: f.quat_xyzw })
+        })
+        .collect();
+    let doc = Document::restore(Contents {
+        next_id: file.next_id,
+        params,
+        frames,
+        sketches: file.sketches,
+        bodies: file.bodies,
+        robots: file.robots,
+        waypoints: file.waypoints,
+        paths: file.paths,
+    })?;
     let needs_repair = doc
         .sketches()
         .iter()
@@ -258,6 +285,41 @@ mod tests {
             },
         )
         .unwrap();
+        // A robot cell: a body, a robot, a waypoint on a sketch point and a path.
+        use gc_doc::{Body, CellOp, MotionPath, Placement, Robot, Solid, Waypoint, WaypointTarget};
+        let cell = |doc: &mut Document, op: CellOp| apply(doc, &Command::Cell(op)).unwrap().created;
+        let placement = Placement { xyz: [0.4, 0.0, 0.1], rpy: [0.0, 0.0, 0.5] };
+        cell(
+            &mut doc,
+            CellOp::AddBody(Body {
+                name: "기둥".into(),
+                placement,
+                solid: Solid::Cylinder { radius: 0.05, length: 1.0 },
+            }),
+        );
+        let robot = Robot {
+            name: "Robot1".into(),
+            urdf: "<robot name=\"r\"/>".into(),
+            base_link: "base_link".into(),
+            tip_link: "tool0".into(),
+            placement: Placement::default(),
+            joints: vec![0.1, -0.2, 0.3],
+            max_acc: 5.0,
+        };
+        let Created::Robot(robot) = cell(&mut doc, CellOp::AddRobot(robot))[0] else { panic!("no robot") };
+        let target = WaypointTarget::SketchPoint { sketch, point: a };
+        let waypoint = Waypoint { name: "P1".into(), robot, target };
+        let Created::Waypoint(waypoint) = cell(&mut doc, CellOp::AddWaypoint(waypoint))[0] else {
+            panic!("no waypoint")
+        };
+        let path = MotionPath {
+            name: "Path1".into(),
+            robot,
+            waypoints: vec![waypoint],
+            planner: "rrt_connect".into(),
+            seed: 7,
+        };
+        cell(&mut doc, CellOp::AddPath(path));
         doc
     }
 

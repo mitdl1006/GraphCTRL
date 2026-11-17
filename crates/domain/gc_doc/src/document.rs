@@ -6,6 +6,8 @@ use gc_core::{AnyId, Entity, Id, IdAlloc, Kind, Revision};
 use gc_expr::Unit;
 use gc_sketch::Sketch;
 
+use crate::cell::{Body, MotionPath, Robot, Waypoint};
+
 /// The ids of the entities a commit, undo or redo touched.
 pub type ChangeSet = BTreeSet<AnyId>;
 
@@ -209,6 +211,31 @@ tables! {
     params: Param,
     frames: Frame,
     sketches: Sketch,
+    bodies: Body,
+    robots: Robot,
+    waypoints: Waypoint,
+    paths: MotionPath,
+}
+
+/// Everything a stored document consists of, as [`Document::restore`] takes it.
+#[derive(Clone, Debug)]
+pub struct Contents {
+    /// The next id the document would hand out.
+    pub next_id: std::num::NonZeroU64,
+    /// Parameters.
+    pub params: BTreeMap<Id<Param>, Param>,
+    /// Frames.
+    pub frames: BTreeMap<Id<Frame>, Frame>,
+    /// Sketches.
+    pub sketches: BTreeMap<Id<Sketch>, Sketch>,
+    /// Bodies.
+    pub bodies: BTreeMap<Id<Body>, Body>,
+    /// Robots.
+    pub robots: BTreeMap<Id<Robot>, Robot>,
+    /// Waypoints.
+    pub waypoints: BTreeMap<Id<Waypoint>, Waypoint>,
+    /// Paths.
+    pub paths: BTreeMap<Id<MotionPath>, MotionPath>,
 }
 
 impl Default for Document {
@@ -227,6 +254,10 @@ impl Document {
             params: Store::default(),
             frames: Store::default(),
             sketches: Store::default(),
+            bodies: Store::default(),
+            robots: Store::default(),
+            waypoints: Store::default(),
+            paths: Store::default(),
             ids: IdAlloc::new(),
             revision: Revision::default(),
         };
@@ -254,25 +285,28 @@ impl Document {
         self.ids.peek()
     }
 
-    /// Rebuilds a document from saved parts. Fails when an entity refers to one that is missing.
-    pub fn restore(
-        params: impl IntoIterator<Item = (Id<Param>, Param)>,
-        frames: impl IntoIterator<Item = (Id<Frame>, Frame)>,
-        sketches: impl IntoIterator<Item = (Id<Sketch>, Sketch)>,
-        next_id: std::num::NonZeroU64,
-    ) -> Result<Self, crate::DocError> {
+    /// Rebuilds a document from stored contents. Fails when an entity refers to one that is missing.
+    pub fn restore(contents: Contents) -> Result<Self, crate::DocError> {
         let mut doc = Self {
-            params: Store { items: params.into_iter().collect() },
-            frames: Store { items: frames.into_iter().collect() },
-            sketches: Store { items: sketches.into_iter().collect() },
+            params: Store { items: contents.params },
+            frames: Store { items: contents.frames },
+            sketches: Store { items: contents.sketches },
+            bodies: Store { items: contents.bodies },
+            robots: Store { items: contents.robots },
+            waypoints: Store { items: contents.waypoints },
+            paths: Store { items: contents.paths },
             ids: IdAlloc::new(),
             revision: Revision::default(),
         };
         // Whatever the file claims, new ids must be above every id in use.
-        let mut highest = next_id;
+        let mut highest = contents.next_id;
         let mut raise = |raw: std::num::NonZeroU64| highest = highest.max(raw.saturating_add(1));
         doc.params.items.keys().for_each(|id| raise(id.raw()));
         doc.frames.items.keys().for_each(|id| raise(id.raw()));
+        doc.bodies.items.keys().for_each(|id| raise(id.raw()));
+        doc.robots.items.keys().for_each(|id| raise(id.raw()));
+        doc.waypoints.items.keys().for_each(|id| raise(id.raw()));
+        doc.paths.items.keys().for_each(|id| raise(id.raw()));
         for (id, sketch) in &doc.sketches.items {
             raise(id.raw());
             sketch.points.keys().for_each(|p| raise(p.raw()));
@@ -315,6 +349,26 @@ impl Document {
     /// All sketches.
     pub fn sketches(&self) -> &Store<Sketch> {
         &self.sketches
+    }
+
+    /// All bodies.
+    pub fn bodies(&self) -> &Store<Body> {
+        &self.bodies
+    }
+
+    /// All robots.
+    pub fn robots(&self) -> &Store<Robot> {
+        &self.robots
+    }
+
+    /// All waypoints.
+    pub fn waypoints(&self) -> &Store<Waypoint> {
+        &self.waypoints
+    }
+
+    /// All paths.
+    pub fn paths(&self) -> &Store<MotionPath> {
+        &self.paths
     }
 
     /// The pose of a frame in the world: its own pose composed with those of its ancestors.

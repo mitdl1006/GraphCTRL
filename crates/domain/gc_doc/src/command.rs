@@ -165,6 +165,8 @@ pub enum Command {
         /// The edit.
         op: SketchOp,
     },
+    /// Edits the robot cell.
+    Cell(crate::cell::CellOp),
 }
 
 /// Something a command created.
@@ -182,6 +184,14 @@ pub enum Created {
     Constraint(Id<GeoConstraint>),
     /// A dimension.
     Dimension(Id<Dimension>),
+    /// A body.
+    Body(Id<crate::cell::Body>),
+    /// A robot.
+    Robot(Id<crate::cell::Robot>),
+    /// A waypoint.
+    Waypoint(Id<crate::cell::Waypoint>),
+    /// A path.
+    Path(Id<crate::cell::MotionPath>),
 }
 
 /// The result of a command that was applied.
@@ -229,9 +239,12 @@ pub enum EditError {
     /// Parameters refer to each other in a circle.
     #[error("parameters refer to each other in a circle")]
     Cycle,
-    /// The parameter is used by an expression and cannot be deleted.
-    #[error("the parameter is still in use")]
+    /// Something else still uses this and it cannot be deleted.
+    #[error("this is still in use")]
     InUse,
+    /// A value is not a finite number, not positive where it must be, or of the wrong length.
+    #[error("a value is out of range")]
+    BadValue,
 }
 
 /// Unit of a bare number in a dimension field.
@@ -506,6 +519,7 @@ fn run(txn: &mut Txn<'_>, command: &Command) -> Result<(Vec<Created>, &'static s
             let scope = scope_of(txn.doc());
             txn.modify(*sketch, |s: &mut Sketch, ids| sketch_op(s, ids, op, &scope))?
         }
+        Command::Cell(op) => crate::cell::run(txn, op),
     }
 }
 

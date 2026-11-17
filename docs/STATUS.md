@@ -33,9 +33,9 @@
 | gc_robotics_api | 완료 | 10 (API만으로 작성한 모의 플러그인 포함) |
 | gc_solver | 완료(드래그 속도는 KNOWN_ISSUES 참고) | 35 (F1–F20, 드래그, 3D 포함) |
 | gc_sketch | 완료(스냅·추론은 gc_tools에서) | 11 (G1–G3, G8, G12, 삭제 연쇄, 드래그) |
-| gc_doc | 완료(Param·Frame·Sketch; 바디·로봇·경로는 해당 단계에서 추가) | 9 (롤백, undo∘redo, 파라미터 연동, 실패 시 문서 불변) |
+| gc_doc | 완료(스케치 + 로봇 셀: 바디·로봇·웨이포인트·경로 엔티티와 명령) | 11 |
 | gc_tools | 완료(2D 도구·스냅; 트림·3D 배치는 이후) | 3 |
-| gc_session | 완료(스케치 범위; 로봇·경로·저장은 해당 단계에서) | 9 (시나리오 S1–S6) |
+| gc_session | 스케치 범위 + 로봇 셀(로봇 로드, 조그, 웨이포인트, 경로 계획·오래됨 판정·재생) | 11 |
 | gc_draw | 카메라·내비게이션 완료(ViewCube·피킹은 이후) | 9 |
 | gc_ui / gc_viewport / gc_panels / gc_app | 셸 + 2D 스케치 캔버스 | 4 + kittest 2 |
 | gc_persist | 완료(`.gctrl` v1, 원자적 저장, `.bak`; 자동 저장·복구는 이후) | 4 (save∘load = id, 결정적 출력, 손상·상위 버전 거부) |

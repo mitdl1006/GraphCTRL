@@ -11,9 +11,12 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(test, allow(clippy::float_cmp, reason = "tests compare exactly representable values"))]
 
+mod cell;
+
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+pub use cell::{LoadedRobot, PADDING, PLANNERS, PlanStatus, PlannedPath};
 use gc_core::{Id, Revision};
 use gc_doc::{Applied, Command, Created, Document, EditError, History, Sketch, SketchOp, apply};
 pub use gc_persist::PersistError;
@@ -56,6 +59,7 @@ pub struct Session {
     last_error: Option<EditError>,
     path: Option<PathBuf>,
     saved_revision: Revision,
+    cell: cell::CellState,
 }
 
 impl Default for Session {
@@ -80,6 +84,7 @@ impl Session {
             last_error: None,
             path: None,
             saved_revision: Revision::default(),
+            cell: cell::CellState::default(),
         }
     }
 
@@ -209,6 +214,7 @@ impl Session {
     }
 
     fn refresh(&mut self) {
+        self.cell.sync(&self.doc);
         // Solving a consistent sketch changes nothing; it is run on a copy only to obtain the report.
         self.report = self.active_sketch().and_then(|(_, sketch)| sketch.clone().solve().ok());
         if let Some((_, sketch)) = self.active.and_then(|id| self.doc.get(id).map(|s| (id, s))) {
