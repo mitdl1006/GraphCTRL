@@ -1,5 +1,26 @@
 # 백엔드 인계 (2026-11-17)
 
+## 2026-11-17 밤 2 — 어셈블리 P1-2 컴포넌트 원점 폴더(+P1-4 일부), 리드 b02ac34 병합
+
+- `Document::component_origin(occurrence) -> Option<ComponentOrigin{pose}>`; `ComponentOrigin::{point(), axis(0|1|2), plane(OriginPlane)}`.
+  바디·로봇(베이스)·어셈블리는 placement, 부품은 파일의 부품 행렬(배율이 있으면 정규직교화) × 어셈블리 placement.
+  평면 방향은 문서 원점 평면과 같다(XY 법선 +Z, XZ 법선 −Y, YZ 법선 +X).
+- 참조: `PlaneRef::Component(occurrence, OriginPlane)`, `PointRef::Component(occurrence)`(작업 피처 기준),
+  `PlaneSource::Component{occurrence, plane}`(스케치 평면, 컴포넌트를 따라 움직임, 쓰는 동안 그 컴포넌트 삭제 거부).
+- 세션: `session.component_origin(occurrence) -> Option<gc_doc::ComponentOrigin>`,
+  `session.create_sketch_on_component(occurrence, plane: gc_doc::OriginPlane) -> Result<Id<Sketch>, EditError>`.
+  원점 요소 표시(프론트엔드 요청): `gc_doc::OriginElement::{Plane(OriginPlane), Axis(0..=2), Point}`,
+  `session.set_origin_visible(occurrence, &[OriginElement], bool) -> Result<(), EditError>`(여러 개를 한 undo 단계, 저장됨, 기본 숨김),
+  `session.origin_visible(occurrence, element) -> bool`. 폴더 전체 토글은 7개를 한꺼번에 넘긴다.
+- 근거: 명세의 A52 About Reference Planes / A53 To Display Reference Planes(명세 표의 GUID가 잘려 원문을 열지 못함 — 전체 GUID를
+  알려 주면 확인하겠다), A11 Place Components.
+- 테스트: `gc_session/tests/sketch_planes.rs::every_component_has_an_origin_and_a_sketch_on_its_plane_moves_with_it`.
+
+**구동(Drive) 제안 — 리드 요청**: 어셈블리 구속·조인트가 생기면 `session.drive_relationship(id: Id<Relationship>, value: f64)`로
+구속의 오프셋/각도를 문서를 바꾸지 않고 미리보기 값으로 바꿔 풀고(리드의 `drive_show`와 같은 CellState.drive 계층),
+`end_drive()`로 원래 값에 돌아간다. 값 범위는 조인트 한계(있으면)로 자르고, 풀 수 없는 값이면 직전 자세를 유지하고 `Err(Unsolved)`.
+로봇 관절은 구속 솔버가 풀지 않으므로(명세 4절) 로봇 마운트 조인트 구동은 로봇 전체를 옮기는 것으로 끝난다.
+
 ## 2026-11-17 밤 — 어셈블리 P1-1 컴포넌트 계층·상태
 
 리드 브랜치(93a1a73) 병합 후 진행. 근거: Inventor 2026 도움말 A11 Place Components(첫 컴포넌트 자동 고정),

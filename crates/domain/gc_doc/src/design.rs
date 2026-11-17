@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::cell::{Look, Placement};
 
 /// One of the three origin planes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum OriginPlane {
     /// The XY plane (normal +Z).
     Xy,
@@ -26,6 +26,8 @@ pub enum PlaneRef {
     Origin(OriginPlane),
     /// A work plane.
     Work(Id<WorkFeature>),
+    /// An origin plane of a component (it follows the component).
+    Component(Occurrence, OriginPlane),
 }
 
 /// A point a work feature is built through.
@@ -44,6 +46,8 @@ pub enum PointRef {
     },
     /// A work point.
     Work(Id<WorkFeature>),
+    /// The centre point of a component's origin (it follows the component).
+    Component(Occurrence),
 }
 
 /// How a work feature is defined.
@@ -140,14 +144,17 @@ impl Entity for WorkFeature {
     const KIND: Kind = Kind::WorkFeature;
     fn refs(&self, out: &mut Vec<AnyId>) {
         for plane in self.geometry.planes() {
-            if let PlaneRef::Work(id) = plane {
-                out.push(id.erase());
+            match plane {
+                PlaneRef::Work(id) => out.push(id.erase()),
+                PlaneRef::Component(occurrence, _) => out.push(occurrence.owner()),
+                PlaneRef::Origin(_) => {}
             }
         }
         for point in self.geometry.points() {
             match point {
                 PointRef::SketchPoint { sketch, .. } => out.push(sketch.erase()),
                 PointRef::Work(id) => out.push(id.erase()),
+                PointRef::Component(occurrence) => out.push(occurrence.owner()),
                 PointRef::Origin | PointRef::Fixed(_) => {}
             }
         }
@@ -355,6 +362,16 @@ pub enum Occurrence {
     },
 }
 
+impl Occurrence {
+    /// The document item the occurrence belongs to (an assembly for its parts).
+    pub fn owner(&self) -> AnyId {
+        match *self {
+            Occurrence::Item(item) => item,
+            Occurrence::Part { assembly, .. } => assembly.erase(),
+        }
+    }
+}
+
 /// A state of a component that can be switched on and off.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ComponentFlag {
@@ -384,6 +401,20 @@ pub struct Components {
     /// Suppressed assembly parts.
     #[serde(default)]
     pub suppressed: Vec<Occurrence>,
+    /// Origin elements shown in the viewport (all are hidden by default).
+    #[serde(default)]
+    pub origins_shown: Vec<(Occurrence, OriginElement)>,
+}
+
+/// An element of a component's origin folder.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum OriginElement {
+    /// An origin plane.
+    Plane(OriginPlane),
+    /// An axis: 0 = X, 1 = Y, 2 = Z.
+    Axis(u8),
+    /// The centre point.
+    Point,
 }
 
 impl Components {
@@ -393,6 +424,7 @@ impl Components {
             && self.disabled.is_empty()
             && self.hidden.is_empty()
             && self.suppressed.is_empty()
+            && self.origins_shown.is_empty()
     }
 }
 
@@ -422,6 +454,13 @@ pub enum PlaneSource {
         /// Rotation of the plane in the part's frame (the plane is its XY plane), scalar last.
         quat_xyzw: [f64; 4],
     },
+    /// An origin plane of a component: the sketch moves with the component.
+    Component {
+        /// The component.
+        occurrence: Occurrence,
+        /// Which of its origin planes.
+        plane: OriginPlane,
+    },
 }
 
 impl PlaneSource {
@@ -429,6 +468,7 @@ impl PlaneSource {
         match self {
             Self::Work(id) => id.erase(),
             Self::Face { assembly, .. } => assembly.erase(),
+            Self::Component { occurrence, .. } => occurrence.owner(),
         }
     }
 }

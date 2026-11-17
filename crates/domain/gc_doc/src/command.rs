@@ -272,6 +272,15 @@ pub enum Command {
         /// The new value.
         on: bool,
     },
+    /// Shows or hides elements of a component's origin folder (planes, axes, centre point).
+    SetOriginVisible {
+        /// The component.
+        occurrence: crate::design::Occurrence,
+        /// The elements.
+        elements: Vec<crate::design::OriginElement>,
+        /// True to show them.
+        visible: bool,
+    },
     /// Adds a named parameter. `angle` selects degrees instead of millimetres for bare numbers.
     AddParam {
         /// The name.
@@ -1088,6 +1097,9 @@ fn run(txn: &mut Txn<'_>, command: &Command) -> Result<(Vec<Created>, &'static s
         Command::Cell(op) => crate::cell::run(txn, op),
         Command::Rename { item, name } => crate::tree::rename(txn, *item, name),
         Command::SetVisible { item, visible } => crate::tree::set_visible(txn, *item, *visible),
+        Command::SetOriginVisible { occurrence, elements, visible } => {
+            crate::tree::set_origin_visible(txn, *occurrence, elements, *visible)
+        }
         Command::SetComponent { occurrence, flag, on } => {
             crate::tree::set_component(txn, *occurrence, *flag, *on)
         }

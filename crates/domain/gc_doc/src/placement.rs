@@ -17,6 +17,9 @@ impl Document {
                 WorkShape::Plane(pose) => Some(pose),
                 _ => None,
             },
+            crate::design::PlaneSource::Component { occurrence, plane } => {
+                self.component_origin(*occurrence).map(|o| o.plane(*plane))
+            }
             crate::design::PlaneSource::Face { assembly, part, xyz, quat_xyzw, .. } => {
                 let assembly = self.get(*assembly)?;
                 let m = assembly.part_matrix(*part as usize)?;
@@ -124,12 +127,14 @@ fn plane(doc: &Document, plane: PlaneRef, depth: usize) -> Option<DPose3> {
             WorkShape::Plane(pose) => Some(pose),
             _ => None,
         },
+        PlaneRef::Component(occurrence, which) => Some(doc.component_origin(occurrence)?.plane(which)),
     }
 }
 
 fn point(doc: &Document, point: PointRef, depth: usize) -> Option<DVec3> {
     match point {
         PointRef::Origin => Some(DVec3::ZERO),
+        PointRef::Component(occurrence) => Some(doc.component_origin(occurrence)?.point()),
         PointRef::Fixed(xyz) => Some(DVec3::from_array(xyz)),
         PointRef::SketchPoint { sketch, point } => {
             let sketch = doc.get(sketch)?;
@@ -141,5 +146,83 @@ fn point(doc: &Document, point: PointRef, depth: usize) -> Option<DVec3> {
             WorkShape::Point(p) => Some(p),
             _ => None,
         },
+    }
+}
+
+/// A component's origin folder in the world (docs/ux/inventor-assembly-parity.md, P1-2): three planes,
+/// three axes and the centre point, all from the component's frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ComponentOrigin {
+    /// The component's frame in the world.
+    pub pose: DPose3,
+}
+
+impl ComponentOrigin {
+    /// The centre point.
+    pub fn point(&self) -> DVec3 {
+        self.pose.translation
+    }
+
+    /// An axis (0 = X, 1 = Y, 2 = Z) as a unit direction through [`ComponentOrigin::point`].
+    pub fn axis(&self, axis: usize) -> DVec3 {
+        let local = match axis {
+            0 => DVec3::X,
+            1 => DVec3::Y,
+            _ => DVec3::Z,
+        };
+        self.pose.rotation * local
+    }
+
+    /// An origin plane as a frame whose XY plane it is, oriented like the document's origin plane of the
+    /// same name (XY: normal +Z; XZ: normal −Y; YZ: normal +X).
+    pub fn plane(&self, plane: OriginPlane) -> DPose3 {
+        self.pose * DPose3::from_parts(DVec3::ZERO, origin_plane_rotation(plane))
+    }
+}
+
+/// The rotation of a document origin plane's frame (as the document creates them).
+fn origin_plane_rotation(plane: OriginPlane) -> DQuat {
+    let (x, y) = match plane {
+        OriginPlane::Xy => (DVec3::X, DVec3::Y),
+        OriginPlane::Xz => (DVec3::X, DVec3::Z),
+        OriginPlane::Yz => (DVec3::Y, DVec3::Z),
+    };
+    DQuat::from_mat3(&gc_math::DMat3::from_cols(x, y, x.cross(y))).normalize()
+}
+
+impl Document {
+    /// The origin folder of a component: where its frame is in the world. A body's, robot's (its base) or
+    /// imported assembly's frame is its placement; a part's is its frame in the file (made square when the
+    /// file scales it) under the assembly's placement. `None` when the component does not exist.
+    pub fn component_origin(&self, occurrence: crate::design::Occurrence) -> Option<ComponentOrigin> {
+        use crate::design::Occurrence;
+        use gc_core::Kind;
+        let placed = |p: &crate::cell::Placement| gc_math::pose_from_xyz_rpy(p.xyz, p.rpy);
+        let pose = match occurrence {
+            Occurrence::Item(item) => match item.kind {
+                Kind::Body => placed(&self.get(Id::<crate::cell::Body>::from_raw(item.raw))?.placement),
+                Kind::RobotInstance => {
+                    placed(&self.get(Id::<crate::cell::Robot>::from_raw(item.raw))?.placement)
+                }
+                Kind::Assembly => {
+                    placed(&self.get(Id::<crate::design::Assembly>::from_raw(item.raw))?.placement)
+                }
+                _ => return None,
+            },
+            Occurrence::Part { assembly, index } => {
+                let a = self.get(assembly)?;
+                let m = a.part_matrix(index as usize)?;
+                let column = |c: usize| DVec3::new(m[c][0], m[c][1], m[c][2]);
+                let (x, y) = (column(0), column(1));
+                let z = x.cross(y);
+                if x.length() < 1e-12 || z.length() < 1e-12 {
+                    return None;
+                }
+                let (x, z) = (x.normalize(), z.normalize());
+                let rotation = DQuat::from_mat3(&gc_math::DMat3::from_cols(x, z.cross(x), z)).normalize();
+                placed(&a.placement) * DPose3::from_parts(column(3), rotation)
+            }
+        };
+        Some(ComponentOrigin { pose })
     }
 }
