@@ -54,6 +54,39 @@ pub fn remember_recent(dir: &Path, project: &Path) -> Result<Vec<PathBuf>, Persi
     Ok(list)
 }
 
+/// The user's settings, kept between runs in `settings.json`. Missing fields take their defaults, so
+/// a file from an older version still loads.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct Settings {
+    /// Format version of the file.
+    pub version: u32,
+    /// The interface language as a code (`ko`, `en`); empty for the default.
+    pub language: String,
+}
+
+/// The settings file in the settings folder.
+pub fn settings_file(dir: &Path) -> PathBuf {
+    dir.join("settings.json")
+}
+
+/// The saved settings; the defaults when there are none or the file cannot be read.
+pub fn load_settings(dir: &Path) -> Settings {
+    std::fs::read_to_string(settings_file(dir))
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default()
+}
+
+/// Saves the settings.
+pub fn save_settings(dir: &Path, settings: &Settings) -> Result<(), PersistError> {
+    std::fs::create_dir_all(dir).map_err(io(dir))?;
+    let file = settings_file(dir);
+    let text = serde_json::to_string_pretty(&Settings { version: 1, ..settings.clone() })
+        .map_err(|e| io(&file)(std::io::Error::other(e)))?;
+    std::fs::write(&file, text).map_err(io(&file))
+}
+
 /// The automatic save: the document, and a file naming the project it belongs to (empty when it has
 /// none yet).
 pub fn autosave_files(dir: &Path) -> (PathBuf, PathBuf) {

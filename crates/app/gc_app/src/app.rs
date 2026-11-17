@@ -173,6 +173,8 @@ pub struct GraphCtrlApp {
     ime: ImeTest,
     /// Whether the licence notices window is open.
     notices: bool,
+    /// Whether the about window is open.
+    about: bool,
     /// The pose calculator, when its window is open.
     pose_calc: Option<gc_panels::PoseCalc>,
     dialogs: Box<dyn FileDialogs>,
@@ -196,6 +198,13 @@ impl GraphCtrlApp {
         let (library, resources, kinematics) = robot_library();
         let recent = options.settings_dir.as_deref().map(gc_persist::places::load_recent).unwrap_or_default();
         let recovery = options.settings_dir.as_deref().and_then(gc_persist::places::pending_autosave);
+        // The language chosen last time, when there are saved settings.
+        let lang = options
+            .settings_dir
+            .as_deref()
+            .map(gc_persist::places::load_settings)
+            .and_then(|settings| Lang::from_code(&settings.language))
+            .unwrap_or_default();
         let mut session = Session::new();
         session.set_resources(resources);
         session.set_kinematics(kinematics);
@@ -208,7 +217,7 @@ impl GraphCtrlApp {
             frames: 0,
             session,
             viewport: Viewport::new(cc.wgpu_render_state.clone()),
-            lang: Lang::default(),
+            lang,
             tab: Tab::Model,
             cell: gc_panels::CellUi::default(),
             params: gc_panels::ParamsUi::default(),
@@ -216,6 +225,7 @@ impl GraphCtrlApp {
             expression: String::new(),
             ime: ImeTest { dimension: "25 mm".to_owned(), ..ImeTest::default() },
             notices: false,
+            about: false,
             pose_calc: None,
             dialogs: Box::new(NativeDialogs),
             notice: None,
@@ -555,6 +565,9 @@ impl GraphCtrlApp {
                 }
             });
             ui.menu_button(tr!(lang, MenuHelp), |ui| {
+                if ui.button(tr!(lang, MenuAbout)).clicked() {
+                    self.about = true;
+                }
                 if ui.button(tr!(lang, MenuLicences)).clicked() {
                     self.notices = true;
                 }
@@ -570,6 +583,7 @@ impl GraphCtrlApp {
                     for choice in Lang::ALL {
                         if ui.selectable_label(self.lang == choice, choice.native_name()).clicked() {
                             self.lang = choice;
+                            self.save_settings();
                         }
                     }
                 });
@@ -602,6 +616,37 @@ impl GraphCtrlApp {
         if let Some(accept) = answer {
             self.session.answer_reference_offer(accept);
         }
+    }
+
+    /// Saves the settings that outlive a run (the language). A failure is shown in the status bar.
+    fn save_settings(&mut self) {
+        let Some(dir) = &self.options.settings_dir else { return };
+        let settings =
+            gc_persist::places::Settings { language: self.lang.code().to_owned(), ..Default::default() };
+        if let Err(error) = gc_persist::places::save_settings(dir, &settings) {
+            self.notice = Some(tr!(self.lang, FileError, error));
+        }
+    }
+
+    /// The version and where the application keeps its settings and recovery files.
+    fn about_window(&mut self, ctx: &egui::Context) {
+        let lang = self.lang;
+        let mut open = self.about;
+        egui::Window::new(tr!(lang, MenuAbout)).open(&mut open).resizable(false).show(ctx, |ui| {
+            ui.label(egui::RichText::new("GraphCTRL").size(18.0).strong());
+            ui.label(tr!(lang, AboutVersion, env!("CARGO_PKG_VERSION")));
+            ui.add_space(6.0);
+            match &self.options.settings_dir {
+                Some(dir) => {
+                    ui.label(tr!(lang, AboutSettings, gc_persist::places::settings_file(dir).display()));
+                    ui.label(tr!(lang, AboutRecovery, dir.join("recovery").display()));
+                }
+                None => {
+                    ui.label(tr!(lang, AboutNoSettings));
+                }
+            }
+        });
+        self.about = open;
     }
 
     /// The licences of what ships with the application: its own, the bundled font's and the UR robot
@@ -781,6 +826,9 @@ impl eframe::App for GraphCtrlApp {
         }
         if self.notices {
             self.notices_window(&ctx);
+        }
+        if self.about {
+            self.about_window(&ctx);
         }
         if let Some(mut calc) = self.pose_calc.take() {
             let mut open = true;

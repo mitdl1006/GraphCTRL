@@ -1643,3 +1643,38 @@ fn waypoint_references_and_the_pose_calculator() {
         harness.render().unwrap().save(out.join("review-24-pose-calculator.png")).unwrap();
     }
 }
+
+/// The language is remembered between runs in the settings file, and Help > About says where it is.
+#[test]
+fn the_language_is_remembered() {
+    let directory = tempfile::tempdir().unwrap();
+    let settings = directory.path().join("settings");
+    let start = |dir: std::path::PathBuf| {
+        let options = RunOptions { settings_dir: Some(dir), ..RunOptions::default() };
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(SIZE)
+            .with_pixels_per_point(1.0)
+            .build_eframe(move |cc| GraphCtrlApp::new(cc, options));
+        harness.run();
+        harness
+    };
+    let mut harness = start(settings.clone());
+    harness.get_by_label("도구").click();
+    harness.run();
+    harness.get_by_label("언어").click();
+    harness.run();
+    harness.get_by_label("English").click();
+    harness.run();
+    harness.get_by_label("File");
+    assert!(settings.join("settings.json").is_file());
+    drop(harness);
+
+    // The next run starts in English; About shows the settings file.
+    let mut harness = start(settings.clone());
+    harness.get_by_label("File");
+    harness.get_by_label("Help").click();
+    harness.run();
+    harness.get_by_label("About").click();
+    harness.run();
+    assert!(harness.query_by_label_contains("settings.json").is_some());
+}
