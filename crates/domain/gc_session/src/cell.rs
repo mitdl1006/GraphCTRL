@@ -582,13 +582,41 @@ fn frame_pose_of(doc: &Document, frame: &WorkFrame) -> Option<DPose3> {
     Some(DPose3::from_parts(origin, axes * gc_math::quat_from_rpy(frame.rpy[0], frame.rpy[1], frame.rpy[2])))
 }
 
-/// The world pose of the tool centre point at a waypoint target that does not need the robot.
-fn target_pose(doc: &Document, target: &WaypointTarget) -> Option<DPose3> {
+/// The world pose of the tool centre point at a waypoint target given as a pose; `base` is the world pose
+/// of the waypoint robot's base frame. `None` for joint values.
+fn target_pose(doc: &Document, target: &WaypointTarget, base: Option<DPose3>) -> Option<DPose3> {
     match target {
         WaypointTarget::Joints(_) => None,
         WaypointTarget::SketchPoint { sketch, point } => pose_at_point(doc, *sketch, *point),
         WaypointTarget::InFrame { frame, offset } => Some(work_frame_pose(doc, *frame)? * pose_of(offset)),
+        WaypointTarget::InWorld { offset } => Some(pose_of(offset)),
+        WaypointTarget::InBase { offset } => Some(base? * pose_of(offset)),
     }
+}
+
+/// The world pose of a robot's base frame when its root link stands at `placement`: its link named
+/// `base` (fixed to the root on UR arms, where the teach pendant measures from it), else the root link.
+fn base_frame(loaded: &LoadedRobot, placement: &Placement) -> DPose3 {
+    let mut poses = Vec::new();
+    loaded.model.link_poses(&loaded.chain.expand(&vec![0.0; loaded.chain.dof()]), &mut poses);
+    let local = loaded.model.link("base").and_then(|i| poses.get(i).copied()).unwrap_or(DPose3::IDENTITY);
+    pose_of(placement) * local
+}
+
+/// A placement holding a pose.
+fn placement_of(pose: &DPose3) -> Placement {
+    Placement { xyz: pose.translation.to_array(), rpy: rpy_from_quat(pose.rotation) }
+}
+
+/// What the numbers of a waypoint or a pose are measured from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Reference {
+    /// The world frame.
+    World,
+    /// The robot's base frame.
+    Base,
+    /// A work frame.
+    Frame(Id<WorkFrame>),
 }
 
 impl Session {
@@ -1199,12 +1227,71 @@ impl Session {
         }
     }
 
+    /// The world pose of a robot's base frame as it is shown: its `base` link when it has one (as on a UR
+    /// teach pendant), else its root link.
+    pub fn robot_base_frame(&self, robot: Id<Robot>) -> Option<DPose3> {
+        Some(base_frame(self.robot_model(robot)?, &self.shown_base(robot)?))
+    }
+
+    /// The world pose of a reference frame, for the given robot's base.
+    pub fn reference_pose(&self, robot: Id<Robot>, reference: Reference) -> Option<DPose3> {
+        match reference {
+            Reference::World => Some(DPose3::IDENTITY),
+            Reference::Base => self.robot_base_frame(robot),
+            Reference::Frame(frame) => self.work_frame_pose(frame),
+        }
+    }
+
+    /// What a waypoint's numbers are measured from; `None` for joint values and sketch points.
+    pub fn waypoint_reference(&self, waypoint: Id<Waypoint>) -> Option<Reference> {
+        match self.shown_target(waypoint)? {
+            WaypointTarget::InWorld { .. } => Some(Reference::World),
+            WaypointTarget::InBase { .. } => Some(Reference::Base),
+            WaypointTarget::InFrame { frame, .. } => Some(Reference::Frame(frame)),
+            WaypointTarget::Joints(_) | WaypointTarget::SketchPoint { .. } => None,
+        }
+    }
+
+    /// The target that puts a waypoint at `world` measured from `reference`.
+    pub fn target_at(
+        &self,
+        waypoint: Id<Waypoint>,
+        reference: Reference,
+        world: DPose3,
+    ) -> Option<WaypointTarget> {
+        let robot = self.doc.get(waypoint)?.robot;
+        let offset = placement_of(&(self.reference_pose(robot, reference)?.inverse() * world));
+        Some(match reference {
+            Reference::World => WaypointTarget::InWorld { offset },
+            Reference::Base => WaypointTarget::InBase { offset },
+            Reference::Frame(frame) => WaypointTarget::InFrame { frame, offset },
+        })
+    }
+
+    /// Measures a waypoint from another reference without moving it: its numbers change, its place does
+    /// not. A waypoint given by joint values or a sketch point becomes a pose (and no longer follows the
+    /// sketch). One undo step.
+    pub fn express_waypoint(
+        &mut self,
+        waypoint: Id<Waypoint>,
+        reference: Reference,
+    ) -> Result<(), EditError> {
+        let world = self.waypoint_pose(waypoint).ok_or(EditError::BadValue)?;
+        let target = self.target_at(waypoint, reference, world).ok_or(EditError::BadValue)?;
+        self.cell_op(CellOp::SetWaypointTarget { id: waypoint, target }).map(|_| ())
+    }
+
     /// The world pose of the tool at a waypoint.
     pub fn waypoint_pose(&self, waypoint: Id<Waypoint>) -> Option<DPose3> {
         let target = self.shown_target(waypoint)?;
         let waypoint = self.doc.get(waypoint)?;
         match &target {
-            WaypointTarget::SketchPoint { .. } => target_pose(&self.doc, &target),
+            WaypointTarget::SketchPoint { .. } | WaypointTarget::InWorld { .. } => {
+                target_pose(&self.doc, &target, None)
+            }
+            WaypointTarget::InBase { offset } => {
+                Some(self.robot_base_frame(waypoint.robot)? * pose_of(offset))
+            }
             WaypointTarget::InFrame { frame, offset } => {
                 Some(self.work_frame_pose(*frame)? * pose_of(offset))
             }
@@ -1334,12 +1421,13 @@ impl Session {
         let doc = &self.doc;
         let path = doc.get(path)?;
         let robot = doc.get(path.robot)?;
+        let base = self.robot_model(path.robot).map(|loaded| base_frame(loaded, &robot.placement));
         let targets: Vec<String> = path
             .waypoints
             .iter()
             .map(|w| match doc.get(*w).map(|w| &w.target) {
                 Some(WaypointTarget::Joints(q)) => format!("{q:?}"),
-                Some(target) => format!("{:?}", target_pose(doc, target)),
+                Some(target) => format!("{:?}", target_pose(doc, target, base)),
                 None => String::new(),
             })
             .collect();
@@ -1593,13 +1681,14 @@ fn plan_path(
     let mut segments = Vec::with_capacity(path.waypoints.len());
     for (index, waypoint_id) in path.waypoints.iter().enumerate() {
         let waypoint = doc.get(*waypoint_id).ok_or("a waypoint no longer exists")?;
-        let goal =
-            match &waypoint.target {
-                WaypointTarget::Joints(q) => Goal::Joints(q.clone()),
-                target => Goal::Pose(target_pose(doc, target).ok_or_else(|| {
-                    format!("{}: its sketch point or frame no longer exists", waypoint.name)
-                })?),
-            };
+        let goal = match &waypoint.target {
+            WaypointTarget::Joints(q) => Goal::Joints(q.clone()),
+            target => {
+                Goal::Pose(target_pose(doc, target, Some(base_frame(loaded, &robot.placement))).ok_or_else(
+                    || format!("{}: its sketch point or frame no longer exists", waypoint.name),
+                )?)
+            }
+        };
         let request = MotionRequest {
             start: start.clone(),
             goal,

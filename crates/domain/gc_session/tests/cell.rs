@@ -894,3 +894,57 @@ fn a_straight_move_keeps_to_the_tool_speed_limit() {
     assert!(session.execute(&speed(Some(0.0))).is_err());
     assert!(session.execute(&speed(Some(-1.0))).is_err());
 }
+
+#[test]
+fn a_waypoint_is_measured_from_the_frame_chosen_without_moving() {
+    use gc_session::Reference;
+    let mut session = Session::new();
+    let robot = session.add_robot("Robot1", &six_axis()).unwrap();
+    session.jog(robot, &RIGHT);
+    session.end_jog();
+    let waypoint = session.add_waypoint_here(robot).unwrap();
+    session.jog(robot, &LEFT);
+    session.end_jog();
+    // The robot stands away from the origin, turned, so that world and base numbers differ.
+    let placed = Placement { xyz: [0.5, -0.2, 0.1], rpy: [0.0, 0.0, 0.7] };
+    session.execute(&Command::Cell(CellOp::PlaceRobot { id: robot, placement: placed })).unwrap();
+    let world = session.waypoint_pose(waypoint).unwrap();
+    assert_eq!(session.waypoint_reference(waypoint), None, "joint values");
+
+    // Measured from the world, then from the base: the same place, other numbers.
+    let close = |a: gc_math::DPose3, b: gc_math::DPose3| {
+        (a.translation - b.translation).length() < 1e-9
+            && [gc_math::DVec3::X, gc_math::DVec3::Z]
+                .iter()
+                .all(|v| (a.rotation * *v - b.rotation * *v).length() < 1e-9)
+    };
+    session.express_waypoint(waypoint, Reference::World).unwrap();
+    assert_eq!(session.waypoint_reference(waypoint), Some(Reference::World));
+    assert!(close(session.waypoint_pose(waypoint).unwrap(), world));
+    let in_world = session.doc().get(waypoint).unwrap().target.clone();
+    session.express_waypoint(waypoint, Reference::Base).unwrap();
+    assert!(close(session.waypoint_pose(waypoint).unwrap(), world));
+    let WaypointTarget::InBase { offset } = session.doc().get(waypoint).unwrap().target.clone() else {
+        panic!("not in the base frame")
+    };
+    let WaypointTarget::InWorld { offset: absolute } = in_world.clone() else { panic!("not in the world") };
+    assert!((offset.xyz[0] - absolute.xyz[0]).abs() > 0.01, "other numbers: {offset:?} {absolute:?}");
+    // The base is the robot's root link here (no link named `base`).
+    let base = session.robot_base_frame(robot).unwrap();
+    assert!((base.translation - gc_math::DVec3::new(0.5, -0.2, 0.1)).length() < 1e-12);
+
+    // A waypoint in the base frame moves with the robot; one in the world stays.
+    let path = session.add_path(robot, vec![waypoint]).unwrap();
+    assert_eq!(session.plan(path), PlanStatus::Ready, "{:?}", session.plan_error(path));
+    let moved = Placement { xyz: [0.6, -0.2, 0.1], ..placed };
+    session.execute(&Command::Cell(CellOp::PlaceRobot { id: robot, placement: moved })).unwrap();
+    let shifted = session.waypoint_pose(waypoint).unwrap().translation - world.translation;
+    assert!((shifted - gc_math::DVec3::new(0.1, 0.0, 0.0)).length() < 1e-9, "{shifted:?}");
+    assert_eq!(session.plan(path), PlanStatus::Ready, "{:?}", session.plan_error(path));
+    session.execute(&Command::Cell(CellOp::SetWaypointTarget { id: waypoint, target: in_world })).unwrap();
+    assert!(close(session.waypoint_pose(waypoint).unwrap(), world), "in the world it stays");
+
+    // Undo goes back through the changes of reference.
+    session.undo();
+    assert!(matches!(session.doc().get(waypoint).unwrap().target, WaypointTarget::InBase { .. }));
+}

@@ -201,6 +201,17 @@ pub enum WaypointTarget {
         /// Position (m) and roll, pitch, yaw of the tool centre point in the frame.
         offset: Placement,
     },
+    /// A pose of the tool centre point in the world frame.
+    InWorld {
+        /// Position (m) and roll, pitch, yaw of the tool centre point in the world.
+        offset: Placement,
+    },
+    /// A pose of the tool centre point in the robot's base frame (its `base` link when it has one, as
+    /// on a UR teach pendant; otherwise its root link). It moves with the robot.
+    InBase {
+        /// Position (m) and roll, pitch, yaw of the tool centre point in the base frame.
+        offset: Placement,
+    },
 }
 
 /// A place the robot should go to.
@@ -221,7 +232,7 @@ impl Entity for Waypoint {
         match &self.target {
             WaypointTarget::SketchPoint { sketch, .. } => out.push(sketch.erase()),
             WaypointTarget::InFrame { frame, .. } => out.push(frame.erase()),
-            WaypointTarget::Joints(_) => {}
+            WaypointTarget::Joints(_) | WaypointTarget::InWorld { .. } | WaypointTarget::InBase { .. } => {}
         }
     }
 }
@@ -425,6 +436,7 @@ fn target_ok(txn: &Txn<'_>, robot: Id<Robot>, target: &WaypointTarget) -> Result
             txn.doc().get(*frame).ok_or(DocError::Missing(frame.erase()))?;
             placed(offset)?;
         }
+        WaypointTarget::InWorld { offset } | WaypointTarget::InBase { offset } => placed(offset)?,
     }
     Ok(())
 }

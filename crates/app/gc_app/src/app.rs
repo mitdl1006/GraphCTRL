@@ -168,6 +168,8 @@ pub struct GraphCtrlApp {
     ime: ImeTest,
     /// Whether the licence notices window is open.
     notices: bool,
+    /// The pose calculator, when its window is open.
+    pose_calc: Option<gc_panels::PoseCalc>,
     dialogs: Box<dyn FileDialogs>,
     /// The latest message about files, shown in the status bar.
     notice: Option<String>,
@@ -208,6 +210,7 @@ impl GraphCtrlApp {
             expression: String::new(),
             ime: ImeTest { dimension: "25 mm".to_owned(), ..ImeTest::default() },
             notices: false,
+            pose_calc: None,
             dialogs: Box::new(NativeDialogs),
             notice: None,
             pending: None,
@@ -551,6 +554,9 @@ impl GraphCtrlApp {
                 }
             });
             ui.menu_button(tr!(lang, MenuTools), |ui| {
+                if ui.button(tr!(lang, MenuPoseCalc)).clicked() {
+                    self.pose_calc.get_or_insert_with(gc_panels::PoseCalc::default);
+                }
                 if ui.button(tr!(lang, MenuImeTest)).clicked() {
                     self.ime.open = true;
                 }
@@ -769,6 +775,19 @@ impl eframe::App for GraphCtrlApp {
         }
         if self.notices {
             self.notices_window(&ctx);
+        }
+        if let Some(mut calc) = self.pose_calc.take() {
+            let mut open = true;
+            egui::Window::new(tr!(lang, MenuPoseCalc)).open(&mut open).default_width(460.0).show(
+                &ctx,
+                |ui| {
+                    egui::ScrollArea::vertical()
+                        .show(ui, |ui| gc_panels::pose_calculator(ui, &self.session, lang, &mut calc));
+                },
+            );
+            if open {
+                self.pose_calc = Some(calc);
+            }
         }
 
         if let Some(limit) = self.options.smoke_frames {

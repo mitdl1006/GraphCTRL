@@ -1,6 +1,7 @@
 //! The panels around the viewport: model browser, properties and status bar.
 
 mod cell;
+mod pose;
 
 use egui::{RichText, Ui};
 use gc_core::Id;
@@ -12,6 +13,7 @@ use gc_tools::Prompt;
 use gc_ui::colors;
 
 pub use cell::{CellUi, cell, status_text};
+pub use pose::{PoseCalc, RotationInput, pose_calculator};
 
 /// What the user asked for in the browser.
 #[derive(Clone, Debug, PartialEq)]

@@ -83,6 +83,8 @@ pub fn cell(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) 
         frames(ui, session, lang, state, focus);
     }
     if let Some(CellItem::Waypoint(id)) = focus {
+        ui.add_space(8.0);
+        crate::pose::waypoint_place(ui, session, lang, id, true);
         taught(ui, session, lang, id);
         reach(ui, session, lang, id);
     }
@@ -175,7 +177,9 @@ fn taught(ui: &mut Ui, session: &mut Session, lang: Lang, waypoint: gc_core::Id<
             ui.add_space(8.0);
             ui.weak(tr!(lang, PropOnSketchPoint, name));
         }
-        gc_doc::WaypointTarget::InFrame { .. } => {}
+        gc_doc::WaypointTarget::InFrame { .. }
+        | gc_doc::WaypointTarget::InWorld { .. }
+        | gc_doc::WaypointTarget::InBase { .. } => {}
     }
 }
 
@@ -211,7 +215,8 @@ pub fn problem_text(lang: Lang, problem: &gc_session::StateProblem) -> String {
 
 /// An angle shown and edited in degrees. Returns true when the user changed it.
 fn degrees(ui: &mut Ui, value: &mut f64, name: &str) -> bool {
-    let mut shown = value.to_degrees();
+    // Adding zero turns -0 into 0, so that a value is never shown as "-0".
+    let mut shown = value.to_degrees() + 0.0;
     let changed = ui.add(egui::DragValue::new(&mut shown).speed(1.0).prefix(format!("{name} "))).changed();
     if changed {
         *value = shown.to_radians();
@@ -220,7 +225,7 @@ fn degrees(ui: &mut Ui, value: &mut f64, name: &str) -> bool {
 }
 
 /// Position and rotation of a placement. Returns true when the user changed something.
-fn placement(ui: &mut Ui, lang: Lang, placement: &mut gc_doc::Placement) -> bool {
+pub(crate) fn placement(ui: &mut Ui, lang: Lang, placement: &mut gc_doc::Placement) -> bool {
     let mut changed = false;
     ui.label(tr!(lang, PropPosition));
     ui.horizontal(|ui| {
@@ -274,7 +279,7 @@ fn transparency(ui: &mut Ui, session: &mut Session, lang: Lang, item: gc_session
 
 /// A length shown and edited in millimetres. Returns true when the user changed it.
 fn millimetres(ui: &mut Ui, value: &mut f64, name: &str, least: f64) -> bool {
-    let mut mm = *value * 1000.0;
+    let mut mm = *value * 1000.0 + 0.0;
     let drag = egui::DragValue::new(&mut mm).speed(1.0).range(least..=100_000.0).prefix(format!("{name} "));
     let changed = ui.add(drag).changed();
     if changed {
@@ -327,33 +332,13 @@ fn frame_axes(
 /// The six numbers of a frame's pose: in the world and in the first robot's base frame.
 fn frame_pose(ui: &mut Ui, session: &Session, lang: Lang, id: gc_core::Id<gc_doc::WorkFrame>) {
     let Some(world) = session.work_frame_pose(id) else { return };
-    let mut rows = vec![(tr!(lang, PropPoseWorld), world)];
+    let mut rows = vec![(tr!(lang, PropPoseWorld).to_owned(), world)];
     if let Some((robot, _)) = session.doc().robots().iter().next()
-        && let Some(base) = session.shown_base(robot)
+        && let Some(base) = session.robot_base_frame(robot)
     {
-        let base = gc_math::pose_from_xyz_rpy(base.xyz, base.rpy);
-        rows.push((tr!(lang, PropPoseBase), base.inverse() * world));
+        rows.push((tr!(lang, PropPoseBase).to_owned(), base.inverse() * world));
     }
-    egui::Grid::new(("gc_frame_pose", id.raw())).show(ui, |ui| {
-        for (title, pose) in rows {
-            // Values that round to zero are shown as 0, not -0.
-            let clean = |v: f64| if v.abs() < 5e-7 { 0.0 } else { v };
-            let t = (pose.translation * 1000.0).to_array().map(clean);
-            let t = gc_math::DVec3::from_array(t);
-            let [r, p, y] = gc_math::rpy_from_quat(pose.rotation).map(|a| clean(a.to_degrees()));
-            let v =
-                gc_math::DVec3::from_array(gc_math::rotvec_from_quat(pose.rotation).to_array().map(clean));
-            ui.label(title);
-            ui.label(format!("X {:.1}  Y {:.1}  Z {:.1} mm", t.x, t.y, t.z));
-            ui.end_row();
-            ui.label("");
-            ui.label(format!("R {r:.2}°  P {p:.2}°  Y {y:.2}°"));
-            ui.end_row();
-            ui.label(tr!(lang, PropRotvec));
-            ui.label(format!("Rx {:.4}  Ry {:.4}  Rz {:.4} rad", v.x, v.y, v.z));
-            ui.end_row();
-        }
-    });
+    crate::pose::pose_rows(ui, lang, ("gc_frame_pose", id.raw()), &rows);
 }
 
 /// The work frames (which one new waypoints are taught in, and how each is turned) and the waypoints
@@ -405,19 +390,17 @@ fn frames(
             session.preview_frame(*id, frame);
         }
     }
-    let waypoints: Vec<_> = session.doc().waypoints().iter().map(|(id, w)| (id, w.name.clone())).collect();
-    for (id, name) in waypoints.into_iter().filter(|(id, _)| shows(CellItem::Waypoint(*id))) {
-        let Some(gc_doc::WaypointTarget::InFrame { frame, mut offset }) = session.shown_target(id) else {
-            continue;
-        };
-        let frame_name = session.doc().get(frame).map(|f| f.name.clone()).unwrap_or_default();
-        let mut changed = false;
-        egui::CollapsingHeader::new(tr!(lang, PropInFrame, name, frame_name))
-            .id_salt(("gc_in_frame", id.raw()))
-            .open(focus.is_some().then_some(true))
-            .show(ui, |ui| changed = placement(ui, lang, &mut offset));
-        if changed {
-            session.preview_target(id, gc_doc::WaypointTarget::InFrame { frame, offset });
+    // With nothing selected, the waypoints given as poses, each under what it is measured from.
+    if focus.is_none() {
+        let waypoints: Vec<_> = session
+            .doc()
+            .waypoints()
+            .iter()
+            .map(|(id, _)| id)
+            .filter(|id| session.waypoint_reference(*id).is_some())
+            .collect();
+        for id in waypoints {
+            crate::pose::waypoint_place(ui, session, lang, id, false);
         }
     }
 }

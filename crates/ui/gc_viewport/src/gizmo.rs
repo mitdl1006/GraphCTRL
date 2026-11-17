@@ -4,7 +4,7 @@
 //! change is a preview; releasing the mouse makes it one undo step.
 
 use egui::{Color32, FontId, Pos2, Stroke, pos2};
-use gc_doc::{Placement, WaypointTarget};
+use gc_doc::Placement;
 use gc_draw::Camera;
 use gc_math::{DPose3, DQuat, DVec3, Plane, fm};
 use gc_session::{CellItem, Session};
@@ -56,10 +56,11 @@ fn pose_of(session: &Session, item: CellItem) -> Option<(DPose3, bool)> {
     match item {
         CellItem::Body(id) => Some((pose(session.shown_body(id)?.placement), true)),
         CellItem::Robot(id) => Some((pose(session.shown_base(id)?), true)),
-        CellItem::Waypoint(id) => match session.shown_target(id)? {
-            WaypointTarget::InFrame { .. } => Some((session.waypoint_pose(id)?, true)),
-            _ => None,
-        },
+        // A waypoint given as a pose in some frame; joint values and sketch points are not dragged.
+        CellItem::Waypoint(id) => {
+            session.waypoint_reference(id)?;
+            Some((session.waypoint_pose(id)?, true))
+        }
         CellItem::Frame(id) => Some((session.work_frame_pose(id)?, false)),
         CellItem::Path(_) => None,
     }
@@ -80,11 +81,10 @@ fn preview(session: &mut Session, item: CellItem, pose: &DPose3) {
         }
         CellItem::Robot(id) => session.preview_base(id, placement(pose)),
         CellItem::Waypoint(id) => {
-            if let Some(WaypointTarget::InFrame { frame, .. }) = session.shown_target(id)
-                && let Some(origin) = session.work_frame_pose(frame)
+            if let Some(reference) = session.waypoint_reference(id)
+                && let Some(target) = session.target_at(id, reference, *pose)
             {
-                let offset = placement(&(origin.inverse() * *pose));
-                session.preview_target(id, WaypointTarget::InFrame { frame, offset });
+                session.preview_target(id, target);
             }
         }
         CellItem::Frame(id) => {

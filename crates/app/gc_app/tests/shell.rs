@@ -692,18 +692,16 @@ fn a_frame_from_picked_points_shows_its_six_numbers() {
     let (_, frame) = session.doc().work_frames().iter().next().unwrap();
     assert!(frame.x_point.is_some() && frame.xy_point.is_none());
 
-    // Open the frame in the panel: X axis at 45 degrees, origin at (400, 100) in the world and (400, 200)
-    // from the robot's base.
+    // Open the frame in the panel: X axis at 45 degrees, origin at (400, 100) in the world.
     let header = harness.query_all_by_label("Frame1").last().unwrap();
     header.click();
     harness.run();
-    harness.get_by_label("X 400.0  Y 100.0  Z 0.0 mm");
-    harness.get_by_label("X 400.0  Y 200.0  Z 0.0 mm");
-    assert_eq!(
-        harness.query_all_by_label("R 0.00°  P 0.00°  Y 45.00°").count(),
-        2,
-        "turned 45 degrees about Z"
-    );
+    harness.get_by_label("X 400.000  Y 100.000  Z 0.000 mm");
+    harness.get_by_label("R 0.000°  P 0.000°  Y 45.000°");
+    // From the UR5e's base frame (its `base` link, half a turn about Z from base_link), as the teach
+    // pendant shows it.
+    harness.get_by_label("X -400.000  Y -200.000  Z 0.000 mm");
+    harness.get_by_label("R 0.000°  P 0.000°  Y -135.000°");
     harness.get_by_label("X축 방향 점");
     if gpu {
         let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
@@ -1579,5 +1577,62 @@ fn the_library_offers_the_ur_e_series() {
     if gpu {
         let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
         harness.render().unwrap().save(out.join("review-22-ur10e.png")).unwrap();
+    }
+}
+
+/// A waypoint's numbers are measured from the frame the user picks (world, the robot's base as on the UR
+/// teach pendant, a work frame) without moving it; the pose calculator composes and re-expresses poses.
+#[test]
+fn waypoint_references_and_the_pose_calculator() {
+    use gc_session::{CellItem, Reference};
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("파일").click();
+    harness.run();
+    harness.get_by_label("예제 열기 (UR5e 셀)").click();
+    harness.run();
+    let session = &harness.state().session;
+    let p1 = session.doc().waypoints().iter().next().unwrap().0;
+    let robot = session.doc().robots().iter().next().unwrap().0;
+    let world = session.waypoint_pose(p1).unwrap();
+    // The UR5e's base frame is its `base` link: base_link turned half a turn about Z.
+    let base = session.robot_base_frame(robot).unwrap();
+    assert!((base.rotation * gc_math::DVec3::X + gc_math::DVec3::X).length() < 1e-12);
+
+    harness.state_mut().session.select_item(Some(CellItem::Waypoint(p1)));
+    harness.run();
+    harness.get_by_label("P1 (기준: Frame1)");
+    harness.get_by_label("기준 좌표계").click();
+    harness.run();
+    harness.query_all_by_label("로봇 베이스").last().unwrap().click();
+    harness.run();
+    let session = &harness.state().session;
+    assert_eq!(session.waypoint_reference(p1), Some(Reference::Base));
+    assert!((session.waypoint_pose(p1).unwrap().translation - world.translation).length() < 1e-9);
+    harness.get_by_label("P1 (기준: 로봇 베이스)");
+    harness.get_by_label("다른 좌표계에서 본 값").click();
+    harness.get_by_label("변환 행렬 (이동: mm)").click();
+    harness.run_steps(8);
+    if gpu {
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        harness.render().unwrap().save(out.join("review-23-reference.png")).unwrap();
+    }
+
+    // The calculator takes the waypoint as pose A and shows it in another frame.
+    harness.get_by_label("도구").click();
+    harness.run();
+    harness.get_by_label("포즈 변환 계산기").click();
+    harness.run_steps(8);
+    harness.get_by_label("선택한 웨이포인트 → A").click();
+    harness.run_steps(8);
+    harness.get_by_label("A · B");
+    harness.get_by_label("A: 월드 기준 → 월드 기준");
+    if gpu {
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        harness.render().unwrap().save(out.join("review-24-pose-calculator.png")).unwrap();
     }
 }

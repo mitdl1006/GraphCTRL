@@ -19,8 +19,8 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 pub use cell::{
-    CellItem, CompareRow, Ghost, LoadedRobot, MeshRef, PADDING, PLANNERS, PlanStatus, PlannedPath, Resources,
-    Shown, ShownPart,
+    CellItem, CompareRow, Ghost, LoadedRobot, MeshRef, PADDING, PLANNERS, PlanStatus, PlannedPath, Reference,
+    Resources, Shown, ShownPart,
 };
 use gc_core::{Id, Revision};
 use gc_doc::{Applied, Command, Created, Document, EditError, History, Sketch, SketchOp, apply};
