@@ -2,6 +2,7 @@
 
 mod agent;
 mod app;
+mod conflict;
 mod constrain;
 mod cut_edges;
 mod diagnostics;

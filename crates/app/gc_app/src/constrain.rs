@@ -28,6 +28,8 @@ pub(crate) struct Constrain {
     sense: AxisSense,
     aligned: bool,
     name: String,
+    /// A relationship that could not be satisfied: the app opens the constraint error dialog for it.
+    pub(crate) conflict: Option<crate::conflict::Conflict>,
 }
 
 impl Default for Constrain {
@@ -43,6 +45,7 @@ impl Default for Constrain {
             sense: AxisSense::Opposed,
             aligned: false,
             name: String::new(),
+            conflict: None,
         }
     }
 }
@@ -205,7 +208,7 @@ impl Constrain {
             && let Some(relationship) = self.relationship(session)
         {
             // A constraint that cannot be solved is refused; the status bar says why.
-            if session.add_relationship(relationship).is_ok() {
+            if crate::conflict::try_add(session, relationship, &mut self.conflict) {
                 // Apply goes on with the next constraint, OK closes.
                 self.first = None;
                 self.second = None;
@@ -265,6 +268,8 @@ pub(crate) struct Joint {
     slot: usize,
     flip: bool,
     name: String,
+    /// A relationship that could not be satisfied (see `Constrain::conflict`).
+    pub(crate) conflict: Option<crate::conflict::Conflict>,
 }
 
 impl Default for Joint {
@@ -277,6 +282,7 @@ impl Default for Joint {
             slot: 0,
             flip: false,
             name: String::new(),
+            conflict: None,
         }
     }
 }
@@ -369,7 +375,7 @@ impl Joint {
             });
         if (ok || apply)
             && let Some(relationship) = self.relationship(session)
-            && session.add_relationship(relationship).is_ok()
+            && crate::conflict::try_add(session, relationship, &mut self.conflict)
         {
             self.first = None;
             self.second = None;

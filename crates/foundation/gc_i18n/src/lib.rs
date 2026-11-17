@@ -698,6 +698,16 @@ messages! {
     ViewPanelsSeeThrough => ("패널 반투명", "See-through panels"),
     /// Help menu: the log window.
     MenuLog => ("로그", "Log"),
+    /// Constraint error dialog: title.
+    ConflictTitle => ("구속 오류", "Constraint error"),
+    /// Constraint error dialog: what was refused. `{0}` lists the relationships that are not satisfied.
+    ConflictMessage => ("{0}을(를) 함께 만족할 수 없습니다.", "{0} cannot be satisfied together."),
+    /// Constraint error dialog: heading of the list of relationships in the way.
+    ConflictCulprits => ("걸림이 되는 관계 (하나만 억제하면 풀림)", "Relationships in the way (suppressing one solves it)"),
+    /// Constraint error dialog: no single relationship is the cause.
+    ConflictNoSingle => ("한 관계만으로는 풀리지 않습니다. 새 관계를 바꾸세요.", "No single relationship is the cause. Change the new relationship."),
+    /// Constraint error dialog: delete the relationship in the way.
+    ConflictDelete => ("삭제", "Delete"),
     /// Plan card: what the checks guarantee. `{0}` padding mm, `{1}` step mm, `{2}` step degrees, `{3}` clearance mm.
     PlanGuarantee => ("패딩 {0} mm, 검사 간격 {1} mm·{2}°에서 볼록 충돌 모델이 장애물과 {3} mm 이상 떨어짐", "Padding {0} mm; with check steps of {1} mm and {2} degrees the convex collision model stays at least {3} mm from obstacles"),
     /// Plan card: the guarantee holds only at the checked states.

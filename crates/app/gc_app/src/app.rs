@@ -255,6 +255,7 @@ pub struct GraphCtrlApp {
     drive: crate::drive::Drive,
     /// The Constrain dialog.
     constrain: crate::constrain::Constrain,
+    conflict: crate::conflict::ConstraintError,
     /// The Joint dialog.
     joint: crate::constrain::Joint,
     /// The Parameters dialog.
@@ -344,6 +345,7 @@ impl GraphCtrlApp {
             interference: crate::interference::Interference::default(),
             drive: crate::drive::Drive::default(),
             constrain: crate::constrain::Constrain::default(),
+            conflict: crate::conflict::ConstraintError::default(),
             joint: crate::constrain::Joint::default(),
             parameters: crate::parameters::Parameters::default(),
             expression: String::new(),
@@ -1184,6 +1186,10 @@ impl eframe::App for GraphCtrlApp {
         if self.joint.open {
             self.joint.window(&ctx, &mut self.session, lang);
         }
+        if let Some(conflict) = self.joint.conflict.take().or_else(|| self.constrain.conflict.take()) {
+            self.conflict.show_for(&self.session, conflict);
+        }
+        self.conflict.window(&ctx, &mut self.session, lang);
         if self.constrain.open {
             self.constrain.window(&ctx, &mut self.session, lang);
         }
