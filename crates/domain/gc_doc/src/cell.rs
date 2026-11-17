@@ -504,6 +504,39 @@ pub enum CellOp {
         /// A position to delete.
         position: Option<usize>,
     },
+    /// Mirrors components across a plane (a planar face, work plane or origin plane): new instances
+    /// placed by a rotation and translation; relationships between them re-made when asked (those that
+    /// cannot be satisfied or whose orientation is ambiguous are made suppressed).
+    MirrorComponents {
+        /// The components (bodies, robots, assemblies).
+        items: Vec<AnyId>,
+        /// The mirror plane.
+        plane: crate::relate::Selection,
+        /// Mirror Relationships.
+        relationships: bool,
+        /// Ground New Components.
+        ground: bool,
+    },
+    /// Copies components, moved by `offset` (a world transform); relationships between them copied when
+    /// asked.
+    CopyComponents {
+        /// The components.
+        items: Vec<AnyId>,
+        /// How far the copies are moved from the sources.
+        offset: Placement,
+        /// Copy Relationships.
+        relationships: bool,
+        /// Ground New Components.
+        ground: bool,
+    },
+    /// Replaces components with another shape or file (Replace; Replace All with every component of the
+    /// same source): each stays where it was, relationships kept where possible and suppressed otherwise.
+    ReplaceComponents {
+        /// The components replaced (all bodies, or all assemblies).
+        items: Vec<AnyId>,
+        /// What they become.
+        with: crate::replicate::Replacement,
+    },
     /// Ground and Root, "Ground at origin": moves the components (bodies, robots, assemblies) to the
     /// assembly's origin, aligned with it, and grounds them. Refused when constraints then cannot be met.
     GroundAtOrigin(Vec<AnyId>),
@@ -1126,6 +1159,13 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
         CellOp::DeleteRepresentation { view, position } => {
             crate::representation::delete(txn, *view, *position)
         }
+        CellOp::MirrorComponents { items, plane, relationships, ground } => {
+            crate::replicate::mirror(txn, items, plane, *relationships, *ground)
+        }
+        CellOp::CopyComponents { items, offset, relationships, ground } => {
+            crate::replicate::copy(txn, items, offset, *relationships, *ground)
+        }
+        CellOp::ReplaceComponents { items, with } => crate::replicate::replace(txn, items, with),
         CellOp::GroundAtOrigin(items) => {
             use crate::design::Occurrence;
             if items.is_empty() || !items.iter().all(|i| txn.doc().owner_pose(*i).is_some()) {

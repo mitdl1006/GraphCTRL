@@ -1,9 +1,28 @@
 # 백엔드 인계 (2026-11-17)
 
+## 2026-11-18 — 컴포넌트 미러·복사·교체(리드 ②③)
+
+근거(원문, `https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/`):
+About Mirrored Assembly Components `GUID-66AA4A06-F63F-49C3-8F39-42FE4999F1FC.htm`, To Mirror Assembly Components `GUID-C5B3D3DF-27B3-4B4C-9058-A949138D8B8A.htm`,
+Mirror Components: Reference `GUID-7B19CA69-8D14-40DA-9543-115A8AFE6336.htm`, About Copied Assembly Components `GUID-0E21F4A0-DE77-469D-9381-9F55CFA6BF49.htm`,
+Copy assembly components `GUID-5AAA6CB1-7BB2-4AF0-9A3D-AB729E5160C5.htm`, Replace assembly components `GUID-E5FAA224-7332-4AC6-A78E-793FDACFEEDD.htm`.
+- 미러: `CellOp::MirrorComponents{items, plane: Selection(평면), relationships, ground}`, 세션 `mirror_components(items, plane, rel, ground) -> 억제된 관계 이름`.
+  원문의 Reuse 방식(회전+이동): 컴포넌트의 대칭면 = 미러 법선에 가장 가까운 로컬 좌표 평면, R' = M·R·F. 이름 `Block:1`.
+  "두 참조가 모두 선택 집합에 있는 관계"만 다시 만들고, 바깥 참조(대칭면·각도 기준)가 있으면 방향이 모호 → 억제, 풀리지 않는 것도 억제.
+  Directed 각도는 부호 반전. Ground New Components 지원.
+- 복사: `CellOp::CopyComponents{items, offset: Placement, relationships, ground}`, 세션 `copy_components(..)`. 모양·외관·enabled 상태 복사, 비연관.
+- 교체: `CellOp::ReplaceComponents{items, with: Replacement::{Solid(Solid), Assembly(Assembly)}}`, 세션 `replace_component(item, with, all)`
+  (`all` = Replace All, `doc.same_source(item)`: 같은 메시 파일/같은 프리미티브, 같은 어셈블리 파일, 같은 URDF). 같은 위치·원점 일치.
+  관계 유지: 박스·원기둥·구는 선택 기하가 새 모양에 그대로 있는지 검사(원점 기하는 항상 유지), 메시는 문서가 모양을 몰라 유지로 본다,
+  어셈블리 부품은 이름으로 다시 찾는다. 사라진 것과 풀리지 않는 것은 억제하고 이름을 돌려준다(원문: "must be reapplied").
+- 원문과 다른 점: 파일을 만들지 않으므로 Mirror = Reuse(프리미티브는 정확히 대칭, 메시·어셈블리·로봇은 반사된 모양이 아니라 회전 배치).
+  미러 대칭면 변경(우클릭), 패턴·표현 복제, 파일 이름 대화상자 없음. 로봇 교체는 아직(URDF 다시 읽기 필요 — 세션에서 add_robot 후 관계 재지정).
+- 테스트 `gc_doc/tests/replicate.rs`(5), `gc_session/tests/replicate.rs`(2).
+
 ## 2026-11-18 — P2-20 표현(Representations): 뷰·위치
 
 근거(원문): To Create, Edit, or Copy Positional Representations `GUID-34C28C35-45CA-4476-9336-30146F7C9471.htm`([Primary] = 기본 상태,
-새 위치 표현은 Primary 복사, 관계·컴포넌트 재정의, 하나만 활성). 뷰 표현 원문 페이지는 이 환경에서 열리지 않아 명세(A62/A64: 가시성·표시 상태 저장)를 따랐다.
+새 위치 표현은 Primary 복사, 관계·컴포넌트 재정의, 하나만 활성). About View Representations `GUID-9A49CDC1-4DC7-4462-81D7-E18B8339DE0F.htm`(가시성·enabled 상태·투명도·카메라) — 33a40fa에서 enabled·투명도도 저장.
 - 뷰: `CellOp::AddViewRepresentation{name, camera, section}`(지금 가시성 저장; camera·section은 뷰포트가 쓰고 읽는 문자열 — 형식은 프론트엔드/리드 결정),
   `SetViewRepresentation{index, view}`, `ActivateViewRepresentation(index)`(숨김·표시를 한 undo 단계로 적용, 부품·로봇 링크 포함).
 - 위치: `AddPositionalRepresentation(name)`("Primary" 예약), `SetPositionalRepresentation{index, position: PositionalRepresentation{values:

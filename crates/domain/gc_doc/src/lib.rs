@@ -20,6 +20,7 @@ mod pattern;
 mod placement;
 mod project;
 mod relate;
+mod replicate;
 mod representation;
 mod tree;
 mod txn;
@@ -47,6 +48,7 @@ pub use relate::{
     AngleSolution, AxisSense, ComponentStatus, Dof, Geometry, Limits, RelationKind, RelationStatus,
     Relationship, Selection, Unsolved,
 };
+pub use replicate::Replacement;
 pub use representation::{PositionalRepresentation, Representations, ViewRepresentation};
 pub use tree::ComponentNode;
 pub use txn::{DocError, Txn};
