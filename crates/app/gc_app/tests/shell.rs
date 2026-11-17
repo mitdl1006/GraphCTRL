@@ -3454,3 +3454,48 @@ fn place_reads_a_step_assembly_and_ground_toggles_a_component() {
     harness.run();
     assert_eq!(grounded(&harness), before);
 }
+
+/// Right-click a component in the browser > Contact Set; Inspect tab > Contact Solver > Contact Set Only.
+/// (Inventor 2026: Detect contact between assembly components, GUID-FA1A8282-3A7E-45BE-8DB3-F637FB1C3292.)
+#[test]
+fn the_contact_set_and_the_contact_solver_are_set_from_the_ui() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.05, 0.05, 0.05] };
+    let body = harness.state_mut().session.add_body(solid, gc_doc::Placement::default()).unwrap();
+    harness.run();
+    assert!(!harness.state().session.doc().in_contact_set(body.erase()));
+
+    let at = harness.get_by_label("Body1:1").rect().center();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run();
+    }
+    harness.get_by_label("접촉 세트").click();
+    harness.run();
+    assert!(harness.state().session.doc().in_contact_set(body.erase()));
+
+    harness.get_by_label("검사").click();
+    harness.run();
+    harness.get_by_label("접촉 솔버").click();
+    harness.run_steps(3);
+    if gpu {
+        let image = harness.render().unwrap();
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        image.save(out.join("review-43-contact-solver.png")).unwrap();
+    }
+    harness.get_by_label("접촉 세트만").click();
+    harness.run();
+    assert_eq!(harness.state().session.doc().contact_solver(), gc_doc::ContactSolver::ContactSet);
+}

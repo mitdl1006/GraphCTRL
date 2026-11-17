@@ -754,6 +754,16 @@ messages! {
     GroupVisibility => ("가시성", "Visibility"),
     /// View tab, Visibility: shows the degrees-of-freedom symbols of the components.
     CmdDof => ("자유도", "Degrees of Freedom"),
+    /// Browser, right-click a component: it takes part in the contact solver's analysis.
+    CmdContactSet => ("접촉 세트", "Contact Set"),
+    /// Inspect tab: activates the contact solver (a menu of the modes).
+    CmdContactSolver => ("접촉 솔버", "Contact Solver"),
+    /// Contact solver mode: off.
+    ContactOff => ("접촉 솔버 끔", "Contact Solver Off"),
+    /// Contact solver mode: only the components of the contact set.
+    ContactSetOnly => ("접촉 세트만", "Contact Set Only"),
+    /// Contact solver mode: every component of the assembly.
+    ContactAll => ("모든 컴포넌트", "All Components"),
     /// Plan card: what the checks guarantee. `{0}` padding mm, `{1}` step mm, `{2}` step degrees, `{3}` clearance mm.
     PlanGuarantee => ("패딩 {0} mm, 검사 간격 {1} mm·{2}°에서 볼록 충돌 모델이 장애물과 {3} mm 이상 떨어짐", "Padding {0} mm; with check steps of {1} mm and {2} degrees the convex collision model stays at least {3} mm from obstacles"),
     /// Plan card: the guarantee holds only at the checked states.

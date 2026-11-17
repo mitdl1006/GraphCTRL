@@ -38,6 +38,8 @@ pub enum BrowserAction {
     SketchOnComponent(gc_doc::Occurrence, gc_doc::OriginPlane),
     /// Drive an assembly relationship (the Drive dialog).
     DriveRelationship(gc_core::Id<gc_doc::Relationship>),
+    /// Put a component into the contact set, or take it out.
+    ContactSet(gc_core::AnyId, bool),
     /// Suppress a relationship (or bring it back) and solve again.
     SuppressRelationship(gc_core::Id<gc_doc::Relationship>, bool),
 }
@@ -379,6 +381,15 @@ fn browser_section(
                 suppressible: matches!(item, CellItem::Waypoint(_) | CellItem::Path(_)),
             };
             let result = node_row(ui, session, lang, state, &node, action, |ui, action| {
+                if let CellItem::Body(_) | CellItem::Robot(_) = item {
+                    // Inventor: right-click a component > Contact Set.
+                    let any = cell_any(item);
+                    let member = session.doc().in_contact_set(any);
+                    if ui.checkbox(&mut { member }, tr!(lang, CmdContactSet)).clicked() {
+                        *action = Some(BrowserAction::ContactSet(any, !member));
+                        ui.close();
+                    }
+                }
                 if let CellItem::Path(path) = item
                     && ui.button(tr!(lang, CmdPlan)).clicked()
                 {

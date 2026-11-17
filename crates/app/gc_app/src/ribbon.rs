@@ -1,7 +1,7 @@
 //! The ribbon: tabs of command groups. Every button is a view of a session command.
 
 use eframe::egui;
-use gc_doc::{Placement, Solid, WaypointTarget};
+use gc_doc::{ContactSolver, Placement, Solid, WaypointTarget};
 use gc_draw::StandardView;
 use gc_i18n::{Lang, Msg, tr};
 use gc_panels::CellUi;
@@ -232,6 +232,28 @@ pub(crate) fn show(
                     if ribbon_button(ui, Icon::Cuboid, tr!(lang, MenuInterference), false, true).clicked() {
                         action = Some(RibbonAction::StartInterference);
                     }
+                    // Inventor: Inspect tab > Interference panel > Activate Contact Solver; the modes are the
+                    // Interactive Contact choices of the document settings.
+                    let mode = session.doc().contact_solver();
+                    let button = ribbon_button(
+                        ui,
+                        Icon::Cuboid,
+                        tr!(lang, CmdContactSolver),
+                        mode != ContactSolver::Off,
+                        true,
+                    );
+                    egui::Popup::menu(&button).show(|ui| {
+                        for (this, label) in [
+                            (ContactSolver::Off, tr!(lang, ContactOff)),
+                            (ContactSolver::ContactSet, tr!(lang, ContactSetOnly)),
+                            (ContactSolver::All, tr!(lang, ContactAll)),
+                        ] {
+                            if ui.selectable_label(mode == this, label).clicked() {
+                                drop(session.set_contact_solver(this));
+                                ui.close();
+                            }
+                        }
+                    });
                 });
             }
             Tab::Manage => {
