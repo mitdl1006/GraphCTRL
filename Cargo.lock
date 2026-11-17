@@ -1480,7 +1480,7 @@ dependencies = [
 name = "gc_plan"
 version = "0.1.0"
 dependencies = [
- "smallvec",
+ "libm",
  "thiserror 2.0.21",
 ]
 

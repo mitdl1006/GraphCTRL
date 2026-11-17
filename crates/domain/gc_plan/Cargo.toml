@@ -11,5 +11,5 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
-smallvec.workspace = true
+libm.workspace = true
 thiserror.workspace = true
