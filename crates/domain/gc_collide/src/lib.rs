@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 use gc_math::{DPose3, DQuat, DVec3};
 use gc_mesh::MeshData;
+use parry3d_f64::bounding_volume::BoundingVolume;
 use parry3d_f64::query::{self, ClosestPoints};
 use parry3d_f64::shape::SharedShape;
 
@@ -168,7 +169,41 @@ fn build(desc: &ShapeDesc) -> Result<(DPose3, SharedShape), CollideError> {
             }
             (DPose3::IDENTITY, SharedShape::convex_hull(&points).ok_or(CollideError::DegenerateHull)?)
         }
-        ShapeDesc::Mesh(mesh) => {
+        ShapeDesc::Mesh(mesh) => (DPose3::IDENTITY, mesh_shape(mesh)?),
+    })
+}
+
+/// Triangle meshes already built, by the mesh they were built from: building one (its BVH) takes tens of
+/// milliseconds at 100,000 triangles, and the same mesh is asked for again and again (a body measured, a
+/// contact step, an interference run). Entries go when their mesh is dropped.
+static MESH_SHAPES: std::sync::Mutex<Vec<(std::sync::Weak<MeshData>, SharedShape)>> =
+    std::sync::Mutex::new(Vec::new());
+
+/// Builds the collision shape of a mesh ahead of its first use (it is kept while the mesh lives).
+pub fn prepare_mesh(mesh: &Arc<MeshData>) {
+    // A mesh that cannot be built reports its error where it is used.
+    mesh_shape(mesh).ok();
+}
+
+fn mesh_shape(mesh: &Arc<MeshData>) -> Result<SharedShape, CollideError> {
+    if let Ok(mut cache) = MESH_SHAPES.lock() {
+        cache.retain(|(weak, _)| weak.strong_count() > 0);
+        if let Some((_, shape)) =
+            cache.iter().find(|(weak, _)| std::ptr::eq(weak.as_ptr(), Arc::as_ptr(mesh)))
+        {
+            return Ok(shape.clone());
+        }
+    }
+    let shape = build_mesh(mesh)?;
+    if let Ok(mut cache) = MESH_SHAPES.lock() {
+        cache.push((Arc::downgrade(mesh), shape.clone()));
+    }
+    Ok(shape)
+}
+
+fn build_mesh(mesh: &MeshData) -> Result<SharedShape, CollideError> {
+    Ok({
+        {
             if mesh.triangle_count() == 0 {
                 return Err(CollideError::BadMesh("it has no triangles".to_owned()));
             }
@@ -178,9 +213,7 @@ fn build(desc: &ShapeDesc) -> Result<(DPose3, SharedShape), CollideError> {
                 .map(|p| DVec3::new(f64::from(p[0]), f64::from(p[1]), f64::from(p[2])))
                 .collect();
             let indices = mesh.indices().chunks_exact(3).map(|t| [t[0], t[1], t[2]]).collect();
-            let shape =
-                SharedShape::trimesh(vertices, indices).map_err(|e| CollideError::BadMesh(e.to_string()))?;
-            (DPose3::IDENTITY, shape)
+            SharedShape::trimesh(vertices, indices).map_err(|e| CollideError::BadMesh(e.to_string()))?
         }
     })
 }
@@ -303,7 +336,7 @@ impl Geometry {
     /// their bounds: its volume (m³), its centroid and the sample points inside both (the centres of the
     /// cells counted). `None` when they do not overlap.
     pub fn interference(&self, other: &Geometry, cells: usize) -> Result<Option<Interference>, CollideError> {
-        if !self.closest(other)?.is_some_and(|c| c.distance == 0.0) {
+        if !self.intersects(other)? {
             return Ok(None);
         }
         let (Some((low_a, high_a)), Some((low_b, high_b))) = (self.bounds(), other.bounds()) else {
@@ -342,12 +375,37 @@ impl Geometry {
         Ok(Some(Interference { volume: count * cell_volume, centroid: (sum / count).to_array(), points }))
     }
 
+    /// True when the two geometries overlap or touch. Pairs of shapes whose bounds are apart are not
+    /// looked at further.
+    pub fn intersects(&self, other: &Geometry) -> Result<bool, CollideError> {
+        for (pose_a, shape_a) in &self.parts {
+            let aabb_a = shape_a.compute_aabb(pose_a);
+            for (pose_b, shape_b) in &other.parts {
+                if !aabb_a.intersects(&shape_b.compute_aabb(pose_b)) {
+                    continue;
+                }
+                let unsupported = |_e| CollideError::Unsupported;
+                if query::intersection_test(pose_a, &**shape_a, pose_b, &**shape_b)
+                    .map_err(unsupported)?
+                    .intersecting
+                {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
+
     /// The deepest overlap between this geometry and another, beyond `tolerance`; `None` when they are
     /// apart or only touch.
     pub fn penetration(&self, other: &Geometry, tolerance: f64) -> Result<Option<Penetration>, CollideError> {
         let mut deepest: Option<Penetration> = None;
         for (pose_a, shape_a) in &self.parts {
+            let aabb_a = shape_a.compute_aabb(pose_a);
             for (pose_b, shape_b) in &other.parts {
+                if !aabb_a.intersects(&shape_b.compute_aabb(pose_b)) {
+                    continue;
+                }
                 let unsupported = |_e| CollideError::Unsupported;
                 let Some(contact) =
                     query::contact(pose_a, &**shape_a, pose_b, &**shape_b, 0.0).map_err(unsupported)?

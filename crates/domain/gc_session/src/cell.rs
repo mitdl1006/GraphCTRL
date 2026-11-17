@@ -580,6 +580,9 @@ impl CellState {
         if let Ok(data) = stored
             && let Some(mesh) = scaled(data, [*scale; 3])
         {
+            // Build its collision shape now, while the file is being read anyway, rather than in the
+            // middle of a drag or drive (tens of milliseconds for a large mesh).
+            gc_collide::prepare_mesh(&mesh.data);
             self.meshes.insert(key, mesh);
         }
     }
@@ -1362,13 +1365,29 @@ impl Session {
         pushed: &mut BTreeMap<gc_core::AnyId, DPose3>,
     ) -> Result<(), (gc_core::AnyId, gc_core::AnyId)> {
         const TOLERANCE: f64 = 1e-6;
-        let imposed: BTreeMap<gc_core::AnyId, DPose3> = moves.iter().copied().collect();
+        let stored =
+            |item: gc_core::AnyId| self.doc.component_origin(gc_doc::Occurrence::Item(item)).map(|o| o.pose);
+        // Only what really moves counts: the solver can report components it touched by a rounding error.
+        let imposed: BTreeMap<gc_core::AnyId, DPose3> = moves
+            .iter()
+            .copied()
+            .filter(|(item, pose)| {
+                stored(*item).is_none_or(|was| {
+                    (was.translation - pose.translation).length() > 1e-9
+                        || was.rotation.angle_between(pose.rotation) > 1e-9
+                })
+            })
+            .collect();
         let pose = |item: gc_core::AnyId, pushed: &BTreeMap<gc_core::AnyId, DPose3>| {
-            imposed
-                .get(&item)
-                .or_else(|| pushed.get(&item))
-                .copied()
-                .or_else(|| self.doc.component_origin(gc_doc::Occurrence::Item(item)).map(|o| o.pose))
+            imposed.get(&item).or_else(|| pushed.get(&item)).copied().or_else(|| stored(item))
+        };
+        // How deep a pair already overlapped where the document has it: only going deeper is contact.
+        let depth_before = |a: gc_core::AnyId, b: gc_core::AnyId| -> f64 {
+            let (Some(pa), Some(pb)) = (stored(a), stored(b)) else { return 0.0 };
+            let (Some(ga), Some(gb)) = (self.contact_geometry(a, &pa), self.contact_geometry(b, &pb)) else {
+                return 0.0;
+            };
+            ga.penetration(&gb, 0.0).ok().flatten().map_or(0.0, |p| p.depth)
         };
         let mut last = None;
         for _round in 0..32 {
@@ -1386,6 +1405,9 @@ impl Session {
                     let Some(pose_b) = pose(b, pushed) else { continue };
                     let Some(geometry_b) = self.contact_geometry(b, &pose_b) else { continue };
                     let Ok(Some(hit)) = geometry_a.penetration(&geometry_b, TOLERANCE) else { continue };
+                    if hit.depth <= depth_before(a, b) + TOLERANCE {
+                        continue;
+                    }
                     if imposed.contains_key(&b) || !self.pushable(b) {
                         return Err((a, b));
                     }

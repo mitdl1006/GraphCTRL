@@ -1,5 +1,6 @@
 //! `cargo xtask bench-quality`: the Tier B planning quality bench (plan, section 7 and appendix E), then the
-//! large-scene check (`bench_scene` of `gc_session`: a frame's session queries for 50 components within 2 ms).
+//! large-scene check (`bench_scene` of `gc_session`: a frame's session queries for 50 components within
+//! 2 ms, and 20 meshes of 100,000 triangles: drag, drive with contact, Measure and Interference).
 //!
 //! The bench itself is the `bench_quality` example of `gc_motion` (it needs the domain crates, which the
 //! automation crate does not depend on). This command builds it with `--release` and points its report

@@ -1,5 +1,19 @@
 # 백엔드 인계 (2026-11-17)
 
+## 2026-11-18 — 대형 메시 성능(리드 ③)
+
+`bench_scene`에 "Large meshes" 표 추가(`--meshes 20 --triangles 100000` 기본, `cargo xtask bench-quality`가 보고서에 덧붙임).
+처음 돌렸을 때 접촉 구동 한 단계 21 s, Measure 103 ms, Interference(190쌍) 200 s — 원인과 수정:
+- gc_collide가 질의마다 TriMesh(BVH)를 새로 만들었다 → 메시별 공유 캐시(`MESH_SHAPES`, 메시가 사라지면 항목도 정리),
+  세션이 메시 파일을 읽을 때 `gc_collide::prepare_mesh`로 미리 만든다(드래그·구동 중이 아니라 불러올 때 비용).
+- 간섭이 `closest`(여백 무한, 큰 메시 둘 사이 전체 거리 계산)로 겹침을 판정 → `Geometry::intersects`(AABB 선검사 + intersection_test).
+  `penetration`도 AABB 선검사.
+- 접촉 솔버: 솔버가 반올림만큼 건드린 컴포넌트까지 "움직임"으로 셌다 → 실제로 움직인 것만; 이미 겹쳐 있던 쌍은 더 깊어질 때만 접촉.
+결과(이 샌드박스, release): 프레임 질의 p95 0.09 ms, 드래그 0.06 ms, 풀이 0.01 ms, 접촉 구동 한 단계 2.5–4 ms, Measure 0.05 ms,
+Interference 190쌍 ~0.12–0.15 s(명령), 0.15 m 구동을 한 번에(2 mm × ~50 단계, 접촉 정지) ~0.26 s.
+남은 것: 메시 20개 추가(파일 읽기 + BVH) ~1.3 s가 동기 — 불러오기 작업(job)으로 옮기면 좋다. 구동 대화상자는 프레임마다 값을 조금씩 넘길 것.
+어셈블리(GLB/STEP) 부품은 세션의 간섭·측정·접촉 대상이 아니라 이 표에 없음(구속 풀이는 포즈만 써서 메시 크기와 무관).
+
 ## 2026-11-18 — 자유도(DOF) 기호 API(리드 ②)
 
 근거(원문): Degrees of freedom in assemblies `GUID-6E131E5A-438B-4008-94F3-D3A3E92EF44C.htm`,
