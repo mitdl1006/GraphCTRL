@@ -65,6 +65,7 @@ impl Section {
         Slicing {
             planes: self.planes.iter().map(SectionPlane::world).collect(),
             union: self.kind == SectionKind::ThreeQuarter,
+            cap: true,
         }
     }
 

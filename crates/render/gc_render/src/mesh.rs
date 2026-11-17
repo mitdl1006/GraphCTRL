@@ -60,6 +60,8 @@ pub struct View {
     pub slice2: Option<[f32; 4]>,
     /// With two planes: cut away what lies on the cut side of either (true) or of both (false).
     pub slice_union: bool,
+    /// Whether the cut is drawn open as a section: back faces seen through it are a flat cap.
+    pub slice_cap: bool,
 }
 
 /// What a frame cost.
@@ -354,7 +356,8 @@ impl MeshRenderer {
                     (Some(_), None) | (None, Some(_)) => 1.0,
                     (None, None) => 0.0,
                 },
-                if view.slice_union { 1.0 } else { 0.0 },
+                // w: bit 0 the union of two cuts, bit 1 the cap.
+                if view.slice_union { 1.0 } else { 0.0 } + if view.slice_cap { 2.0 } else { 0.0 },
             ],
             slice: view.slice.or(view.slice2).unwrap_or([0.0; 4]),
             slice2: if view.slice.is_some() { view.slice2.unwrap_or([0.0; 4]) } else { [0.0; 4] },

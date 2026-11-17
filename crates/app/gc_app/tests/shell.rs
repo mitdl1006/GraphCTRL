@@ -2904,6 +2904,15 @@ fn section_views_cut_the_model() {
         let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
         std::fs::create_dir_all(&out).unwrap();
         cut.save(out.join("review-34-half-section.png")).unwrap();
+        // Flipped, the cut face looks at the viewer: the cap is a flat face, not the box's blue.
+        harness.get_by_label("뒤집기").click();
+        harness.run_steps(3);
+        let flipped = harness.render().unwrap();
+        flipped.save(out.join("review-41-section-cap.png")).unwrap();
+        let at = flipped.get_pixel(520, 420).0;
+        assert!(at[0] + 20 >= at[2] && at[0] > 120, "a flat cap, not the box blue: {at:?}");
+        harness.get_by_label("뒤집기").click();
+        harness.run_steps(3);
     }
     // OK applies it; the toolbar goes away and the cut stays.
     harness.get_by_label("확인").click();
@@ -3336,4 +3345,37 @@ fn the_pattern_dialog_lists_the_components() {
         std::fs::create_dir_all(&out).unwrap();
         image.save(out.join("review-40-assemble-pattern.png")).unwrap();
     }
+}
+
+/// View tab > Visibility > Degrees of Freedom shows a symbol at every component that can still move.
+#[test]
+fn degrees_of_freedom_symbols_are_shown_from_the_view_tab() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.2, 0.2, 0.2] };
+    let placement = gc_doc::Placement { xyz: [0.0, 0.0, 0.1], rpy: [0.0; 3] };
+    // The first component is grounded; the second one is free.
+    harness.state_mut().session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    harness.state_mut().session.add_body(solid, placement).unwrap();
+    harness.state_mut().fit_view();
+    harness.get_by_label("뷰").click();
+    harness.run();
+    assert!(harness.state().session.dof_symbols().is_empty());
+    harness.get_by_label("자유도").click();
+    harness.run_steps(3);
+    let symbols = harness.state().session.dof_symbols();
+    let counts: Vec<_> = symbols.iter().map(|(_, s)| (s.translations.len(), s.rotations.len())).collect();
+    assert!(counts.contains(&(3, 3)) && counts.contains(&(0, 0)), "a free and a grounded body: {counts:?}");
+    if gpu {
+        let image = harness.render().unwrap();
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        image.save(out.join("review-42-dof.png")).unwrap();
+    }
+    harness.get_by_label("자유도").click();
+    harness.run_steps(3);
+    assert!(harness.state().session.dof_symbols().is_empty());
 }
