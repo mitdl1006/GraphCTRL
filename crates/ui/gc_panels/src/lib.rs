@@ -98,8 +98,7 @@ fn params(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi) -> O
 /// The model browser: origin geometry and sketches. Double-click a sketch to edit it.
 pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi) -> Option<BrowserAction> {
     let mut action = None;
-    ui.heading(tr!(lang, PanelBrowser));
-    ui.separator();
+    gc_ui::panel::header(ui, tr!(lang, PanelBrowser));
     egui::CollapsingHeader::new(tr!(lang, BrowserOrigin)).default_open(true).show(ui, |ui| {
         for (_, frame) in session.doc().frames().iter().filter(|(_, f)| f.kind == FrameKind::OriginPlane) {
             ui.label(&frame.name);
@@ -170,7 +169,10 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
                             ui.close();
                         }
                     });
-                    let button = ui.small_button("x").on_hover_text(tr!(lang, CmdDeleteItem, name));
+                    let cross = RichText::new("×").color(gc_ui::colors::MUTED);
+                    let button = ui
+                        .add(egui::Button::new(cross).small().frame_when_inactive(false))
+                        .on_hover_text(tr!(lang, CmdDeleteItem, name));
                     button.widget_info(|| {
                         egui::WidgetInfo::labeled(egui::Role::Button, true, tr!(lang, CmdDeleteItem, name))
                     });
@@ -217,8 +219,7 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
 
 /// The properties of the selection. A selected dimension can be edited here.
 pub fn properties(ui: &mut Ui, session: &mut Session, lang: Lang, expression: &mut String) {
-    ui.heading(tr!(lang, PanelProperties));
-    ui.separator();
+    gc_ui::panel::header(ui, tr!(lang, PanelProperties));
     // Outside sketches the robot cell's panel below says what is selected.
     let Some((_, sketch)) = session.active_sketch() else { return };
     let selection: Vec<Item> = session.selection().iter().copied().collect();

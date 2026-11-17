@@ -6,6 +6,7 @@
 
 pub mod fonts;
 mod icons;
+pub mod panel;
 mod ribbon;
 mod theme;
 

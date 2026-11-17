@@ -3,12 +3,25 @@
 use egui::{Response, Role, Sense, Ui, WidgetInfo, vec2};
 
 use crate::icons::Icon;
+use crate::theme::colors;
 
 const BUTTON_SIZE: egui::Vec2 = vec2(58.0, 58.0);
 
-/// A tab of the ribbon. Returns true when it was clicked.
+/// A tab of the ribbon: its name, underlined in the accent colour when it is the open one. Returns
+/// true when it was clicked.
 pub fn ribbon_tab(ui: &mut Ui, label: &str, selected: bool) -> bool {
-    ui.selectable_label(selected, egui::RichText::new(label).strong()).clicked()
+    let color = if selected { colors::ACCENT } else { colors::MUTED };
+    let text = egui::RichText::new(label).size(13.0).strong().color(color);
+    let response = ui.add(egui::Button::selectable(selected, text).frame_when_inactive(false));
+    if selected {
+        let rect = response.rect;
+        let underline = egui::Rect::from_min_max(
+            egui::pos2(rect.left() + 4.0, rect.bottom() - 2.0),
+            egui::pos2(rect.right() - 4.0, rect.bottom()),
+        );
+        ui.painter().rect_filled(underline, 1.0, colors::ACCENT);
+    }
+    response.clicked()
 }
 
 /// A large button: icon above, label below. `selected` marks the active tool.
@@ -32,7 +45,14 @@ pub fn ribbon_button(ui: &mut Ui, icon: Icon, label: &str, selected: bool, enabl
         } else {
             egui::Color32::TRANSPARENT
         };
-        let color = if enabled { visuals.strong_text_color() } else { visuals.weak_text_color() };
+        // Disabled buttons stay legible: lighter, not faint.
+        let color = if selected {
+            colors::ACCENT
+        } else if enabled {
+            colors::TEXT
+        } else {
+            egui::Color32::from_rgb(0xA3, 0xA9, 0xB2)
+        };
         ui.painter().rect_filled(rect, 4.0, fill);
         let icon_rect = egui::Rect::from_center_size(rect.center_top() + vec2(0.0, 20.0), vec2(26.0, 26.0));
         icon.paint(ui.painter(), icon_rect, color);
@@ -61,7 +81,7 @@ pub fn ribbon_group(ui: &mut Ui, title: &str, add_buttons: impl FnOnce(&mut Ui))
             egui::Align2::CENTER_CENTER,
             title,
             egui::FontId::proportional(10.5),
-            ui.visuals().weak_text_color(),
+            colors::MUTED,
         );
     });
     ui.separator();

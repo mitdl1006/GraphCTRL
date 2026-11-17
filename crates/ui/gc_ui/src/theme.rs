@@ -44,18 +44,63 @@ pub mod colors {
     /// Major grid lines.
     pub const GRID_MAJOR: Color32 = Color32::from_rgb(0x98, 0xA2, 0xAE);
     /// The ribbon's background.
-    pub const RIBBON: Color32 = Color32::from_rgb(0xF3, 0xF4, 0xF6);
+    pub const RIBBON: Color32 = Color32::from_rgb(0xFF, 0xFF, 0xFF);
+    /// The side panels' background.
+    pub const SURFACE: Color32 = Color32::from_rgb(0xF6, 0xF7, 0xF9);
+    /// Text fields, cards and other raised surfaces.
+    pub const CARD: Color32 = Color32::from_rgb(0xFF, 0xFF, 0xFF);
+    /// Hairlines and widget borders.
+    pub const BORDER: Color32 = Color32::from_rgb(0xDF, 0xE3, 0xE8);
+    /// The accent: active tabs, section bars, focused fields.
+    pub const ACCENT: Color32 = Color32::from_rgb(0x25, 0x63, 0xEB);
+    /// Body text.
+    pub const TEXT: Color32 = Color32::from_rgb(0x1F, 0x23, 0x28);
+    /// Labels and notes.
+    pub const MUTED: Color32 = Color32::from_rgb(0x6B, 0x72, 0x80);
 }
 
-/// Applies the light theme.
+/// Applies the light theme: white raised surfaces on a light grey ground, hairline borders, rounded
+/// corners, one blue accent.
 pub fn install(ctx: &egui::Context) {
+    use egui::{Color32, CornerRadius, Stroke};
     let mut visuals = egui::Visuals::light();
-    visuals.panel_fill = colors::RIBBON;
-    visuals.selection.bg_fill = egui::Color32::from_rgb(0xCF, 0xE4, 0xFA);
-    visuals.selection.stroke = egui::Stroke::new(1.0, colors::SELECTED);
+    visuals.panel_fill = colors::SURFACE;
+    visuals.window_fill = colors::CARD;
+    visuals.extreme_bg_color = colors::CARD;
+    visuals.faint_bg_color = Color32::from_rgb(0xF0, 0xF2, 0xF5);
+    visuals.override_text_color = Some(colors::TEXT);
+    visuals.window_corner_radius = CornerRadius::same(10);
+    visuals.menu_corner_radius = CornerRadius::same(8);
+    visuals.window_stroke = Stroke::new(1.0, colors::BORDER);
+    visuals.selection.bg_fill = Color32::from_rgb(0xDB, 0xE8, 0xFD);
+    visuals.selection.stroke = Stroke::new(1.0, colors::ACCENT);
+    let radius = CornerRadius::same(6);
+    let widgets = &mut visuals.widgets;
+    widgets.noninteractive.bg_stroke = Stroke::new(1.0, colors::BORDER);
+    widgets.noninteractive.fg_stroke = Stroke::new(1.0, colors::TEXT);
+    widgets.noninteractive.corner_radius = radius;
+    widgets.inactive.bg_fill = Color32::from_rgb(0xF1, 0xF3, 0xF6);
+    widgets.inactive.weak_bg_fill = Color32::from_rgb(0xF1, 0xF3, 0xF6);
+    widgets.inactive.bg_stroke = Stroke::new(1.0, colors::BORDER);
+    widgets.inactive.fg_stroke = Stroke::new(1.0, colors::TEXT);
+    widgets.inactive.corner_radius = radius;
+    widgets.hovered.bg_fill = Color32::from_rgb(0xE8, 0xEE, 0xF8);
+    widgets.hovered.weak_bg_fill = Color32::from_rgb(0xE8, 0xEE, 0xF8);
+    widgets.hovered.bg_stroke = Stroke::new(1.0, Color32::from_rgb(0xA9, 0xC1, 0xF5));
+    widgets.hovered.fg_stroke = Stroke::new(1.5, colors::TEXT);
+    widgets.hovered.corner_radius = radius;
+    widgets.active.bg_fill = Color32::from_rgb(0xDB, 0xE8, 0xFD);
+    widgets.active.weak_bg_fill = Color32::from_rgb(0xDB, 0xE8, 0xFD);
+    widgets.active.bg_stroke = Stroke::new(1.0, colors::ACCENT);
+    widgets.active.fg_stroke = Stroke::new(1.5, colors::TEXT);
+    widgets.active.corner_radius = radius;
+    widgets.open = widgets.active;
     ctx.set_visuals(visuals);
     ctx.global_style_mut(|style| {
-        style.spacing.item_spacing = egui::vec2(6.0, 4.0);
+        style.spacing.item_spacing = egui::vec2(6.0, 5.0);
         style.spacing.button_padding = egui::vec2(8.0, 3.0);
+        style.spacing.interact_size.y = 22.0;
+        style.spacing.indent = 14.0;
+        style.spacing.window_margin = egui::Margin::same(12);
     });
 }

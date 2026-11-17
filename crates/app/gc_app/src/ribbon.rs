@@ -94,7 +94,7 @@ pub(crate) fn show(
                             *tab = Tab::Sketch;
                         }
                     }
-                    if ribbon_button(ui, Icon::View, tr!(lang, CmdSketch3d), false, !sketching).clicked() {
+                    if ribbon_button(ui, Icon::Line, tr!(lang, CmdSketch3d), false, !sketching).clicked() {
                         drop(session.create_sketch_3d());
                         *tab = Tab::Sketch;
                     }
@@ -153,13 +153,13 @@ pub(crate) fn show(
             Tab::Robot => action = robot_tab(ui, session, viewport, cell, library, lang),
             Tab::View => {
                 ribbon_group(ui, tr!(lang, GroupViews), |ui| {
-                    for (view, label) in [
-                        (StandardView::Iso, Msg::ViewHome),
-                        (StandardView::Front, Msg::ViewFront),
-                        (StandardView::Top, Msg::ViewTop),
-                        (StandardView::Right, Msg::ViewRight),
+                    for (view, label, icon) in [
+                        (StandardView::Iso, Msg::ViewHome, Icon::Home),
+                        (StandardView::Front, Msg::ViewFront, Icon::View),
+                        (StandardView::Top, Msg::ViewTop, Icon::View),
+                        (StandardView::Right, Msg::ViewRight, Icon::View),
                     ] {
-                        if ribbon_button(ui, Icon::View, label.text(lang), false, true).clicked() {
+                        if ribbon_button(ui, icon, label.text(lang), false, true).clicked() {
                             viewport.look(view);
                         }
                     }
@@ -172,7 +172,9 @@ pub(crate) fn show(
                     if ribbon_button(ui, Icon::View, tr!(lang, ViewOrtho), ortho, true).clicked() {
                         viewport.camera.ortho = true;
                     }
-                    if ribbon_button(ui, Icon::View, tr!(lang, ViewPerspective), !ortho, true).clicked() {
+                    if ribbon_button(ui, Icon::Perspective, tr!(lang, ViewPerspective), !ortho, true)
+                        .clicked()
+                    {
                         viewport.camera.ortho = false;
                     }
                 });
@@ -197,7 +199,7 @@ fn robot_tab(
     ribbon_group(ui, tr!(lang, GroupAdd), |ui| {
         // One robot per cell for now: the panels show the first one.
         // The robot library in one list: UR3e, UR5e, UR10e, UR16e and the sample arm.
-        let add = ribbon_button(ui, Icon::View, tr!(lang, CmdRobotLibrary), false, robot.is_none());
+        let add = ribbon_button(ui, Icon::Robot, tr!(lang, CmdRobotLibrary), false, robot.is_none());
         egui::Popup::menu(&add).show(|ui| {
             for (name, urdf) in library {
                 if ui.button(tr!(lang, CmdAddRobot, name)).clicked() {
@@ -209,17 +211,22 @@ fn robot_tab(
                 }
             }
         });
-        if ribbon_button(ui, Icon::View, tr!(lang, CmdImportRobot), false, robot.is_none()).clicked() {
+        if ribbon_button(ui, Icon::Import, tr!(lang, CmdImportRobot), false, robot.is_none()).clicked() {
             action = Some(RibbonAction::ImportRobot);
         }
-        if ribbon_button(ui, Icon::View, tr!(lang, CmdImportMesh), false, true).clicked() {
+        if ribbon_button(ui, Icon::Import, tr!(lang, CmdImportMesh), false, true).clicked() {
             action = Some(RibbonAction::ImportMesh);
         }
         let at = |x: f64, z: f64| Placement { xyz: [x, 0.0, z], rpy: [0.0; 3] };
         for (icon, label, solid, placement) in [
-            (Icon::Rectangle, Msg::CmdAddBox, Solid::Box { size: [0.1, 0.1, 1.4] }, at(0.55, 0.7)),
-            (Icon::Circle, Msg::CmdAddCylinder, Solid::Cylinder { radius: 0.06, length: 0.8 }, at(0.0, 0.4)),
-            (Icon::Circle, Msg::CmdAddSphere, Solid::Sphere { radius: 0.1 }, at(0.0, 0.1)),
+            (Icon::Cuboid, Msg::CmdAddBox, Solid::Box { size: [0.1, 0.1, 1.4] }, at(0.55, 0.7)),
+            (
+                Icon::Cylinder,
+                Msg::CmdAddCylinder,
+                Solid::Cylinder { radius: 0.06, length: 0.8 },
+                at(0.0, 0.4),
+            ),
+            (Icon::Sphere, Msg::CmdAddSphere, Solid::Sphere { radius: 0.1 }, at(0.0, 0.1)),
         ] {
             if ribbon_button(ui, icon, label.text(lang), false, true).clicked() {
                 // New bodies are spread out sideways so that they do not hide each other.
@@ -234,7 +241,7 @@ fn robot_tab(
         }
     });
     ribbon_group(ui, tr!(lang, GroupPath), |ui| {
-        if ribbon_button(ui, Icon::Text("+P"), tr!(lang, CmdAddWaypoint), false, robot.is_some()).clicked()
+        if ribbon_button(ui, Icon::Waypoint, tr!(lang, CmdAddWaypoint), false, robot.is_some()).clicked()
             && let Some(robot) = robot
         {
             drop(session.add_waypoint_here(robot));
@@ -247,7 +254,7 @@ fn robot_tab(
             _ => None,
         };
         let enabled = robot.is_some() && point.is_some();
-        if ribbon_button(ui, Icon::Text("+S"), tr!(lang, CmdWaypointAtPoint), false, enabled).clicked()
+        if ribbon_button(ui, Icon::Waypoint, tr!(lang, CmdWaypointAtPoint), false, enabled).clicked()
             && let (Some(robot), Some((sketch, point))) = (robot, point)
         {
             drop(session.add_waypoint(robot, WaypointTarget::SketchPoint { sketch, point }));
@@ -266,8 +273,7 @@ fn robot_tab(
             .active_sketch()
             .map(|(id, _)| id)
             .filter(|_| (1..=3).contains(&frame_points.len()) && frame_points.len() == order.len());
-        if ribbon_button(ui, Icon::Text("+F"), tr!(lang, CmdWorkFrame), false, frame_sketch.is_some())
-            .clicked()
+        if ribbon_button(ui, Icon::Frame, tr!(lang, CmdWorkFrame), false, frame_sketch.is_some()).clicked()
             && let Some(sketch) = frame_sketch
         {
             // A refusal (a point can still move, or the points give no axes) is explained in the status bar.
@@ -275,7 +281,7 @@ fn robot_tab(
         }
         let frame = cell.active_frame(session);
         let enabled = robot.is_some() && frame.is_some();
-        if ribbon_button(ui, Icon::Text("+W"), tr!(lang, CmdWaypointInFrame), false, enabled).clicked()
+        if ribbon_button(ui, Icon::Waypoint, tr!(lang, CmdWaypointInFrame), false, enabled).clicked()
             && let (Some(robot), Some(frame)) = (robot, frame)
         {
             drop(session.add_waypoint_in_frame(robot, frame));
@@ -287,7 +293,7 @@ fn robot_tab(
             .filter(|(_, w)| Some(w.robot) == robot)
             .map(|(id, _)| id)
             .collect();
-        if ribbon_button(ui, Icon::Line, tr!(lang, CmdMakePath), false, !waypoints.is_empty()).clicked()
+        if ribbon_button(ui, Icon::Path, tr!(lang, CmdMakePath), false, !waypoints.is_empty()).clicked()
             && let Some(robot) = robot
         {
             // The new path becomes the one the panel works on.
@@ -322,7 +328,7 @@ fn robot_tab(
         }
         let planned = path.is_some_and(|p| session.planned(p).is_some());
         let label = if cell.playing { tr!(lang, CmdStop) } else { tr!(lang, CmdPlay) };
-        if ribbon_button(ui, Icon::Text(">"), label, cell.playing, planned).clicked()
+        if ribbon_button(ui, Icon::Play, label, cell.playing, planned).clicked()
             && let Some(path) = path
         {
             cell.playing = !cell.playing;

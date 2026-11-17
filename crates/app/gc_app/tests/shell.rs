@@ -1523,6 +1523,8 @@ fn the_example_cell_opens_planned() {
     let now = [0.3, -1.6, 1.5, -1.4, -1.57, 0.2];
     harness.state_mut().session.jog(robot, &now);
     harness.state_mut().session.end_jog();
+    harness.get_by_label("지금 로봇 자세로 다시 저장").scroll_to_me();
+    harness.run();
     harness.get_by_label("지금 로봇 자세로 다시 저장").click();
     harness.run();
     let target = harness.state().session.doc().get(taught).unwrap().target.clone();

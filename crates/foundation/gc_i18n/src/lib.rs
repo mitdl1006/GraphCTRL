@@ -446,6 +446,8 @@ messages! {
     CalcCompose => ("A · B", "A · B"),
     CalcInverse => ("A^-1", "A^-1"),
     CalcRelative => ("A^-1 · B (A에서 본 B)", "A^-1 · B (B seen from A)"),
+    PropSteps => ("웨이포인트 순서", "Waypoints in order"),
+    PropResult => ("결과", "Result"),
     CmdExample => ("예제 열기 (UR5e 셀)", "Open example (UR5e cell)"),
     ExampleFailed => ("예제를 열 수 없습니다: {0}", "The example could not be opened: {0}"),
     PanelTool => ("툴", "Tool"),

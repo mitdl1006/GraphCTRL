@@ -728,8 +728,8 @@ impl eframe::App for GraphCtrlApp {
                 self.notice.as_deref(),
             );
         });
-        egui::Panel::left("browser").show(ui, |ui| {
-            ui.set_min_width(190.0);
+        // The side panels keep their width: the user can drag it within a range, content never widens it.
+        egui::Panel::left("browser").default_size(210.0).size_range(180.0..=360.0).show(ui, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 match gc_panels::browser(ui, &self.session, lang, &mut self.params) {
                     Some(BrowserAction::EditSketch(id)) => {
@@ -759,8 +759,8 @@ impl eframe::App for GraphCtrlApp {
                 }
             });
         });
-        egui::Panel::right("properties").show(ui, |ui| {
-            ui.set_min_width(250.0);
+        egui::Panel::right("properties").default_size(330.0).size_range(280.0..=520.0).show(ui, |ui| {
+            ui.set_max_width(ui.available_width());
             egui::ScrollArea::vertical().show(ui, |ui| {
                 gc_panels::properties(ui, &mut self.session, lang, &mut self.expression);
                 gc_panels::cell(ui, &mut self.session, lang, &mut self.cell);

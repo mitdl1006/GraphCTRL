@@ -9,6 +9,9 @@ use gc_ui::colors;
 /// Display names of the planners, in the order of [`PLANNERS`].
 const PLANNER_NAMES: [&str; 5] = ["RRT-Connect", "RRT", "RRT*", "Informed RRT*", "PRM"];
 
+/// The width of a number field, so that rows of X, Y, Z line up.
+const FIELD_WIDTH: f32 = 66.0;
+
 /// State of the cell panels that lives between frames.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct CellUi {
@@ -56,12 +59,18 @@ pub fn cell(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) 
     let focus = session.selected_item();
     if let Some(item) = focus {
         if let Some(name) = session.item_name(item) {
-            ui.add_space(6.0);
-            ui.label(RichText::new(name).heading().color(colors::SELECTED));
+            let kind = match item {
+                CellItem::Body(_) => tr!(lang, BrowserBodies),
+                CellItem::Robot(_) => tr!(lang, BrowserRobots),
+                CellItem::Waypoint(_) => tr!(lang, BrowserWaypoints),
+                CellItem::Frame(_) => tr!(lang, BrowserFrames),
+                CellItem::Path(_) => tr!(lang, BrowserPaths),
+            };
+            gc_ui::panel::title(ui, kind, &name);
         }
     } else if !session.doc().robots().is_empty() || !session.doc().bodies().is_empty() {
-        ui.add_space(6.0);
-        ui.weak(tr!(lang, PropCellOverview));
+        ui.add_space(4.0);
+        gc_ui::panel::note(ui, tr!(lang, PropCellOverview));
     }
     let first_robot = session.doc().robots().iter().next().map(|(id, _)| id);
     let robot = match focus {
@@ -79,7 +88,7 @@ pub fn cell(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) 
         Some(CellItem::Body(id)) => bodies(ui, session, lang, Some(id)),
         Some(_) => {}
     }
-    if matches!(focus, None | Some(CellItem::Frame(_) | CellItem::Waypoint(_))) {
+    if matches!(focus, None | Some(CellItem::Frame(_))) {
         frames(ui, session, lang, state, focus);
     }
     if let Some(CellItem::Waypoint(id)) = focus {
@@ -114,8 +123,7 @@ fn jog(ui: &mut Ui, session: &mut Session, lang: Lang, robot: gc_core::Id<gc_doc
     else {
         return;
     };
-    ui.add_space(8.0);
-    ui.label(RichText::new(tr!(lang, PanelJog)).strong());
+    gc_ui::panel::section(ui, tr!(lang, PanelJog));
     transparency(ui, session, lang, gc_session::Shown::Robot(robot));
     let mut changed = false;
     let chain = &loaded.chain;
@@ -126,10 +134,15 @@ fn jog(ui: &mut Ui, session: &mut Session, lang: Lang, robot: gc_core::Id<gc_doc
         // Only the text is rounded. A slider told to keep one decimal would round the value itself and
         // report that as a change, which would move the robot by itself.
         let slider = egui::Slider::new(&mut degrees, lower..=upper)
-            .text(name)
             .custom_formatter(|value, _| format!("{value:.1}"))
             .suffix("°");
-        ui.add(slider);
+        // One row per joint: its name in the label column, the slider filling the rest.
+        ui.horizontal(|ui| {
+            let label = gc_ui::panel::fixed_label(ui, 112.0, name);
+            // Room for the value box beside the slider, so that the row never widens the panel.
+            ui.spacing_mut().slider_width = (ui.available_width() - 84.0).clamp(60.0, 260.0);
+            ui.add(slider).labelled_by(label.id);
+        });
         if (degrees - shown).abs() > 1e-9 {
             joints[index] = degrees.to_radians();
             changed = true;
@@ -151,8 +164,7 @@ fn taught(ui: &mut Ui, session: &mut Session, lang: Lang, waypoint: gc_core::Id<
     let Some(robot) = session.doc().get(waypoint).map(|w| w.robot) else { return };
     match target {
         gc_doc::WaypointTarget::Joints(mut q) => {
-            ui.add_space(8.0);
-            ui.label(RichText::new(tr!(lang, PropTaughtJoints)).strong());
+            gc_ui::panel::section(ui, tr!(lang, PropTaughtJoints));
             let names: Vec<String> = session
                 .robot_model(robot)
                 .map(|loaded| loaded.chain.joint_names().to_vec())
@@ -160,7 +172,19 @@ fn taught(ui: &mut Ui, session: &mut Session, lang: Lang, waypoint: gc_core::Id<
             let mut changed = false;
             for (index, value) in q.iter_mut().enumerate() {
                 let name = names.get(index).cloned().unwrap_or_else(|| format!("J{}", index + 1));
-                changed |= degrees(ui, value, &name);
+                ui.horizontal(|ui| {
+                    let label = gc_ui::panel::fixed_label(ui, 112.0, &name);
+                    let mut shown = value.to_degrees() + 0.0;
+                    let drag = egui::DragValue::new(&mut shown).speed(1.0).suffix("°").max_decimals(3);
+                    if ui
+                        .add_sized([90.0, ui.spacing().interact_size.y], drag)
+                        .labelled_by(label.id)
+                        .changed()
+                    {
+                        *value = shown.to_radians();
+                        changed = true;
+                    }
+                });
             }
             if ui.button(tr!(lang, CmdTeachAgain)).clicked()
                 && let Some(now) = session.robot_joints(robot)
@@ -217,7 +241,8 @@ pub fn problem_text(lang: Lang, problem: &gc_session::StateProblem) -> String {
 fn degrees(ui: &mut Ui, value: &mut f64, name: &str) -> bool {
     // Adding zero turns -0 into 0, so that a value is never shown as "-0".
     let mut shown = value.to_degrees() + 0.0;
-    let changed = ui.add(egui::DragValue::new(&mut shown).speed(1.0).prefix(format!("{name} "))).changed();
+    let drag = egui::DragValue::new(&mut shown).speed(1.0).prefix(format!("{name} "));
+    let changed = ui.add_sized([FIELD_WIDTH, ui.spacing().interact_size.y], drag).changed();
     if changed {
         *value = shown.to_radians();
     }
@@ -227,14 +252,14 @@ fn degrees(ui: &mut Ui, value: &mut f64, name: &str) -> bool {
 /// Position and rotation of a placement. Returns true when the user changed something.
 pub(crate) fn placement(ui: &mut Ui, lang: Lang, placement: &mut gc_doc::Placement) -> bool {
     let mut changed = false;
-    ui.label(tr!(lang, PropPosition));
     ui.horizontal(|ui| {
+        gc_ui::panel::label(ui, tr!(lang, PropPosition));
         for (value, name) in placement.xyz.iter_mut().zip(["X", "Y", "Z"]) {
             changed |= millimetres(ui, value, name, -100_000.0);
         }
     });
-    ui.label(tr!(lang, PropRotation));
     ui.horizontal(|ui| {
+        gc_ui::panel::label(ui, tr!(lang, PropRotation));
         for (value, name) in placement.rpy.iter_mut().zip(["R", "P", "Y"]) {
             changed |= degrees(ui, value, name);
         }
@@ -281,7 +306,7 @@ fn transparency(ui: &mut Ui, session: &mut Session, lang: Lang, item: gc_session
 fn millimetres(ui: &mut Ui, value: &mut f64, name: &str, least: f64) -> bool {
     let mut mm = *value * 1000.0 + 0.0;
     let drag = egui::DragValue::new(&mut mm).speed(1.0).range(least..=100_000.0).prefix(format!("{name} "));
-    let changed = ui.add(drag).changed();
+    let changed = ui.add_sized([FIELD_WIDTH, ui.spacing().interact_size.y], drag).changed();
     if changed {
         *value = mm / 1000.0;
     }
@@ -356,8 +381,7 @@ fn frames(
     if frames.is_empty() {
         return;
     }
-    ui.add_space(8.0);
-    ui.label(RichText::new(tr!(lang, PanelFrames)).strong());
+    gc_ui::panel::section(ui, tr!(lang, PanelFrames));
     if let Some(active) = state.active_frame(session) {
         let mut chosen = active;
         let name = frames.iter().find(|(id, _)| *id == active).map(|(_, n)| n.clone()).unwrap_or_default();
@@ -527,8 +551,7 @@ fn bodies(ui: &mut Ui, session: &mut Session, lang: Lang, only: Option<gc_core::
     if ids.is_empty() {
         return;
     }
-    ui.add_space(8.0);
-    ui.label(RichText::new(tr!(lang, PanelBodies)).strong());
+    gc_ui::panel::section(ui, tr!(lang, PanelBodies));
     for id in ids {
         let Some(mut body) = session.shown_body(id).cloned() else { continue };
         let mut changed = false;
@@ -552,8 +575,7 @@ fn paths(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) {
         return;
     };
     let Some(path) = session.doc().get(path_id).cloned() else { return };
-    ui.add_space(8.0);
-    ui.label(RichText::new(tr!(lang, PanelPath)).strong());
+    gc_ui::panel::section(ui, tr!(lang, PanelPath));
     // With several paths, this chooses the one the panel and the ribbon work on.
     let names: Vec<_> = session.doc().paths().iter().map(|(id, p)| (id, p.name.clone())).collect();
     if names.len() > 1 {
@@ -569,8 +591,6 @@ fn paths(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) {
             session.set_playback(None);
             return;
         }
-    } else {
-        ui.label(&path.name);
     }
     let mut planner = path.planner.clone();
     let mut seed = path.seed;
@@ -589,6 +609,7 @@ fn paths(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) {
         // A refusal is shown in the status bar.
         drop(session.execute(&Command::Cell(CellOp::SetPlanner { id: path_id, planner, seed })));
     }
+    gc_ui::panel::section(ui, tr!(lang, PropSteps));
     steps(ui, session, lang, path_id, &path);
     tcp_speed(ui, session, lang, path_id, path.tcp_speed);
     let status = session.plan_status(path_id);
@@ -597,7 +618,8 @@ fn paths(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) {
         PlanStatus::Failed => colors::ERROR,
         PlanStatus::Stale | PlanStatus::NotPlanned | PlanStatus::Planning => colors::INACTIVE,
     };
-    ui.colored_label(color, status_text(lang, status));
+    gc_ui::panel::section(ui, tr!(lang, PropResult));
+    gc_ui::panel::chip(ui, status_text(lang, status), color);
     if let Some(error) = session.plan_error(path_id) {
         ui.colored_label(colors::ERROR, error);
     }
@@ -607,17 +629,19 @@ fn paths(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) {
         return;
     };
     let duration = planned.duration();
-    ui.label(tr!(lang, PlanDuration, format!("{duration:.2}")));
-    ui.label(tr!(lang, PlanPeakTcp, format!("{:.0}", planned.peak_tcp_speed() * 1000.0)));
-    let clearance = planned.min_clearance();
-    if clearance.is_finite() {
-        ui.label(tr!(lang, PlanClearance, format!("{:.1}", clearance * 1000.0)));
-    }
-    if planned.segments.iter().all(|s| s.straight) {
-        ui.label(tr!(lang, PlanStraight));
-    } else {
-        ui.label(tr!(lang, PlanChecks, planned.state_checks()));
-    }
+    gc_ui::panel::card(ui, |ui| {
+        ui.label(tr!(lang, PlanDuration, format!("{duration:.2}")));
+        ui.label(tr!(lang, PlanPeakTcp, format!("{:.0}", planned.peak_tcp_speed() * 1000.0)));
+        let clearance = planned.min_clearance();
+        if clearance.is_finite() {
+            ui.label(tr!(lang, PlanClearance, format!("{:.1}", clearance * 1000.0)));
+        }
+        if planned.segments.iter().all(|s| s.straight) {
+            gc_ui::panel::note(ui, tr!(lang, PlanStraight));
+        } else {
+            gc_ui::panel::note(ui, &tr!(lang, PlanChecks, planned.state_checks()));
+        }
+    });
     let mut time = session.playback().filter(|(id, _)| *id == path_id).map_or(0.0, |(_, t)| t);
     let before = time;
     let slider = egui::Slider::new(&mut time, 0.0..=duration)

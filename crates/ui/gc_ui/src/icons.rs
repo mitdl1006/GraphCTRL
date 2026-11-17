@@ -23,6 +23,28 @@ pub enum Icon {
     Finish,
     /// A cube seen from a corner.
     View,
+    /// A robot arm: base, two links and a gripper.
+    Robot,
+    /// A box seen from a corner.
+    Cuboid,
+    /// An upright cylinder.
+    Cylinder,
+    /// A sphere with its equator.
+    Sphere,
+    /// A waypoint: a diamond with the tool's axis.
+    Waypoint,
+    /// Three axes from an origin.
+    Frame,
+    /// A path through three points.
+    Path,
+    /// A play triangle.
+    Play,
+    /// An arrow into a tray.
+    Import,
+    /// A house.
+    Home,
+    /// A box in perspective, its far face smaller.
+    Perspective,
     /// A short text, for constraint symbols.
     Text(&'static str),
 }
@@ -115,6 +137,96 @@ impl Icon {
                     (right_low, low),
                 ] {
                     line(a, b);
+                }
+            }
+            Self::Robot => {
+                let thick = Stroke::new(2.2, color);
+                painter.line_segment([at(0.15, 0.9), at(0.55, 0.9)], thick);
+                painter.line_segment([at(0.35, 0.9), at(0.35, 0.62)], thick);
+                painter.line_segment([at(0.35, 0.62), at(0.55, 0.28)], thick);
+                painter.line_segment([at(0.55, 0.28), at(0.82, 0.42)], thick);
+                painter.circle_filled(at(0.35, 0.62), 2.6, color);
+                painter.circle_filled(at(0.55, 0.28), 2.6, color);
+                line(at(0.82, 0.42), at(0.9, 0.34));
+                line(at(0.82, 0.42), at(0.88, 0.52));
+            }
+            Self::Cuboid | Self::Perspective => {
+                let far = if matches!(self, Self::Perspective) { 0.14 } else { 0.0 };
+                let front = [at(0.12, 0.38), at(0.62, 0.38), at(0.62, 0.88), at(0.12, 0.88)];
+                let back = [
+                    at(0.38 + far, 0.12 + far),
+                    at(0.88 - far, 0.12 + far),
+                    at(0.88 - far, 0.62 - far),
+                    at(0.38 + far, 0.62 - far),
+                ];
+                for i in 0..4 {
+                    line(front[i], front[(i + 1) % 4]);
+                    line(front[i], back[i]);
+                }
+                line(back[0], back[1]);
+                line(back[1], back[2]);
+            }
+            Self::Cylinder => {
+                let (w, h) = (rect.width() * 0.34, rect.height() * 0.1);
+                for y in [0.22, 0.8] {
+                    painter.add(egui::Shape::ellipse_stroke(at(0.5, y), egui::vec2(w, h), stroke));
+                }
+                line(at(0.16, 0.22), at(0.16, 0.8));
+                line(at(0.84, 0.22), at(0.84, 0.8));
+            }
+            Self::Sphere => {
+                painter.circle_stroke(at(0.5, 0.5), rect.width() * 0.38, stroke);
+                painter.add(egui::Shape::ellipse_stroke(
+                    at(0.5, 0.5),
+                    egui::vec2(rect.width() * 0.38, rect.height() * 0.12),
+                    stroke,
+                ));
+            }
+            Self::Waypoint => {
+                let diamond = [at(0.5, 0.2), at(0.78, 0.5), at(0.5, 0.8), at(0.22, 0.5)];
+                for i in 0..4 {
+                    line(diamond[i], diamond[(i + 1) % 4]);
+                }
+                dot(at(0.5, 0.5));
+            }
+            Self::Frame => {
+                let o = at(0.3, 0.72);
+                painter
+                    .line_segment([o, at(0.9, 0.72)], Stroke::new(1.8, Color32::from_rgb(0xD0, 0x30, 0x30)));
+                painter
+                    .line_segment([o, at(0.3, 0.1)], Stroke::new(1.8, Color32::from_rgb(0x30, 0x50, 0xD0)));
+                painter
+                    .line_segment([o, at(0.62, 0.42)], Stroke::new(1.8, Color32::from_rgb(0x20, 0xA0, 0x40)));
+                dot(o);
+            }
+            Self::Path => {
+                let points = vec![at(0.12, 0.8), at(0.4, 0.3), at(0.62, 0.62), at(0.88, 0.2)];
+                painter.add(egui::Shape::line(points.clone(), stroke));
+                for p in points {
+                    dot(p);
+                }
+            }
+            Self::Play => {
+                painter.add(egui::Shape::convex_polygon(
+                    vec![at(0.3, 0.18), at(0.82, 0.5), at(0.3, 0.82)],
+                    color,
+                    Stroke::NONE,
+                ));
+            }
+            Self::Import => {
+                line(at(0.5, 0.1), at(0.5, 0.62));
+                line(at(0.5, 0.62), at(0.32, 0.44));
+                line(at(0.5, 0.62), at(0.68, 0.44));
+                line(at(0.15, 0.6), at(0.15, 0.88));
+                line(at(0.15, 0.88), at(0.85, 0.88));
+                line(at(0.85, 0.88), at(0.85, 0.6));
+            }
+            Self::Home => {
+                line(at(0.12, 0.5), at(0.5, 0.15));
+                line(at(0.5, 0.15), at(0.88, 0.5));
+                let walls = [at(0.22, 0.42), at(0.22, 0.88), at(0.78, 0.88), at(0.78, 0.42)];
+                for pair in walls.windows(2) {
+                    line(pair[0], pair[1]);
                 }
             }
             Self::Text(text) => {

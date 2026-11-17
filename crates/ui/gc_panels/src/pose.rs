@@ -91,19 +91,19 @@ pub(crate) fn pose_rows(
     salt: impl std::hash::Hash + std::fmt::Debug,
     rows: &[(String, DPose3)],
 ) {
-    egui::Grid::new(salt).num_columns(3).show(ui, |ui| {
+    ui.push_id(salt, |ui| {
         for (title, pose) in rows {
             let lines = pose_lines(pose);
-            ui.label(title);
-            ui.vertical(|ui| {
-                for line in &lines[..3] {
-                    ui.label(RichText::new(line).monospace());
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(title).size(12.0).strong());
+                if ui.small_button(tr!(lang, CmdCopy)).clicked() {
+                    ui.ctx().copy_text(format!("{title}\n{}", lines.join("\n")));
                 }
             });
-            if ui.small_button(tr!(lang, CmdCopy)).clicked() {
-                ui.ctx().copy_text(format!("{title}\n{}", lines.join("\n")));
+            for line in &lines[..3] {
+                ui.add(egui::Label::new(RichText::new(line).monospace().size(11.5)).extend());
             }
-            ui.end_row();
+            ui.add_space(4.0);
         }
     });
 }
