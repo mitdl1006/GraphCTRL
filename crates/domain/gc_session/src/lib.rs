@@ -12,9 +12,11 @@
 #![cfg_attr(test, allow(clippy::float_cmp, reason = "tests compare exactly representable values"))]
 
 use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 
-use gc_core::Id;
+use gc_core::{Id, Revision};
 use gc_doc::{Applied, Command, Created, Document, EditError, History, Sketch, SketchOp, apply};
+pub use gc_persist::PersistError;
 use gc_sketch::{Curve, DimKind, Dimension, FrameOutcome, Item, SkPoint, SketchDrag, SketchReport};
 use gc_tools::{Preview, Prompt, Tool, ToolEvent, ToolKind, ToolOutput};
 
@@ -52,6 +54,8 @@ pub struct Session {
     request: Option<ValueRequest>,
     offer: Option<ReferenceOffer>,
     last_error: Option<EditError>,
+    path: Option<PathBuf>,
+    saved_revision: Revision,
 }
 
 impl Default for Session {
@@ -74,12 +78,65 @@ impl Session {
             request: None,
             offer: None,
             last_error: None,
+            path: None,
+            saved_revision: Revision::default(),
         }
     }
 
     /// The document.
     pub fn doc(&self) -> &Document {
         &self.doc
+    }
+
+    /// The file the document was loaded from or last saved to.
+    pub fn file_path(&self) -> Option<&Path> {
+        self.path.as_deref()
+    }
+
+    /// True when the document has changes that are not in its file.
+    pub fn is_dirty(&self) -> bool {
+        self.doc.revision() != self.saved_revision
+    }
+
+    fn replace_document(&mut self, doc: Document, path: Option<PathBuf>) {
+        self.saved_revision = doc.revision();
+        self.doc = doc;
+        self.path = path;
+        self.history.clear();
+        self.active = None;
+        self.selection.clear();
+        self.last_error = None;
+        self.set_tool(ToolKind::Select);
+        self.refresh();
+    }
+
+    /// Starts a new, empty document. Unsaved changes are discarded; ask the user first.
+    pub fn new_document(&mut self) {
+        self.replace_document(Document::new(), None);
+    }
+
+    /// Saves the document to `path` and remembers the path.
+    pub fn save_as(&mut self, path: &Path) -> Result<(), PersistError> {
+        gc_persist::save(&self.doc, path)?;
+        self.path = Some(path.to_path_buf());
+        self.saved_revision = self.doc.revision();
+        Ok(())
+    }
+
+    /// Saves the document to its file. Returns `false` when it has none yet (use [`Session::save_as`]).
+    pub fn save(&mut self) -> Result<bool, PersistError> {
+        match self.path.clone() {
+            Some(path) => self.save_as(&path).map(|()| true),
+            None => Ok(false),
+        }
+    }
+
+    /// Opens a document, replacing the current one. Returns the sketches whose stored coordinates violate
+    /// their constraints; they are shown as stored.
+    pub fn open(&mut self, path: &Path) -> Result<Vec<Id<Sketch>>, PersistError> {
+        let loaded = gc_persist::load(path)?;
+        self.replace_document(loaded.doc, Some(path.to_path_buf()));
+        Ok(loaded.needs_repair)
     }
 
     /// The history, for the undo and redo menu entries.

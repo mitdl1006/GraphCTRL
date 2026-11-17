@@ -121,9 +121,9 @@ fn prompt_text(lang: Lang, prompt: Prompt) -> &'static str {
     message.text(lang)
 }
 
-/// The status bar: what the tool expects next, why the last edit was refused, and how constrained the
-/// sketch is.
-pub fn status_bar(ui: &mut Ui, session: &Session, lang: Lang, gpu: bool) {
+/// The status bar: what the tool expects next, why the last edit was refused, a notice from the
+/// application (file saved, file error) and how constrained the sketch is.
+pub fn status_bar(ui: &mut Ui, session: &Session, lang: Lang, gpu: bool, notice: Option<&str>) {
     ui.horizontal(|ui| {
         if session.active_sketch().is_some() {
             ui.label(prompt_text(lang, session.prompt()));
@@ -142,6 +142,10 @@ pub fn status_bar(ui: &mut Ui, session: &Session, lang: Lang, gpu: bool) {
             };
             ui.separator();
             ui.label(RichText::new(message.text(lang)).color(colors::ERROR));
+        }
+        if let Some(notice) = notice {
+            ui.separator();
+            ui.label(notice);
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.weak(if gpu { tr!(lang, GpuOn) } else { tr!(lang, GpuOff) });

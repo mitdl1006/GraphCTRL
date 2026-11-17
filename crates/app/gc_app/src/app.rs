@@ -21,6 +21,35 @@ pub struct RunOptions {
     pub screenshot: Option<PathBuf>,
 }
 
+/// Asks the user for file names. The application uses the operating system's dialogs; tests script the
+/// answers.
+pub trait FileDialogs {
+    /// The file to open, or `None` when the user cancelled.
+    fn open(&mut self) -> Option<PathBuf>;
+    /// The file to save to, or `None` when the user cancelled.
+    fn save(&mut self, suggested_name: &str) -> Option<PathBuf>;
+}
+
+struct NativeDialogs;
+
+impl FileDialogs for NativeDialogs {
+    fn open(&mut self) -> Option<PathBuf> {
+        rfd::FileDialog::new().add_filter("GraphCTRL", &["gctrl"]).pick_file()
+    }
+
+    fn save(&mut self, suggested_name: &str) -> Option<PathBuf> {
+        rfd::FileDialog::new().add_filter("GraphCTRL", &["gctrl"]).set_file_name(suggested_name).save_file()
+    }
+}
+
+/// Something that would discard unsaved changes and therefore waits for the user's answer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Pending {
+    New,
+    Open,
+    Quit,
+}
+
 /// The fields of the Korean input test window.
 #[derive(Default)]
 struct ImeTest {
@@ -41,6 +70,12 @@ pub struct GraphCtrlApp {
     tab: Tab,
     expression: String,
     ime: ImeTest,
+    dialogs: Box<dyn FileDialogs>,
+    /// The latest message about files, shown in the status bar.
+    notice: Option<String>,
+    pending: Option<Pending>,
+    quitting: bool,
+    title: String,
 }
 
 impl GraphCtrlApp {
@@ -57,6 +92,127 @@ impl GraphCtrlApp {
             tab: Tab::Model,
             expression: String::new(),
             ime: ImeTest { dimension: "25 mm".to_owned(), ..ImeTest::default() },
+            dialogs: Box::new(NativeDialogs),
+            notice: None,
+            pending: None,
+            quitting: false,
+            title: String::new(),
+        }
+    }
+
+    /// Replaces the file dialogs, so that tests can answer them.
+    #[must_use]
+    pub fn with_dialogs(mut self, dialogs: Box<dyn FileDialogs>) -> Self {
+        self.dialogs = dialogs;
+        self
+    }
+
+    /// Saves the document, asking for a file name when it has none or when `choose` is set.
+    /// Returns whether it was saved.
+    pub fn save(&mut self, choose: bool) -> bool {
+        let lang = self.lang;
+        let path = match self.session.file_path() {
+            Some(path) if !choose => Some(path.to_path_buf()),
+            _ => self.dialogs.save("Untitled.gctrl"),
+        };
+        let Some(path) = path else { return false };
+        match self.session.save_as(&path) {
+            Ok(()) => {
+                self.notice = Some(tr!(lang, FileSaved, path.display()));
+                true
+            }
+            Err(error) => {
+                self.notice = Some(tr!(lang, FileError, error));
+                false
+            }
+        }
+    }
+
+    /// Starts an action that discards the current document; asks first when there are unsaved changes.
+    fn request(&mut self, action: Pending, ctx: &egui::Context) {
+        if self.session.is_dirty() {
+            self.pending = Some(action);
+        } else {
+            self.perform(action, ctx);
+        }
+    }
+
+    fn perform(&mut self, action: Pending, ctx: &egui::Context) {
+        let lang = self.lang;
+        match action {
+            Pending::New => {
+                self.session.new_document();
+                self.tab = Tab::Model;
+                self.notice = None;
+            }
+            Pending::Open => {
+                let Some(path) = self.dialogs.open() else { return };
+                match self.session.open(&path) {
+                    Ok(needs_repair) => {
+                        self.tab = Tab::Model;
+                        self.notice = (!needs_repair.is_empty())
+                            .then(|| tr!(lang, FileNeedsRepair, needs_repair.len()));
+                    }
+                    Err(error) => self.notice = Some(tr!(lang, FileError, error)),
+                }
+            }
+            Pending::Quit => {
+                self.quitting = true;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        }
+    }
+
+    /// The question shown before unsaved changes would be lost.
+    fn unsaved_question(&mut self, ctx: &egui::Context) {
+        let Some(action) = self.pending else { return };
+        let lang = self.lang;
+        let mut answer = None;
+        egui::Window::new(tr!(lang, AppTitle))
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.label(tr!(lang, AskSaveChanges));
+                ui.horizontal(|ui| {
+                    if ui.button(tr!(lang, CmdSave)).clicked() {
+                        answer = Some(Some(true));
+                    }
+                    if ui.button(tr!(lang, BtnDiscard)).clicked() {
+                        answer = Some(Some(false));
+                    }
+                    if ui.button(tr!(lang, Cancel)).clicked() {
+                        answer = Some(None);
+                    }
+                });
+            });
+        match answer {
+            Some(Some(true)) => {
+                self.pending = None;
+                if self.save(false) {
+                    self.perform(action, ctx);
+                }
+            }
+            Some(Some(false)) => {
+                self.pending = None;
+                self.perform(action, ctx);
+            }
+            Some(None) => self.pending = None,
+            None => {}
+        }
+    }
+
+    /// Keeps the window title in step with the file name and the unsaved marker.
+    fn update_title(&mut self, ctx: &egui::Context) {
+        let name = self
+            .session
+            .file_path()
+            .and_then(|p| p.file_name())
+            .map_or_else(|| tr!(self.lang, Untitled).to_owned(), |n| n.to_string_lossy().into_owned());
+        let title = format!("{name}{} - GraphCTRL", if self.session.is_dirty() { "*" } else { "" });
+        if title != self.title {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            self.title = title;
         }
     }
 
@@ -83,6 +239,11 @@ impl GraphCtrlApp {
                 egui::Key::Z if command => {
                     self.session.undo();
                 }
+                egui::Key::S if command => {
+                    self.save(modifiers.shift);
+                }
+                egui::Key::N if command => self.request(Pending::New, ctx),
+                egui::Key::O if command => self.request(Pending::Open, ctx),
                 egui::Key::Y if command => {
                     self.session.redo();
                 }
@@ -110,8 +271,22 @@ impl GraphCtrlApp {
         let lang = self.lang;
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button(tr!(lang, MenuFile), |ui| {
+                let ctx = ui.ctx().clone();
+                if ui.button(tr!(lang, CmdNew)).clicked() {
+                    self.request(Pending::New, &ctx);
+                }
+                if ui.button(tr!(lang, CmdOpen)).clicked() {
+                    self.request(Pending::Open, &ctx);
+                }
+                if ui.button(tr!(lang, CmdSave)).clicked() {
+                    self.save(false);
+                }
+                if ui.button(tr!(lang, CmdSaveAs)).clicked() {
+                    self.save(true);
+                }
+                ui.separator();
                 if ui.button(tr!(lang, CmdQuit)).clicked() {
-                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                    self.request(Pending::Quit, &ctx);
                 }
             });
             ui.menu_button(tr!(lang, MenuEdit), |ui| {
@@ -212,13 +387,25 @@ impl eframe::App for GraphCtrlApp {
         let ctx = ui.ctx().clone();
         let lang = self.lang;
         self.shortcuts(&ctx);
+        // Closing the window with unsaved changes asks first.
+        if ctx.input(|i| i.viewport().close_requested()) && self.session.is_dirty() && !self.quitting {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.pending = Some(Pending::Quit);
+        }
+        self.update_title(&ctx);
 
         egui::Panel::top("menu").show(ui, |ui| self.menu(ui));
         egui::Panel::top("ribbon").show(ui, |ui| {
             ribbon::show(ui, &mut self.tab, &mut self.session, &mut self.viewport, lang);
         });
         egui::Panel::bottom("status").show(ui, |ui| {
-            gc_panels::status_bar(ui, &self.session, lang, self.viewport.background().has_gpu());
+            gc_panels::status_bar(
+                ui,
+                &self.session,
+                lang,
+                self.viewport.background().has_gpu(),
+                self.notice.as_deref(),
+            );
         });
         egui::Panel::left("browser").show(ui, |ui| {
             ui.set_min_width(190.0);
@@ -233,6 +420,7 @@ impl eframe::App for GraphCtrlApp {
         });
         egui::CentralPanel::no_frame().show(ui, |ui| self.viewport.ui(ui, &mut self.session, lang));
         self.reference_question(&ctx);
+        self.unsaved_question(&ctx);
         if self.ime.open {
             self.ime_window(&ctx);
         }

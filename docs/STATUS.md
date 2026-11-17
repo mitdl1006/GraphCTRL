@@ -38,4 +38,5 @@
 | gc_session | 완료(스케치 범위; 로봇·경로·저장은 해당 단계에서) | 9 (시나리오 S1–S6) |
 | gc_draw | 카메라·내비게이션 완료(ViewCube·피킹은 이후) | 9 |
 | gc_ui / gc_viewport / gc_panels / gc_app | 셸 + 2D 스케치 캔버스 | 4 + kittest 2 |
+| gc_persist | 완료(`.gctrl` v1, 원자적 저장, `.bak`; 자동 저장·복구는 이후) | 4 (save∘load = id, 결정적 출력, 손상·상위 버전 거부) |
 | 그 외 | 스텁 | |

@@ -150,3 +150,73 @@ fn screenshots_for_review() {
     harness.get_by_label("홈").click();
     shot(&mut harness, "review-4-home-view.png");
 }
+
+/// File dialogs that always answer with one path.
+struct Scripted(std::path::PathBuf);
+
+impl gc_app::FileDialogs for Scripted {
+    fn open(&mut self) -> Option<std::path::PathBuf> {
+        Some(self.0.clone())
+    }
+    fn save(&mut self, _: &str) -> Option<std::path::PathBuf> {
+        Some(self.0.clone())
+    }
+}
+
+/// Save, start a new document, open the file again: the sketch is back and the window is not "dirty".
+#[test]
+fn save_new_and_open_through_the_file_menu() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("sample.gctrl");
+    let dialogs = Scripted(path.clone());
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()).with_dialogs(Box::new(dialogs)));
+    harness.run();
+    harness.get_by_label("XY 스케치").click();
+    harness.run();
+    draw_sample(harness.state_mut());
+    harness.run();
+    assert!(harness.state().session.is_dirty());
+    let before = harness.state().session.doc().clone();
+
+    assert!(harness.state_mut().save(false));
+    harness.run();
+    assert!(!harness.state().session.is_dirty());
+    assert!(path.exists());
+
+    // With nothing unsaved, "New" does not ask.
+    harness.get_by_label("파일").click();
+    harness.run();
+    harness.get_by_label("새로 만들기").click();
+    harness.run();
+    assert_eq!(harness.state().session.doc().sketches().len(), 0);
+
+    harness.get_by_label("파일").click();
+    harness.run();
+    harness.get_by_label("열기...").click();
+    harness.run();
+    assert!(harness.state().session.doc().same_content(&before));
+    assert!(!harness.state().session.is_dirty());
+    harness.get_by_label("Sketch1");
+
+    // An edit makes the document dirty again, and "New" then asks before discarding it.
+    harness.state_mut().session.undo();
+    let app = harness.state_mut();
+    let first = app.session.doc().sketches().iter().next().map(|(id, _)| id).unwrap();
+    app.session.enter_sketch(first);
+    app.session.set_tool(ToolKind::Circle);
+    click(app, mm(-30.0, -30.0));
+    click(app, mm(-20.0, -30.0));
+    harness.run();
+    assert!(harness.state().session.is_dirty());
+    harness.get_by_label("파일").click();
+    harness.run();
+    harness.get_by_label("새로 만들기").click();
+    harness.run();
+    harness.get_by_label("변경 내용을 저장할까요?");
+    harness.get_by_label("취소").click();
+    harness.run();
+    assert_eq!(harness.state().session.doc().sketches().len(), 1, "cancelling keeps the document");
+}

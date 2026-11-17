@@ -249,6 +249,46 @@ impl Document {
         doc
     }
 
+    /// The raw value the next new id will get. Saved with the document so that ids are never reused.
+    pub fn next_id(&self) -> std::num::NonZeroU64 {
+        self.ids.peek()
+    }
+
+    /// Rebuilds a document from saved parts. Fails when an entity refers to one that is missing.
+    pub fn restore(
+        params: impl IntoIterator<Item = (Id<Param>, Param)>,
+        frames: impl IntoIterator<Item = (Id<Frame>, Frame)>,
+        sketches: impl IntoIterator<Item = (Id<Sketch>, Sketch)>,
+        next_id: std::num::NonZeroU64,
+    ) -> Result<Self, crate::DocError> {
+        let mut doc = Self {
+            params: Store { items: params.into_iter().collect() },
+            frames: Store { items: frames.into_iter().collect() },
+            sketches: Store { items: sketches.into_iter().collect() },
+            ids: IdAlloc::new(),
+            revision: Revision::default(),
+        };
+        // Whatever the file claims, new ids must be above every id in use.
+        let mut highest = next_id;
+        let mut raise = |raw: std::num::NonZeroU64| highest = highest.max(raw.saturating_add(1));
+        doc.params.items.keys().for_each(|id| raise(id.raw()));
+        doc.frames.items.keys().for_each(|id| raise(id.raw()));
+        for (id, sketch) in &doc.sketches.items {
+            raise(id.raw());
+            sketch.points.keys().for_each(|p| raise(p.raw()));
+            sketch.curves.keys().for_each(|c| raise(c.raw()));
+            sketch.constraints.keys().for_each(|c| raise(c.raw()));
+            sketch.dimensions.keys().for_each(|d| raise(d.raw()));
+        }
+        if let Some(before) = std::num::NonZeroU64::new(highest.get() - 1) {
+            doc.ids.reserve_through(before);
+        }
+        match doc.references().into_iter().find(|(_, to)| !doc.contains(*to)) {
+            Some((from, to)) => Err(crate::DocError::Dangling(from, to)),
+            None => Ok(doc),
+        }
+    }
+
     /// Counts committed changes (including undo and redo). Caches compare it to know they are stale.
     pub fn revision(&self) -> Revision {
         self.revision

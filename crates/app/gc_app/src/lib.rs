@@ -3,4 +3,4 @@
 mod app;
 mod ribbon;
 
-pub use app::{GraphCtrlApp, RunOptions, run};
+pub use app::{FileDialogs, GraphCtrlApp, RunOptions, run};

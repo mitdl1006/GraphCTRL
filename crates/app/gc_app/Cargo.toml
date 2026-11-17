@@ -31,5 +31,6 @@ log.workspace = true
 image.workspace = true
 
 [dev-dependencies]
+tempfile.workspace = true
 egui_kittest.workspace = true
 gc_test_support.workspace = true

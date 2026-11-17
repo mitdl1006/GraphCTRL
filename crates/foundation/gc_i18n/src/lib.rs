@@ -89,11 +89,11 @@ messages! {
     /// Command: New document.
     CmdNew => ("새로 만들기", "New"),
     /// Command: Open a document.
-    CmdOpen => ("열기…", "Open…"),
+    CmdOpen => ("열기...", "Open..."),
     /// Command: Save the document.
     CmdSave => ("저장", "Save"),
     /// Command: Save under another name.
-    CmdSaveAs => ("다른 이름으로 저장…", "Save As…"),
+    CmdSaveAs => ("다른 이름으로 저장...", "Save As..."),
     /// Command: Quit the application.
     CmdQuit => ("끝내기", "Quit"),
     /// Command: Undo.
@@ -246,6 +246,18 @@ messages! {
     GpuOn => ("GPU 사용 중", "GPU in use"),
     /// Status: no GPU.
     GpuOff => ("GPU 없음", "No GPU"),
+    /// Question before discarding unsaved changes.
+    AskSaveChanges => ("변경 내용을 저장할까요?", "Save the changes?"),
+    /// Button: do not save.
+    BtnDiscard => ("저장 안 함", "Don't Save"),
+    /// Status: a file operation failed. `{0}` is the reason.
+    FileError => ("파일 오류: {0}", "File error: {0}"),
+    /// Status: the document was saved. `{0}` is the file name.
+    FileSaved => ("저장했습니다: {0}", "Saved: {0}"),
+    /// Status: some sketches in the opened file do not satisfy their constraints. `{0}` is how many.
+    FileNeedsRepair => ("구속을 만족하지 않는 스케치가 {0}개 있습니다", "{0} sketches do not satisfy their constraints"),
+    /// Title of a document that has no file yet.
+    Untitled => ("제목 없음", "Untitled"),
     /// Button: confirm.
     Ok => ("확인", "OK"),
     /// Button: cancel.
