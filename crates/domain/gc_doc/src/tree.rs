@@ -5,7 +5,7 @@ use gc_core::{AnyId, Id, Kind};
 
 use crate::cell::{Body, MotionPath, Robot, Waypoint, WorkFrame};
 use crate::command::{Created, EditError};
-use crate::design::{Assembly, ComponentFlag, Feature, Occurrence, WorkFeature};
+use crate::design::{Assembly, ComponentFlag, Feature, Occurrence, OriginElement, WorkFeature};
 use crate::document::Document;
 use crate::txn::Txn;
 use gc_sketch::Sketch;
@@ -229,6 +229,11 @@ impl Document {
         }
     }
 
+    /// True when an element of a component's origin folder is shown (all are hidden by default).
+    pub fn origin_visible(&self, occurrence: Occurrence, element: OriginElement) -> bool {
+        self.components_state().origins_shown.contains(&(occurrence, element))
+    }
+
     /// True when the document has no component yet (the first one placed is grounded).
     pub(crate) fn has_no_components(&self) -> bool {
         self.bodies().is_empty() && self.robots().is_empty() && self.assemblies().is_empty()
@@ -292,4 +297,26 @@ pub(crate) fn ground_if_first(txn: &mut Txn<'_>, first: bool, item: AnyId) -> Re
         crate::cell::set_timeline(txn, |t| t.components.grounded.push(Occurrence::Item(item)))?;
     }
     Ok(())
+}
+
+/// Shows or hides elements of a component's origin folder (several at once: one undo step).
+pub(crate) fn set_origin_visible(
+    txn: &mut Txn<'_>,
+    occurrence: Occurrence,
+    elements: &[OriginElement],
+    visible: bool,
+) -> Outcome {
+    if !txn.doc().has_occurrence(occurrence)
+        || elements.iter().any(|e| matches!(e, OriginElement::Axis(a) if *a > 2))
+    {
+        return Err(EditError::BadValue);
+    }
+    crate::cell::set_timeline(txn, |t| {
+        let shown = &mut t.components.origins_shown;
+        shown.retain(|(o, e)| !(*o == occurrence && elements.contains(e)));
+        if visible {
+            shown.extend(elements.iter().map(|e| (occurrence, *e)));
+        }
+    })?;
+    Ok((Vec::new(), if visible { "Show origin" } else { "Hide origin" }))
 }

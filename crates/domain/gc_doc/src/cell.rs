@@ -562,6 +562,7 @@ fn work_feature_ok(
     let plane_ok = |plane: &PlaneRef| match plane {
         PlaneRef::Origin(_) => true,
         PlaneRef::Work(id) => Some(*id) != itself && doc.get(*id).is_some_and(|w| w.geometry.is_plane()),
+        PlaneRef::Component(occurrence, _) => doc.component_origin(*occurrence).is_some(),
     };
     let point_ok = |point: &PointRef| match point {
         PointRef::Origin | PointRef::Fixed(_) => true,
@@ -569,6 +570,7 @@ fn work_feature_ok(
             doc.get(*sketch).is_some_and(|s| s.points.contains_key(point))
         }
         PointRef::Work(id) => Some(*id) != itself && doc.get(*id).is_some_and(|w| w.geometry.is_point()),
+        PointRef::Component(occurrence) => doc.component_origin(*occurrence).is_some(),
     };
     let ok = match &feature.geometry {
         WorkGeometry::PlaneOffset { base, .. } => plane_ok(base),

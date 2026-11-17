@@ -462,6 +462,38 @@ impl Session {
         self.create_sketch_on(gc_doc::PlaneSource::Work(plane))
     }
 
+    /// Creates a 2D sketch on an origin plane of a component (body, robot base, assembly or part) and
+    /// starts editing it. The sketch moves with the component.
+    pub fn create_sketch_on_component(
+        &mut self,
+        occurrence: gc_doc::Occurrence,
+        plane: gc_doc::OriginPlane,
+    ) -> Result<Id<Sketch>, EditError> {
+        self.create_sketch_on(gc_doc::PlaneSource::Component { occurrence, plane })
+    }
+
+    /// Shows or hides elements of a component's origin folder (one undo step; saved). All are hidden by
+    /// default. To switch the whole folder pass all seven elements.
+    pub fn set_origin_visible(
+        &mut self,
+        occurrence: gc_doc::Occurrence,
+        elements: &[gc_doc::OriginElement],
+        visible: bool,
+    ) -> Result<(), EditError> {
+        self.execute(&Command::SetOriginVisible { occurrence, elements: elements.to_vec(), visible })
+            .map(|_| ())
+    }
+
+    /// True when an element of a component's origin folder is shown.
+    pub fn origin_visible(&self, occurrence: gc_doc::Occurrence, element: gc_doc::OriginElement) -> bool {
+        self.doc.origin_visible(occurrence, element)
+    }
+
+    /// A component's origin folder in the world: centre point, axes and planes (assembly P1-2).
+    pub fn component_origin(&self, occurrence: gc_doc::Occurrence) -> Option<gc_doc::ComponentOrigin> {
+        self.doc.component_origin(occurrence)
+    }
+
     /// Creates a 2D sketch on the plane of a triangle of an imported part (a picked face) and starts
     /// editing it: origin at the triangle's centre, normal out of its front side, X along its first
     /// edge. The sketch follows the assembly when it is moved.
