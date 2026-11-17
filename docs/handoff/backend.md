@@ -1,5 +1,61 @@
 # 백엔드 인계 (2026-11-17)
 
+## 2026-11-18 — 어셈블리 P1-5 Project Geometry
+
+근거(원문): To Project Geometry into a 2D Sketch `GUID-B8D8B07B-86F2-4CB7-AB21-3131D94AD1CC.htm`, About Projecting Sketch Geometry
+`GUID-B61431DA-FABC-41EE-945C-6E54B4806582.htm` — 투영은 원본과 연결(원본이 바뀌면 갱신), 원본 삭제 시 고정 스케치 곡선으로 바뀌고
+구속·치수는 유지, Shift+클릭은 구성선 토글의 반대로 투영, Break Link로 연결 해제.
+**명세와 차이**: 원문은 Project **Cut Edges**는 연관되지 않는 스냅샷("if the parent geometry changes, the projected geometry does not
+update")이라고 한다 — 명세 P1-6 수용 기준("평면을 옮기면 갱신")과 다르다. P1-6은 원문대로 스냅샷으로 구현할 예정(리드 판단 필요하면 알려 주세요).
+
+- `SketchOp::Project{source: ProjectSource, construction}` / `session.project_geometry(source, shift) -> Result<Vec<Created>, EditError>`
+  (구성선 = 서식 토글 XOR shift). `ProjectSource::{Point{occurrence, local}, Edge{occurrence, a, b}, OriginAxis{occurrence, axis},
+  WorkPoint(id), WorkAxis(id)}` — 컴포넌트(부품·로봇 링크 포함) 프레임 좌표. 점은 참조점, 모서리·축은 참조점 2개 + 선(축은 ±0.1 m,
+  끝에서 보면 점 하나). 메시 꼭짓점·모서리는 프론트엔드가 피킹 좌표를 컴포넌트 프레임으로 바꿔 Point/Edge로 넘긴다.
+- 연결: `ExternalRef::Projected{owner, part, local_nm}`(gc_sketch). 모든 명령 뒤 `apply`가 투영점을 원본 위치로 옮기고 스케치를 다시 푼다.
+  원본이 없어지면 점은 Free + `Fix` 구속(구속 유지). 원본 삭제를 막지 않는다.
+- 아직: Break Link 명령, 면 클릭 = 모든 루프(메시 루프 추출), 치수·구속 시 자동 투영.
+- 테스트 `gc_session/tests/project_geometry.rs`.
+
+## 2026-11-18 — 관계 구동(Drive) — 리드 요청
+
+- `session.drive_relationship(id, value) -> Result<(), EditError>`: 문서를 바꾸지 않고 관계를 `value`로 구동했을 때의 위치로 보여 준다
+  (Mate·Flush·Insert = 오프셋 m, Rotational = 지금 자세에서의 회전 rad; Rigid는 거부). 풀 수 없는 값은 거부하고 직전 표시 유지.
+  `session.end_drive_relationship()`로 문서 위치로 복귀. `session.driven_placement(item) -> Option<Placement>`.
+- 표시 연결: `shown_body`(바디), `shown_base`(로봇), `assembly_parts`(어셈블리)가 구동 위치를 쓴다 — 렌더가 이 셋을 쓰면 추가 작업 없음.
+  계산은 `Document::driven(id, value) -> Result<Vec<(AnyId, DPose3)>, EditError>`(문서 사본에 같은 명령을 적용해 풀이).
+- 아직: 한계(Start/End)·단계·반복 재생은 대시보드 쪽(리드). 구동 중 문서가 바뀌면 표시가 낡을 수 있으니 대화상자를 닫을 때 end 호출.
+  원문 A31(To Drive Relationships)의 GUID가 명세 표에서 잘려 있어 원문 대조는 아직.
+- 테스트 `gc_session/tests/robot_links.rs::drive_plays_a_relationship_through_values_without_changing_the_document`.
+
+## 2026-11-18 — 로봇 링크를 하위 컴포넌트로(리드 순서 ②)
+
+사용자 요구 "로봇조차도 xyz가 있으니 xy평면 같은 것들에 접근 가능해야".
+- 문서: `Robot.links: Vec<RobotLink{name, parent, origin, axis, motion: LinkMotion::{Fixed, Turn{joint, scale, offset}, Slide{..}}}>` —
+  설명(URDF)에서 뽑은 링크 트리를 평범한 자료로 저장(문서가 URDF를 읽지 않고 링크 프레임을 계산). `Robot::link_frames()`(로봇 배치 기준).
+  로봇을 추가할 때 채우고, 옛 프로젝트는 열 때 채운다(편집이 아니며 '변경됨'으로 표시 안 함). `CellOp::SetRobotLinks{id, links}`.
+  미믹 관절은 구동 관절의 배율·오프셋으로, 계획 체인 밖 관절은 0으로 고정.
+- `Occurrence::Link{robot, index}` — `component_origin`(관절값을 따라 움직이는 링크 원점 폴더: 평면 3·축 3·점), 구속·조인트 선택,
+  `create_sketch_on_component`, 원점 표시, 가시성(숨김) 모두 같은 API. 억제는 거부.
+- **조인트 값이 바뀌면(SetJoints) 관계를 다시 풀되 그 로봇의 베이스는 그대로**: 링크에 Rigid로 붙인 바디(툴·공작물)가 팔을 따라간다.
+- 세션: `session.robot_links(robot) -> Vec<ComponentNode>`(로봇 노드 아래 표시용; `components()`에는 넣지 않음 — 상태바 개수·기존 트리 유지).
+  미리보기 관절(조그·구동·재생)은 문서 값이 아니므로 링크 원점은 문서 관절값 기준이다.
+- 테스트 `gc_session/tests/robot_links.rs`(세션 FK와 일치, 관절 변경 추종, 링크에 붙인 바디·링크 평면 스케치 추종, 옛 프로젝트 채움).
+
+## 2026-11-18 — 어셈블리 P1-10 구속 상태·남은 자유도
+
+근거(원문): Degrees of freedom in assemblies `GUID-6E131E5A-438B-4008-94F3-D3A3E92EF44C.htm`(처음 6 = 병진 3 + 회전 3, 구속은 자유도를
+줄이고 조인트는 자유도를 명시), To Manage the Display of Constraint Status in the Browser `GUID-A0573060-3778-4D6F-9431-28587D837CC7.htm`
+(**컴포넌트별** 점: 검은 점 = 완전 구속, 속 빈 점 = 미구속, 대시 = 알 수 없음; Hide Fully Constrained / Show Constraint State 메뉴).
+
+- `session.component_dof(item) -> Option<gc_doc::Dof{total, translation}>`(+`rotation()`): 다른 컴포넌트를 고정했을 때 남은 독립 운동 수
+  (관계 잔차의 자코비안 계수로 계산). 고정 = 0, 관계 없음 = 6/3. 예: 면 Mate → 3(병진 2 + 회전 1), Insert·Rotational → 1, Rigid → 0.
+- `session.component_status(item) -> Option<gc_doc::ComponentStatus::{Full, Under, Unknown}>` — 브라우저 점(검은/속 빈/대시).
+  Unknown = 그 컴포넌트에 걸린 관계가 만족되지 않음.
+- `session.relationship_status(id) -> Option<gc_doc::RelationStatus::{Full, Under, Sick}>` — Relationships 폴더 행 표시용(원문의 점은
+  컴포넌트 단위라는 점 주의).
+- 테스트 `gc_doc/tests/relate.rs::remaining_freedom_and_status_points_follow_the_relationships`.
+
 ## 2026-11-18 — QA 버그 2건(원점 표시), Unsolvable 메시지
 
 - 리드 브랜치 병합. `qa_origin_folder`의 두 `#[ignore]` 해제: ① 이미 보이는 원점 요소를 다시 보이면 중복 저장 → 처음 보인 순서대로 한 번만,

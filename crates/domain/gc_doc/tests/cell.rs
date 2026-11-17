@@ -27,6 +27,7 @@ fn robot() -> Robot {
         look: Default::default(),
         tool: None,
         acm_overrides: Vec::new(),
+        links: Vec::new(),
     }
 }
 

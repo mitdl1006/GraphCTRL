@@ -394,6 +394,9 @@ pub(crate) struct CellState {
     jog: Option<(Id<Robot>, Vec<f64>)>,
     /// A pose shown by Drive: never committed, and not touched by the jog previews.
     drive: Option<(Id<Robot>, Vec<f64>)>,
+    /// Components shown where Drive puts an assembly relationship (never committed): their placements.
+    relation_drive: BTreeMap<gc_core::AnyId, Placement>,
+    driven_bodies: BTreeMap<Id<Body>, Body>,
     body: Option<(Id<Body>, Body)>,
     base: Option<(Id<Robot>, Placement)>,
     tcp: Option<(Id<Robot>, Placement)>,
@@ -439,6 +442,8 @@ impl Default for CellState {
             robots: BTreeMap::new(),
             jog: None,
             drive: None,
+            relation_drive: BTreeMap::new(),
+            driven_bodies: BTreeMap::new(),
             body: None,
             base: None,
             tcp: None,
@@ -838,7 +843,8 @@ impl Session {
         let assembly = self.doc.get(id).ok_or("the assembly no longer exists")?;
         let meshes = self.cell.assemblies.of(assembly)?;
         let keep = self.doc.parts_shown(id, false);
-        Ok(crate::assembly::shown_parts(assembly, &pose_of(&assembly.placement), meshes, &keep))
+        let placement = self.driven_placement(id.erase()).unwrap_or(assembly.placement);
+        Ok(crate::assembly::shown_parts(assembly, &pose_of(&placement), meshes, &keep))
     }
 
     /// Sets where the files robot descriptions refer to come from, and reloads the robots.
@@ -904,6 +910,7 @@ impl Session {
             look: Default::default(),
             tool: None,
             acm_overrides: Vec::new(),
+            links: link_tree(&loaded.model, &loaded.chain),
         };
         match self.cell_op(CellOp::AddRobot(robot)).map_err(|e| e.to_string())?.first() {
             Some(Created::Robot(id)) => Ok(*id),
@@ -1085,7 +1092,7 @@ impl Session {
     pub fn shown_body(&self, body: Id<Body>) -> Option<&Body> {
         match &self.cell.body {
             Some((id, preview)) if *id == body => Some(preview),
-            _ => self.doc.get(body),
+            _ => self.cell.driven_bodies.get(&body).or_else(|| self.doc.get(body)),
         }
     }
 
@@ -1130,8 +1137,55 @@ impl Session {
     pub fn shown_base(&self, robot: Id<Robot>) -> Option<Placement> {
         match &self.cell.base {
             Some((id, preview)) if *id == robot => Some(*preview),
-            _ => self.doc.get(robot).map(|r| r.placement),
+            _ => self
+                .cell
+                .relation_drive
+                .get(&robot.erase())
+                .copied()
+                .or_else(|| self.doc.get(robot).map(|r| r.placement)),
         }
+    }
+
+    /// Drive for an assembly relationship: shows the components where the relationship driven to `value`
+    /// puts them (the offset in metres of a Mate, Flush or Insert; the turn in radians of a Rotational
+    /// joint, from where it stands), without changing the document, until [`Self::end_drive_relationship`].
+    /// Refused for a Rigid joint or a value the relationships cannot reach; the shown positions then stay.
+    pub fn drive_relationship(&mut self, id: Id<gc_doc::Relationship>, value: f64) -> Result<(), EditError> {
+        let moves = self.doc.driven(id, value)?;
+        self.cell.relation_drive = moves
+            .into_iter()
+            .map(|(item, pose)| {
+                let placement = Placement {
+                    xyz: pose.translation.to_array(),
+                    rpy: gc_math::rpy_from_quat(pose.rotation),
+                };
+                (item, placement)
+            })
+            .collect();
+        self.cell.driven_bodies = self
+            .cell
+            .relation_drive
+            .iter()
+            .filter(|(item, _)| item.kind == gc_core::Kind::Body)
+            .filter_map(|(item, placement)| {
+                let id = Id::<Body>::from_raw(item.raw);
+                let mut body = self.doc.get(id)?.clone();
+                body.placement = *placement;
+                Some((id, body))
+            })
+            .collect();
+        Ok(())
+    }
+
+    /// Ends Drive for a relationship: the components are shown as the document has them again.
+    pub fn end_drive_relationship(&mut self) {
+        self.cell.relation_drive.clear();
+        self.cell.driven_bodies.clear();
+    }
+
+    /// Where Drive shows a component (body, robot or assembly) right now, if it moves it.
+    pub fn driven_placement(&self, item: gc_core::AnyId) -> Option<Placement> {
+        self.cell.relation_drive.get(&item).copied()
     }
 
     /// Previews a placement of a robot's base without touching the document.
@@ -2186,4 +2240,69 @@ fn plan_path(
         segments.push(plan);
     }
     Ok(PlannedPath { segments, strategy: (path.planner.clone(), seed) })
+}
+
+/// A robot's link tree as plain data for the document: links from the root outwards, each with its joint
+/// frame, axis and how the joint follows the planning chain's values (mimic joints included; joints
+/// outside the chain stay at zero).
+pub(crate) fn link_tree(model: &gc_robot::RobotModel, chain: &gc_robot::Chain) -> Vec<gc_doc::RobotLink> {
+    use gc_robot::JointKind;
+    let mut order: Vec<usize> = vec![model.root];
+    let mut at = 0;
+    while at < order.len() {
+        let parent = order[at];
+        for joint in &model.joints {
+            if joint.parent == parent && !order.contains(&joint.child) {
+                order.push(joint.child);
+            }
+        }
+        at += 1;
+    }
+    let index_of = |link: usize| order.iter().position(|l| *l == link);
+    order
+        .iter()
+        .map(|link| {
+            let data = &model.links[*link];
+            let Some(j) = data.parent_joint else {
+                return gc_doc::RobotLink {
+                    name: data.name.clone(),
+                    parent: None,
+                    origin: Placement::default(),
+                    axis: [0.0, 0.0, 1.0],
+                    motion: gc_doc::LinkMotion::Fixed,
+                };
+            };
+            let joint = &model.joints[j];
+            // Follow mimic joints to the joint that drives them.
+            let (mut source, mut scale, mut offset) = (j, 1.0, 0.0);
+            while let Some((master, multiplier, shift)) = model.joints[source].mimic {
+                offset += scale * shift;
+                scale *= multiplier;
+                source = master;
+            }
+            let k = chain.active_joints().iter().position(|a| *a == source);
+            #[allow(clippy::cast_possible_truncation, reason = "joint and link counts fit in u32")]
+            let motion = match (joint.kind, k) {
+                (JointKind::Revolute | JointKind::Continuous, Some(k)) => {
+                    gc_doc::LinkMotion::Turn { joint: k as u32, scale, offset }
+                }
+                (JointKind::Prismatic, Some(k)) => {
+                    gc_doc::LinkMotion::Slide { joint: k as u32, scale, offset }
+                }
+                _ => gc_doc::LinkMotion::Fixed,
+            };
+            #[allow(clippy::cast_possible_truncation, reason = "link counts fit in u32")]
+            let parent = index_of(joint.parent).map(|p| p as u32);
+            gc_doc::RobotLink {
+                name: data.name.clone(),
+                parent,
+                origin: Placement {
+                    xyz: joint.origin.translation.to_array(),
+                    rpy: gc_math::rpy_from_quat(joint.origin.rotation),
+                },
+                axis: joint.axis.to_array(),
+                motion,
+            }
+        })
+        .collect()
 }

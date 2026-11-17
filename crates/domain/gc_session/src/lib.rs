@@ -141,6 +141,37 @@ impl Session {
         self.last_error = None;
         self.set_tool(ToolKind::Select);
         self.refresh();
+        self.fill_link_trees();
+    }
+
+    /// Gives robots of an older project their link tree (from the loaded description), as part of opening
+    /// it: not an edit to undo, and the project does not count as changed.
+    fn fill_link_trees(&mut self) {
+        let missing: Vec<(Id<gc_doc::Robot>, Vec<gc_doc::RobotLink>)> = self
+            .doc
+            .robots()
+            .iter()
+            .filter(|(_, r)| r.links.is_empty())
+            .filter_map(|(id, _)| {
+                let loaded = self.robot_model(id)?;
+                Some((id, crate::cell::link_tree(&loaded.model, &loaded.chain)))
+            })
+            .collect();
+        if missing.is_empty() {
+            return;
+        }
+        let unchanged = self.saved_revision == self.doc.revision();
+        for (id, links) in missing {
+            // A tree from the loaded description is always well formed; if not, the robot simply has none.
+            if gc_doc::apply(&mut self.doc, &Command::Cell(gc_doc::CellOp::SetRobotLinks { id, links }))
+                .is_err()
+            {
+                log::warn!("could not record the link tree of robot {id:?}");
+            }
+        }
+        if unchanged {
+            self.saved_revision = self.doc.revision();
+        }
     }
 
     /// Starts a new, empty document. Unsaved changes are discarded; ask the user first.
@@ -399,6 +430,12 @@ impl Session {
         self.doc.components()
     }
 
+    /// A robot's links as sub-components (each with an origin folder that follows the joint values), to
+    /// show under the robot's node; not included in [`Session::components`].
+    pub fn robot_links(&self, robot: Id<gc_doc::Robot>) -> Vec<gc_doc::ComponentNode> {
+        self.doc.robot_links(robot)
+    }
+
     /// Switches a state of a component (one undo step). Hidden parts are not drawn but stay obstacles;
     /// suppressed parts are neither. Grounding takes effect with assembly constraints; disabled
     /// components are for the display to draw in the background style and not pick.
@@ -542,6 +579,35 @@ impl Session {
         second: &gc_doc::Selection,
     ) -> gc_doc::RelationKind {
         gc_doc::Document::automatic_joint(first, second)
+    }
+
+    /// The freedom a component has left under the assembly relationships (the DOF symbol): total and pure
+    /// translations. Grounded: none; unconstrained: six.
+    pub fn component_dof(&self, item: gc_core::AnyId) -> Option<gc_doc::Dof> {
+        self.doc.component_dof(item)
+    }
+
+    /// The constraint status dot of a component in the browser: full (black), under (hollow), unknown (dash).
+    pub fn component_status(&self, item: gc_core::AnyId) -> Option<gc_doc::ComponentStatus> {
+        self.doc.component_status(item)
+    }
+
+    /// The status of an assembly relationship: full, under-constrained or sick.
+    pub fn relationship_status(&self, id: Id<gc_doc::Relationship>) -> Option<gc_doc::RelationStatus> {
+        self.doc.relationship_status(id)
+    }
+
+    /// Project Geometry into the sketch being edited: reference geometry that follows its source. It is
+    /// construction geometry when the Construction toggle is on, the other way round with `shift` (Shift
+    /// held while clicking). One undo step.
+    pub fn project_geometry(
+        &mut self,
+        source: gc_doc::ProjectSource,
+        shift: bool,
+    ) -> Result<Vec<gc_doc::Created>, EditError> {
+        let sketch = self.active.ok_or(EditError::BadValue)?;
+        let construction = self.tool_construction() != shift;
+        self.execute(&Command::Sketch { sketch, op: gc_doc::SketchOp::Project { source, construction } })
     }
 
     /// A component's origin folder in the world: centre point, axes and planes (assembly P1-2).
