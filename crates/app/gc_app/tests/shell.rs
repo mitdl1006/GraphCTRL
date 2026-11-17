@@ -900,6 +900,113 @@ fn a_selected_body_is_moved_and_turned_with_its_handles() {
     assert_eq!(turned.xyz, moved.xyz, "turning does not move it");
     assert!(harness.state_mut().session.undo());
     assert_eq!(harness.state().session.doc().get(body).unwrap().placement, moved);
+
+    // The X ring tips it over: from the ring's +Y side to its +Z side is a quarter turn about X.
+    let on_x_ring = |harness: &egui_kittest::Harness<'_, GraphCtrlApp>, angle: f64| {
+        let (c, s) = (gc_math::fm::cos(angle), gc_math::fm::sin(angle));
+        screen(harness, origin + gc_math::DVec3::new(0.0, c, s) * radius)
+    };
+    let (from, to) = (on_x_ring(&harness, 0.4), on_x_ring(&harness, 0.4 + std::f64::consts::FRAC_PI_2));
+    drag(&mut harness, from, to);
+    let tipped = harness.state().session.doc().get(body).unwrap().placement;
+    let rotation = gc_math::quat_from_rpy(tipped.rpy[0], tipped.rpy[1], tipped.rpy[2]);
+    let up = rotation * gc_math::DVec3::Z;
+    assert!(
+        (up - gc_math::DVec3::new(0.0, -1.0, 0.0)).length() < 0.03,
+        "the box's Z now points along -Y: {up:?}"
+    );
+    assert_eq!(tipped.xyz, moved.xyz);
+}
+
+/// The handles of a waypoint given in a work frame move it in the world and store the result in the
+/// frame; a work frame's own handles only turn it, its origin being a constrained sketch point.
+#[test]
+fn waypoints_and_frames_have_handles_too() {
+    use gc_session::CellItem;
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("로봇").click();
+    harness.run();
+    harness.get_by_label("6R 로봇").click();
+    harness.run();
+    let app = harness.state_mut();
+    let robot = app.session.doc().robots().iter().next().unwrap().0;
+    let sketch = app.session.create_sketch("XY").unwrap();
+    let created = app
+        .session
+        .execute(&gc_doc::Command::Sketch { sketch, op: gc_doc::SketchOp::AddPoint { pos: [0.4, 0.0, 0.0] } })
+        .unwrap();
+    let gc_doc::Created::Point(point) = created[0] else { panic!("no point") };
+    let fix = gc_doc::SketchOp::AddConstraint(gc_sketch::GeoConstraint::Fix(point));
+    app.session.execute(&gc_doc::Command::Sketch { sketch, op: fix }).unwrap();
+    let frame = app.session.add_work_frame(sketch, point).unwrap();
+    app.session.finish_sketch();
+    let offset = gc_doc::Placement { xyz: [0.0, 0.0, 0.3], rpy: [std::f64::consts::PI, 0.0, 0.0] };
+    let waypoint =
+        app.session.add_waypoint(robot, gc_doc::WaypointTarget::InFrame { frame, offset }).unwrap();
+    app.session.select_item(Some(CellItem::Waypoint(waypoint)));
+    harness.run();
+
+    let screen = |harness: &egui_kittest::Harness<'_, GraphCtrlApp>, w| {
+        harness.state().viewport().screen_of(w).unwrap()
+    };
+    let drag = |harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, from: egui::Pos2, to: egui::Pos2| {
+        harness.event(egui::Event::PointerMoved(from));
+        harness.run();
+        let button = |pressed: bool, at| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        harness.event(button(true, from));
+        harness.step();
+        for k in 1..=6 {
+            harness.event(egui::Event::PointerMoved(from + (to - from) * (k as f32 / 6.0)));
+            harness.step();
+        }
+        harness.event(button(false, to));
+        harness.run();
+    };
+    // Up the Z arrow by 50 mm: the stored offset in the frame goes from 300 to 350 mm.
+    let at = harness.state().session.waypoint_pose(waypoint).unwrap().translation;
+    let base = screen(&harness, at);
+    let up = (screen(&harness, at + gc_math::DVec3::Z * 0.05) - base).normalized();
+    let per_metre = screen(&harness, at + gc_math::DVec3::Z * 0.1).distance(base) / 0.1;
+    let grab = base + up * 40.0;
+    drag(&mut harness, grab, grab + up * per_metre * 0.05);
+    let Some(gc_doc::WaypointTarget::InFrame { offset: now, .. }) =
+        harness.state().session.doc().get(waypoint).map(|w| w.target.clone())
+    else {
+        panic!("not in a frame")
+    };
+    assert!((now.xyz[2] - 0.35).abs() < 0.0051, "{:?}", now.xyz);
+    assert!(now.xyz[0].abs() < 1e-9 && now.xyz[1].abs() < 1e-9);
+
+    // The frame: no arrows where they would be, and its ring turns it about its origin.
+    let app = harness.state_mut();
+    app.session.select_item(Some(CellItem::Frame(frame)));
+    harness.run();
+    let origin = harness.state().session.work_frame_pose(frame).unwrap().translation;
+    let right = harness.state().viewport().camera.right();
+    let radius =
+        60.0 / f64::from(screen(&harness, origin + right * 0.1).distance(screen(&harness, origin)) / 0.1);
+    let on_ring = |harness: &egui_kittest::Harness<'_, GraphCtrlApp>, angle: f64| {
+        let (c, s) = (gc_math::fm::cos(angle), gc_math::fm::sin(angle));
+        screen(harness, origin + gc_math::DVec3::new(c, s, 0.0) * radius)
+    };
+    let before = harness.state().session.waypoint_pose(waypoint).unwrap().translation;
+    let (from, to) = (on_ring(&harness, 0.3), on_ring(&harness, 0.3 + std::f64::consts::FRAC_PI_2));
+    drag(&mut harness, from, to);
+    let rpy = harness.state().session.doc().get(frame).unwrap().rpy;
+    assert!((rpy[2] - std::f64::consts::FRAC_PI_2).abs() < 0.0175 + 1e-9, "{rpy:?}");
+    assert!((harness.state().session.work_frame_pose(frame).unwrap().translation - origin).length() < 1e-9);
+    // The waypoint in it stays where it is relative to the frame: straight above the origin, so in place.
+    let after = harness.state().session.waypoint_pose(waypoint).unwrap().translation;
+    assert!((after - before).length() < 1e-6);
 }
 
 /// With worker threads, planning does not finish inside the click: the window shows "planning" and picks

@@ -974,6 +974,11 @@ impl Session {
         }
     }
 
+    /// The world pose a work frame would have with these settings (e.g. with its angles set to zero).
+    pub fn frame_pose_with(&self, frame: &WorkFrame) -> Option<DPose3> {
+        frame_pose_of(&self.doc, frame)
+    }
+
     /// A work frame as it is shown: the preview while it is being edited, else the document's.
     pub fn shown_frame(&self, frame: Id<WorkFrame>) -> Option<WorkFrame> {
         match &self.cell.frame {
