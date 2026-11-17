@@ -987,6 +987,11 @@ messages! {
     PromptOffsetPlace => ("간격띄우기 위치를 클릭하거나 거리를 입력하십시오", "Click where the offset goes, or type the distance"),
     PromptPickGeometry => ("패턴할 형상을 클릭하십시오(다시 클릭하면 빠짐)", "Click the geometry to pattern (click again to remove)"),
     PromptPickLine => ("선을 클릭하십시오", "Click a line"),
+    PromptArcSlotCentre => ("슬롯 중심 호의 중심을 클릭하십시오", "Click the centre of the slot's centre arc"),
+    PromptArcSlotThrough => ("슬롯 중심 호가 지나는 점을 클릭하십시오", "Click a point on the slot's centre arc"),
+    PromptArcSlotEnd => ("슬롯 중심 호의 끝을 클릭하십시오", "Click the end of the slot's centre arc"),
+    ToolSlotThreePointArc => ("3점 호 슬롯", "Three Point Arc Slot"),
+    ToolSlotCenterPointArc => ("중심점 호 슬롯", "Center Point Arc Slot"),
     PromptPickPoint => ("점이나 원을 클릭하십시오(원은 중심)", "Click a point or a circle (its centre)"),
     /// Input box: offset distance.
     HudDistance => ("거리", "Distance"),

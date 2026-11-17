@@ -1,7 +1,7 @@
 //! The ribbon: tabs of command groups. Every button is a view of a session command.
 
 use eframe::egui;
-use gc_doc::{ContactSolver, Placement, SlotKind, Solid, WaypointTarget};
+use gc_doc::{ArcSlotKind, ContactSolver, Placement, SlotKind, Solid, WaypointTarget};
 use gc_draw::StandardView;
 use gc_i18n::{Lang, Msg, tr};
 use gc_panels::CellUi;
@@ -183,35 +183,51 @@ pub(crate) fn show(
                             }
                         }
                         ui.vertical(|ui| {
-                            ui.horizontal(|ui| {
-                                for (kind, symbol, label) in [
-                                    (ToolKind::Slot(SlotKind::Overall), "(=)", Msg::ToolSlotOverall),
-                                    (ToolKind::Slot(SlotKind::CenterPoint), "(+)", Msg::ToolSlotCenterPoint),
-                                ] {
-                                    let button = gc_ui::ribbon_small_button(
-                                        ui,
-                                        Icon::Text(symbol),
-                                        label.text(lang),
-                                        current == kind,
-                                        sketching,
-                                    );
-                                    if button.clicked() {
-                                        session.set_tool(kind);
+                            // The other slots as small icons: two rows, the Center Point toggle (Format panel) last.
+                            let slots = [
+                                (ToolKind::Slot(SlotKind::Overall), "(=)", Msg::ToolSlotOverall),
+                                (ToolKind::Slot(SlotKind::CenterPoint), "(+)", Msg::ToolSlotCenterPoint),
+                                (
+                                    ToolKind::ArcSlot(ArcSlotKind::ThreePoint),
+                                    "(~)",
+                                    Msg::ToolSlotThreePointArc,
+                                ),
+                                (
+                                    ToolKind::ArcSlot(ArcSlotKind::CenterPoint),
+                                    "(c)",
+                                    Msg::ToolSlotCenterPointArc,
+                                ),
+                            ];
+                            for (row, slots) in slots.chunks(3).enumerate() {
+                                ui.horizontal(|ui| {
+                                    for (kind, symbol, label) in slots.iter().copied() {
+                                        let button = gc_ui::ribbon_small_button(
+                                            ui,
+                                            Icon::Text(symbol),
+                                            label.text(lang),
+                                            current == kind,
+                                            sketching,
+                                        );
+                                        if button.clicked() {
+                                            session.set_tool(kind);
+                                        }
                                     }
-                                }
-                            });
-                            // The Format panel's Center Point toggle.
-                            let on = session.center_point();
-                            let toggle = gc_ui::ribbon_small_button(
-                                ui,
-                                Icon::Text("+"),
-                                tr!(lang, ToolCenterPoint),
-                                on,
-                                sketching,
-                            );
-                            if toggle.clicked() {
-                                // A refusal (a selected end point) shows in the status bar.
-                                drop(session.set_center_point(!on));
+                                    if row == 1 {
+                                        // The Format panel's Center Point toggle.
+                                        let on = session.center_point();
+                                        let toggle = gc_ui::ribbon_small_button(
+                                            ui,
+                                            Icon::Text("+"),
+                                            tr!(lang, ToolCenterPoint),
+                                            on,
+                                            sketching,
+                                        );
+                                        if toggle.clicked() {
+                                            // A refusal (a selected end point) shows in the status bar.
+                                            drop(session.set_center_point(!on));
+                                        }
+                                    }
+                                });
                             }
                         });
                     }

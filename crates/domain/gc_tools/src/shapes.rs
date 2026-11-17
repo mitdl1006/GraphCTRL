@@ -6,18 +6,23 @@
 //! - Point: each click places a point (a centre point unless the Center Point toggle is off).
 //! - Polygon: click the centre, then a corner (inscribed) or an edge midpoint (circumscribed).
 //! - Slot: two clicks as the slot kind reads them, then the width.
+//! - Arc slot: three clicks for the centre arc (start, end, a point on it; or centre, start, end), then the
+//!   width.
 //! - Offset: click a curve, then where the offset goes (or type the distance).
 
-use gc_doc::{SketchOp, preview_sketch_op};
+use gc_doc::{ArcSlotKind, SketchOp, preview_sketch_op};
 use gc_math::fm;
 use gc_sketch::{CurveGeom, Sketch};
 
-use super::{HudField, Preview, Prompt, Tool, ToolEvent, ToolKind, ToolOutput, distance};
+use super::{HudField, Preview, Prompt, Tool, ToolEvent, ToolKind, ToolOutput, arc_through, distance};
 use crate::pick::{closest_on_curve, nearest_curve};
 
 /// The kinds these tools cover.
 pub(super) fn is_shape_tool(kind: ToolKind) -> bool {
-    matches!(kind, ToolKind::Point | ToolKind::Polygon | ToolKind::Slot(_) | ToolKind::Offset)
+    matches!(
+        kind,
+        ToolKind::Point | ToolKind::Polygon | ToolKind::Slot(_) | ToolKind::ArcSlot(_) | ToolKind::Offset
+    )
 }
 
 /// The width of a slot: twice the cursor's distance from the line through the first two clicks.
@@ -28,6 +33,35 @@ fn slot_width(a: [f64; 2], b: [f64; 2], cursor: [f64; 2]) -> f64 {
         return 2.0 * distance(a, cursor);
     }
     2.0 * ((cursor[0] - a[0]) * dy - (cursor[1] - a[1]) * dx).abs() / length
+}
+
+/// The centre arc of an arc slot from its three clicks: centre, start and end, counter-clockwise.
+fn slot_arc(
+    kind: ArcSlotKind,
+    a: [f64; 2],
+    b: [f64; 2],
+    c: [f64; 2],
+) -> Option<([f64; 2], [f64; 2], [f64; 2])> {
+    match kind {
+        ArcSlotKind::ThreePoint => {
+            let (centre, _, _, sweep) = arc_through(a, b, c)?;
+            Some(if sweep >= 0.0 { (centre, a, b) } else { (centre, b, a) })
+        }
+        ArcSlotKind::CenterPoint => {
+            if distance(a, b) < 1e-12 || distance(a, c) < 1e-12 {
+                return None;
+            }
+            // The shorter way round from the start to the end.
+            let angle = |p: [f64; 2]| fm::atan2(p[1] - a[1], p[0] - a[0]);
+            let ccw = (angle(c) - angle(b)).rem_euclid(std::f64::consts::TAU);
+            Some(if ccw <= std::f64::consts::PI { (a, b, c) } else { (a, c, b) })
+        }
+    }
+}
+
+/// The width of an arc slot: twice the cursor's distance from the centre arc's circle.
+fn arc_slot_width(centre: [f64; 2], start: [f64; 2], cursor: [f64; 2]) -> f64 {
+    2.0 * (distance(centre, cursor) - distance(centre, start)).abs()
 }
 
 fn xyz(p: [f64; 2]) -> [f64; 3] {
@@ -122,6 +156,12 @@ impl Tool {
             ToolKind::Slot(_) if self.anchor.is_none() => Prompt::SlotFirst,
             ToolKind::Slot(_) if self.second.is_none() => Prompt::SlotSecond,
             ToolKind::Slot(_) => Prompt::SlotWidth,
+            ToolKind::ArcSlot(ArcSlotKind::CenterPoint) if self.anchor.is_none() => Prompt::ArcSlotCentre,
+            ToolKind::ArcSlot(_) if self.anchor.is_none() => Prompt::SlotFirst,
+            ToolKind::ArcSlot(_) if self.second.is_none() => Prompt::SlotSecond,
+            ToolKind::ArcSlot(ArcSlotKind::ThreePoint) if self.slot_third.is_none() => Prompt::ArcSlotThrough,
+            ToolKind::ArcSlot(_) if self.slot_third.is_none() => Prompt::ArcSlotEnd,
+            ToolKind::ArcSlot(_) => Prompt::SlotWidth,
             ToolKind::Offset if self.offset_pick.is_none() => Prompt::OffsetPick,
             _ => Prompt::OffsetPlace,
         }
@@ -183,6 +223,18 @@ impl Tool {
                 let width = self.locked_value(HudField::Width).unwrap_or_else(|| slot_width(a, b, cursor));
                 (width > 1e-9).then(|| SketchOp::AddSlot { a: xyz(a), b: xyz(b), width, kind })
             }
+            ToolKind::ArcSlot(kind) => {
+                let (centre, start, end) = slot_arc(kind, self.anchor?, self.second?.pos, self.slot_third?)?;
+                let width = self
+                    .locked_value(HudField::Width)
+                    .unwrap_or_else(|| arc_slot_width(centre, start, cursor));
+                (width > 1e-9).then(|| SketchOp::AddArcSlot {
+                    centre: xyz(centre),
+                    start: xyz(start),
+                    end: xyz(end),
+                    width,
+                })
+            }
             ToolKind::Offset => self.offset_op(self.offset_distance(sketch, cursor)?),
             _ => None,
         }
@@ -190,8 +242,21 @@ impl Tool {
 
     pub(super) fn shape_preview(&self, sketch: &Sketch, preview: &mut Preview) {
         let Some(cursor) = self.cursor.map(|c| c.pos) else { return };
-        if let (ToolKind::Slot(_), Some(a), None) = (self.kind, self.anchor, self.second) {
+        if let (ToolKind::Slot(_) | ToolKind::ArcSlot(_), Some(a), None) =
+            (self.kind, self.anchor, self.second)
+        {
             preview.lines.push((a, cursor));
+            return;
+        }
+        if let (ToolKind::ArcSlot(kind), Some(a), Some(b), None) =
+            (self.kind, self.anchor, self.second, self.slot_third)
+        {
+            // The centre arc follows the cursor.
+            if let Some((centre, start, end)) = slot_arc(kind, a, b.pos, cursor) {
+                let angle = |p: [f64; 2]| fm::atan2(p[1] - centre[1], p[0] - centre[0]);
+                let sweep = (angle(end) - angle(start)).rem_euclid(std::f64::consts::TAU);
+                preview.arcs.push((centre, distance(centre, start), angle(start), sweep));
+            }
             return;
         }
         if let Some(op) = self.shape_op(sketch, cursor)
@@ -212,6 +277,14 @@ impl Tool {
         match self.kind {
             ToolKind::Slot(_) => match (self.anchor, self.second) {
                 (Some(a), Some(b)) => vec![slot(HudField::Width, slot_width(a, b.pos, cursor))],
+                _ => Vec::new(),
+            },
+            ToolKind::ArcSlot(kind) => match (self.anchor, self.second, self.slot_third) {
+                (Some(a), Some(b), Some(c)) => slot_arc(kind, a, b.pos, c)
+                    .map(|(centre, start, _)| {
+                        vec![slot(HudField::Width, arc_slot_width(centre, start, cursor))]
+                    })
+                    .unwrap_or_default(),
                 _ => Vec::new(),
             },
             ToolKind::Offset if self.offset_pick.is_some() => {
@@ -275,6 +348,31 @@ impl Tool {
                         out.into_iter().collect()
                     }
                 }
+            }
+            ToolKind::ArcSlot(kind) => {
+                let here = self.place(sketch, pos, px, None, modifier);
+                match (self.anchor, self.second, self.slot_third) {
+                    (None, _, _) => {
+                        self.anchor = Some(here.pos);
+                        self.anchor_snap = Some(here);
+                    }
+                    (Some(a), None, _) => {
+                        if distance(a, here.pos) > px.max(1e-12) {
+                            self.second = Some(here);
+                        }
+                    }
+                    (Some(a), Some(b), None) => {
+                        if slot_arc(kind, a, b.pos, here.pos).is_some() {
+                            self.slot_third = Some(here.pos);
+                        }
+                    }
+                    (Some(_), Some(_), Some(_)) => {
+                        let out = self.shape_op(sketch, here.pos).map(|op| self.emit(op, &[]));
+                        self.reset();
+                        return Some(out.into_iter().collect());
+                    }
+                }
+                Vec::new()
             }
             ToolKind::Offset => {
                 if self.offset_pick.is_none() {

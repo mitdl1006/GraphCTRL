@@ -62,6 +62,16 @@ pub enum SlotKind {
     CenterPoint,
 }
 
+/// How the first three clicks of an arc slot are read (Inventor 2026 help, To Create 2D Shape Geometry,
+/// GUID-D489CE6D-7299-4211-A43A-F3580A4BA357, Slots).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ArcSlotKind {
+    /// Three Point Arc Slot: the centre arc's start and end, then a point it passes through.
+    ThreePoint,
+    /// Center Point Arc Slot: the centre arc's centre, start and end.
+    CenterPoint,
+}
+
 /// One direction of a sketch rectangular pattern.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SketchPatternDirection {
@@ -120,6 +130,22 @@ pub enum SketchOp {
         width: f64,
         /// How the clicks are read.
         kind: SlotKind,
+    },
+    /// An arc slot (Three Point Arc Slot or Center Point Arc Slot, Inventor 2026 help, To Create 2D Shape
+    /// Geometry, GUID-D489CE6D-7299-4211-A43A-F3580A4BA357): a construction centre arc counter-clockwise
+    /// from `start` to `end` round `centre` (`end` only gives the direction), an outer and an inner arc
+    /// concentric with it and half-round ends centred on its ends. The ends' tangency is built from
+    /// first-order pieces (a construction radius through each end on which the end's centre and both
+    /// arc ends lie), so the slot keeps six degrees of freedom (centre, radius, two angles, width).
+    AddArcSlot {
+        /// The centre arc's centre.
+        centre: [f64; 3],
+        /// The centre arc's start (it sets the radius).
+        start: [f64; 3],
+        /// The direction of the centre arc's end.
+        end: [f64; 3],
+        /// Width, metres (less than twice the radius).
+        width: f64,
     },
     /// The sketch Mirror command (Inventor 2026 help, To Create and Edit Sketch Patterns,
     /// GUID-AAD3A699-FED8-4614-A31D-0A2316328CEE, Create Mirror Patterns): copies of the curves reflected
@@ -1235,6 +1261,86 @@ fn sketch_op(
                 require(sketch, ids, tangent, &mut created)?;
             }
             require(sketch, ids, GeoConstraint::Equal(far, near), &mut created)?;
+            "Slot"
+        }
+        SketchOp::AddArcSlot { centre, start, end, width } => {
+            if !centre.iter().chain(start).chain(end).all(|v| v.is_finite())
+                || !(width.is_finite() && *width > 0.0)
+            {
+                return Err(SketchError::InvalidValue.into());
+            }
+            let o = [centre[0], centre[1]];
+            let angle = |p: &[f64; 3]| gc_math::fm::atan2(p[1] - o[1], p[0] - o[0]);
+            let r = gc_math::fm::hypot(start[0] - o[0], start[1] - o[1]);
+            let h = width / 2.0;
+            let reach = gc_math::fm::hypot(end[0] - o[0], end[1] - o[1]);
+            let (ts, te) = (angle(start), angle(end));
+            let sweep = (te - ts).rem_euclid(std::f64::consts::TAU);
+            if r < 1e-9 || reach < 1e-9 || h >= r || !(1e-6..std::f64::consts::TAU - 1e-6).contains(&sweep) {
+                return Err(SketchError::InvalidValue.into());
+            }
+            let at = |radius: f64, t: f64| {
+                [o[0] + radius * gc_math::fm::cos(t), o[1] + radius * gc_math::fm::sin(t), 0.0]
+            };
+            let o3 = [o[0], o[1], 0.0];
+            let middle = sketch.add_arc(ids, o3, at(r, ts), at(r, te))?;
+            let outer = sketch.add_arc(ids, o3, at(r + h, ts), at(r + h, te))?;
+            let inner = sketch.add_arc(ids, o3, at(r - h, ts), at(r - h, te))?;
+            // The ends bulge outwards: round the end from the outer arc to the inner, at the start back.
+            let end_cap = sketch.add_arc(ids, at(r, te), at(r + h, te), at(r - h, te))?;
+            let start_cap = sketch.add_arc(ids, at(r, ts), at(r - h, ts), at(r + h, ts))?;
+            let radius_s = sketch.add_line(ids, o3, at(r + h, ts));
+            let radius_e = sketch.add_line(ids, o3, at(r + h, te));
+            for construction in [middle, radius_s, radius_e] {
+                if let Some(c) = sketch.curves.get_mut(&construction) {
+                    c.construction = true;
+                }
+            }
+            created
+                .extend([outer, end_cap, inner, start_cap, middle, radius_s, radius_e].map(Created::Curve));
+            let arc = |sketch: &Sketch, id: Id<Curve>| match sketch.curves.get(&id).map(|c| c.geom) {
+                Some(gc_sketch::CurveGeom::Arc { c, s, e }) => Some((c, s, e)),
+                _ => None,
+            };
+            let (
+                Some((mc, ms, me)),
+                Some((oc, os, oe)),
+                Some((ic, is, ie)),
+                Some((ec, es, ee)),
+                Some((sc, ss, se)),
+                Some((ra, rb)),
+                Some((qa, qb)),
+            ) = (
+                arc(sketch, middle),
+                arc(sketch, outer),
+                arc(sketch, inner),
+                arc(sketch, end_cap),
+                arc(sketch, start_cap),
+                sketch.line(radius_s),
+                sketch.line(radius_e),
+            )
+            else {
+                return Err(SketchError::InvalidValue.into());
+            };
+            for (p, q) in [
+                (oc, mc),
+                (ic, mc),
+                (ec, me),
+                (sc, ms),
+                (os, se),
+                (oe, es),
+                (is, ss),
+                (ie, ee),
+                (ra, mc),
+                (rb, os),
+                (qa, mc),
+                (qb, oe),
+            ] {
+                require(sketch, ids, GeoConstraint::Coincident(p, q), &mut created)?;
+            }
+            for (p, line) in [(ms, radius_s), (is, radius_s), (me, radius_e), (ie, radius_e)] {
+                try_constraint(sketch, ids, GeoConstraint::PointOnCurve(p, line), &mut created);
+            }
             "Slot"
         }
         SketchOp::Mirror { curves, axis } => {

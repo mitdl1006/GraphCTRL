@@ -212,3 +212,20 @@ fn another_command_closes_the_dialog() {
     harness.run();
     assert!(harness.query_by_label("미러 패턴").is_none());
 }
+
+#[test]
+fn the_arc_slot_buttons_draw_arc_slots() {
+    let mut harness = sketching();
+    harness.get_by_label("중심점 호 슬롯").click();
+    harness.run();
+    assert_eq!(harness.state().session.tool(), ToolKind::ArcSlot(gc_doc::ArcSlotKind::CenterPoint));
+    harness.get_by_label("슬롯 중심 호의 중심을 클릭하십시오");
+    for at in [mm(0.0, 0.0), mm(30.0, 0.0), mm(0.0, 30.0), mm(35.0, 0.0)] {
+        click(harness.state_mut(), at, false);
+    }
+    harness.run();
+    assert_eq!(curves(&harness), 4, "outer, inner and two ends");
+    harness.get_by_label("3점 호 슬롯").click();
+    harness.run();
+    assert_eq!(harness.state().session.tool(), ToolKind::ArcSlot(gc_doc::ArcSlotKind::ThreePoint));
+}

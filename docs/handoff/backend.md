@@ -25,7 +25,7 @@
 | STEP B-rep(정확 형상) | 테셀레이션 없는 솔리드는 경고 후 건너뜀. 평면·원통부터 자체 테셀레이터 필요. 앱의 가져오기 배선(확장자 → `read_step`)은 리드/FE. 실제 대형 파일(NIST CTC 등) 확인은 네트워크 허용 후 |
 | 미러의 진짜 반사 | 파일을 만들지 않아 Mirror = Reuse(프리미티브만 정확). 메시 반사는 렌더/메시 쪽 배율 음수 지원 필요 |
 | 로봇 교체, 패턴·표현의 미러/복사 | 미지원 |
-| 스케치 호 슬롯 2종·패턴 개체 | 호 슬롯(Three Point Arc, Center Point Arc)은 2차 퇴화 때문에 다른 구성 필요. 스케치 패턴 편집(개수·Delete Pattern·Suppress)은 없음 — 다시 만들어야 함 |
+| 스케치 패턴 개체 | 스케치 패턴 편집(개수·Delete Pattern·Suppress)은 없음 — 다시 만들어야 함 |
 | 접촉 솔버 | 밀린 부품은 병진만(회전 없음), 배율 있는 어셈블리 부품 제외, Surface Complexity 없음 |
 | 메시 로드 | `add_mesh_body`는 mm/m 판정용 STL 파싱만 동기 |
 | DOF 기호 | 기호마다 관계를 모음(수백 개 동시 표시 시 캐시 필요) |
@@ -34,6 +34,20 @@
 | 모션(오래된 남은 일) | 맨 아래 "남은 일(백엔드)" 절 그대로 |
 
 # 작업 기록(최신 순)
+
+## 2026-11-18 — 스케치 창의 뷰포트 선택 · 호 슬롯 2종(리드 ③①)
+
+- 창이 열린 채 선택: 세션 `SketchPick{Curves, Line, Point}`, `set_sketch_pick(Some(..), 현재 항목)`/`sketch_pick()`. 선택 도구의
+  클릭·상자 선택이 선택기 규칙을 따른다(아래 도구 절). gc_viewport는 고칠 필요가 없었다(상자 선택도 `ToolOutput::Select`를 거침).
+- 호 슬롯(원문 GUID-D489CE6D-7299-4211-A43A-F3580A4BA357, Create Slots):
+  - Three Point Arc Slot: 중심 호의 시작·끝, 세 번째 클릭, 너비.
+  - Center Point Arc Slot: 중심, 시작·끝, 너비.
+  - `SketchOp::AddArcSlot{centre, start, end, width}`(반시계), `ToolKind::ArcSlot(gc_doc::ArcSlotKind)`, `Prompt::{ArcSlotCentre, ArcSlotThrough, ArcSlotEnd}`.
+  - 구성: 구성 중심 호 + 동심 바깥·안쪽 호 + 반원 끝 2개 + 끝마다 구성 반지름 선(중심 → 바깥 호 끝, 그 위에 끝 중심·안쪽 호 끝). 자유도 6.
+- 원문과 다른 점:
+  - 원문은 3점 호 슬롯의 세 번째 클릭을 "슬롯 호의 중심(center of the slot arc)"이라 적었다. 여기서는 3점 호 도구처럼 호가 지나는 점으로 읽는다.
+  - 중심점 호 슬롯은 커서가 쓸어간 방향 대신 시작에서 끝까지 짧은 쪽으로 돈다.
+- 테스트: `gc_doc/tests/sketch_shapes.rs` arc_slots…, 세션 `the_arc_slot_tools…`, `a_dialog_selector…`, 앱 kittest 9개.
 
 ## 2026-11-18 — 스케치 도형·패턴 도구의 화면 연결(리드 허락, 프론트엔드 대신)
 

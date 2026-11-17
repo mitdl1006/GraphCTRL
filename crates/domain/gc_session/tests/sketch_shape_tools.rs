@@ -180,3 +180,39 @@ fn a_dialog_selector_takes_the_select_tools_clicks_by_its_own_rules() {
     session.set_tool(ToolKind::Line);
     assert!(session.sketch_pick().is_none());
 }
+
+/// Inventor 2026 help, To Create 2D Shape Geometry (GUID-D489CE6D-7299-4211-A43A-F3580A4BA357): Three
+/// Point Arc Slot (start, end, a point of the centre arc, width) and Center Point Arc Slot (centre, start,
+/// end, width).
+#[test]
+fn the_arc_slot_tools_take_three_points_then_the_width() {
+    use gc_doc::ArcSlotKind;
+    for (kind, clicks) in [
+        (ArcSlotKind::ThreePoint, [mm(30.0, 0.0), mm(0.0, 30.0), mm(21.2132, 21.2132)]),
+        (ArcSlotKind::CenterPoint, [mm(0.0, 0.0), mm(30.0, 0.0), mm(0.0, 30.0)]),
+    ] {
+        let mut session = new_session();
+        session.set_tool(ToolKind::ArcSlot(kind));
+        let first = if kind == ArcSlotKind::CenterPoint { Prompt::ArcSlotCentre } else { Prompt::SlotFirst };
+        assert_eq!(session.prompt(), first);
+        click(&mut session, clicks[0]);
+        click(&mut session, clicks[1]);
+        let third =
+            if kind == ArcSlotKind::CenterPoint { Prompt::ArcSlotEnd } else { Prompt::ArcSlotThrough };
+        assert_eq!(session.prompt(), third);
+        click(&mut session, clicks[2]);
+        assert_eq!(session.prompt(), Prompt::SlotWidth);
+        session.tool_event(ToolEvent::Move { pos: mm(35.0, 0.0), px: PX, suppress_snap: true });
+        let hud = session.tool_hud();
+        assert!((hud[0].measured - 0.01).abs() < 1e-6, "{kind:?}: {hud:?}");
+        assert_eq!(session.preview().arcs.len(), 4, "{kind:?}: the slot follows the cursor");
+        click(&mut session, mm(35.0, 0.0));
+        let (_, sketch) = session.active_sketch().unwrap();
+        let mut radii: Vec<f64> =
+            drawn(&session).iter().filter_map(|c| sketch.round(*c).map(|(_, r)| r)).collect();
+        radii.sort_by(f64::total_cmp);
+        let want = [0.005, 0.005, 0.025, 0.035];
+        assert!(radii.iter().zip(want).all(|(r, w)| (r - w).abs() < 1e-6), "{kind:?}: {radii:?}");
+        assert_eq!(session.prompt(), first, "ready for the next");
+    }
+}

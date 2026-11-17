@@ -198,6 +198,8 @@ pub enum ToolKind {
     Polygon,
     /// Draw a straight slot of this kind: two points, then the width.
     Slot(gc_doc::SlotKind),
+    /// Draw an arc slot of this kind: three points for the centre arc, then the width.
+    ArcSlot(gc_doc::ArcSlotKind),
     /// Offset curves (whole loops by default): pick one, then where the offset goes.
     Offset,
 }
@@ -279,6 +281,9 @@ pub enum Prompt {
     OffsetPick,
     /// Offset: click where the offset goes, or type the distance.
     OffsetPlace,
+    ArcSlotCentre,
+    ArcSlotThrough,
+    ArcSlotEnd,
     /// A sketch dialog's Geometry selector is active.
     PickGeometry,
     /// A sketch dialog's line selector is active.
@@ -356,6 +361,8 @@ pub struct Tool {
     offset_constrain: bool,
     offset_pick: Option<Id<Curve>>,
     offset_measured: f64,
+    /// Arc slot: the third click.
+    slot_third: Option<[f64; 2]>,
 }
 
 fn angle_about(centre: [f64; 2], point: [f64; 2]) -> f64 {
@@ -577,6 +584,7 @@ impl Tool {
             offset_constrain: true,
             offset_pick: None,
             offset_measured: 0.0,
+            slot_third: None,
         }
     }
 
@@ -623,9 +631,14 @@ impl Tool {
                 Prompt::ConstraintPick
             }
             // Answered by `shape_prompt` above.
-            (ToolKind::Point | ToolKind::Polygon | ToolKind::Slot(_) | ToolKind::Offset, _) => {
-                self.shape_prompt()
-            }
+            (
+                ToolKind::Point
+                | ToolKind::Polygon
+                | ToolKind::Slot(_)
+                | ToolKind::ArcSlot(_)
+                | ToolKind::Offset,
+                _,
+            ) => self.shape_prompt(),
         }
     }
 
@@ -863,6 +876,7 @@ impl Tool {
         self.fillet_first = None;
         self.sweep_from = None;
         self.offset_pick = None;
+        self.slot_third = None;
         if self.kind != ToolKind::Fillet {
             self.hud.clear(); // the fillet radius stays
         }
@@ -966,6 +980,7 @@ impl Tool {
                         | ToolKind::Point
                         | ToolKind::Polygon
                         | ToolKind::Slot(_)
+                        | ToolKind::ArcSlot(_)
                         | ToolKind::Offset
                 );
                 self.hover = matches!(self.kind, ToolKind::Trim | ToolKind::Extend | ToolKind::Fillet)
@@ -1204,7 +1219,11 @@ impl Tool {
         let pick = |sketch: &Sketch, pos: [f64; 2], px: f64| picked.unwrap_or_else(|| pick(sketch, pos, px));
         match self.kind {
             // Their clicks are handled by `shape_event` before this.
-            ToolKind::Point | ToolKind::Polygon | ToolKind::Slot(_) | ToolKind::Offset => Vec::new(),
+            ToolKind::Point
+            | ToolKind::Polygon
+            | ToolKind::Slot(_)
+            | ToolKind::ArcSlot(_)
+            | ToolKind::Offset => Vec::new(),
             ToolKind::Select => vec![ToolOutput::Select { item: pick(sketch, pos, px), extend: modifier }],
             ToolKind::Line => {
                 let here = self.place(sketch, pos, px, self.anchor, modifier);
@@ -1511,7 +1530,7 @@ fn snap_free(pos: [f64; 2]) -> Snap {
 }
 
 /// The arc from `a` to `b` through `through`: centre, radius, start angle (at `a`) and signed sweep.
-fn arc_through(a: [f64; 2], b: [f64; 2], through: [f64; 2]) -> Option<([f64; 2], f64, f64, f64)> {
+pub(crate) fn arc_through(a: [f64; 2], b: [f64; 2], through: [f64; 2]) -> Option<([f64; 2], f64, f64, f64)> {
     let d = 2.0 * (a[0] * (b[1] - through[1]) + b[0] * (through[1] - a[1]) + through[0] * (a[1] - b[1]));
     let scale = distance(a, b).max(distance(a, through)).max(1e-12);
     if d.abs() < 1e-9 * scale * scale {

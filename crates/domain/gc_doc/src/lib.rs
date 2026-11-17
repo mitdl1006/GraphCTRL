@@ -32,8 +32,8 @@ pub use cell::{
     Solid, Tool, Waypoint, WaypointTarget, WorkFrame,
 };
 pub use command::{
-    Applied, Command, Created, DimSlot, EditError, EndSnap, SketchOp, SketchPatternDirection, SlotKind,
-    TangentArc, apply, preview_sketch_op, tangent_arc,
+    Applied, ArcSlotKind, Command, Created, DimSlot, EditError, EndSnap, SketchOp, SketchPatternDirection,
+    SlotKind, TangentArc, apply, preview_sketch_op, tangent_arc,
 };
 pub use design::{
     Assembly, AssemblyMesh, AssemblyPart, ComponentFlag, Components, ContactSolver, Extent, Extrude, Feature,

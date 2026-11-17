@@ -640,3 +640,38 @@ fn offset_takes_whole_loops_and_keeps_one_distance() {
             .is_err()
     );
 }
+
+/// Inventor 2026 help, To Create 2D Shape Geometry (GUID-D489CE6D-7299-4211-A43A-F3580A4BA357), Slots:
+/// the arc slots are a centre arc, concentric outer and inner arcs and half-round ends.
+#[test]
+fn arc_slots_keep_centre_radius_angles_and_width_with_six_degrees_of_freedom() {
+    let mut bench = Bench::new();
+    let dof = bench.dof();
+    let created = bench
+        .op(SketchOp::AddArcSlot {
+            centre: [0.0, 0.0, 0.0],
+            start: [0.1, 0.0, 0.0],
+            end: [0.0, 0.3, 0.0],
+            width: 0.02,
+        })
+        .unwrap();
+    let sketch = bench.sketch();
+    let curves = Bench::curves(&created);
+    let drawn: Vec<_> = curves.iter().filter(|c| !sketch.curves[c].construction).collect();
+    assert_eq!(drawn.len(), 4, "outer, inner and two ends");
+    let mut radii: Vec<f64> = drawn.iter().filter_map(|c| sketch.round(**c).map(|(_, r)| r)).collect();
+    radii.sort_by(f64::total_cmp);
+    for (got, want) in radii.iter().zip([0.01, 0.01, 0.09, 0.11]) {
+        assert!((got - want).abs() < 1e-9, "{radii:?}");
+    }
+    assert_eq!(bench.dof(), dof + 6, "centre, radius, two angles and the width");
+    let bad = |centre: [f64; 3], start: [f64; 3], end: [f64; 3], width| SketchOp::AddArcSlot {
+        centre,
+        start,
+        end,
+        width,
+    };
+    assert!(bench.op(bad([0.0; 3], [0.1, 0.0, 0.0], [0.2, 0.0, 0.0], 0.01)).is_err(), "no sweep");
+    assert!(bench.op(bad([0.0; 3], [0.1, 0.0, 0.0], [0.0, 0.1, 0.0], 0.2)).is_err(), "wider than the arc");
+    assert!(bench.op(bad([0.0; 3], [0.0; 3], [0.0, 0.1, 0.0], 0.01)).is_err(), "no radius");
+}
