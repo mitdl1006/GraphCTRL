@@ -67,6 +67,8 @@ pub enum SketchOp {
         a: [f64; 2],
         /// Opposite corner.
         b: [f64; 2],
+        /// What the first corner was snapped to.
+        snap_a: EndSnap,
     },
     /// Adds a geometric constraint. Refused when redundant or conflicting.
     AddConstraint(GeoConstraint),
@@ -364,7 +366,7 @@ fn sketch_op(
             created.push(Created::Curve(sketch.add_arc(ids, *centre, *start, *end)?));
             "Arc"
         }
-        SketchOp::AddRectangle { a, b } => {
+        SketchOp::AddRectangle { a, b, snap_a } => {
             let corners = [[a[0], a[1], 0.0], [b[0], a[1], 0.0], [b[0], b[1], 0.0], [a[0], b[1], 0.0]];
             let lines: Vec<Id<Curve>> =
                 (0..4).map(|i| sketch.add_line(ids, corners[i], corners[(i + 1) % 4])).collect();
@@ -384,6 +386,11 @@ fn sketch_op(
                     GeoConstraint::Vertical(*start, *end)
                 };
                 created.push(Created::Constraint(added(sketch.try_add_constraint(ids, constraint)?)?));
+            }
+            if let (Some(point), Some((corner, _))) = (snap_a.point, ends.first()) {
+                infer(sketch, ids, GeoConstraint::Coincident(point, *corner), &mut created);
+            } else if let (Some(curve), Some((corner, _))) = (snap_a.curve, ends.first()) {
+                infer(sketch, ids, GeoConstraint::PointOnCurve(*corner, curve), &mut created);
             }
             "Rectangle"
         }

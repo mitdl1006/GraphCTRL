@@ -42,8 +42,12 @@ fn rectangle_driven_by_parameter() -> (Document, History, Id<Sketch>, Id<Param>,
             .unwrap();
     let Created::Param(param) = applied.created[0] else { panic!("no param") };
     history.record(applied.label, applied.delta);
-    let created =
-        run(&mut doc, &mut history, sketch, SketchOp::AddRectangle { a: [0.0, 0.0], b: [0.010, 0.005] });
+    let created = run(
+        &mut doc,
+        &mut history,
+        sketch,
+        SketchOp::AddRectangle { a: [0.0, 0.0], b: [0.010, 0.005], snap_a: EndSnap::default() },
+    );
     let lines: Vec<Id<Curve>> =
         created.iter().filter_map(|c| if let Created::Curve(id) = c { Some(*id) } else { None }).collect();
     let s = doc.get(sketch).unwrap();

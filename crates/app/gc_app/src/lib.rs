@@ -1,6 +1,6 @@
-//! eframe wiring, settings, file dialogs and crash handling.
+//! eframe wiring: the application window, ribbon, panels and shortcuts.
 
 mod app;
-mod viewport_stub;
+mod ribbon;
 
 pub use app::{GraphCtrlApp, RunOptions, run};

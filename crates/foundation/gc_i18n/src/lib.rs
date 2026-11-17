@@ -108,6 +108,144 @@ messages! {
     StatusDimensionsNeeded => ("{0}개 치수 필요", "{0} dimensions needed"),
     /// Status bar: the sketch is fully constrained.
     StatusFullyConstrained => ("완전 구속", "Fully constrained"),
+    /// Ribbon tab: 3D model.
+    TabModel => ("3D 모델", "3D Model"),
+    /// Ribbon tab: sketch.
+    TabSketch => ("스케치", "Sketch"),
+    /// Ribbon tab: view.
+    TabView => ("뷰", "View"),
+    /// Ribbon group: start a sketch.
+    GroupSketch => ("스케치", "Sketch"),
+    /// Ribbon group: create geometry.
+    GroupCreate => ("작성", "Create"),
+    /// Ribbon group: constraints.
+    GroupConstrain => ("구속", "Constrain"),
+    /// Ribbon group: leave the sketch.
+    GroupExit => ("종료", "Exit"),
+    /// Ribbon group: standard views.
+    GroupViews => ("표준 뷰", "Views"),
+    /// Ribbon group: projection.
+    GroupProjection => ("투영", "Projection"),
+    /// Command: start a 2D sketch on a plane. `{0}` is the plane name.
+    CmdSketchOn => ("{0} 스케치", "Sketch on {0}"),
+    /// Command: finish the sketch.
+    CmdFinishSketch => ("스케치 마무리", "Finish Sketch"),
+    /// Tool: select.
+    ToolSelect => ("선택", "Select"),
+    /// Tool: line.
+    ToolLine => ("선", "Line"),
+    /// Tool: circle.
+    ToolCircle => ("원", "Circle"),
+    /// Tool: rectangle.
+    ToolRectangle => ("사각형", "Rectangle"),
+    /// Tool: dimension.
+    ToolDimension => ("치수", "Dimension"),
+    /// Constraint: coincident.
+    ConCoincident => ("일치", "Coincident"),
+    /// Constraint: horizontal.
+    ConHorizontal => ("수평", "Horizontal"),
+    /// Constraint: vertical.
+    ConVertical => ("수직", "Vertical"),
+    /// Constraint: parallel.
+    ConParallel => ("평행", "Parallel"),
+    /// Constraint: perpendicular.
+    ConPerpendicular => ("직각", "Perpendicular"),
+    /// Constraint: collinear.
+    ConCollinear => ("동일선상", "Collinear"),
+    /// Constraint: tangent.
+    ConTangent => ("접선", "Tangent"),
+    /// Constraint: equal.
+    ConEqual => ("동일", "Equal"),
+    /// Constraint: concentric.
+    ConConcentric => ("동심", "Concentric"),
+    /// Constraint: midpoint.
+    ConMidpoint => ("중점", "Midpoint"),
+    /// Constraint: fix.
+    ConFix => ("고정", "Fix"),
+    /// Constraint: symmetric.
+    ConSymmetric => ("대칭", "Symmetric"),
+    /// View: front.
+    ViewFront => ("정면", "Front"),
+    /// View: top.
+    ViewTop => ("평면", "Top"),
+    /// View: right.
+    ViewRight => ("우측", "Right"),
+    /// View: home (isometric).
+    ViewHome => ("홈", "Home"),
+    /// View: zoom to fit everything.
+    ViewFit => ("전체 보기", "Zoom All"),
+    /// View: orthographic projection.
+    ViewOrtho => ("직교", "Orthographic"),
+    /// View: perspective projection.
+    ViewPerspective => ("원근", "Perspective"),
+    /// Panel title: model browser.
+    PanelBrowser => ("모델", "Model"),
+    /// Panel title: properties.
+    PanelProperties => ("속성", "Properties"),
+    /// Browser: origin folder.
+    BrowserOrigin => ("원점", "Origin"),
+    /// Browser: sketches folder.
+    BrowserSketches => ("스케치", "Sketches"),
+    /// Properties: nothing is selected.
+    PropNothing => ("선택된 항목이 없습니다", "Nothing selected"),
+    /// Properties: number of selected items. `{0}` is the count.
+    PropSelected => ("{0}개 선택됨", "{0} selected"),
+    /// Properties: a line and its length. `{0}` is the length.
+    PropLine => ("선 · 길이 {0}", "Line · length {0}"),
+    /// Properties: a circle and its radius. `{0}` is the radius.
+    PropCircle => ("원 · 반지름 {0}", "Circle · radius {0}"),
+    /// Properties: an arc and its radius. `{0}` is the radius.
+    PropArc => ("호 · 반지름 {0}", "Arc · radius {0}"),
+    /// Properties: a point and its coordinates. `{0}` and `{1}` are the coordinates.
+    PropPoint => ("점 · ({0}, {1})", "Point · ({0}, {1})"),
+    /// Properties: a dimension and its expression. `{0}` is the expression.
+    PropDimension => ("치수 · {0}", "Dimension · {0}"),
+    /// Properties: a geometric constraint.
+    PropConstraint => ("구속조건", "Constraint"),
+    /// Properties: label of the expression field of a dimension.
+    PropExpression => ("수식", "Expression"),
+    /// Prompt: select tool.
+    PromptSelect => ("항목을 선택하거나 끌어서 이동", "Select items, or drag to move them"),
+    /// Prompt: first point of a line.
+    PromptLineStart => ("선의 시작점을 클릭", "Click the start of the line"),
+    /// Prompt: next point of a line.
+    PromptLineEnd => ("다음 점을 클릭 (Esc: 끝내기)", "Click the next point (Esc to finish)"),
+    /// Prompt: centre of a circle.
+    PromptCircleCentre => ("원의 중심을 클릭", "Click the centre of the circle"),
+    /// Prompt: a point on the circle.
+    PromptCircleRim => ("원 위의 한 점을 클릭", "Click a point on the circle"),
+    /// Prompt: first corner of a rectangle.
+    PromptRectFirst => ("첫 번째 구석을 클릭", "Click the first corner"),
+    /// Prompt: opposite corner of a rectangle.
+    PromptRectSecond => ("반대쪽 구석을 클릭", "Click the opposite corner"),
+    /// Prompt: pick what to dimension.
+    PromptDimPick => ("치수를 넣을 형상을 클릭", "Click the geometry to dimension"),
+    /// Prompt: place the dimension.
+    PromptDimPlace => ("치수를 놓을 위치를 클릭 (다른 형상을 클릭하면 둘 사이의 치수)", "Click where to place the dimension (or another item to dimension between them)"),
+    /// Prompt: type the dimension value.
+    PromptDimValue => ("값을 입력하고 Enter", "Type the value and press Enter"),
+    /// Prompt: pick items for a constraint.
+    PromptConstraint => ("구속할 형상을 차례로 클릭", "Click the items to constrain"),
+    /// Status: the last edit was refused as redundant.
+    ErrRedundant => ("이미 다른 구속으로 정해져 있습니다", "Already determined by other constraints"),
+    /// Status: the last edit was refused as conflicting.
+    ErrConflicting => ("다른 구속과 충돌합니다", "Conflicts with other constraints"),
+    /// Status: the expression is not valid.
+    ErrExpression => ("수식을 읽을 수 없습니다", "The expression is not valid"),
+    /// Status: the sketch cannot be solved with this change.
+    ErrUnsolved => ("이 변경으로는 스케치를 풀 수 없습니다", "The sketch cannot be solved with this change"),
+    /// Status: any other refusal.
+    ErrOther => ("적용할 수 없습니다", "This cannot be applied"),
+    /// Question: add an over-constraining dimension as a reference dimension?
+    AskReference => ("이 치수는 스케치를 과구속합니다. 참조 치수로 넣을까요?", "This dimension over-constrains the sketch. Add it as a reference dimension?"),
+    /// Menu: Korean input test window.
+    MenuImeTest => ("한글 입력 시험", "Korean input test"),
+    /// Menu: language.
+    MenuLanguage => ("언어", "Language"),
+    /// Status: GPU in use.
+    GpuOn => ("GPU 사용 중", "GPU in use"),
+    /// Status: no GPU.
+    GpuOff => ("GPU 없음", "No GPU"),
     /// Button: confirm.
     Ok => ("확인", "OK"),
     /// Button: cancel.

@@ -277,6 +277,25 @@ impl Document {
         &self.sketches
     }
 
+    /// The pose of a frame in the world: its own pose composed with those of its ancestors.
+    pub fn frame_world_pose(&self, frame: Id<Frame>) -> Option<gc_math::DPose3> {
+        let mut pose = gc_math::DPose3::IDENTITY;
+        let mut at = Some(frame);
+        // A parent chain longer than the number of frames would be a cycle.
+        for _ in 0..=self.frames.len() {
+            let Some(id) = at else { return Some(pose) };
+            let f = self.frames.get(id)?;
+            let [x, y, z, w] = f.quat_xyzw;
+            let local = gc_math::DPose3::from_parts(
+                gc_math::DVec3::from_array(f.xyz),
+                gc_math::DQuat::from_xyzw(x, y, z, w),
+            );
+            pose = local * pose;
+            at = f.parent;
+        }
+        None
+    }
+
     /// The world frame.
     pub fn world(&self) -> Option<Id<Frame>> {
         self.frames.iter().find(|(_, f)| f.kind == FrameKind::World).map(|(id, _)| id)

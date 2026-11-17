@@ -437,7 +437,12 @@ impl Tool {
                     self.anchor = Some(corner);
                     return Vec::new();
                 }
-                vec![ToolOutput::Edit(SketchOp::AddRectangle { a: corner, b: here })]
+                let at_corner = snap(sketch, corner, px, None, modifier);
+                vec![ToolOutput::Edit(SketchOp::AddRectangle {
+                    a: corner,
+                    b: here,
+                    snap_a: end_snap(&at_corner),
+                })]
             }
             ToolKind::Dimension => {
                 if self.pending.is_some() {

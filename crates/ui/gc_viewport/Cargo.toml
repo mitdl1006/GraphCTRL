@@ -11,6 +11,11 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+gc_core.workspace = true
+gc_math.workspace = true
+gc_i18n.workspace = true
+gc_doc.workspace = true
+gc_sketch.workspace = true
 gc_ui.workspace = true
 gc_render.workspace = true
 gc_draw.workspace = true

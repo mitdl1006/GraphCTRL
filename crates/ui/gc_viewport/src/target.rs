@@ -1,38 +1,41 @@
-//! Stage 0 placeholder for the 3D viewport: clears an offscreen target and shows it as an image.
-//!
-//! This proves the embedding path (own render target -> `register_native_texture` -> egui image) and
-//! keeps working without a GPU, in which case a flat placeholder is painted instead.
+//! The viewport background: the renderer's offscreen target shown as an image.
 
-use eframe::{egui, egui_wgpu, wgpu};
 use gc_render::ViewTarget;
+use gc_ui::colors;
 
-pub(crate) struct ViewportStub {
+/// Owns the offscreen render target and its registration with egui.
+pub struct Background {
     render_state: Option<egui_wgpu::RenderState>,
     target: Option<(ViewTarget, egui::TextureId)>,
 }
 
-impl ViewportStub {
+impl Background {
     pub(crate) fn new(render_state: Option<egui_wgpu::RenderState>) -> Self {
         Self { render_state, target: None }
     }
 
-    pub(crate) fn has_gpu(&self) -> bool {
+    /// True when a GPU renders the background.
+    pub fn has_gpu(&self) -> bool {
         self.render_state.is_some()
     }
 
     /// The current offscreen target, if one was rendered.
-    pub(crate) fn target(&self) -> Option<(&egui_wgpu::RenderState, &ViewTarget)> {
+    pub fn target(&self) -> Option<(&egui_wgpu::RenderState, &ViewTarget)> {
         Some((self.render_state.as_ref()?, &self.target.as_ref()?.0))
     }
 
-    pub(crate) fn ui(&mut self, ui: &mut egui::Ui) {
-        let (rect, _response) = ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
+    pub(crate) fn paint(&mut self, ui: &egui::Ui, rect: egui::Rect) {
         let Some(rs) = self.render_state.as_ref() else {
-            ui.painter().rect_filled(rect, 0.0, egui::Color32::from_rgb(0xC3, 0xCA, 0xD3));
+            ui.painter().rect_filled(rect, 0.0, colors::BACKGROUND_BOTTOM);
             return;
         };
         let ppp = ui.pixels_per_point();
-        let px = |v: f32| ((v * ppp).round() as u32).clamp(1, 8192);
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "clamped to a valid texture size"
+        )]
+        let px = |v: f32| ((v * ppp).round().clamp(1.0, 8192.0)) as u32;
         let size = (px(rect.width()), px(rect.height()));
         if self.target.as_ref().is_none_or(|(t, _)| t.size() != size) {
             let target = ViewTarget::new(&rs.device, size.0, size.1);
@@ -54,7 +57,14 @@ impl ViewportStub {
                 ),
             };
             drop(renderer);
-            gc_render::clear(&rs.device, &rs.queue, &target, [0.90, 0.92, 0.93, 1.0]);
+            let c = colors::BACKGROUND_TOP;
+            let linear = |v: u8| f64::from(v) / 255.0;
+            gc_render::clear(
+                &rs.device,
+                &rs.queue,
+                &target,
+                [linear(c.r()), linear(c.g()), linear(c.b()), 1.0],
+            );
             self.target = Some((target, id));
         }
         if let Some((_, id)) = self.target.as_ref() {

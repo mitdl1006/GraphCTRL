@@ -1329,6 +1329,7 @@ dependencies = [
  "egui",
  "egui_kittest",
  "gc_core",
+ "gc_draw",
  "gc_i18n",
  "gc_jobs",
  "gc_panels",
@@ -1337,6 +1338,7 @@ dependencies = [
  "gc_robotics_api",
  "gc_session",
  "gc_test_support",
+ "gc_tools",
  "gc_ui",
  "gc_viewport",
  "image",
@@ -1448,10 +1450,13 @@ name = "gc_panels"
 version = "0.1.0"
 dependencies = [
  "egui",
+ "gc_core",
  "gc_doc",
  "gc_i18n",
  "gc_robotics_api",
  "gc_session",
+ "gc_sketch",
+ "gc_tools",
  "gc_ui",
 ]
 
@@ -1659,10 +1664,15 @@ version = "0.1.0"
 dependencies = [
  "egui",
  "egui-wgpu",
+ "gc_core",
+ "gc_doc",
  "gc_draw",
+ "gc_i18n",
+ "gc_math",
  "gc_render",
  "gc_scene",
  "gc_session",
+ "gc_sketch",
  "gc_tools",
  "gc_ui",
  "wgpu",
