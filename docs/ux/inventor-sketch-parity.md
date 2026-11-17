@@ -55,8 +55,8 @@
 | Two Point Rectangle (2점) [S3] | 대각 모서리 2클릭, 스케치 축에 정렬. HUD 지원 [S4] | (표에 없음) | 2클릭. 선4+일치4+H,V,H,V(PLAN 5.5). 단축키 R(인벤터 표에 없음) | 구속 구성은 같음으로 보이나 **(인벤터가 만드는 구속 목록은 도움말에 없음, 미확인)** | P1 | BE |
 | Three Point Rectangle (3점) [S3] | 1=모서리, 2=한 변의 방향·길이, 3=인접 변 길이. 임의 방향. HUD 지원 [S4] | | 없음 | 신규 | P1 | BE |
 | Two Point Center / Three Point Center Rectangle [S3] | 2점 중심: 1=중심, 2=모서리. 3점 중심: 1=중심, 2=한 변 방향·거리, 3=인접 변 거리 | | 없음 | 신규 | P2 | BE |
-| Slot (슬롯) 5종 [S3] | Center to Center: 호 중심 2점 클릭 후 3번째로 너비. Overall: 중심선 시작·끝 2점 후 너비. Center Point: 슬롯 중심, 호 중심 1점, 너비. Three Point Arc Slot(호 슬롯): 중심 호의 시작·끝 2점, 3번째 = 호 중심, 마지막 = 너비. Center Point Arc Slot: 중심점, 중심 호의 시작·끝, 너비(4클릭). 값은 입력창·우클릭으로 직접 입력 가능 [S3] | (미확인) | 없음 | 신규 5종 | P2 | BE |
-| Polygon (다각형) [S3] | 대화상자: Inscribed(꼭짓점 기준)/Circumscribed(변 중점 기준), 변 수(최대 120). 중심 클릭 후 드래그. Esc·다른 명령·대화상자 Done으로 종료 | (미확인) | 없음 | 신규 | P2 | BE+FE |
+| Slot (슬롯) 5종 [S3] | Center to Center: 호 중심 2점 클릭 후 3번째로 너비. Overall: 중심선 시작·끝 2점 후 너비. Center Point: 슬롯 중심, 호 중심 1점, 너비. Three Point Arc Slot(호 슬롯): 중심 호의 시작·끝 2점, 3번째 = 호 중심, 마지막 = 너비. Center Point Arc Slot: 중심점, 중심 호의 시작·끝, 너비(4클릭). 값은 입력창·우클릭으로 직접 입력 가능 [S3] | (미확인) | **BE 직선 3종 완료**: `SketchOp::AddSlot{a, b, width, kind: SlotKind::{CenterToCenter, Overall, CenterPoint}}` — 구성 중심선, 변 2개, 반원 끝 2개(변과 접함, 같은 반지름). 남는 자유도 5(호 중심 2개·너비) | **호 슬롯 2종(Three Point Arc, Center Point Arc) 남음**: 끝 반원이 바깥·안쪽 호와 끝점에서 접하는 구속이 2차로만 잡혀(이중근) 다른 구성이 필요. 도구(클릭 순서)·입력창은 FE | P2 | BE |
+| Polygon (다각형) [S3] | 대화상자: Inscribed(꼭짓점 기준)/Circumscribed(변 중점 기준), 변 수(최대 120). 중심 클릭 후 드래그. Esc·다른 명령·대화상자 Done으로 종료 | (미확인) | **BE 완료**: `SketchOp::AddPolygon{centre, at, sides(3–120), circumscribed}` — 선 n개 + 구성 원(내접: 꼭짓점이 원 위, 외접: 변이 원에 접함), 꼭짓점 일치, 변 같음(짝수 외접은 첫 변 중점으로 가는 구성 반지름이 그 변과 직각). 남는 자유도 4(중심·크기·회전). 원문에 구속 목록은 없어 구성은 자체 결정 | 대화상자(내접/외접·변 수)·중심 클릭 후 드래그 도구는 FE | P2 | BE+FE |
 | Ellipse (타원) [S3] | 1=중심, 2=첫 축의 방향·길이(중심선 표시), 3=두 번째 축 길이 | (미확인) | 없음 | 신규(타원 기하 자체가 `CurveGeom`에 없음) | P3 | BE |
 | Interpolation Spline (보간) [S11] | 클릭마다 맞춤점. 끝점은 사각형, 맞춤점은 마름모. 시작점 우클릭 "Close Curve". 핸들 편집(Activate Handle), Insert Point, Split Spline, Spline Tension 등 [S11] | (미확인) | 없음 | 신규 | P3 | BE |
 | Control Vertex Spline (제어점) [S11] | 클릭마다 제어점(제어 프레임은 구성선, 제어점은 원). 완료는 OK, 계속은 Apply | | 없음 | 신규 | P3 | BE |
@@ -87,9 +87,9 @@
 
 | 명령 | 인벤터 2026 동작 | 단축키 | GraphCTRL 현재 | 차이 | 우선 | 담당 |
 |---|---|---|---|---|---|---|
-| Rectangular Pattern (사각 패턴) [S12] | 대화상자: 기하 선택 → 방향 1 선택(화살표) + Count + Spacing(수식 가능), 방향 2 동일. 선택 Extents: Boundary(Include Geometry/Include Centroids/Base Points). 고급: Suppress, Associative, Fitted. OK로 생성. 패턴 형상은 완전 구속이며 구속은 그룹으로 유지. 경계 밖 형상은 다른 색·선종류(2026.2) | RP [S29] | 없음 | 신규 | P2 | BE+FE |
-| Circular Pattern (원형 패턴) [S12] | 축(점·꼭짓점·작업축) 선택, Count, Angle(첫~끝 요소 사이 각도, 수식 가능) | CP [S29] | 없음 | 신규 | P2 | BE+FE |
-| Mirror (대칭 복사) [S12] | 대화상자: 기하 선택 → Mirror Line 선택(파란 화살표). 스플라인이 대칭선과 교차하면 Self Symmetric. Apply로 계속·Done으로 종료 | (미확인; 표의 MI는 피처 미러) | 없음 | 신규(대칭 구속은 있음) | P2 | BE |
+| Rectangular Pattern (사각 패턴) [S12] | 대화상자: 기하 선택 → 방향 1 선택(화살표) + Count + Spacing(수식 가능), 방향 2 동일. 선택 Extents: Boundary(Include Geometry/Include Centroids/Base Points). 고급: Suppress, Associative, Fitted. OK로 생성. 패턴 형상은 완전 구속이며 구속은 그룹으로 유지. 경계 밖 형상은 다른 색·선종류(2026.2) | RP [S29] | **BE 완료**: `SketchOp::RectangularPattern{curves, first, second: Option<SketchPatternDirection{line, count, spacing(식), flip}>, fitted}` — 복사 점마다 앞 복사본에서 방향선과 평행·첫 간격선과 같은 길이의 구성 단계, 첫 단계에 간격 치수(방향마다 1개) → 완전 구속, 간격 치수 편집이 패턴 전체를 옮김 | 패턴 개체(개수 편집·Delete Pattern·Suppress·Associative 해제·Boundary)는 없음 — 다시 만들어야 함. 대화상자는 FE | P2 | BE+FE |
+| Circular Pattern (원형 패턴) [S12] | 축(점·꼭짓점·작업축) 선택, Count, Angle(첫~끝 요소 사이 각도, 수식 가능) | CP [S29] | **BE 완료**: `SketchOp::CircularPattern{curves, axis(점), count, angle(식), flip, fitted}` — 복사 점마다 원본과 같은 반지름의 구성 선 + 앞 복사본과의 각도 치수(같은 식) → 완전 구속. 식에 모델 매개변수를 쓰면 함께 편집됨 | 축으로 작업축 선택은 점만 지원. 패턴 개체 없음(위와 같음) | P2 | BE+FE |
+| Mirror (대칭 복사) [S12] | 대화상자: 기하 선택 → Mirror Line 선택(파란 화살표). 스플라인이 대칭선과 교차하면 Self Symmetric. Apply로 계속·Done으로 종료 | (미확인; 표의 MI는 피처 미러) | **BE 완료**: `SketchOp::Mirror{curves, axis}` — 복사 점마다 대칭 구속(대칭선 위 점은 공유), 원은 같은 반지름, 호는 방향 반대로. 자유도 추가 없음(원본을 바꾸면 따라감) | 대화상자(Select·Mirror Line·Apply/Done)는 FE. Self Symmetric(스플라인)은 스플라인이 없어 해당 없음 | P2 | BE |
 | 패턴 편집 | 요소 우클릭 Edit Pattern, 패턴 치수 더블클릭, Delete / Delete Pattern / Suppress Element(s) [S12] | | 없음 | | P3 | BE+FE |
 
 ### 2.6 Constrain 패널 — 구속조건

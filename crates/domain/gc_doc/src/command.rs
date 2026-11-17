@@ -50,6 +50,31 @@ pub enum DimSlot {
     Height,
 }
 
+/// How the first two clicks of a straight slot are read (Inventor 2026 help, To Create 2D Shape Geometry,
+/// GUID-D489CE6D-7299-4211-A43A-F3580A4BA357, Slots).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SlotKind {
+    /// Center to Center Slot: the two arc centres.
+    CenterToCenter,
+    /// Overall Slot: the start and end of the slot's centre line, ends included.
+    Overall,
+    /// Center Point Slot: the slot's centre, then one arc centre.
+    CenterPoint,
+}
+
+/// One direction of a sketch rectangular pattern.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SketchPatternDirection {
+    /// A line giving the direction (from its start to its end).
+    pub line: Id<Curve>,
+    /// Number of elements along it, the originals included, 2 to 500.
+    pub count: u32,
+    /// Spacing between neighbours (or overall, fitted), an expression in millimetres by default.
+    pub spacing: String,
+    /// The other way along the line.
+    pub flip: bool,
+}
+
 /// An edit of one sketch.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum SketchOp {
@@ -66,6 +91,80 @@ pub enum SketchOp {
         pos: [f64; 3],
         /// A centre point rather than a sketch point.
         center: bool,
+    },
+    /// The Polygon command (Inventor 2026 help, To Create 2D Shape Geometry,
+    /// GUID-D489CE6D-7299-4211-A43A-F3580A4BA357: up to 120 sides, Inscribed — "the vertex ... determines
+    /// the size and orientation" — or Circumscribed — "the midpoint of an edge"): a regular polygon round
+    /// `centre` with a corner (inscribed) or an edge midpoint (circumscribed) at `at`. A construction
+    /// circle through the corners, or touching the edges, carries its size; the polygon keeps four degrees
+    /// of freedom (centre, size, turn).
+    AddPolygon {
+        /// Centre.
+        centre: [f64; 3],
+        /// A corner (inscribed) or the midpoint of an edge (circumscribed).
+        at: [f64; 3],
+        /// Number of sides, 3 to 120.
+        sides: u32,
+        /// Circumscribed (edges touch the circle) rather than inscribed (corners on it).
+        circumscribed: bool,
+    },
+    /// A straight slot (Center to Center, Overall or Center Point): a construction centre line between
+    /// the arc centres, two sides and two half-round ends tangent to them, ends of equal radius. It keeps
+    /// five degrees of freedom (the two arc centres and the width).
+    AddSlot {
+        /// First click.
+        a: [f64; 3],
+        /// Second click.
+        b: [f64; 3],
+        /// Width (the third click), metres.
+        width: f64,
+        /// How the clicks are read.
+        kind: SlotKind,
+    },
+    /// The sketch Mirror command (Inventor 2026 help, To Create and Edit Sketch Patterns,
+    /// GUID-AAD3A699-FED8-4614-A31D-0A2316328CEE, Create Mirror Patterns): copies of the curves reflected
+    /// across a line, every copied point symmetric to its original about it (points on the line are
+    /// shared), circles of equal radius. The copies add no degrees of freedom.
+    Mirror {
+        /// The curves to mirror.
+        curves: Vec<Id<Curve>>,
+        /// The mirror line.
+        axis: Id<Curve>,
+    },
+    /// The sketch Rectangular Pattern (Inventor 2026 help, To Create and Edit Sketch Patterns,
+    /// GUID-AAD3A699-FED8-4614-A31D-0A2316328CEE): copies of the curves along one or two directions
+    /// (lines), `count` along each (the originals included) at `spacing` (an expression; fitted: the whole
+    /// extent). Fully constrained: every copied point is one construction step from the previous copy,
+    /// parallel to the direction and as long as the first step, which carries the spacing dimension —
+    /// editing that dimension moves the whole pattern.
+    RectangularPattern {
+        /// The curves to pattern.
+        curves: Vec<Id<Curve>>,
+        /// Direction 1.
+        first: SketchPatternDirection,
+        /// Direction 2, if any.
+        second: Option<SketchPatternDirection>,
+        /// Fitted: `spacing` is the overall distance, shared out between the elements.
+        fitted: bool,
+    },
+    /// The sketch Circular Pattern: copies round an axis point, `count` in all (the originals included),
+    /// `angle` (an expression) between neighbours (fitted: the overall angle, a full turn shared out by
+    /// `count`). Fully constrained: each copied point keeps its original's distance from the axis and an
+    /// angle dimension from the previous copy, all from the same expression (name a model parameter in it
+    /// to edit them together).
+    CircularPattern {
+        /// The curves to pattern.
+        curves: Vec<Id<Curve>>,
+        /// The axis: a point (a centre, a vertex, a sketch point).
+        axis: Id<SkPoint>,
+        /// Number of elements, the originals included, 2 to 500.
+        count: u32,
+        /// The angle between neighbours (or overall, fitted), an expression.
+        angle: String,
+        /// Clockwise instead of counter-clockwise.
+        flip: bool,
+        /// Fitted: `angle` is the overall angle.
+        fitted: bool,
     },
     /// The Center Point toggle on selected standalone points (curve ends and centres are refused).
     SetCenterPoint {
@@ -723,6 +822,71 @@ fn snap_constraint(
     }
 }
 
+/// What a sketch pattern copies: the curves and their points, each point once.
+struct PatternSources {
+    curves: Vec<(Id<Curve>, Curve)>,
+    points: Vec<Id<SkPoint>>,
+}
+
+fn pattern_sources(sketch: &Sketch, curves: &[Id<Curve>]) -> Result<PatternSources, EditError> {
+    if curves.is_empty() {
+        return Err(SketchError::InvalidValue.into());
+    }
+    let mut points = Vec::new();
+    let mut out = Vec::new();
+    for id in curves {
+        let curve = *sketch.curves.get(id).ok_or(SketchError::MissingCurve)?;
+        for p in curve.points() {
+            if !points.contains(&p) {
+                points.push(p);
+            }
+        }
+        out.push((*id, curve));
+    }
+    Ok(PatternSources { curves: out, points })
+}
+
+/// A construction line between two existing points (it shares them).
+fn construction_between(
+    sketch: &mut Sketch,
+    ids: &mut IdAlloc,
+    a: Id<SkPoint>,
+    b: Id<SkPoint>,
+    created: &mut Vec<Created>,
+) -> Result<Id<Curve>, EditError> {
+    let id: Id<Curve> = ids.alloc();
+    sketch.curves.insert(id, Curve { geom: gc_sketch::CurveGeom::Line { a, b }, construction: true });
+    created.push(Created::Curve(id));
+    Ok(id)
+}
+
+/// Copies of the curves on the points `map` gives; circles keep their originals' radii.
+fn copy_curves(
+    sketch: &mut Sketch,
+    ids: &mut IdAlloc,
+    sources: &PatternSources,
+    map: &std::collections::BTreeMap<Id<SkPoint>, Id<SkPoint>>,
+    created: &mut Vec<Created>,
+) -> Result<(), EditError> {
+    let at = |p: Id<SkPoint>| map.get(&p).copied().ok_or(EditError::Sketch(SketchError::MissingItem));
+    for (original, curve) in &sources.curves {
+        let geom = match curve.geom {
+            gc_sketch::CurveGeom::Line { a, b } => gc_sketch::CurveGeom::Line { a: at(a)?, b: at(b)? },
+            gc_sketch::CurveGeom::Circle { c, r } => gc_sketch::CurveGeom::Circle { c: at(c)?, r },
+            gc_sketch::CurveGeom::Arc { c, s, e } => {
+                gc_sketch::CurveGeom::Arc { c: at(c)?, s: at(s)?, e: at(e)? }
+            }
+        };
+        let id: Id<Curve> = ids.alloc();
+        sketch.curves.insert(id, Curve { geom, construction: curve.construction });
+        created.push(Created::Curve(id));
+        if matches!(curve.geom, gc_sketch::CurveGeom::Circle { .. }) {
+            require(sketch, ids, GeoConstraint::Equal(*original, id), created)?;
+        }
+    }
+    Ok(())
+}
+
 /// A tangency between two curves, with the side captured from how they lie now.
 fn tangency(sketch: &Sketch, a: Id<Curve>, b: Id<Curve>) -> Option<GeoConstraint> {
     let xy = |p: Id<SkPoint>| sketch.pos(p).map(|q| [q[0], q[1]]);
@@ -872,6 +1036,372 @@ fn sketch_op(
             }
             created.push(Created::Point(point));
             if *center { "Center point" } else { "Point" }
+        }
+        SketchOp::AddPolygon { centre, at, sides, circumscribed } => {
+            if !(3..=120).contains(sides) || !centre.iter().chain(at).all(|v| v.is_finite()) {
+                return Err(SketchError::InvalidValue.into());
+            }
+            let (dx, dy) = (at[0] - centre[0], at[1] - centre[1]);
+            let reach = gc_math::fm::hypot(dx, dy);
+            if reach < 1e-9 {
+                return Err(SketchError::InvalidValue.into());
+            }
+            let n = *sides as usize;
+            let step = std::f64::consts::TAU / f64::from(*sides);
+            let start = gc_math::fm::atan2(dy, dx);
+            // Corners: on the circle (inscribed), or half a step either side of the clicked edge midpoint,
+            // farther out (circumscribed).
+            let (radius, first) = if *circumscribed {
+                (reach / gc_math::fm::cos(step / 2.0), start - step / 2.0)
+            } else {
+                (reach, start)
+            };
+            #[allow(clippy::cast_precision_loss, reason = "at most 120 sides")]
+            let corners: Vec<[f64; 3]> = (0..n)
+                .map(|i| {
+                    let angle = first + step * i as f64;
+                    [
+                        centre[0] + radius * gc_math::fm::cos(angle),
+                        centre[1] + radius * gc_math::fm::sin(angle),
+                        0.0,
+                    ]
+                })
+                .collect();
+            let lines: Vec<Id<Curve>> =
+                (0..n).map(|i| sketch.add_line(ids, corners[i], corners[(i + 1) % n])).collect();
+            let ends: Vec<(Id<SkPoint>, Id<SkPoint>)> =
+                lines.iter().filter_map(|l| sketch.line(*l)).collect();
+            let circle = sketch.add_circle(ids, *centre, reach)?;
+            if let Some(c) = sketch.curves.get_mut(&circle) {
+                c.construction = true;
+            }
+            created.extend(lines.iter().map(|l| Created::Curve(*l)));
+            created.push(Created::Curve(circle));
+            for i in 0..n {
+                require(
+                    sketch,
+                    ids,
+                    GeoConstraint::Coincident(ends[i].1, ends[(i + 1) % n].0),
+                    &mut created,
+                )?;
+            }
+            if *circumscribed {
+                for line in &lines {
+                    let tangent = tangency(sketch, *line, circle).ok_or(SketchError::InvalidValue)?;
+                    require(sketch, ids, tangent, &mut created)?;
+                }
+                // Equal sides: with every edge touching the circle, an odd polygon is then regular; an
+                // even one only up to alternating tangent lengths (a rhombus), which one edge touching
+                // at its midpoint settles (and the last equality then follows).
+                let equal = if n.is_multiple_of(2) { n - 2 } else { n - 1 };
+                for i in 0..equal {
+                    require(sketch, ids, GeoConstraint::Equal(lines[i], lines[i + 1]), &mut created)?;
+                }
+                if n.is_multiple_of(2) {
+                    // A construction radius to the first edge's midpoint, square to it: the edge touches
+                    // at its midpoint (a point merely on the circle would hold only to second order).
+                    let radius_line = sketch.add_line(ids, *centre, *at);
+                    if let Some(c) = sketch.curves.get_mut(&radius_line) {
+                        c.construction = true;
+                    }
+                    created.push(Created::Curve(radius_line));
+                    let (from, to) = sketch.line(radius_line).ok_or(SketchError::InvalidValue)?;
+                    let middle = sketch.round(circle).map(|(c, _)| c).ok_or(SketchError::InvalidValue)?;
+                    require(sketch, ids, GeoConstraint::Coincident(from, middle), &mut created)?;
+                    require(sketch, ids, GeoConstraint::Midpoint(to, lines[0]), &mut created)?;
+                    require(sketch, ids, GeoConstraint::Perpendicular(radius_line, lines[0]), &mut created)?;
+                }
+            } else {
+                for (corner, _) in &ends {
+                    require(sketch, ids, GeoConstraint::PointOnCurve(*corner, circle), &mut created)?;
+                }
+                for i in 0..n - 1 {
+                    require(sketch, ids, GeoConstraint::Equal(lines[i], lines[i + 1]), &mut created)?;
+                }
+            }
+            "Polygon"
+        }
+        SketchOp::AddSlot { a, b, width, kind } => {
+            if !a.iter().chain(b).all(|v| v.is_finite()) || !(width.is_finite() && *width > 0.0) {
+                return Err(SketchError::InvalidValue.into());
+            }
+            let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+            let span = gc_math::fm::hypot(dx, dy);
+            let h = width / 2.0;
+            let (d, n) = if span > 1e-12 {
+                ([dx / span, dy / span], [-dy / span, dx / span])
+            } else {
+                ([1.0, 0.0], [0.0, 1.0])
+            };
+            let (c1, c2) = match kind {
+                SlotKind::CenterToCenter => ([a[0], a[1]], [b[0], b[1]]),
+                SlotKind::Overall => {
+                    if span <= 2.0 * h {
+                        return Err(SketchError::InvalidValue.into());
+                    }
+                    ([a[0] + d[0] * h, a[1] + d[1] * h], [b[0] - d[0] * h, b[1] - d[1] * h])
+                }
+                SlotKind::CenterPoint => ([2.0 * a[0] - b[0], 2.0 * a[1] - b[1]], [b[0], b[1]]),
+            };
+            if gc_math::fm::hypot(c2[0] - c1[0], c2[1] - c1[1]) < 1e-9 {
+                return Err(SketchError::InvalidValue.into());
+            }
+            let p = |c: [f64; 2], s: f64| [c[0] + n[0] * h * s, c[1] + n[1] * h * s, 0.0];
+            let centre_line = sketch.add_line(ids, [c1[0], c1[1], 0.0], [c2[0], c2[1], 0.0]);
+            if let Some(c) = sketch.curves.get_mut(&centre_line) {
+                c.construction = true;
+            }
+            let bottom = sketch.add_line(ids, p(c1, -1.0), p(c2, -1.0));
+            let top = sketch.add_line(ids, p(c2, 1.0), p(c1, 1.0));
+            // Counter-clockwise: round the far end from the bottom side to the top, and back at the start.
+            let far = sketch.add_arc(ids, [c2[0], c2[1], 0.0], p(c2, -1.0), p(c2, 1.0))?;
+            let near = sketch.add_arc(ids, [c1[0], c1[1], 0.0], p(c1, 1.0), p(c1, -1.0))?;
+            created.extend([bottom, far, top, near, centre_line].map(Created::Curve));
+            let arc_points = |sketch: &Sketch, arc: Id<Curve>| match sketch.curves.get(&arc).map(|c| c.geom) {
+                Some(gc_sketch::CurveGeom::Arc { c, s, e }) => Some((c, s, e)),
+                _ => None,
+            };
+            let (Some((fc, fs, fe)), Some((nc, ns, ne)), Some((la, lb)), Some((ba, bb)), Some((ta, tb))) = (
+                arc_points(sketch, far),
+                arc_points(sketch, near),
+                sketch.line(centre_line),
+                sketch.line(bottom),
+                sketch.line(top),
+            ) else {
+                return Err(SketchError::InvalidValue.into());
+            };
+            for (p, q) in [(la, nc), (lb, fc), (bb, fs), (fe, ta), (tb, ns), (ne, ba)] {
+                require(sketch, ids, GeoConstraint::Coincident(p, q), &mut created)?;
+            }
+            for (line, arc) in [(bottom, far), (top, far), (top, near), (bottom, near)] {
+                let tangent = tangency(sketch, line, arc).ok_or(SketchError::InvalidValue)?;
+                require(sketch, ids, tangent, &mut created)?;
+            }
+            require(sketch, ids, GeoConstraint::Equal(far, near), &mut created)?;
+            "Slot"
+        }
+        SketchOp::Mirror { curves, axis } => {
+            let (Some((la, lb)), false) = (sketch.line(*axis), curves.contains(axis)) else {
+                return Err(SketchError::InvalidValue.into());
+            };
+            let (Some(a), Some(b)) = (sketch.pos(la), sketch.pos(lb)) else {
+                return Err(SketchError::MissingItem.into());
+            };
+            let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+            let length = gc_math::fm::hypot(dx, dy);
+            if curves.is_empty() || length < 1e-12 {
+                return Err(SketchError::InvalidValue.into());
+            }
+            let (ux, uy) = (dx / length, dy / length);
+            let reflect = |p: [f64; 3]| {
+                let (px, py) = (p[0] - a[0], p[1] - a[1]);
+                let along = px * ux + py * uy;
+                let (fx, fy) = (a[0] + along * ux, a[1] + along * uy);
+                [2.0 * fx - p[0], 2.0 * fy - p[1], p[2]]
+            };
+            let off_line = |p: [f64; 3]| ((p[0] - a[0]) * uy - (p[1] - a[1]) * ux).abs() > 1e-9;
+            let originals: Vec<Curve> = curves
+                .iter()
+                .map(|c| sketch.curves.get(c).copied().ok_or(SketchError::MissingCurve))
+                .collect::<Result<_, _>>()?;
+            // Each point once: its copy (or itself on the mirror line).
+            let mut copies: std::collections::BTreeMap<Id<SkPoint>, Id<SkPoint>> =
+                std::collections::BTreeMap::new();
+            for curve in &originals {
+                for point in curve.points() {
+                    if copies.contains_key(&point) {
+                        continue;
+                    }
+                    let pos = sketch.pos(point).ok_or(SketchError::MissingItem)?;
+                    let copy = if off_line(pos) { sketch.add_point(ids, reflect(pos)) } else { point };
+                    copies.insert(point, copy);
+                }
+            }
+            let map = |p: Id<SkPoint>| copies.get(&p).copied().ok_or(SketchError::MissingItem);
+            let mut made = Vec::new();
+            for (original, curve) in curves.iter().zip(&originals) {
+                let geom = match curve.geom {
+                    gc_sketch::CurveGeom::Line { a, b } => {
+                        gc_sketch::CurveGeom::Line { a: map(a)?, b: map(b)? }
+                    }
+                    gc_sketch::CurveGeom::Circle { c, r } => gc_sketch::CurveGeom::Circle { c: map(c)?, r },
+                    // A reflection turns the arc's direction round: it runs back from the copied end.
+                    gc_sketch::CurveGeom::Arc { c, s, e } => {
+                        gc_sketch::CurveGeom::Arc { c: map(c)?, s: map(e)?, e: map(s)? }
+                    }
+                };
+                let id: Id<Curve> = ids.alloc();
+                sketch.curves.insert(id, Curve { geom, construction: curve.construction });
+                created.push(Created::Curve(id));
+                made.push((*original, id, matches!(curve.geom, gc_sketch::CurveGeom::Circle { .. })));
+            }
+            for (point, copy) in copies.clone() {
+                if point != copy {
+                    created.push(Created::Point(copy));
+                    require(
+                        sketch,
+                        ids,
+                        GeoConstraint::Symmetric { p: point, q: copy, axis: *axis },
+                        &mut created,
+                    )?;
+                }
+            }
+            for (original, copy, circle) in made {
+                if circle {
+                    require(sketch, ids, GeoConstraint::Equal(original, copy), &mut created)?;
+                }
+            }
+            "Mirror"
+        }
+        SketchOp::RectangularPattern { curves, first, second, fitted } => {
+            let directions: Vec<&SketchPatternDirection> =
+                std::iter::once(first).chain(second.as_ref()).collect();
+            let mut steps = Vec::new();
+            for d in &directions {
+                if !(2..=500).contains(&d.count) {
+                    return Err(SketchError::InvalidValue.into());
+                }
+                let (a, b) = sketch.line(d.line).ok_or(SketchError::InvalidValue)?;
+                let (pa, pb) = (
+                    sketch.pos(a).ok_or(SketchError::MissingItem)?,
+                    sketch.pos(b).ok_or(SketchError::MissingItem)?,
+                );
+                let length = gc_math::fm::hypot(pb[0] - pa[0], pb[1] - pa[1]);
+                if length < 1e-12 || curves.contains(&d.line) {
+                    return Err(SketchError::InvalidValue.into());
+                }
+                let sign = if d.flip { -1.0 } else { 1.0 };
+                // The spacing between neighbours (fitted: the whole extent shared out).
+                let source =
+                    if *fitted { format!("({})/{}", d.spacing, d.count - 1) } else { d.spacing.clone() };
+                let spacing = evaluate(&source, scope, Unit::Mm)?;
+                if !(spacing.is_finite() && spacing > 0.0) {
+                    return Err(SketchError::InvalidValue.into());
+                }
+                steps.push((
+                    [sign * (pb[0] - pa[0]) / length, sign * (pb[1] - pa[1]) / length],
+                    spacing,
+                    source,
+                    d.count,
+                ));
+            }
+            let originals = pattern_sources(sketch, curves)?;
+            // Copy (i, j) is made from (i - 1, j) along the first direction, or (i, j - 1) along the second.
+            let counts = (steps[0].3, steps.get(1).map_or(1, |s| s.3));
+            let mut grid: std::collections::BTreeMap<
+                (u32, u32),
+                std::collections::BTreeMap<Id<SkPoint>, Id<SkPoint>>,
+            > = std::collections::BTreeMap::new();
+            grid.insert((0, 0), originals.points.iter().map(|p| (*p, *p)).collect());
+            let mut spacing_lines: Vec<Option<Id<Curve>>> = vec![None; steps.len()];
+            for j in 0..counts.1 {
+                for i in 0..counts.0 {
+                    if (i, j) == (0, 0) {
+                        continue;
+                    }
+                    let (from, axis) = if i > 0 { ((i - 1, j), 0) } else { ((i, j - 1), 1) };
+                    let (dir, spacing, source, _) = &steps[axis];
+                    let previous = grid.get(&from).cloned().ok_or(SketchError::MissingItem)?;
+                    let mut map = std::collections::BTreeMap::new();
+                    for point in &originals.points {
+                        let before = previous[point];
+                        let at = sketch.pos(before).ok_or(SketchError::MissingItem)?;
+                        let copy = sketch
+                            .add_point(ids, [at[0] + dir[0] * spacing, at[1] + dir[1] * spacing, at[2]]);
+                        created.push(Created::Point(copy));
+                        // A construction step from the previous copy: along the direction, as long as the
+                        // first step (which carries the spacing dimension).
+                        let step = construction_between(sketch, ids, before, copy, &mut created)?;
+                        require(
+                            sketch,
+                            ids,
+                            GeoConstraint::Parallel(step, directions[axis].line),
+                            &mut created,
+                        )?;
+                        match spacing_lines[axis] {
+                            Some(first_step) => {
+                                require(sketch, ids, GeoConstraint::Equal(step, first_step), &mut created)?;
+                            }
+                            None => {
+                                let (p, q) = sketch.line(step).ok_or(SketchError::MissingItem)?;
+                                let kind = DimKind::Distance { p, q };
+                                let result =
+                                    sketch.try_add_dimension(ids, kind, source, *spacing, [0.0; 2])?;
+                                created.push(Created::Dimension(added(result)?));
+                                spacing_lines[axis] = Some(step);
+                            }
+                        }
+                        map.insert(*point, copy);
+                    }
+                    copy_curves(sketch, ids, &originals, &map, &mut created)?;
+                    grid.insert((i, j), map);
+                }
+            }
+            "Rectangular pattern"
+        }
+        SketchOp::CircularPattern { curves, axis, count, angle, flip, fitted } => {
+            if !(2..=500).contains(count) {
+                return Err(SketchError::InvalidValue.into());
+            }
+            let centre = sketch.pos(*axis).ok_or(SketchError::MissingPoint)?;
+            let source = if *fitted {
+                // Fitted: the angle is shared out; a full turn leaves no element on the first one.
+                let total = evaluate(angle, scope, Unit::Deg)?;
+                let full = (total.abs() - std::f64::consts::TAU).abs() < 1e-9;
+                format!("({angle})/{}", if full { *count } else { count - 1 })
+            } else {
+                angle.clone()
+            };
+            let step = evaluate(&source, scope, Unit::Deg)? * if *flip { -1.0 } else { 1.0 };
+            if !step.is_finite() || step.abs() < 1e-12 {
+                return Err(SketchError::InvalidValue.into());
+            }
+            let originals = pattern_sources(sketch, curves)?;
+            let at_axis = |sketch: &Sketch, p: Id<SkPoint>| {
+                sketch.pos(p).is_some_and(|q| gc_math::fm::hypot(q[0] - centre[0], q[1] - centre[1]) < 1e-12)
+            };
+            // A construction radius from the axis to each original point.
+            let mut spokes: std::collections::BTreeMap<Id<SkPoint>, Id<Curve>> =
+                std::collections::BTreeMap::new();
+            for point in &originals.points {
+                if *point != *axis && !at_axis(sketch, *point) {
+                    spokes.insert(*point, construction_between(sketch, ids, *axis, *point, &mut created)?);
+                }
+            }
+            let mut previous_spokes = spokes.clone();
+            for k in 1..*count {
+                let (sin, cos) =
+                    (gc_math::fm::sin(step * f64::from(k)), gc_math::fm::cos(step * f64::from(k)));
+                let mut map = std::collections::BTreeMap::new();
+                let mut these_spokes = std::collections::BTreeMap::new();
+                for point in &originals.points {
+                    let Some(spoke) = spokes.get(point) else {
+                        // On the axis: every copy shares it.
+                        map.insert(*point, *point);
+                        continue;
+                    };
+                    let p = sketch.pos(*point).ok_or(SketchError::MissingItem)?;
+                    let (x, y) = (p[0] - centre[0], p[1] - centre[1]);
+                    let copy = sketch
+                        .add_point(ids, [centre[0] + cos * x - sin * y, centre[1] + sin * x + cos * y, p[2]]);
+                    created.push(Created::Point(copy));
+                    let radius = construction_between(sketch, ids, *axis, copy, &mut created)?;
+                    require(sketch, ids, GeoConstraint::Equal(radius, *spoke), &mut created)?;
+                    // The turn from the previous copy, from the same angle expression.
+                    let from = previous_spokes[point];
+                    // Counter-clockwise from the earlier spoke (from the later one when turning the other way).
+                    let (l1, l2) = if step > 0.0 { (from, radius) } else { (radius, from) };
+                    let kind = DimKind::Angle { l1, rev1: false, l2, rev2: false };
+                    let value = step.abs();
+                    let result = sketch.try_add_dimension(ids, kind, &source, value, [0.0; 2])?;
+                    created.push(Created::Dimension(added(result)?));
+                    map.insert(*point, copy);
+                    these_spokes.insert(*point, radius);
+                }
+                copy_curves(sketch, ids, &originals, &map, &mut created)?;
+                previous_spokes = these_spokes;
+            }
+            "Circular pattern"
         }
         SketchOp::SetCenterPoint { points, center } => {
             let owned: std::collections::BTreeSet<Id<SkPoint>> =

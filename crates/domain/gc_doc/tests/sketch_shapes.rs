@@ -106,3 +106,405 @@ fn points_are_placed_without_constraints_as_centre_or_sketch_points() {
     assert!(bench.op(SketchOp::SetCenterPoint { points: vec![end], center: true }).is_err());
     assert!(bench.op(SketchOp::PlacePoint { pos: [f64::NAN, 0.0, 0.0], center: true }).is_err());
 }
+
+fn length(sketch: &Sketch, line: Id<Curve>) -> f64 {
+    let (a, b) = sketch.line(line).unwrap();
+    let (p, q) = (sketch.pos(a).unwrap(), sketch.pos(b).unwrap());
+    (p[0] - q[0]).hypot(p[1] - q[1])
+}
+
+/// Inventor 2026 help, To Create 2D Shape Geometry (GUID-D489CE6D-7299-4211-A43A-F3580A4BA357), Polygons:
+/// up to 120 sides; Inscribed uses a vertex for size and orientation, Circumscribed the midpoint of an edge;
+/// click the centre, then drag.
+#[test]
+fn polygons_are_regular_with_four_degrees_of_freedom_inscribed_or_circumscribed() {
+    for circumscribed in [false, true] {
+        for sides in [3u32, 4, 5, 6, 7, 8, 12] {
+            let mut bench = Bench::new();
+            let dof = bench.dof();
+            let created = bench
+                .op(SketchOp::AddPolygon {
+                    centre: [0.1, 0.2, 0.0],
+                    at: [0.1, 0.3, 0.0],
+                    sides,
+                    circumscribed,
+                })
+                .unwrap_or_else(|e| panic!("{sides} {circumscribed}: {e}"));
+            let curves = Bench::curves(&created);
+            let (lines, construction) = curves.split_at(sides as usize);
+            assert!(!construction.is_empty());
+            assert!(construction.iter().all(|c| bench.sketch().curves[c].construction));
+            assert_eq!(bench.dof(), dof + 4, "{sides} {circumscribed}: centre, size and turn");
+            let mut solved = bench.sketch().clone();
+            solved.solve().unwrap();
+            let first = length(&solved, lines[0]);
+            assert!(lines.iter().all(|l| (length(&solved, *l) - first).abs() < 1e-9), "equal sides");
+            // Size: the corner (inscribed) or the edge midpoint (circumscribed) is 0.1 from the centre.
+            let expected = if circumscribed {
+                0.2 * (std::f64::consts::PI / f64::from(sides)).tan()
+            } else {
+                0.2 * (std::f64::consts::PI / f64::from(sides)).sin()
+            };
+            assert!((first - expected).abs() < 1e-9, "{sides} {circumscribed}: {first} vs {expected}");
+        }
+    }
+    let mut bench = Bench::new();
+    for bad in [2, 121] {
+        assert!(
+            bench
+                .op(SketchOp::AddPolygon {
+                    centre: [0.0; 3],
+                    at: [0.1, 0.0, 0.0],
+                    sides: bad,
+                    circumscribed: false
+                })
+                .is_err()
+        );
+    }
+    assert!(
+        bench
+            .op(SketchOp::AddPolygon { centre: [0.0; 3], at: [0.0; 3], sides: 6, circumscribed: false })
+            .is_err()
+    );
+    let created = bench
+        .op(SketchOp::AddPolygon { centre: [0.0; 3], at: [0.1, 0.0, 0.0], sides: 120, circumscribed: true })
+        .unwrap();
+    assert_eq!(Bench::curves(&created).len(), 122, "120 sides, the circle and the radius");
+}
+
+/// Inventor 2026 help, To Create 2D Shape Geometry (GUID-D489CE6D-7299-4211-A43A-F3580A4BA357), Slots:
+/// Center to Center (arc centres, then width), Overall (start and end of the centre line, then width),
+/// Center Point (slot centre, an arc centre, then width).
+#[test]
+fn straight_slots_keep_their_centres_and_width_with_five_degrees_of_freedom() {
+    use gc_doc::SlotKind;
+    for (kind, a, b) in [
+        (SlotKind::CenterToCenter, [0.0, 0.0], [0.2, 0.1]),
+        (
+            SlotKind::Overall,
+            [-0.05 * 0.894_427_190_999_915_9, -0.05 * 0.447_213_595_499_957_9],
+            [0.2 + 0.05 * 0.894_427_190_999_915_9, 0.1 + 0.05 * 0.447_213_595_499_957_9],
+        ),
+        (SlotKind::CenterPoint, [0.1, 0.05], [0.2, 0.1]),
+    ] {
+        let mut bench = Bench::new();
+        let dof = bench.dof();
+        let created = bench
+            .op(SketchOp::AddSlot { a: [a[0], a[1], 0.0], b: [b[0], b[1], 0.0], width: 0.1, kind })
+            .unwrap();
+        assert_eq!(bench.dof(), dof + 5, "{kind:?}: two centres and the width");
+        let curves = Bench::curves(&created);
+        assert_eq!(curves.len(), 5);
+        let mut solved = bench.sketch().clone();
+        solved.solve().unwrap();
+        // The arc centres at (0, 0) and (0.2, 0.1) whichever way they were given; radius = width / 2.
+        let centres: Vec<[f64; 3]> =
+            curves.iter().filter_map(|c| solved.round(*c)).map(|(c, _)| solved.pos(c).unwrap()).collect();
+        let near = |p: [f64; 3], q: [f64; 2]| (p[0] - q[0]).hypot(p[1] - q[1]) < 1e-9;
+        assert!(
+            centres.iter().any(|c| near(*c, [0.0, 0.0])) && centres.iter().any(|c| near(*c, [0.2, 0.1])),
+            "{kind:?} {centres:?}"
+        );
+        assert!(curves.iter().filter_map(|c| solved.round(*c)).all(|(_, r)| (r - 0.05).abs() < 1e-9));
+        // The sides are the centre line's length, and the centre line is construction.
+        let sides: Vec<f64> = curves
+            .iter()
+            .filter(|c| !solved.curves[c].construction)
+            .filter_map(|c| solved.line(*c).map(|_| length(&solved, *c)))
+            .collect();
+        assert_eq!(sides.len(), 2);
+        assert!(sides.iter().all(|l| (l - 0.05f64.hypot(0.1) * 2.0).abs() < 1e-9), "{sides:?}");
+    }
+    let mut bench = Bench::new();
+    let bad = |kind, a: [f64; 3], b: [f64; 3], width| SketchOp::AddSlot { a, b, width, kind };
+    assert!(bench.op(bad(SlotKind::CenterToCenter, [0.0; 3], [0.0; 3], 0.1)).is_err(), "no length");
+    assert!(bench.op(bad(SlotKind::CenterToCenter, [0.0; 3], [0.1, 0.0, 0.0], 0.0)).is_err(), "no width");
+    assert!(bench.op(bad(SlotKind::Overall, [0.0; 3], [0.1, 0.0, 0.0], 0.1)).is_err(), "shorter than wide");
+    assert!(bench.op(bad(SlotKind::CenterPoint, [0.0; 3], [f64::NAN, 0.0, 0.0], 0.1)).is_err());
+}
+
+fn add_line(bench: &mut Bench, a: [f64; 2], b: [f64; 2]) -> Id<Curve> {
+    let created = bench
+        .op(SketchOp::AddLine {
+            a: [a[0], a[1], 0.0],
+            b: [b[0], b[1], 0.0],
+            snap_a: Default::default(),
+            snap_b: Default::default(),
+            horizontal: None,
+        })
+        .unwrap();
+    Bench::curves(&created)[0]
+}
+
+/// Inventor 2026 help, To Create and Edit Sketch Patterns (GUID-AAD3A699-FED8-4614-A31D-0A2316328CEE),
+/// Create Mirror Patterns: select geometry, then the mirror line.
+#[test]
+fn mirror_copies_are_symmetric_about_the_line_and_add_no_freedom() {
+    let mut bench = Bench::new();
+    let axis = add_line(&mut bench, [0.0, -1.0], [0.0, 1.0]);
+    // A line touching the axis, a circle and an arc on the right.
+    let touching = add_line(&mut bench, [0.0, 0.2], [0.3, 0.4]);
+    let circle = Bench::curves(
+        &bench
+            .op(SketchOp::AddCircle {
+                centre: [0.5, 0.0, 0.0],
+                radius: 0.1,
+                centre_snap: Default::default(),
+                rim_snap: Default::default(),
+            })
+            .unwrap(),
+    )[0];
+    let arc = Bench::curves(
+        &bench
+            .op(SketchOp::AddArc { centre: [0.4, -0.4, 0.0], start: [0.5, -0.4, 0.0], end: [0.4, -0.3, 0.0] })
+            .unwrap(),
+    )[0];
+    // The line's end on the axis is held there.
+    let end = bench.sketch().line(touching).unwrap().0;
+    bench.op(SketchOp::AddConstraint(GeoConstraint::PointOnCurve(end, axis))).unwrap();
+    let dof = bench.dof();
+    let depth = bench.history.undo_depth();
+    let created = bench.op(SketchOp::Mirror { curves: vec![touching, circle, arc], axis }).unwrap();
+    assert_eq!(bench.history.undo_depth(), depth + 1);
+    assert_eq!(bench.dof(), dof, "the copies follow their originals");
+    let copies = Bench::curves(&created);
+    assert_eq!(copies.len(), 3);
+    let sketch = bench.sketch();
+    // The touching line shares its end on the axis with its copy.
+    assert_eq!(sketch.line(copies[0]).unwrap().0, end);
+    let other = sketch.pos(sketch.line(copies[0]).unwrap().1).unwrap();
+    assert!((other[0] + 0.3).abs() < 1e-12 && (other[1] - 0.4).abs() < 1e-12);
+    // The circle's copy at (-0.5, 0), same radius; the arc's copy runs the other way round.
+    let (centre, radius) = sketch.round(copies[1]).unwrap();
+    assert!((sketch.pos(centre).unwrap()[0] + 0.5).abs() < 1e-12 && (radius - 0.1).abs() < 1e-12);
+    let gc_sketch::CurveGeom::Arc { s, e, .. } = sketch.curves[&copies[2]].geom else { panic!() };
+    assert!(
+        (sketch.pos(s).unwrap()[0] + 0.4).abs() < 1e-12 && (sketch.pos(e).unwrap()[0] + 0.5).abs() < 1e-12
+    );
+
+    // Editing the original moves the copy: the circle grows, so does its mirror image.
+    bench
+        .op(SketchOp::AddDimension {
+            kind: gc_sketch::DimKind::Radius(circle),
+            source: "150".into(),
+            text_pos: [0.0; 2],
+        })
+        .unwrap();
+    let (_, r) = bench.sketch().round(copies[1]).unwrap();
+    assert!((r - 0.15).abs() < 1e-9, "{r}");
+    // Refused: not a line as the axis, the axis among the curves, nothing to mirror.
+    assert!(bench.op(SketchOp::Mirror { curves: vec![touching], axis: circle }).is_err());
+    assert!(bench.op(SketchOp::Mirror { curves: vec![axis], axis }).is_err());
+    assert!(bench.op(SketchOp::Mirror { curves: vec![], axis }).is_err());
+}
+
+fn dimensions(created: &[Created]) -> Vec<Id<gc_sketch::Dimension>> {
+    created.iter().filter_map(|c| if let Created::Dimension(id) = c { Some(*id) } else { None }).collect()
+}
+
+fn centre_of(bench: &Bench, circle: Id<Curve>) -> [f64; 2] {
+    let (c, _) = bench.sketch().round(circle).unwrap();
+    let p = bench.sketch().pos(c).unwrap();
+    [p[0], p[1]]
+}
+
+/// Inventor 2026 help, To Create and Edit Sketch Patterns (GUID-AAD3A699-FED8-4614-A31D-0A2316328CEE):
+/// Rectangular: geometry, Direction 1 and 2 with Count and Spacing (an equation), Fitted; "Patterned
+/// geometry is fully constrained".
+#[test]
+fn rectangular_patterns_are_fully_constrained_and_follow_their_spacing() {
+    use gc_doc::SketchPatternDirection;
+    let mut bench = Bench::new();
+    let along_x = add_line(&mut bench, [0.0, -0.5], [1.0, -0.5]);
+    let along_y = add_line(&mut bench, [-0.5, 0.0], [-0.5, 1.0]);
+    let hole = Bench::curves(
+        &bench
+            .op(SketchOp::AddCircle {
+                centre: [0.0, 0.0, 0.0],
+                radius: 0.01,
+                centre_snap: Default::default(),
+                rim_snap: Default::default(),
+            })
+            .unwrap(),
+    )[0];
+    let held = bench.sketch().round(hole).unwrap().0;
+    bench.op(SketchOp::AddConstraint(GeoConstraint::Fix(held))).unwrap();
+    let dof = bench.dof();
+    let direction = |line, count, spacing: &str| SketchPatternDirection {
+        line,
+        count,
+        spacing: spacing.into(),
+        flip: false,
+    };
+    let created = bench
+        .op(SketchOp::RectangularPattern {
+            curves: vec![hole],
+            first: direction(along_x, 3, "50"),
+            second: Some(direction(along_y, 2, "30")),
+            fitted: false,
+        })
+        .unwrap();
+    assert_eq!(bench.dof(), dof, "fully constrained to the original");
+    let circles: Vec<Id<Curve>> =
+        Bench::curves(&created).into_iter().filter(|c| bench.sketch().round(*c).is_some()).collect();
+    assert_eq!(circles.len(), 5, "3 × 2, less the original");
+    let mut centres: Vec<[f64; 2]> = circles.iter().map(|c| centre_of(&bench, *c)).collect();
+    centres.sort_by(|a, b| a[1].total_cmp(&b[1]).then(a[0].total_cmp(&b[0])));
+    let expected = [[0.05, 0.0], [0.1, 0.0], [0.0, 0.03], [0.05, 0.03], [0.1, 0.03]];
+    for (c, e) in centres.iter().zip(expected) {
+        assert!((c[0] - e[0]).abs() < 1e-9 && (c[1] - e[1]).abs() < 1e-9, "{centres:?}");
+    }
+    // One spacing dimension per direction; editing the first moves the columns.
+    let dims = dimensions(&created);
+    assert_eq!(dims.len(), 2);
+    bench.op(SketchOp::SetDimension { id: dims[0], source: "80".into() }).unwrap();
+    let mut xs: Vec<f64> = circles.iter().map(|c| centre_of(&bench, *c)[0]).collect();
+    xs.sort_by(f64::total_cmp);
+    assert!((xs[4] - 0.16).abs() < 1e-7, "{xs:?}");
+    // Fitted: 100 mm overall for three elements is 50 mm apart; flip goes the other way.
+    let mut bench2 = Bench::new();
+    let along = add_line(&mut bench2, [0.0, -0.5], [1.0, -0.5]);
+    let dot = Bench::curves(
+        &bench2
+            .op(SketchOp::AddCircle {
+                centre: [0.0; 3],
+                radius: 0.01,
+                centre_snap: Default::default(),
+                rim_snap: Default::default(),
+            })
+            .unwrap(),
+    )[0];
+    let created = bench2
+        .op(SketchOp::RectangularPattern {
+            curves: vec![dot],
+            first: SketchPatternDirection { line: along, count: 3, spacing: "100".into(), flip: true },
+            second: None,
+            fitted: true,
+        })
+        .unwrap();
+    let mut xs: Vec<f64> = Bench::curves(&created)
+        .into_iter()
+        .filter_map(|c| bench2.sketch().round(c).map(|_| centre_of(&bench2, c)[0]))
+        .collect();
+    xs.sort_by(f64::total_cmp);
+    assert!((xs[0] + 0.1).abs() < 1e-9 && (xs[1] + 0.05).abs() < 1e-9, "{xs:?}");
+    // Refused: one element, the direction among the curves, a bad spacing.
+    assert!(
+        bench2
+            .op(SketchOp::RectangularPattern {
+                curves: vec![dot],
+                first: direction(along, 1, "10"),
+                second: None,
+                fitted: false
+            })
+            .is_err()
+    );
+    assert!(
+        bench2
+            .op(SketchOp::RectangularPattern {
+                curves: vec![along],
+                first: direction(along, 2, "10"),
+                second: None,
+                fitted: false
+            })
+            .is_err()
+    );
+    assert!(
+        bench2
+            .op(SketchOp::RectangularPattern {
+                curves: vec![dot],
+                first: direction(along, 2, "-5"),
+                second: None,
+                fitted: false
+            })
+            .is_err()
+    );
+}
+
+/// Circular: an axis (point), Count and Angle (an equation), Fitted.
+#[test]
+fn circular_patterns_turn_round_the_axis_and_stay_constrained() {
+    let mut bench = Bench::new();
+    let centre = Bench::points(&bench.op(SketchOp::PlacePoint { pos: [0.0; 3], center: true }).unwrap())[0];
+    bench.op(SketchOp::AddConstraint(GeoConstraint::Fix(centre))).unwrap();
+    // A short radial line and a small circle at 0.1 on X.
+    let spoke = add_line(&mut bench, [0.05, 0.0], [0.08, 0.0]);
+    let hole = Bench::curves(
+        &bench
+            .op(SketchOp::AddCircle {
+                centre: [0.1, 0.0, 0.0],
+                radius: 0.005,
+                centre_snap: Default::default(),
+                rim_snap: Default::default(),
+            })
+            .unwrap(),
+    )[0];
+    let dof = bench.dof();
+    let created = bench
+        .op(SketchOp::CircularPattern {
+            curves: vec![spoke, hole],
+            axis: centre,
+            count: 6,
+            angle: "360 deg".into(),
+            flip: false,
+            fitted: true,
+        })
+        .unwrap();
+    assert_eq!(bench.dof(), dof, "fully constrained");
+    let circles: Vec<Id<Curve>> =
+        Bench::curves(&created).into_iter().filter(|c| bench.sketch().round(*c).is_some()).collect();
+    assert_eq!(circles.len(), 5);
+    let mut angles: Vec<f64> = circles
+        .iter()
+        .map(|c| {
+            let p = centre_of(&bench, *c);
+            p[1].atan2(p[0]).to_degrees().rem_euclid(360.0)
+        })
+        .collect();
+    angles.sort_by(f64::total_cmp);
+    for (a, e) in angles.iter().zip([60.0, 120.0, 180.0, 240.0, 300.0]) {
+        assert!((a - e).abs() < 1e-7, "{angles:?}");
+    }
+    assert!(circles.iter().all(|c| {
+        let p = centre_of(&bench, *c);
+        (p[0].hypot(p[1]) - 0.1).abs() < 1e-9
+    }));
+    // Clockwise, 30° apart, not fitted.
+    let created = bench
+        .op(SketchOp::CircularPattern {
+            curves: vec![hole],
+            axis: centre,
+            count: 2,
+            angle: "30 deg".into(),
+            flip: true,
+            fitted: false,
+        })
+        .unwrap();
+    let copy = Bench::curves(&created).into_iter().find(|c| bench.sketch().round(*c).is_some()).unwrap();
+    let p = centre_of(&bench, copy);
+    assert!((p[1].atan2(p[0]).to_degrees() + 30.0).abs() < 1e-7, "{p:?}");
+    assert!(
+        bench
+            .op(SketchOp::CircularPattern {
+                curves: vec![hole],
+                axis: centre,
+                count: 1,
+                angle: "30 deg".into(),
+                flip: false,
+                fitted: false
+            })
+            .is_err()
+    );
+    assert!(
+        bench
+            .op(SketchOp::CircularPattern {
+                curves: vec![hole],
+                axis: centre,
+                count: 3,
+                angle: "0 deg".into(),
+                flip: false,
+                fitted: false
+            })
+            .is_err()
+    );
+}
