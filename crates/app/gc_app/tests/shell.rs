@@ -1465,4 +1465,12 @@ fn the_example_cell_opens_planned() {
         std::fs::create_dir_all(&out).unwrap();
         harness.render().unwrap().save(out.join("review-19-example.png")).unwrap();
     }
+    // Help > Licences lists what ships with the application.
+    harness.get_by_label("도움말").click();
+    harness.run();
+    harness.get_by_label("라이선스").click();
+    harness.run();
+    harness.run_steps(3);
+    harness.get_by_label("Jetendard font (SIL Open Font License 1.1)");
+    assert!(harness.query_by_label_contains("Universal Robots ROS2 Description").is_some());
 }

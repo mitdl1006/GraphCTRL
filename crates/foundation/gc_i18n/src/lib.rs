@@ -85,7 +85,6 @@ messages! {
     /// Menu: Tools.
     MenuTools => ("도구", "Tools"),
     /// Menu: Help.
-    MenuHelp => ("도움말", "Help"),
     /// Command: New document.
     CmdNew => ("새로 만들기", "New"),
     /// Command: Open a document.
@@ -416,6 +415,8 @@ messages! {
     PanelFrames => ("좌표계 기준 위치", "Positions in Work Frames"),
     /// Label of a waypoint defined in a work frame. `{0}`: waypoint, `{1}`: frame.
     PropInFrame => ("{0} (기준: {1})", "{0} (in {1})"),
+    MenuHelp => ("도움말", "Help"),
+    MenuLicences => ("라이선스", "Licences"),
     CmdExample => ("예제 열기 (UR5e 셀)", "Open example (UR5e cell)"),
     ExampleFailed => ("예제를 열 수 없습니다: {0}", "The example could not be opened: {0}"),
     PanelTool => ("툴", "Tool"),

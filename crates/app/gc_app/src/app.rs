@@ -88,6 +88,19 @@ enum Pending {
     Quit,
 }
 
+/// What ships with the application and under which licence, shown in Help > Licences.
+const NOTICES: [(&str, &str); 3] = [
+    ("GraphCTRL (MIT)", include_str!("../../../../LICENSE")),
+    (
+        "Jetendard font (SIL Open Font License 1.1)",
+        include_str!("../../../../assets/fonts/LICENSE-Jetendard.txt"),
+    ),
+    (
+        "Universal Robots ROS2 Description (BSD-3-Clause): Universal Robots A/S and contributors",
+        include_str!("../../../../assets/ur/upstream/LICENSE"),
+    ),
+];
+
 /// Unsaved work is saved automatically this often, in seconds.
 const AUTOSAVE_SECONDS: f64 = 60.0;
 
@@ -153,6 +166,8 @@ pub struct GraphCtrlApp {
     library: Vec<(String, String)>,
     expression: String,
     ime: ImeTest,
+    /// Whether the licence notices window is open.
+    notices: bool,
     dialogs: Box<dyn FileDialogs>,
     /// The latest message about files, shown in the status bar.
     notice: Option<String>,
@@ -192,6 +207,7 @@ impl GraphCtrlApp {
             library,
             expression: String::new(),
             ime: ImeTest { dimension: "25 mm".to_owned(), ..ImeTest::default() },
+            notices: false,
             dialogs: Box::new(NativeDialogs),
             notice: None,
             pending: None,
@@ -529,6 +545,11 @@ impl GraphCtrlApp {
                     self.session.redo();
                 }
             });
+            ui.menu_button(tr!(lang, MenuHelp), |ui| {
+                if ui.button(tr!(lang, MenuLicences)).clicked() {
+                    self.notices = true;
+                }
+            });
             ui.menu_button(tr!(lang, MenuTools), |ui| {
                 if ui.button(tr!(lang, MenuImeTest)).clicked() {
                     self.ime.open = true;
@@ -569,6 +590,25 @@ impl GraphCtrlApp {
         if let Some(accept) = answer {
             self.session.answer_reference_offer(accept);
         }
+    }
+
+    /// The licences of what ships with the application: its own, the bundled font's and the UR robot
+    /// descriptions'.
+    fn notices_window(&mut self, ctx: &egui::Context) {
+        let mut open = self.notices;
+        egui::Window::new(tr!(self.lang, MenuLicences)).open(&mut open).default_size([560.0, 480.0]).show(
+            ctx,
+            |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    for (title, text) in NOTICES {
+                        egui::CollapsingHeader::new(title).show(ui, |ui| {
+                            ui.label(egui::RichText::new(text).monospace().size(11.0));
+                        });
+                    }
+                });
+            },
+        );
+        self.notices = open;
     }
 
     /// The checklist window for testing Korean text input on the user's machine.
@@ -720,6 +760,9 @@ impl eframe::App for GraphCtrlApp {
         self.recover_question(&ctx);
         if self.ime.open {
             self.ime_window(&ctx);
+        }
+        if self.notices {
+            self.notices_window(&ctx);
         }
 
         if let Some(limit) = self.options.smoke_frames {
