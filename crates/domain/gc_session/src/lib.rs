@@ -534,7 +534,7 @@ impl Session {
         self.doc.predict_relationship(first, second)
     }
 
-    /// The joint type Automatic picks for two joint origins (Rotational for a circular origin, otherwise
+    /// The joint type Automatic picks for two joint origins (Rotational when both are circular, otherwise
     /// Rigid). Joints are added with [`Session::add_relationship`] like constraints.
     pub fn automatic_joint(
         &self,

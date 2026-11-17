@@ -687,11 +687,12 @@ fn joint_turns(owners: &[Owner], term: &Term, poses: &mut [DPose3]) {
 }
 
 impl Document {
-    /// The joint type Automatic picks for two joint origins: Rotational when either is circular, otherwise
-    /// Rigid (docs/ux/inventor-assembly-parity.md, Joint types).
+    /// The joint type Automatic picks for two joint origins: Rotational when both are circular, otherwise
+    /// Rigid (Inventor 2026 help, Create Joints Reference, GUID-6AA68E8F-7C97-4806-8483-3941DE915E70;
+    /// Cylindrical and Ball, for points on cylinders and spheres, are not modelled yet).
     pub fn automatic_joint(first: &Selection, second: &Selection) -> RelationKind {
         let circular = |s: &Selection| matches!(s.geometry, Geometry::Circle { .. });
-        if circular(first) || circular(second) {
+        if circular(first) && circular(second) {
             RelationKind::Rotational { flip: false }
         } else {
             RelationKind::Rigid { flip: false }
