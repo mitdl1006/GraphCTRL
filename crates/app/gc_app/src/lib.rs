@@ -4,6 +4,7 @@ mod agent;
 mod app;
 mod diagnostics;
 mod example;
+mod measure;
 mod ribbon;
 
 pub use app::{FileDialogs, GraphCtrlApp, RunOptions, run};

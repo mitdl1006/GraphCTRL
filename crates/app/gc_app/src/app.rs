@@ -247,6 +247,8 @@ pub struct GraphCtrlApp {
     packages: Vec<gc_session::library::Package>,
     /// The AI agent connection.
     agent: crate::agent::Agent,
+    /// The Measure panel.
+    measure: crate::measure::Measure,
     expression: String,
     ime: ImeTest,
     /// Whether the licence notices window is open.
@@ -328,6 +330,7 @@ impl GraphCtrlApp {
             licences,
             packages,
             agent,
+            measure: crate::measure::Measure::default(),
             expression: String::new(),
             ime: ImeTest { dimension: "25 mm".to_owned(), ..ImeTest::default() },
             notices: false,
@@ -709,6 +712,9 @@ impl GraphCtrlApp {
                 if ui.button(tr!(lang, MenuImeTest)).clicked() {
                     self.ime.open = true;
                 }
+                if ui.button(tr!(lang, MenuMeasure)).clicked() {
+                    self.measure.start(&self.session);
+                }
                 if ui.button(tr!(lang, MenuAgent)).clicked() {
                     self.agent.open = true;
                 }
@@ -973,7 +979,14 @@ impl eframe::App for GraphCtrlApp {
             egui::pos2(stage.left() + reserved(self.left_open, self.left_width), stage.top()),
             egui::pos2(stage.right() - reserved(self.right_open, self.right_width), stage.bottom()),
         ));
-        egui::CentralPanel::no_frame().show(ui, |ui| self.viewport.ui(ui, &mut self.session, lang));
+        egui::CentralPanel::no_frame().show(ui, |ui| {
+            self.viewport.ui(ui, &mut self.session, lang);
+            self.measure.follow(&self.session);
+            self.measure.overlay(ui.painter(), &self.viewport, &self.session);
+        });
+        if self.measure.open {
+            self.measure.window(&ctx, &self.session, lang);
+        }
         let opaque = !self.translucent;
         side_panel(
             &ctx,

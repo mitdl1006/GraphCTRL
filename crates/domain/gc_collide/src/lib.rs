@@ -217,6 +217,90 @@ pub fn hulls_of(mesh: &MeshData) -> Vec<ShapeDesc> {
         .collect()
 }
 
+/// Where two geometries come closest: the distance and the nearest point on each (metres, world
+/// frame). Overlapping geometries have distance 0.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Closest {
+    /// The smallest distance.
+    pub distance: f64,
+    /// The nearest point on the first geometry.
+    pub on_first: [f64; 3],
+    /// The nearest point on the second geometry.
+    pub on_second: [f64; 3],
+}
+
+/// Shapes placed in the world, for measuring between things (a body, a whole robot at some joint
+/// values). The same shapes the collision checks use, so a measured gap and a collision agree.
+#[derive(Clone, Default)]
+pub struct Geometry {
+    parts: Vec<(DPose3, SharedShape)>,
+}
+
+impl Geometry {
+    /// Geometry from shapes placed in the world.
+    pub fn from_shapes(shapes: &[(DPose3, ShapeDesc)]) -> Result<Self, CollideError> {
+        let mut parts = Vec::with_capacity(shapes.len());
+        for (pose, desc) in shapes {
+            let (correction, shape) = build(desc)?;
+            parts.push((*pose * correction, shape));
+        }
+        Ok(Self { parts })
+    }
+
+    /// A single point.
+    pub fn point(at: [f64; 3]) -> Self {
+        let pose = DPose3::from_translation(DVec3::from_array(at));
+        Self { parts: vec![(pose, SharedShape::ball(0.0))] }
+    }
+
+    /// Adds another geometry's shapes.
+    pub fn extend(&mut self, other: Geometry) {
+        self.parts.extend(other.parts);
+    }
+
+    /// True when there are no shapes.
+    pub fn is_empty(&self) -> bool {
+        self.parts.is_empty()
+    }
+
+    /// Where this geometry and another come closest; `None` when either is empty.
+    pub fn closest(&self, other: &Geometry) -> Result<Option<Closest>, CollideError> {
+        let mut best: Option<Closest> = None;
+        for (pose_a, shape_a) in &self.parts {
+            for (pose_b, shape_b) in &other.parts {
+                let unsupported = |_e| CollideError::Unsupported;
+                // Only pairs closer than the best so far matter.
+                let margin = best.map_or(f64::MAX, |b| b.distance);
+                let found = match query::closest_points(pose_a, &**shape_a, pose_b, &**shape_b, margin)
+                    .map_err(unsupported)?
+                {
+                    ClosestPoints::Intersecting => {
+                        // Overlapping: report a point both share, as near as parry tells.
+                        let contact = query::contact(pose_a, &**shape_a, pose_b, &**shape_b, 0.0)
+                            .map_err(unsupported)?;
+                        let point = contact.map_or(pose_a.translation, |c| c.point1);
+                        let point = point.to_array();
+                        Closest { distance: 0.0, on_first: point, on_second: point }
+                    }
+                    ClosestPoints::WithinMargin(on_a, on_b) => Closest {
+                        distance: on_a.distance(on_b),
+                        on_first: on_a.to_array(),
+                        on_second: on_b.to_array(),
+                    },
+                    ClosestPoints::Disjoint => continue,
+                };
+                if best.is_none_or(|b| found.distance < b.distance) {
+                    best = Some(found);
+                }
+                if found.distance == 0.0 {
+                    return Ok(best);
+                }
+            }
+        }
+        Ok(best)
+    }
+}
+
 /// A set of bodies that can be checked against each other.
 #[derive(Clone, Default)]
 pub struct World {
@@ -313,6 +397,16 @@ impl World {
     /// The name a body was added with.
     pub fn name(&self, body: BodyId) -> &str {
         self.bodies.get(body.0).map_or("", |b| b.name.as_str())
+    }
+
+    /// The shapes of some bodies as they are placed now.
+    pub fn geometry(&self, bodies: &[BodyId]) -> Geometry {
+        let parts = bodies
+            .iter()
+            .filter_map(|id| self.bodies.get(id.0))
+            .flat_map(|body| body.parts.iter().map(|part| (body.pose * part.local, part.shape.clone())))
+            .collect();
+        Geometry { parts }
     }
 
     /// Moves a body.
