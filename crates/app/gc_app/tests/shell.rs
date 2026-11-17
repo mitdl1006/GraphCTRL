@@ -590,6 +590,17 @@ fn waypoints_follow_a_work_frame() {
         harness.run();
         harness.render().unwrap().save(out.join("review-12-work-frame.png")).unwrap();
     }
+    // Selecting a waypoint shows how the arm would stand there, see-through, and says it is reached.
+    let first = waypoints[0];
+    harness.state_mut().session.select_item(Some(gc_session::CellItem::Waypoint(first)));
+    harness.run();
+    let ghost = harness.state().session.shown_ghost().unwrap();
+    assert!(ghost.joints.is_some() && ghost.problem.is_none(), "{ghost:?}");
+    assert!(harness.query_by_label_contains("로봇이 도달합니다").is_some());
+    if gpu {
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        harness.render().unwrap().save(out.join("review-17-ghost.png")).unwrap();
+    }
 }
 
 /// A frame from two points picked in order: origin, then the point the X axis points to. The panel shows

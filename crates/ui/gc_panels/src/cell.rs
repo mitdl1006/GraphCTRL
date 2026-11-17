@@ -78,6 +78,9 @@ pub fn cell(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) 
     if matches!(focus, None | Some(CellItem::Frame(_) | CellItem::Waypoint(_))) {
         frames(ui, session, lang, state, focus);
     }
+    if let Some(CellItem::Waypoint(id)) = focus {
+        reach(ui, session, lang, id);
+    }
     if !pointer_down && !ui.memory(|m| m.focused().is_some()) {
         // The previews become one undo step each when the mouse is released.
         session.end_jog();
@@ -130,6 +133,25 @@ fn jog(ui: &mut Ui, session: &mut Session, lang: Lang, robot: gc_core::Id<gc_doc
     // What is wrong with the pose as it is shown, if anything.
     if let Some(problem) = session.robot_problem(robot) {
         ui.colored_label(colors::ERROR, problem_text(lang, &problem));
+    }
+}
+
+/// Whether the robot reaches a waypoint, and how it would stand there (shown as a ghost).
+fn reach(ui: &mut Ui, session: &Session, lang: Lang, waypoint: gc_core::Id<gc_doc::Waypoint>) {
+    let Some(ghost) = session.waypoint_ghost(waypoint) else { return };
+    ui.add_space(8.0);
+    match (&ghost.joints, &ghost.problem) {
+        (None, _) => {
+            ui.colored_label(colors::ERROR, tr!(lang, ReachOut));
+        }
+        (Some(_), Some(problem)) => {
+            ui.colored_label(colors::ERROR, tr!(lang, ReachProblem, problem_text(lang, problem)));
+        }
+        (Some(joints), None) => {
+            ui.label(tr!(lang, ReachOk));
+            let degrees: Vec<String> = joints.iter().map(|q| format!("{:.1}°", q.to_degrees())).collect();
+            ui.weak(degrees.join("  "));
+        }
     }
 }
 

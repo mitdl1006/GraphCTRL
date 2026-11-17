@@ -416,6 +416,9 @@ messages! {
     PanelFrames => ("좌표계 기준 위치", "Positions in Work Frames"),
     /// Label of a waypoint defined in a work frame. `{0}`: waypoint, `{1}`: frame.
     PropInFrame => ("{0} (기준: {1})", "{0} (in {1})"),
+    ReachOk => ("로봇이 도달합니다(반투명 로봇이 그 자세)", "The robot reaches it (the see-through arm shows how)"),
+    ReachOut => ("로봇이 닿지 않습니다", "The robot cannot reach it"),
+    ReachProblem => ("도달하지만 문제가 있습니다: {0}", "Reached, but: {0}"),
     /// Label: the frame waypoints are taught in. `{0}` is its name.
     PropTeachFrame => ("기준 좌표계: {0}", "Teach in: {0}"),
     /// Edit refused: the axis points of a work frame coincide with its origin or lie on one line.

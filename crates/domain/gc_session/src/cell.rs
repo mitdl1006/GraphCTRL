@@ -278,6 +278,22 @@ impl Control for JobControl {
 type PlanJob = (Id<MotionPath>, String, JobHandle<Option<Result<PlannedPath, String>>>);
 
 /// Robot-cell state of a session that is not part of the document.
+/// Pseudo-random IK starts tried for a ghost besides the robot's own pose: as many as planning tries,
+/// so that the ghost finds a pose whenever planning would.
+const GHOST_STARTS: usize = 32;
+
+/// How a robot would stand at a waypoint.
+#[derive(Clone, Debug)]
+pub struct Ghost {
+    /// The robot the waypoint is for.
+    pub robot: Id<Robot>,
+    /// Joint values that put the tool on the waypoint, nearest to how the robot is shown; `None` when
+    /// the arm cannot reach it.
+    pub joints: Option<Vec<f64>>,
+    /// What is wrong in that pose: a joint beyond its limit, a collision, too close to a body.
+    pub problem: Option<StateProblem>,
+}
+
 pub(crate) struct CellState {
     executor: Executor,
     job: Option<PlanJob>,
@@ -300,6 +316,8 @@ pub(crate) struct CellState {
     /// question asked of it with its answer. Rebuilt when a robot or a body moves.
     scene: std::cell::RefCell<Option<(String, RobotScene)>>,
     asked: std::cell::RefCell<Option<(String, Option<StateProblem>)>>,
+    /// The last ghost worked out, with what it was worked out from.
+    ghost: std::cell::RefCell<Option<(String, Ghost)>>,
     /// Mesh files of bodies by path: the triangles as stored, or why the file could not be read.
     files: BTreeMap<String, Result<Arc<MeshData>, String>>,
     /// The same at the scale a body asks for, by path and scale.
@@ -331,6 +349,7 @@ impl Default for CellState {
             meshes: BTreeMap::new(),
             scene: std::cell::RefCell::new(None),
             asked: std::cell::RefCell::new(None),
+            ghost: std::cell::RefCell::new(None),
         }
     }
 }
@@ -813,10 +832,16 @@ impl Session {
     /// included): a joint beyond its limit, a collision, or a part closer to a body than the padding.
     /// `None` when it is fine.
     pub fn robot_problem(&self, robot: Id<Robot>) -> Option<StateProblem> {
+        let joints = self.robot_joints(robot)?;
+        self.problem_at(robot, &joints, true)
+    }
+
+    /// What is wrong with a robot, as it is placed and among the bodies as they are shown, at these
+    /// joint values. `remember` keeps the answer for the next identical question.
+    fn problem_at(&self, robot: Id<Robot>, joints: &[f64], remember: bool) -> Option<StateProblem> {
         let loaded = self.robot_model(robot)?;
         let stored = self.doc.get(robot)?;
         let base = self.shown_base(robot)?;
-        let joints = self.robot_joints(robot)?;
         let mut obstacles = Vec::new();
         let mut built_from = format!("{:?} {} {base:?}", robot, stored.urdf.len());
         for (id, _) in self.doc.bodies().iter() {
@@ -846,9 +871,74 @@ impl Session {
             .ok()?;
             *scene = Some((built_from, built));
         }
-        let answer = scene.as_ref().and_then(|(_, scene)| scene.state_problem(&joints));
-        *self.cell.asked.borrow_mut() = Some((question, answer.clone()));
+        let answer = scene.as_ref().and_then(|(_, scene)| scene.state_problem(joints));
+        if remember {
+            *self.cell.asked.borrow_mut() = Some((question, answer.clone()));
+        }
         answer
+    }
+
+    /// How the robot of a waypoint would stand there: the joint values nearest to how it is shown now,
+    /// and what would be wrong in that pose. Follows previews, so a waypoint being dragged shows where
+    /// the arm would go.
+    pub fn waypoint_ghost(&self, waypoint: Id<Waypoint>) -> Option<Ghost> {
+        let robot = self.doc.get(waypoint)?.robot;
+        let loaded = self.robot_model(robot)?;
+        let seed = self.robot_joints(robot)?;
+        let target = self.shown_target(waypoint)?;
+        let world = self.waypoint_pose(waypoint)?;
+        let base = self.shown_base(robot)?;
+        let tcp = self.shown_tcp(robot)?;
+        let bodies: Vec<_> = self.doc.bodies().iter().filter_map(|(id, _)| self.shown_body(id)).collect();
+        let question = format!("{robot:?} {target:?} {world:?} {base:?} {tcp:?} {seed:?} {bodies:?}");
+        if let Some((asked, ghost)) = self.cell.ghost.borrow().as_ref()
+            && *asked == question
+        {
+            return Some(ghost.clone());
+        }
+        let candidates = match &target {
+            WaypointTarget::Joints(q) => vec![q.clone()],
+            _ => {
+                let flange = pose_of(&base).inverse() * world * pose_of(&tcp).inverse();
+                let ik = gc_robot::NumericIk::new(&loaded.chain, gc_robot::IkOptions::default());
+                let mut found = ik.solve_many(&flange, Some(&seed), GHOST_STARTS);
+                let distance =
+                    |q: &Vec<f64>| q.iter().zip(&seed).map(|(a, b)| (a - b).abs()).fold(0.0_f64, f64::max);
+                found.sort_by(|a, b| distance(a).total_cmp(&distance(b)));
+                found
+            }
+        };
+        // The nearest pose without a problem; failing that, the nearest with what is wrong there.
+        let mut ghost = Ghost { robot, joints: None, problem: None };
+        for q in candidates {
+            let problem = self.problem_at(robot, &q, false);
+            let fine = problem.is_none();
+            if ghost.joints.is_none() || fine {
+                ghost = Ghost { robot, joints: Some(q), problem };
+            }
+            if fine {
+                break;
+            }
+        }
+        *self.cell.ghost.borrow_mut() = Some((question, ghost.clone()));
+        Some(ghost)
+    }
+
+    /// The ghost to show: the hovered waypoint's, else the selected waypoint's.
+    pub fn shown_ghost(&self) -> Option<Ghost> {
+        [self.cell.hovered, self.cell.selected].into_iter().flatten().find_map(|item| match item {
+            CellItem::Waypoint(id) => self.waypoint_ghost(id),
+            _ => None,
+        })
+    }
+
+    /// World poses of all links of a robot at a ghost's joint values; `None` when it cannot reach.
+    pub fn ghost_links(&self, ghost: &Ghost) -> Option<Vec<DPose3>> {
+        let loaded = self.robot_model(ghost.robot)?;
+        let base = pose_of(&self.shown_base(ghost.robot)?);
+        let mut poses = Vec::new();
+        loaded.model.link_poses(&loaded.chain.expand(ghost.joints.as_ref()?), &mut poses);
+        Some(poses.iter().map(|pose| base * *pose).collect())
     }
 
     /// A robot's tool centre point as it is shown (in the tip link's frame): the preview while it is

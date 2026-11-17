@@ -204,6 +204,10 @@ pub struct Scene {
 
 const BODY: [f32; 4] = [0.55, 0.62, 0.70, 1.0];
 const LINK_LIGHT: [f32; 4] = [0.90, 0.47, 0.13, 1.0];
+/// A ghost robot: light blue, see-through.
+const GHOST: [f32; 4] = [0.45, 0.70, 1.0, 0.35];
+/// A ghost robot in a pose with a problem.
+const GHOST_BAD: [f32; 4] = [1.0, 0.35, 0.30, 0.40];
 const LINK_DARK: [f32; 4] = [0.27, 0.29, 0.32, 1.0];
 
 impl Scene {
@@ -266,35 +270,20 @@ impl Scene {
                     color
                 }
             };
-            for (index, (link, link_pose)) in loaded.model.links.iter().zip(&poses).enumerate() {
-                let geometries = if link.visuals.is_empty() { &link.collisions } else { &link.visuals };
-                let color = if index % 2 == 0 { LINK_DARK } else { LINK_LIGHT };
-                for geometry in geometries {
-                    let pose = *link_pose * geometry.pose;
-                    let shape = match &geometry.shape {
-                        Shape::Box(size) => Shape3::Primitive(Primitive::Box(*size)),
-                        Shape::Cylinder { radius, length } => {
-                            Shape3::Primitive(Primitive::Cylinder { radius: *radius, length: *length })
-                        }
-                        Shape::Sphere(radius) => Shape3::Primitive(Primitive::Sphere(*radius)),
-                        // A mesh file is drawn part by part in the colours it gives; a file that could not
-                        // be supplied is listed as missing and not drawn.
-                        Shape::Mesh { uri, scale } => {
-                            for (mesh, part_color) in loaded.mesh(uri, *scale) {
-                                let color = shown(part_color.unwrap_or(color));
-                                scene.solids.push(Solid3 {
-                                    shape: Shape3::Mesh(mesh.clone()),
-                                    pose,
-                                    color,
-                                    owner: Some(owner),
-                                });
-                            }
-                            continue;
-                        }
-                    };
-                    scene.solids.push(Solid3 { shape, pose, color: shown(color), owner: Some(owner) });
-                }
-            }
+            push_robot(&mut scene, loaded, &poses, Some(owner), &shown);
+        }
+        // How the arm would stand at the waypoint under the mouse or selected: see-through, reddish when
+        // something is wrong there.
+        if let Some(ghost) = session.shown_ghost()
+            && let (Some(loaded), Some(poses)) =
+                (session.robot_model(ghost.robot), session.ghost_links(&ghost))
+        {
+            let tint = if ghost.problem.is_some() { GHOST_BAD } else { GHOST };
+            let shown = |color: [f32; 4]| {
+                let grey = (color[0] + color[1] + color[2]) / 3.0;
+                [0.5 * tint[0] + 0.5 * grey, 0.5 * tint[1] + 0.5 * grey, 0.5 * tint[2] + 0.5 * grey, tint[3]]
+            };
+            push_robot(&mut scene, loaded, &poses, None, &shown);
         }
         scene.tool_points = doc.robots().iter().filter_map(|(id, _)| session.tcp_pose(id)).collect();
         for (id, frame) in doc.work_frames().iter() {
@@ -388,5 +377,39 @@ impl Picker {
             }
         }
         best
+    }
+}
+
+/// Pushes the parts of a robot with its links at `poses`, coloured by `shown`.
+fn push_robot(
+    scene: &mut Scene,
+    loaded: &gc_session::LoadedRobot,
+    poses: &[DPose3],
+    owner: Option<CellItem>,
+    shown: &dyn Fn([f32; 4]) -> [f32; 4],
+) {
+    for (index, (link, link_pose)) in loaded.model.links.iter().zip(poses).enumerate() {
+        let geometries = if link.visuals.is_empty() { &link.collisions } else { &link.visuals };
+        let color = if index % 2 == 0 { LINK_DARK } else { LINK_LIGHT };
+        for geometry in geometries {
+            let pose = *link_pose * geometry.pose;
+            let shape = match &geometry.shape {
+                Shape::Box(size) => Shape3::Primitive(Primitive::Box(*size)),
+                Shape::Cylinder { radius, length } => {
+                    Shape3::Primitive(Primitive::Cylinder { radius: *radius, length: *length })
+                }
+                Shape::Sphere(radius) => Shape3::Primitive(Primitive::Sphere(*radius)),
+                // A mesh file is drawn part by part in the colours it gives; a file that could not be
+                // supplied is listed as missing and not drawn.
+                Shape::Mesh { uri, scale } => {
+                    for (mesh, part_color) in loaded.mesh(uri, *scale) {
+                        let color = shown(part_color.unwrap_or(color));
+                        scene.solids.push(Solid3 { shape: Shape3::Mesh(mesh.clone()), pose, color, owner });
+                    }
+                    continue;
+                }
+            };
+            scene.solids.push(Solid3 { shape, pose, color: shown(color), owner });
+        }
     }
 }

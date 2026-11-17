@@ -710,3 +710,62 @@ fn a_project_carries_its_mesh_files() {
     reopened.save().unwrap();
     assert_eq!(std::fs::read_to_string(moved.join("Line 1.gctrl")).unwrap(), text);
 }
+
+#[test]
+fn a_waypoint_shows_how_the_robot_would_stand_there() {
+    use gc_sketch::DimKind;
+    let mut session = Session::new();
+    let robot = session.add_robot("Robot1", &six_axis()).unwrap();
+    session.jog(robot, &[0.0, 0.3, 0.9, 0.0, 0.4, 0.0]);
+    session.end_jog();
+    // A work frame on a fully dimensioned floor point, and a waypoint 400 mm above it, tool down.
+    let sketch = session.create_sketch("XY").unwrap();
+    let origin = *session.active_sketch().unwrap().1.points.keys().next().unwrap();
+    let created = session
+        .execute(&Command::Sketch { sketch, op: SketchOp::AddPoint { pos: [0.38, 0.12, 0.0] } })
+        .unwrap();
+    let gc_doc::Created::Point(point) = created[0] else { panic!("no point") };
+    for (kind, source) in [
+        (DimKind::HDistance { p: origin, q: point, sign: 1.0 }, "400 mm"),
+        (DimKind::VDistance { p: origin, q: point, sign: 1.0 }, "100 mm"),
+    ] {
+        let op = SketchOp::AddDimension { kind, source: source.to_owned(), text_pos: [0.0; 2] };
+        session.execute(&Command::Sketch { sketch, op }).unwrap();
+    }
+    let frame = session.add_work_frame(sketch, point).unwrap();
+    session.finish_sketch();
+    let down = Placement { xyz: [0.0, 0.0, 0.4], rpy: [std::f64::consts::PI, 0.0, 0.0] };
+    let waypoint = session.add_waypoint(robot, WaypointTarget::InFrame { frame, offset: down }).unwrap();
+    assert!(session.shown_ghost().is_none(), "nothing selected");
+
+    // Selected, the waypoint shows the arm reaching it; the document is untouched.
+    let joints = session.doc().get(robot).unwrap().joints.clone();
+    session.select_item(Some(gc_session::CellItem::Waypoint(waypoint)));
+    let ghost = session.shown_ghost().unwrap();
+    assert_eq!(ghost.robot, robot);
+    assert!(ghost.problem.is_none(), "{ghost:?}");
+    let links = session.ghost_links(&ghost).unwrap();
+    let tip = session.robot_model(robot).unwrap().model.link("tool0").unwrap();
+    let stored = session.doc().get(robot).unwrap();
+    let reached = links[tip] * gc_math::pose_from_xyz_rpy(stored.tcp.xyz, stored.tcp.rpy);
+    let wanted = session.waypoint_pose(waypoint).unwrap();
+    assert!((reached.translation - wanted.translation).length() < 1e-5, "{reached:?} {wanted:?}");
+    assert!(reached.rotation.angle_between(wanted.rotation) < 1e-5);
+    assert_eq!(session.doc().get(robot).unwrap().joints, joints);
+
+    // A box where the arm would be: reached, but with a problem.
+    let at = wanted.translation;
+    let block = session
+        .add_body(Solid::Box { size: [0.2, 0.2, 0.2] }, Placement { xyz: at.to_array(), rpy: [0.0; 3] })
+        .unwrap();
+    let ghost = session.waypoint_ghost(waypoint).unwrap();
+    assert!(ghost.joints.is_some() && ghost.problem.is_some(), "{ghost:?}");
+    session.delete_item(gc_session::CellItem::Body(block)).unwrap();
+
+    // The robot moved far away cannot reach it.
+    let mut placement = session.doc().get(robot).unwrap().placement;
+    placement.xyz[0] += 10.0;
+    session.preview_base(robot, placement);
+    let ghost = session.waypoint_ghost(waypoint).unwrap();
+    assert!(ghost.joints.is_none() && session.ghost_links(&ghost).is_none());
+}
