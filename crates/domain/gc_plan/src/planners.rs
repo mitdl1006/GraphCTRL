@@ -343,6 +343,11 @@ impl Search<'_> {
         };
         while monitor.proceed() {
             let mut sample = self.window.sample(rng);
+            // Until a goal is connected, steer towards one now and then, as plain RRT does: uniform
+            // samples alone rarely land within one step of a goal in six dimensions.
+            if best.is_none() && rng.unit() < self.options.goal_bias {
+                sample = self.goals[rng.below(self.goals.len())].1.to_vec();
+            }
             if let (true, Some(link)) = (informed, best) {
                 // Only states through which a shorter path could pass are worth sampling.
                 let bound = total(&tree, link);

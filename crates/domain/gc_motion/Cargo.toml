@@ -14,9 +14,13 @@ workspace = true
 gc_core.workspace = true
 gc_math.workspace = true
 gc_jobs.workspace = true
+gc_mesh.workspace = true
 gc_robot.workspace = true
 gc_collide.workspace = true
 gc_plan.workspace = true
 gc_traj.workspace = true
 gc_robotics_api.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+gc_collide.workspace = true
