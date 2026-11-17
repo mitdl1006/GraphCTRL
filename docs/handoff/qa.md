@@ -21,6 +21,7 @@
 ## M2-1 (리드 요청)
 
 - 리드 브랜치를 이 QA 브랜치에 merge함(`f76d087`).
+- 최우선 수용 기준: `docs/qa/m2-scenarios.md`의 "스케치 동등성" 절(`docs/ux/inventor-sketch-parity.md` 4절 P1-1~14, 명령별 클릭 순서·구속·Undo 단위·Ctrl 억제).
 - 수용 기준: `docs/qa/m2-scenarios.md`(아래 "인벤터 동등성" 절에 `docs/ux/inventor-parity.md` 3절 U1–U25 병합, 상태 열로 추적; T1 이름 바꾸기·T2 억제·T3 순서·T4 스케치 편집·T5 삭제 종속 안내·T6 선택). 모델 트리 기능은 아직 병합된 브랜치에 없어 테스트는 기능이 올라온 뒤 추가.
 - 로봇 라이브러리 경계 테스트 추가: `gc_session/tests/qa_library.rs`(8개, 1개는 위 버그 3로 `#[ignore]`).
 - 리드 답: 프로젝트의 `Robot.urdf` 사본이 기구학 기준, 메시만 라이브러리에서 찾는다. `qa_library.rs::the_projects_urdf_copy_decides_the_kinematics_not_the_library`로 고정.
