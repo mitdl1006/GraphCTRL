@@ -1,0 +1,117 @@
+<?xml version="1.0"?>
+<!-- A gantry axis with a small arm and a mimic gripper, for tests. -->
+<robot name="gantry_arm">
+  <link name="rail">
+    <visual>
+      <origin xyz="1.0 0 0.05" rpy="0 0 0"/>
+      <geometry><box size="2.0 0.1 0.1"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="1.0 0 0.05" rpy="0 0 0"/>
+      <geometry><box size="2.0 0.1 0.1"/></geometry>
+    </collision>
+  </link>
+  <link name="carriage">
+    <visual>
+      <origin xyz="0 0 0.05" rpy="0 0 0"/>
+      <geometry><box size="0.2 0.2 0.1"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.05" rpy="0 0 0"/>
+      <geometry><box size="0.2 0.2 0.1"/></geometry>
+    </collision>
+  </link>
+  <link name="upper">
+    <visual>
+      <origin xyz="0.2 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.4 0.08 0.08"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.2 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.4 0.08 0.08"/></geometry>
+    </collision>
+  </link>
+  <link name="lower">
+    <visual>
+      <origin xyz="0.15 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.3 0.06 0.06"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.15 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.3 0.06 0.06"/></geometry>
+    </collision>
+  </link>
+  <link name="wrist">
+    <visual>
+      <origin xyz="0 0 0.05" rpy="0 0 0"/>
+      <geometry><cylinder radius="0.04" length="0.1"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.05" rpy="0 0 0"/>
+      <geometry><cylinder radius="0.04" length="0.1"/></geometry>
+    </collision>
+  </link>
+  <link name="finger_left">
+    <visual>
+      <origin xyz="0 0 0.04" rpy="0 0 0"/>
+      <geometry><box size="0.02 0.01 0.08"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.04" rpy="0 0 0"/>
+      <geometry><box size="0.02 0.01 0.08"/></geometry>
+    </collision>
+  </link>
+  <link name="finger_right">
+    <visual>
+      <origin xyz="0 0 0.04" rpy="0 0 0"/>
+      <geometry><box size="0.02 0.01 0.08"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.04" rpy="0 0 0"/>
+      <geometry><box size="0.02 0.01 0.08"/></geometry>
+    </collision>
+  </link>
+  <joint name="slide" type="prismatic">
+    <parent link="rail"/>
+    <child link="carriage"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="0.0" upper="1.8" velocity="0.5" effort="100"/>
+  </joint>
+  <joint name="shoulder" type="revolute">
+    <parent link="carriage"/>
+    <child link="upper"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-1.5" upper="1.5" velocity="2.0" effort="100"/>
+  </joint>
+  <joint name="elbow" type="revolute">
+    <parent link="upper"/>
+    <child link="lower"/>
+    <origin xyz="0.4 0 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-2.5" upper="2.5" velocity="2.0" effort="100"/>
+  </joint>
+  <joint name="wrist_turn" type="revolute">
+    <parent link="lower"/>
+    <child link="wrist"/>
+    <origin xyz="0.3 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.0" upper="3.0" velocity="4.0" effort="100"/>
+  </joint>
+  <joint name="finger_left_slide" type="prismatic">
+    <parent link="wrist"/>
+    <child link="finger_left"/>
+    <origin xyz="0 0.02 0.1" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0.0" upper="0.03" velocity="0.1" effort="100"/>
+  </joint>
+  <joint name="finger_right_slide" type="prismatic">
+    <parent link="wrist"/>
+    <child link="finger_right"/>
+    <origin xyz="0 -0.02 0.1" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-0.03" upper="0.0" effort="100"/>
+    <mimic joint="finger_left_slide" multiplier="-1" offset="0"/>
+  </joint>
+</robot>
