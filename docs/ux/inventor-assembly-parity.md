@@ -124,6 +124,30 @@
 | Analyze Interference | Inspect 탭 Interference 패널 **Analyze Interference**: **Define Set #1 / Set #2**(컴포넌트·그룹 선택; 한 세트만 주면 세트 내부 검사), **Treat subassemblies as components**, 나사 정밀 분석 옵션. 결과: 간섭 개수·총 체적, 각 항목의 **체적·중심(x,y,z)**, 더블클릭 시 해당 영역으로 줌, **간섭 체적을 임시 솔리드로 표시**. 필터 General/Threads/Non-threaded Content Center/AnyCAD, **Ignore/Un-ignore**(무시 항목은 취소선), 값 복사·인쇄. 오래 걸리면 중단 가능 [A47,A48] | 현재 자세 충돌 표시(로봇 링크 빨강)만 | 임의 컴포넌트 쌍 분석·결과 목록·간섭 체적 표시 없음 | P2 | BE+FE |
 | 접촉·충돌 감지 | Contact Solver: 접촉 집합(contact set)으로 드래그·구동 중 충돌 감지 [A18의 Contact Sets 서술, 별도 페이지 `GUID-4499BD14`/`FA1A8282`는 읽지 않음] | `gc_collide` | 읽지 않은 부분 (미확인) | P3 | BE |
 
+#### 3.6.1 원문과의 차이 — 측정·간섭·구동 (2026-11-17, 원문 재확인)
+
+원문을 curl로 다시 읽어 확인한 항목만 적었다. 근거 GUID는 아래 출처 표 참고.
+
+| 기능 | 원문에서 확인한 것 | GraphCTRL 구현 | 차이 |
+|---|---|---|---|
+| 측정 위치 | Tools 탭 > Measure 패널 > Measure [A46, GUID-1805AB8F] | 도구 메뉴 > 측정 | 위치가 다름(리본 탭이 아니라 메뉴). 기능 이름은 같음 |
+| 측정 모드 전환 | Minimum Distance, Center to Center, **Maximum Distance** 세 가지 전환 [A46] | 최소 거리, 중심 간 거리 (두 가지) | **최대 거리 없음** |
+| UCS 선택 | 문서에 UCS가 있으면 측정 기준 UCS를 고를 수 있음 [A46] | 없음 | 차이 |
+| 값 복사 | 값 하나 또는 모두 우클릭 > Copy / Copy All [A46] | 모두 복사만 | **값 하나 복사 없음** |
+| 다시 시작·완료 | 빈 곳 클릭으로 새 측정, Done으로 패널 닫기 [A46] | 빈 곳 클릭 = 다시 시작, 완료 = 닫기 | 같음 |
+| 면적 | 면적·루프 측정 [A46] | 면 면적(mm²) | 루프는 없음 |
+| 질량 | 부품·컴포넌트 선택 시 질량 [A46] | 없음 | 차이(P2 계획과 같음) |
+| 간섭 필터 | General, Threads, Non-threaded Content Center, AnyCAD 필터와 **Ignored 필터 표시/숨김** [A47] | Ignored 표시 필터만 | 나사·콘텐츠 필터 없음 |
+| 간섭 무시 | 우클릭으로 항목 무시, 또는 **지정 체적 이하 모두 무시** [A47] | 무시 / 이하 모두 무시 / 무시 해제 / 모두 해제 | 같음 |
+| 간섭 확대 | 목록 항목을 두 번 클릭하면 해당 간섭 영역으로 줌 [A47] | 두 번 클릭 확대 | 같음 |
+| 간섭 형상 | 원문 2026 항목은 간섭 결과를 **솔리드로 표시**한다고 요약(A48 요약, 원문 문장은 확인 못 함) | 뷰포트에 **표본점**(빨강) 표시 | 차이. 체적은 24³ 격자 추정(충돌 형상 기준), 원문은 정확한 체적 |
+| Contact Solver | Inspect 탭 > Interference 패널 > **Activate Contact Solver** [GUID-FA1A8282] | 없음(충돌 감지는 현재 자세에서 링크 빨강) | 드래그·구동 중 접촉 해석 없음(P3) |
+| 구동 범위 | 관계 하나 또는 조인트 하나씩. 여러 관계는 방정식으로 연결 [A31, GUID-B78E59C9] | 로봇 관절 하나씩 | 일치. 방정식 연결은 없음 |
+| 구동 적응성 | **Drive Adaptivity** 체크 — 관계를 유지하도록 컴포넌트를 적응시킴 [A31] | 없음 | 차이 |
+| 구동 반복 | Start/End는 한 번 돌고 시작으로 복귀. Start/End/Start는 정·역방향 순서이고 **사이클 수**로 반복 [A31] | 시작/끝, 시작/끝/시작 + 반복 횟수 | 같음(사이클 정의 확인 필요) |
+| 구동 기록 | Record(AVI/WMV)는 원문 항목 [A31] | 없음 | 차이(P3) |
+| 구동 후 자세 | 원문은 구동 뒤 자세 유지 여부를 이 페이지에서 명시하지 않음(미확인) | 닫으면 원래 자세로 복귀 | 확인 필요. 원문으로 정해질 때까지 현행 유지 |
+
 ### 3.7 작업 피처 (3D Model 탭 Work Features 패널)
 
 | 항목 | 인벤터 2026 동작 (출처) | GraphCTRL 현재 | 차이 | 우선 | 담당 |
@@ -169,7 +193,7 @@
 10. **Assemble·Show·구속 상태(FE+BE)**: Assemble(형상 먼저, 유형 목록 자동 제한), Show/Show Sick/Hide All 글리프, 구속 상태 점(검은/속 빈/대시), DOF 기호. 수용: 평면 2개만 고르면 Mate-Mate/Mate-Flush/Angle-Directed만 보이고, 구속 후 DOF 기호에 남은 자유도가 표시된다 [A16,A24,A27,A33].
 11. **Joint: Rigid·Rotational + 로봇 마운트(BE+FE)**: 조인트 명령(J), 원점 선택·Flip component·Align 1/2·Invert, Automatic 유형(원형 원점=Rotational, 그 외 Rigid), Rotational 각도 한계 +/- 표시. 수용: 로봇 베이스 Origin을 설비 작업 평면 점에 Rigid로 붙이면 설비를 이동할 때 로봇이 따라가고, 툴 원점을 플랜지 프레임에 Rigid로 붙이면 툴이 TCP와 일치 [A30,A69].
 12. **Measure 3D(BE+FE)**: 도구 > 측정 패널(점·모서리·면 거리, 각도, 컴포넌트 쌍 최소 거리, 최소/중심/최대 거리 전환, 선택 1·2 색 구분, 값 복사). 수용: 로봇 TCP와 설비 모서리 사이 거리가 mm로 표시되고 컴포넌트 2개 선택 시 `gc_collide` 최소 거리와 1e-6 m 이내 일치 [A46].
-    - **상태(리드, 2026-11-17)**: 1차 완료 — 도구 > 측정 패널, 컴포넌트 우선순위(바디·로봇·웨이포인트·좌표계), 선택 1·2 색 구분, 최소 거리(충돌 형상, `Session::measure_pair`)/중심 간 거리 전환, 위치·Δ·Z축 각도, 모두 복사·다시 시작·완료, 빈 곳 클릭 = 다시 시작, 뷰포트에 최소 거리 선. 테스트 `gc_session/tests/measure.rs`, `shell.rs::measure_gives_the_minimum_distance_between_two_components`. 원문: https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-1805AB8F-F782-4B24-A332-B4F2E10A3D00.htm . 2차(리드): **모서리 및 면 우선** — 메시의 평평한 면(같은 평면 삼각형 영역)·외곽 모서리·꼭짓점 피킹(`gc_mesh::region`, `Picker::pick_surface`, `Viewport::pick_feature`), 점·모서리·면 조합의 거리/Δ/각도(`gc_session::measure_features`), 면적, 우선순위 바꾸면 명령 재시작. 남음: 곡면(원통 지름·반지름), 점 2개+Shift 3번째 점 각도, 이중 단위·정밀도, 값 클릭 시 그래픽 강조, 리본 검사/도구 탭 버튼(프론트엔드 리본 정리 때), 시각 메시 기준 최대 거리.
+    - **상태(리드, 2026-11-17)**: 1차 완료 — 도구 > 측정 패널, 컴포넌트 우선순위(바디·로봇·웨이포인트·좌표계), 선택 1·2 색 구분, 최소 거리(충돌 형상, `Session::measure_pair`)/중심 간 거리 전환, 위치·Δ·Z축 각도, 모두 복사·다시 시작·완료, 빈 곳 클릭 = 다시 시작, 뷰포트에 최소 거리 선. 테스트 `gc_session/tests/measure.rs`, `shell.rs::measure_gives_the_minimum_distance_between_two_components`. 원문: https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-1805AB8F-F782-4B24-A332-B4F2E10A3D00.htm . 2차(리드): **모서리 및 면 우선** — 메시의 평평한 면(같은 평면 삼각형 영역)·외곽 모서리·꼭짓점 피킹(`gc_mesh::region`, `Picker::pick_surface`, `Viewport::pick_feature`), 점·모서리·면 조합의 거리/Δ/각도(`gc_session::measure_features`), 면적, 우선순위 바꾸면 명령 재시작. 3차(리드): 원통면 인식(`gc_mesh::region::cylindrical_region`, 축·반지름·길이 맞춤) → 지름·반지름·길이, 원통이 있는 쌍은 최소 거리와 중심 간 거리(축 기준)를 함께 표시(원문: 원·원통 선택 시 Minimum과 Center to Center 동시 표시). 4차(리드): 누적 특성(값 옆 +/−로 거리·면적·각도 그룹에 더하고 빼기, 그룹 합계, 값·그룹 삭제, 모두 복사; 원문 GUID-3610915E-112A-4BBD-8E28-820D33F2A717), 점 2개 뒤 Shift+세 번째 점 = 두 번째 점에서의 각도. 남음: 원형 모서리(호) 길이·지름, 체적·질량 누적(질량 개념 없음), 이중 단위·정밀도, 값 클릭 시 그래픽 강조, 리본 검사/도구 탭 버튼(프론트엔드 리본 정리 때), 시각 메시 기준 최대 거리.
 13. **Free Move·Free Rotate + Update 복귀(FE)**: 뷰 평면 드래그와 3D 회전 기호(내부/상하/좌우/테두리), 관계 있는 컴포넌트는 Update 시 구속 위치로 복귀. 수용: 구속된 컴포넌트를 드래그 후 Update하면 원위치로 돌아오고 고정·무구속 컴포넌트는 새 위치 유지 [A12,A13].
 
 ### P2

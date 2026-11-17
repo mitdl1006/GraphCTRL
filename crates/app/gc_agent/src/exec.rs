@@ -95,8 +95,19 @@ fn pose_json(pose: &DPose3) -> Value {
     json!({ "xyz_mm": pose.translation.to_array().map(mm), "rpy_deg": [r, p, y] })
 }
 
-fn placement(xyz_mm: [f64; 3], rpy_deg: [f64; 3]) -> Placement {
-    Placement { xyz: xyz_mm.map(|v| v / 1000.0), rpy: rpy_deg.map(f64::to_radians) }
+/// Positions farther than this from the origin (millimetres) are refused: a robot cell is a few metres.
+const REACH_MM: f64 = 1.0e6;
+
+/// A placement from millimetres and degrees; refused when a number is not finite or a position is
+/// farther than a kilometre.
+fn placement(xyz_mm: [f64; 3], rpy_deg: [f64; 3]) -> Result<Placement, String> {
+    if !xyz_mm.iter().chain(&rpy_deg).all(|v| v.is_finite()) {
+        return Err("positions and angles must be finite numbers".to_owned());
+    }
+    if xyz_mm.iter().any(|v| v.abs() > REACH_MM) {
+        return Err(format!("positions must be within ±{REACH_MM} mm"));
+    }
+    Ok(Placement { xyz: xyz_mm.map(|v| v / 1000.0), rpy: rpy_deg.map(f64::to_radians) })
 }
 
 fn robot_named(session: &Session, name: &str) -> Result<Id<Robot>, String> {
@@ -212,13 +223,13 @@ pub fn execute(session: &mut Session, library: &[Package], call: &Call) -> Resul
         }
         Call::PlaceRobot { robot, xyz_mm, rpy_deg } => {
             let id = robot_named(session, robot)?;
-            let placement = placement(*xyz_mm, *rpy_deg);
+            let placement = placement(*xyz_mm, *rpy_deg)?;
             session.execute(&Command::Cell(CellOp::PlaceRobot { id, placement })).map_err(edit_error)?;
             Ok(json!({ "placed": robot }))
         }
         Call::AddWaypoint { robot, reference, xyz_mm, rpy_deg } => {
             let robot_id = robot_named(session, robot)?;
-            let offset = placement(*xyz_mm, *rpy_deg);
+            let offset = placement(*xyz_mm, *rpy_deg)?;
             let target = match reference_named(session, reference)? {
                 Reference::World => WaypointTarget::InWorld { offset },
                 Reference::Base => WaypointTarget::InBase { offset },

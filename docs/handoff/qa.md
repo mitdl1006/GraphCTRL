@@ -50,3 +50,14 @@
 - 확인 사실(원문 S19): Trim의 Ctrl+선택 경계 지정, 우클릭 Split/Extend 전환은 아직 테스트하지 않음(구현 여부 불명 → 백엔드에 확인 필요).
 - **미구현 항목은 `#[ignore = "FEATURE ..."]` 스텁 + 확인 절차**: 스케치 화면 쪽 5건(`gc_app/tests/qa_sketch_pending.rs`: HUD 입력창, Trim/Extend/Fillet 리본·단축키, 치수 `이름 = 값` 매개변수, Driven 토글·과구속 Accept/Cancel, 단축키 별칭), 어셈블리 P1 13건 전부(`gc_session/tests/qa_assembly_pending.rs`: 어셈블리 모델 자체가 없음). 기능이 올라오면 `#[ignore]`를 풀고 본문을 채운다.
 - 어셈블리 문서가 스스로 미확인으로 둔 것(Origin 폴더 항목 이름, 첫 컴포넌트 자동 고정 여부 A11 vs A18, 숨김 평면 피킹)은 리드 결정이 필요하다 — 결정되면 테스트에 고정.
+
+## 2026-11-17 리드 결정 3건 반영 + 측정·간섭·구동 경계 테스트 (리드 b02ac34 merge)
+
+- 리드 결정을 테스트에 고정: ① 원점 폴더 항목 이름·순서(`원점` > YZ 평면, XZ 평면, XY 평면, X축, Y축, Z축, 중심점; 영문 Origin > …) ② 첫 컴포넌트만 고정 — `gc_session/tests/qa_assembly_edges.rs::only_the_first_component_is_grounded`(실행 중, 통과: 고정된 첫 컴포넌트를 지워도 다른 것이 자동 고정되지 않고, Undo로 고정 상태 그대로 복원) ③ 숨긴 원점 요소는 뷰포트에서 선택 불가·브라우저에서 선택 가능(켜면 뷰포트에서도). ①·③은 원점 폴더(어셈블리 P1-2/3)가 아직 구현되지 않아 `qa_assembly_pending.rs`의 `#[ignore]` 스텁에 결정 내용을 기록.
+- **`qa_assembly_edges.rs`(9개 통과, 1개 BUG ignore)**: 컴포넌트 상태(없는 항목·없는 부품 거부, 상태마다 Undo 1단계·정확 복원), 측정(삭제된 항목은 `None`, 자기 자신과는 거리·각도 0, 보이기/숨기기와 무관, 퇴화 도형(길이 0 모서리·면적 0·법선 0·NaN·무한)에서 패닉 없음·유한 입력은 유한 출력, 모서리 끝 너머 점은 끝점까지 거리), 간섭(면만 닿으면 체적 0, 같은 위치 동일 상자 = 0.008 m³, 포함 관계 = 안쪽 체적, 빈 집합·삭제된 항목·자기 쌍 없음).
+- **`gc_app/tests/qa_drive.rs`(7개 통과, 2개 BUG ignore)**: 구동 `sequence`는 앱 크레이트 비공개라 `#[path]`로 모듈을 포함해 시험. 도움말(Drive Relationship Reference, To Drive Relationships in Assemblies) 기준: Steps=1 → [Start, End], End = Start 정지, 역방향(Start > End) 정확히 End에서 끝, 음수 증분 = 양수와 같음, 증분 > 범위, Start/End 반복은 Start에서 리셋, Start/End/Start는 "나가고·들어오고·나가고" = 3사이클(전환점 중복 없음), 횟수 0·1e6·u32::MAX는 상한 안, 거대·미세 범위.
+- **새 버그 3건 (낮은 심각도, 담당: 프론트엔드 `gc_app/src/drive.rs`·백엔드 `gc_session/src/measure.rs`)**:
+  1. 구동 `sequence`: **Start 또는 End가 NaN/무한이면 `f64::clamp`에서 패닉**(숫자 상자에 "nan"·"inf" 입력). 재현: `cargo test -p gc_app --test qa_drive -- --ignored a_nan_start_or_end`
+  2. 구동 `sequence`: **증분 0·NaN·무한·매우 작음(1e-6, 10 범위 → 10만 스텝 상한에서 0.1에서 멈춤)이면 End에 도달하지 않음**(0은 Start에 머묾, NaN·무한은 NaN 값). 재현: `-- --ignored an_unusable_increment`
+  3. `Session::interference`: **한 집합에 같은 컴포넌트가 두 번 들어 있으면 자기 자신과 짝지어** 전체 체적을 간섭으로 보고(에이전트·스크립트에서 가능, 선택기에서는 불가). 재현: `cargo test -p gc_session --test qa_assembly_edges -- --ignored a_component_listed_twice`
+- 구동의 충돌 감지(앱 내부 `Drive::show`)는 UI 상태에 묶여 있어 헤드리스 테스트 불가 — kittest로 후속. 참고 링크는 테스트 파일 머리 주석.

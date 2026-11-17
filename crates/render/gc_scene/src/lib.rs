@@ -378,6 +378,9 @@ pub struct SurfaceHit {
     pub point: DVec3,
     /// The flat face around the hit, in the world: normal, a point of its plane, area and outline.
     pub face: Option<(DVec3, DVec3, f64, Vec<[DVec3; 2]>)>,
+    /// The cylindrical surface around the hit, when it is one, in the world: centre, unit axis, radius
+    /// and length.
+    pub cylinder: Option<(DVec3, DVec3, f64, f64)>,
 }
 
 impl Picker {
@@ -412,10 +415,17 @@ impl Picker {
         let solid = scene.solids.get(index)?;
         let pose = solid.pose;
         // Half a degree and ten micrometres: tessellated flat faces stay one face, curved ones split.
-        let face =
-            solid.shape.mesh().ok().and_then(|mesh| {
-                gc_mesh::region::planar_region(&mesh, hit.triangle, 0.5_f64.to_radians(), 1e-5)
-            });
+        let mesh = solid.shape.mesh().ok();
+        let face = mesh
+            .as_ref()
+            .and_then(|mesh| gc_mesh::region::planar_region(mesh, hit.triangle, 0.5_f64.to_radians(), 1e-5));
+        // A smooth surface that bends less than 20° per edge and fits a circle within 1 %.
+        let cylinder = mesh
+            .as_ref()
+            .and_then(|mesh| {
+                gc_mesh::region::cylindrical_region(mesh, hit.triangle, 20_f64.to_radians(), 0.01)
+            })
+            .filter(|c| c.triangles.len() > face.as_ref().map_or(0, |f| f.triangles.len()));
         Some(SurfaceHit {
             owner: solid.owner?,
             point: pose * hit.point,
@@ -423,6 +433,7 @@ impl Picker {
                 let outline = f.outline.iter().map(|[a, b]| [pose * *a, pose * *b]).collect();
                 (pose.rotation * f.normal, pose * f.point, f.area, outline)
             }),
+            cylinder: cylinder.map(|c| (pose * c.centre, pose.rotation * c.axis, c.radius, c.length)),
         })
     }
 

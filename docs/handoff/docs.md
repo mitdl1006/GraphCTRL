@@ -11,3 +11,10 @@
 - ViewCube의 모서리·꼭짓점 개수와 동작은 S14의 "26개 부분" 설명을 따랐고, 검색 요약에 있던 "Go Home" 메뉴는 원문에서 확인하지 못해 적지 않았다.
 - 상태바 항목 목록은 원문에 없었다. 위치와 역할만 S17로 확인했다.
 - 아이콘과 그림은 쓰지 않았다.
+
+## 2026-11-17 오후 추가 (측정·간섭·구동, 탭 패널 확인)
+
+- 원문 재확인(curl): GUID-1805AB8F(측정, Tools > Measure 패널), GUID-80DED0A6(간섭 분석, Inspect > Interference), GUID-B78E59C9(구동, 관계 우클릭), GUID-FA1A8282(접촉 솔버, Inspect > Interference), GUID-2C55B507·GUID-E7A45820(Assemble > Component/Productivity 패널), GUID-DAAB6834(간섭 확인 2026판).
+- `docs/ux/inventor-assembly-parity.md` §3.6.1에 측정·간섭·구동의 원문 차이 정리. 최대 거리 전환, 값 하나 복사, UCS, 간섭 필터, 구동 적응성, 기록은 원문에 있고 구현에 없음. 간섭 결과를 솔리드로 보여 준다는 점은 원문 문장을 확인하지 못해 "확인 못 함"으로 남김.
+- 구동 후 자세 유지 여부는 원문 페이지에서 확인하지 못했으므로 현행(닫으면 복귀)을 유지하고 미확인으로 표시.
+- 탭 패널 목록은 검색으로 일부만 확인됨(검색 결과에 2024 이하 판이 섞임). 미확인 항목은 `docs/ux/inventor-assembly-ui.md` §7.

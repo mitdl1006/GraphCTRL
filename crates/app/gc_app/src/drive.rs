@@ -34,7 +34,12 @@ enum Playing {
     Reverse,
 }
 
-/// The values of a drive sequence, in the joint's display unit: every step of every repetition.
+/// The most steps one pass may have; a finer increment is spread evenly over this many steps instead.
+const MAX_STEPS: usize = 100_000;
+
+/// The values of a drive sequence, in the joint's display unit: every step of every repetition. Every
+/// pass ends exactly at End. A Start or End that is not a number gives no steps; an increment that is not
+/// a positive number moves in one step; one so fine it would need more than [`MAX_STEPS`] uses that many.
 pub(crate) fn sequence(
     start: f64,
     end: f64,
@@ -43,20 +48,35 @@ pub(crate) fn sequence(
     repeat: Repeat,
     count: u32,
 ) -> Vec<f64> {
+    if !(start.is_finite() && end.is_finite()) {
+        return Vec::new();
+    }
     let span = end - start;
-    let steps = match increment {
-        Increment::Amount if step.abs() > 1e-12 => (span.abs() / step.abs()).ceil(),
-        Increment::Steps => step.round().max(1.0),
-        Increment::Amount => 1.0,
+    #[allow(clippy::cast_precision_loss, reason = "MAX_STEPS is small")]
+    let cap = MAX_STEPS as f64;
+    let wanted = match increment {
+        Increment::Amount if step.is_finite() && step.abs() > 0.0 => (span.abs() / step.abs()).ceil(),
+        Increment::Steps if step.is_finite() => step.round(),
+        Increment::Amount | Increment::Steps => 1.0,
     };
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "clamped to a sane count")]
-    let steps = steps.clamp(1.0, 100_000.0) as usize;
-    #[allow(clippy::cast_precision_loss, reason = "at most 100 000 steps")]
-    let at = |i: usize| match increment {
-        Increment::Amount => start + (step.abs() * span.signum() * i as f64).clamp(-span.abs(), span.abs()),
-        Increment::Steps => start + span * i as f64 / steps as f64,
+    let steps = if wanted.is_finite() { wanted.clamp(1.0, cap) } else { cap };
+    // An amount that divides the span into no more than the cap keeps its size (the last step is
+    // shorter); otherwise the steps are equal.
+    let amount =
+        matches!(increment, Increment::Amount) && wanted <= cap && step.is_finite() && step.abs() > 0.0;
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "between 1 and MAX_STEPS")]
+    let n = steps as usize;
+    #[allow(clippy::cast_precision_loss, reason = "at most MAX_STEPS steps")]
+    let at = |i: usize| {
+        if i == n {
+            end
+        } else if amount {
+            start + step.abs() * span.signum() * i as f64
+        } else {
+            start + span * i as f64 / steps
+        }
     };
-    let forward: Vec<f64> = (0..=steps).map(at).collect();
+    let forward: Vec<f64> = (0..=n).map(at).collect();
     let mut values = Vec::new();
     let count = count.clamp(1, 1000);
     for cycle in 0..count {

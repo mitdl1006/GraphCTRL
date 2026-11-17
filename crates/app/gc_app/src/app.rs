@@ -1006,9 +1006,9 @@ impl eframe::App for GraphCtrlApp {
             egui::pos2(stage.right() - reserved(self.right_open, self.right_width), stage.bottom()),
         ));
         egui::CentralPanel::no_frame().show(ui, |ui| {
-            self.measure.follow_view(&mut self.viewport);
+            self.measure.follow_view(&mut self.viewport, ui.input(|i| i.modifiers.shift));
             self.viewport.ui(ui, &mut self.session, lang);
-            self.measure.follow_view(&mut self.viewport);
+            self.measure.follow_view(&mut self.viewport, ui.input(|i| i.modifiers.shift));
             self.measure.follow(&self.session);
             self.measure.overlay(ui.painter(), &self.viewport, &self.session);
             self.interference.follow(&self.session);
