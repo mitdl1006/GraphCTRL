@@ -1588,6 +1588,7 @@ dependencies = [
  "gc_plugin_api",
  "gc_robot",
  "gc_robotics_api",
+ "gc_sketch",
  "gc_tools",
  "log",
  "thiserror 2.0.21",
