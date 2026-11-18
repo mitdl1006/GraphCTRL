@@ -168,6 +168,8 @@ type ToolOutcome = (Option<String>, Vec<(String, String)>);
 struct World {
     variables: BTreeMap<String, CondValue>,
     objects: BTreeMap<String, String>,
+    /// The signals the cell drives (set by steps and tool actions); all start off.
+    signals: BTreeMap<String, bool>,
 }
 
 impl CondScope for World {
@@ -197,6 +199,7 @@ impl Planning<'_> {
                 .filter_map(|(_, v)| Some((v.name.clone(), doc.variable(&v.name)?)))
                 .collect(),
             objects: doc.objects().iter().map(|(_, o)| (o.name.clone(), o.state.clone())).collect(),
+            signals: doc.driven_signals().into_iter().map(|name| (name, false)).collect(),
         }
     }
 
@@ -287,6 +290,20 @@ impl Planning<'_> {
                 };
                 if !world.holds(&task.precondition) {
                     reasons.insert(id, "its precondition does not hold".to_owned());
+                    index += 1;
+                    continue;
+                }
+                // A wait for a signal the cell drives: a task that sets it must have ended (a wait for any
+                // other signal is taken to be answered).
+                let unmet = task.steps.iter().find_map(|step| match step {
+                    gc_doc::Step::WaitIo { condition, .. } => {
+                        let (name, value) = gc_doc::signal_condition(condition)?;
+                        world.signals.get(&name).is_some_and(|now| *now != value).then_some(name)
+                    }
+                    _ => None,
+                });
+                if let Some(name) = unmet {
+                    reasons.insert(id, format!("it waits for the signal `{name}`"));
                     index += 1;
                     continue;
                 }
@@ -425,6 +442,18 @@ impl Planning<'_> {
                 world.objects.extend(changes.remove(&assignment.task).unwrap_or_default());
                 if let Some(task) = doc.get(assignment.task) {
                     self.apply_effects(&mut world, task);
+                    // The signals it set, in the order of its steps.
+                    let kit = doc.robot_tool_kit(assignment.robot).and_then(|(kit, _)| doc.get(kit));
+                    for step in &task.steps {
+                        let set = match step {
+                            gc_doc::Step::SetIo { name, value } => Some((name.clone(), *value)),
+                            gc_doc::Step::ToolAction { action, .. } => {
+                                kit.and_then(|k| k.action(action)).and_then(|a| a.set.clone())
+                            }
+                            _ => None,
+                        };
+                        world.signals.extend(set);
+                    }
                 }
                 // A task that repeats goes back among those to do, in its place by priority.
                 let times = done.entry(assignment.task).or_insert(0);
