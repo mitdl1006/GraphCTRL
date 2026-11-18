@@ -627,6 +627,9 @@ pub enum SketchOp {
 /// An edit of the document.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Command {
+    /// Runs commands one after another as one edit (one undo step); refused whole when any is refused.
+    /// The label is the last command's.
+    Sequence(Vec<Command>),
     /// Runs a command that creates sketches and gives them an owner (Inventor 2026 help, Sketches in
     /// assemblies, GUID-2C180C3A-2064-4671-B1C2-F74B383B5D39): `None` is the top-level assembly, a
     /// component is a sketch made while editing that component in place. One undo step.
@@ -2783,6 +2786,19 @@ fn sketch_op(
 
 pub(crate) fn run(txn: &mut Txn<'_>, command: &Command) -> Result<(Vec<Created>, &'static str), EditError> {
     match command {
+        Command::Sequence(commands) => {
+            let mut created = Vec::new();
+            let mut label = "Edit";
+            for command in commands {
+                let (more, last) = run(txn, command)?;
+                created.extend(more);
+                label = last;
+            }
+            if commands.is_empty() {
+                return Err(EditError::BadValue);
+            }
+            Ok((created, label))
+        }
         Command::Owned { owner, command } => {
             if owner.is_some_and(|o| !txn.doc().has_tree_row(o)) {
                 return Err(EditError::BadValue);
