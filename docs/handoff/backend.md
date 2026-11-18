@@ -54,6 +54,35 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — BOM 기초(리드 ②)
+
+원문: About the BOM Structure, GUID-A0A95805-CBF6-4524-8314-4AC8B53C19CF.
+
+| 원문 | 구현 |
+|---|---|
+| Normal: "numbered and included in quantity calculations" | 기본값. 항목 번호, 수량 |
+| Phantom: 행 아님, 자식은 상위로 올라가 수량이 곱해지고 같은 항목과 합쳐짐, 질량에는 포함 | 자식을 부모 수준으로 올려 부품 번호로 합침 |
+| Reference: BOM에서 자식과 함께 무시, 질량·부피에서 제외 | 두 보기에서 빠짐. 문서 전체 `physical_properties(None)`에서도 제외 |
+| Purchased: 하나의 줄. 구조 보기에는 Normal 자식이 나오고 부품 전용에서는 자식이 숨음 | 그대로 |
+| Inseparable: 부품 전용에서 부품처럼 취급, Normal·Inseparable 자식은 숨고 Purchased 자식은 나옴 | 그대로 |
+| 기본 BOM 구조는 문서 설정 Bill of Materials 탭 | 미구현. 컴포넌트마다 Normal이 기본 |
+
+- 같은 부품 번호는 한 줄로 합치고 수량을 더한다. 같은 파일은 같은 부품 번호라는 인벤터 동작을 따른 것이다.
+  - 부품 번호가 비어 있으면 이름을 쓴다(iProperties 원문).
+  - 하위 어셈블리는 iProperties가 없어 이름이 부품 번호다.
+- 구조 보기는 모든 수준(All Levels)을 보이고 항목 번호는 "1", "1.2" 꼴이다.
+  - 합쳐진 줄의 자식은 첫 인스턴스 기준이다(단위당 수량).
+- 부품 전용 보기에는 자식이 없는 컴포넌트와 Purchased·Inseparable 어셈블리가 나온다. 일반 어셈블리는 나오지 않는다.
+- 다르게 한 점: 단위(Base Quantity "Each")와 열 사용자 정의는 없다. CSV 열은 Item, Part Number, Quantity, Description, BOM Structure 고정이다.
+- 프론트용 API:
+  - `session.bill_of_materials(BomView::{Structured, PartsOnly}) -> Vec<BomRow { item, level, part_number, description, quantity, structure, keys }>`
+  - `session.bom_csv(view) -> String`: RFC 4180, CRLF. 수식처럼 보이는 값(`= + - @`로 시작)은 앞에 `'`를 붙인다.
+  - `session.bom_structure(TreeKey)`, `session.set_bom_structure(TreeKey, BomStructure)`: 실행 취소 한 단계. 트리에 없는 행은 거부한다.
+  - `gc_session::structure_name(BomStructure)`: 표시 이름.
+  - 저장: `Components.bom`(Normal이 아닌 것만). 사라진 행의 값은 정리된다.
+  - 공용 타입 영향: `CellOp::SetBomStructure` 추가, `Components.bom` 필드 추가(serde default). 리드·QA·프론트 브랜치에서
+    `CellOp`를 빠짐없이 매치하거나 `Components { .. }` 리터럴을 쓰는 곳은 없다(grep 확인).
+
 ## 2026-11-18 — 2D 구속·치수 원문 대조(리드 다음 ①, 시작 전)
 
 원문: To Apply Geometric Constraints GUID-A85A7A30-7D81-4C75-8769-CAD034EEA930, Sketch Dimension Reference GUID-3F4E5140-259E-45F1-AD6B-2D31416E1138,

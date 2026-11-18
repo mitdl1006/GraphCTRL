@@ -457,6 +457,13 @@ impl Document {
         }
     }
 
+    /// The BOM Structure of a component or subassembly (Normal unless set).
+    pub fn bom_structure(&self, key: crate::subassembly::TreeKey) -> crate::iproperties::BomStructure {
+        self.timeline()
+            .and_then(|(_, t)| t.components.bom.iter().find(|(k, _)| *k == key).map(|(_, s)| *s))
+            .unwrap_or_default()
+    }
+
     /// The Document Settings (the defaults for a document that has none saved).
     pub fn settings(&self) -> crate::settings::DocSettings {
         self.timeline().map(|(_, t)| t.settings).unwrap_or_default()

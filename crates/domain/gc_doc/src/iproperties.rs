@@ -6,6 +6,25 @@
 
 use serde::{Deserialize, Serialize};
 
+/// The BOM Structure of a component or subassembly (About the BOM Structure, GUID-A0A95805-CBF6-4524-8314-4AC8B53C19CF).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BomStructure {
+    /// "the default BOM Structure for most components … numbered and included in quantity calculations".
+    #[default]
+    Normal,
+    /// "exist in the design, but are not line items … children appear in Structured BOM views … the
+    /// quantity of children is multiplied by the quantity of the phantom component".
+    Phantom,
+    /// "ignored in the BOM … excluded from mass and volume calculations … child components … are ignored".
+    Reference,
+    /// "not fabricated … a single BOM line item, even though it is a part or an assembly"; its children
+    /// are listed in the structured BOM but hidden in parts-only.
+    Purchased,
+    /// "must be physically damaged to separate them": a part in parts-only, like a purchased assembly,
+    /// except that purchased children inside it still show.
+    Inseparable,
+}
+
 /// The default density, kg/m³ (the Physical tab's default material).
 pub const DEFAULT_DENSITY: f64 = 1.0;
 
