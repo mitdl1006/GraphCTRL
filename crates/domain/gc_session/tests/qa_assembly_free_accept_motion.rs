@@ -310,12 +310,10 @@ fn the_mark_goes_when_the_other_relationship_is_changed_deleted_or_suppressed() 
     let (mut sc, accepted) = make();
     let block = sc.block;
     let delete = |s: &mut Session| s.execute(&Command::Cell(CellOp::DeleteBody(block))).map(|_| ());
-    // A part that relationships refer to cannot be deleted from under them: refused with no trace.
-    assert!(step(&mut sc.s, "delete the block", delete).is_none());
-    let held = sc.held;
-    sc.s.delete_relationship(held).unwrap();
-    sc.s.delete_relationship(accepted).unwrap();
-    assert!(step(&mut sc.s, "delete the free block", delete).is_some());
+    // Deleting a part also deletes the relationships that refer to it (backend 43a8be7, lead-approved:
+    // Inventor removes a component's constraints with it), in one undo step; no error mark is left dangling.
+    assert!(step(&mut sc.s, "delete the block with its relationships", delete).is_some());
+    assert!(sc.s.doc().get(accepted).is_none());
     for id in sc.s.sick_relationships() {
         assert!(sc.s.doc().get(id).is_some(), "a dangling error mark {id:?} (was {accepted:?})");
     }
@@ -608,21 +606,13 @@ fn motion_constraints_survive_saving_and_deleting_the_part_leaves_no_dangling_re
     h.held = g.held;
     turn_to(&mut h, 0.6).unwrap();
     assert!((yaw(&h.s, g.driven) - before + 3.0 * (yaw(&h.s, g.driver) - 0.3)).abs() < 1e-5);
-    // A gear that a motion constraint refers to cannot be deleted from under it; with the constraint gone it can.
+    // Deleting a gear deletes the motion constraint (and every other relationship) that refers to it, in one
+    // undo step (backend 43a8be7, lead-approved): nothing is left dangling.
     let driven = g.driven;
     let delete = |s: &mut Session| s.execute(&Command::Cell(CellOp::DeleteBody(driven))).map(|_| ());
-    assert!(step(&mut g.s, "delete the driven gear", delete).is_none());
-    let holding: Vec<_> =
-        g.s.relationships()
-            .into_iter()
-            .filter(|(_, r)| r.references(driven.erase()))
-            .map(|(i, _)| i)
-            .collect();
-    assert!(holding.contains(&id));
-    for rel in holding {
-        g.s.delete_relationship(rel).unwrap();
-    }
-    assert!(step(&mut g.s, "delete the free gear", delete).is_some());
+    assert!(step(&mut g.s, "delete the driven gear with its relationships", delete).is_some());
+    assert!(g.s.doc().get(id).is_none());
+    assert!(g.s.relationships().iter().all(|(_, r)| !r.references(driven.erase())));
 }
 
 fn gears_from(g: &Gears) -> Gears {
