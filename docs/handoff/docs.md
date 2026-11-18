@@ -23,3 +23,8 @@
 
 - `docs/ux/inventor-assembly-parity.md`의 "GraphCTRL 현재" 열을 handoff(backend·frontend)와 i18n 문자열, 대화상자 모듈 기준으로 고쳤다. 원문 대조는 이전 항목의 GUID를 그대로 쓴다. 확인하지 못한 것은 "확인 중"으로 표시(단면 참여, 조인트 편집 대화상자, 컴포넌트 단면 제외, 교차 부품 투영).
 - 가이드 39장(작업 모델)과 40장(스케줄과 URScript)을 추가했다. URScript는 "URSim·실제 로봇으로 검증하지 않은 프로그램"이라는 안내를 넣었다(i18n `UrScriptNotice`).
+
+## 2026-11-18 밤 2 — 구속 값·조인트 원점·자유 이동·표현·구속 오류 보강 (가이드·parity)
+
+- 가이드: 16장(모션 구속, 구속 값 = 모델 매개변수), 17장(조인트 원점 정렬·뒤집기·오프셋, Planar·Gap·Ball 한계 보류), 18장(Accept·구속 복구·충돌 분석), 19장(패턴 요소 억제·독립·복원), 20장(생산성 그룹의 Ground and Root·Place at Component Origin, 화면 연결됨), 21장(고무줄·업데이트·마킹 메뉴 닫기), 26장(뷰 표현 잠금·복사, 위치 표현 복사, 오버라이드 보류), 3장(ViewCube 우클릭), 34장(예정 목록 갱신).
+- parity 문서 "현재" 열: 위 항목을 handoff의 GUID 근거와 i18n 문자열 기준으로 갱신. 보류 항목(Transitional, Planar 조인트, Gap, Ball 한계, 위치 표현 오버라이드, 마킹 메뉴 명령 배치)은 "보류"로 표시.
