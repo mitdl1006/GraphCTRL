@@ -356,7 +356,8 @@ impl Sketch {
             CurveGeom::Circle { c, r } => Some((c, r)),
             CurveGeom::Arc { c, s, .. } => {
                 let (centre, start) = (self.pos(c)?, self.pos(s)?);
-                Some((c, ((start[0] - centre[0]).powi(2) + (start[1] - centre[1]).powi(2)).sqrt()))
+                let squares = (0..3).map(|k| (start[k] - centre[k]).powi(2)).sum::<f64>();
+                Some((c, squares.sqrt()))
             }
             CurveGeom::Line { .. } => None,
         }

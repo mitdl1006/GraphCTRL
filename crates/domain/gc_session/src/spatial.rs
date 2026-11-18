@@ -1,5 +1,7 @@
-//! Drawing in a 3D sketch: chained lines whose points the user interface places with
-//! [`gc_tools::spatial::place`].
+//! Drawing in a 3D sketch: chained lines and arcs whose points the user interface places with
+//! [`gc_tools::spatial::place`]. Arcs: Three Point Arc (two ends, then a point on it) and Center Point Arc
+//! (centre, start, end), as on Inventor's 3D Sketch tab (Inventor 2026 help, To Create Lines, Arcs, and
+//! Bends, GUID-4F861674-F74C-474E-869A-4C190ED6EC4B).
 
 use gc_core::Id;
 use gc_doc::{Created, EndSnap, SketchOp};
@@ -17,11 +19,13 @@ pub(crate) struct SpatialState {
     hover: Option<([f64; 3], Option<usize>)>,
     /// The normal of the working plane: 2 = XY, 0 = YZ, 1 = ZX.
     plane: usize,
+    /// The points clicked so far for an arc, with the existing points they were placed on.
+    arc: Vec<([f64; 3], Option<Id<SkPoint>>)>,
 }
 
 impl Default for SpatialState {
     fn default() -> Self {
-        Self { anchor: None, hover: None, plane: 2 }
+        Self { anchor: None, hover: None, plane: 2, arc: Vec::new() }
     }
 }
 
@@ -29,12 +33,15 @@ impl SpatialState {
     pub(crate) fn reset(&mut self) {
         self.anchor = None;
         self.hover = None;
+        self.arc.clear();
     }
 
-    /// Drops the line in progress. Returns false when there was none.
+    /// Drops the line or arc in progress. Returns false when there was none.
     pub(crate) fn drop_line(&mut self) -> bool {
         self.hover = None;
-        self.anchor.take().is_some()
+        let arc = !self.arc.is_empty();
+        self.arc.clear();
+        self.anchor.take().is_some() || arc
     }
 }
 
@@ -58,9 +65,37 @@ impl Session {
         };
     }
 
-    /// Where the 3D line in progress starts.
+    /// Where the 3D line in progress starts, or the last point of the arc in progress (axis locks run
+    /// through it).
     pub fn spatial_anchor(&self) -> Option<[f64; 3]> {
-        self.spatial.anchor.map(|(pos, _)| pos)
+        match self.spatial.arc.last() {
+            Some((pos, _)) => Some(*pos),
+            None => self.spatial.anchor.map(|(pos, _)| pos),
+        }
+    }
+
+    /// The centre, start and end of the arc the clicks so far and `last` would make.
+    fn spatial_arc(&self, last: [f64; 3]) -> Option<([f64; 3], [f64; 3], [f64; 3])> {
+        let [(a, _), (b, _)] = <[_; 2]>::try_from(self.spatial.arc.as_slice()).ok()?;
+        match self.tool() {
+            ToolKind::Arc3 => gc_sketch::Arc3::through(a, last, b),
+            _ => Some((a, b, last)),
+        }
+    }
+
+    /// The arc in progress as points along it (the rubber band), once two points are placed; with one, the
+    /// segment to the cursor.
+    pub fn spatial_arc_preview(&self) -> Option<Vec<[f64; 3]>> {
+        let (cursor, _) = self.spatial.hover?;
+        match self.spatial.arc.len() {
+            1 => Some(vec![self.spatial.arc[0].0, cursor]),
+            2 => {
+                let (centre, start, end) = self.spatial_arc(cursor)?;
+                let arc = gc_sketch::Arc3::new(centre, start, end)?;
+                Some((0..=48).map(|i| arc.at(f64::from(i) / 48.0)).collect())
+            }
+            _ => None,
+        }
     }
 
     /// Tells the session where the cursor would place the next point (for the rubber band); `None` when
@@ -81,7 +116,14 @@ impl Session {
     /// starts a line; every further click ends one and starts the next from there. What the placement
     /// implies becomes constraints where that is consistent, and is left out where it is not.
     pub fn spatial_click(&mut self, pos: [f64; 3], point: Option<Id<SkPoint>>, axis: Option<usize>) {
-        if self.tool() != ToolKind::Line || !self.sketch_is_spatial() {
+        if !self.sketch_is_spatial() {
+            return;
+        }
+        if matches!(self.tool(), ToolKind::Arc | ToolKind::Arc3) {
+            self.spatial_arc_click(pos, point);
+            return;
+        }
+        if self.tool() != ToolKind::Line {
             return;
         }
         let Some((start, start_point)) = self.spatial.anchor else {
@@ -115,5 +157,33 @@ impl Session {
         // The next line starts at the end of this one, wherever solving left it.
         let end = self.point_pos(to).unwrap_or(pos);
         self.spatial.anchor = Some((end, Some(to)));
+    }
+
+    /// A click of an arc tool in a 3D sketch: three points, then the arc.
+    fn spatial_arc_click(&mut self, pos: [f64; 3], point: Option<Id<SkPoint>>) {
+        let repeated = self.spatial.arc.iter().any(|(at, p)| {
+            (point.is_some() && *p == point) || (0..3).map(|k| (at[k] - pos[k]).powi(2)).sum::<f64>() < 1e-18
+        });
+        if repeated {
+            return;
+        }
+        if self.spatial.arc.len() < 2 {
+            self.spatial.arc.push((pos, point));
+            return;
+        }
+        let Some((centre, start, end)) = self.spatial_arc(pos) else {
+            self.last_error = Some(gc_sketch::SketchError::InvalidValue.into());
+            return;
+        };
+        // Which existing points the centre, start and end were placed on.
+        let (first, second) = (self.spatial.arc[0].1, self.spatial.arc[1].1);
+        let snaps = match self.tool() {
+            ToolKind::Arc3 => [None, first, second],
+            _ => [first, second, point],
+        };
+        let op = SketchOp::AddSpatialArc { centre, start, end, snaps };
+        if self.sketch_op(op).is_ok() {
+            self.spatial.arc.clear();
+        }
     }
 }

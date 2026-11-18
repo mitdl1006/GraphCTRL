@@ -873,13 +873,29 @@ impl Viewport {
             .keys()
             .filter_map(|id| Some((*id, DVec3::from_array(session.point_pos(*id)?))))
             .collect();
+        // Lines, and arcs as short segments, for picking.
         let lines: Vec<(Id<gc_sketch::Curve>, DVec3, DVec3)> = sketch
             .curves
-            .keys()
-            .filter_map(|id| {
-                let (a, b) = sketch.line(*id)?;
+            .iter()
+            .flat_map(|(id, curve)| {
                 let at = |p| session.point_pos(p).map(DVec3::from_array);
-                Some((*id, at(a)?, at(b)?))
+                let segments: Vec<(Id<gc_sketch::Curve>, DVec3, DVec3)> = match curve.geom {
+                    CurveGeom::Line { a, b } => {
+                        at(a).zip(at(b)).map(|(a, b)| vec![(*id, a, b)]).unwrap_or_default()
+                    }
+                    CurveGeom::Arc { c, s, e } => (|| {
+                        let arc = gc_sketch::Arc3::new(
+                            session.point_pos(c)?,
+                            session.point_pos(s)?,
+                            session.point_pos(e)?,
+                        )?;
+                        let along = |i: u32| DVec3::from_array(arc.at(f64::from(i) / 24.0));
+                        Some((0..24).map(|i| (*id, along(i), along(i + 1))).collect())
+                    })()
+                    .unwrap_or_default(),
+                    CurveGeom::Circle { .. } => Vec::new(),
+                };
+                segments
             })
             .collect();
         let camera = self.camera;
@@ -892,7 +908,10 @@ impl Viewport {
         let ctrl = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
         let clicked =
             response.clicked_by(PointerButton::Primary).then(|| response.interact_pointer_pos()).flatten();
-        if session.tool() == gc_tools::ToolKind::Line {
+        if matches!(
+            session.tool(),
+            gc_tools::ToolKind::Line | gc_tools::ToolKind::Arc | gc_tools::ToolKind::Arc3
+        ) {
             let anchor = session.spatial_anchor().map(DVec3::from_array);
             let plane_axis = session.spatial_plane();
             let place = |at: egui::Pos2| {

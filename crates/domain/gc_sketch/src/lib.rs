@@ -12,6 +12,7 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(test, allow(clippy::float_cmp, reason = "tests compare exactly representable values"))]
 
+mod arc3;
 mod bind;
 mod cut;
 mod drag;
@@ -19,6 +20,7 @@ mod edit;
 mod model;
 mod pattern;
 
+pub use arc3::Arc3;
 pub use cut::{CutResult, Piece};
 pub use drag::{SketchDrag, SketchGrab};
 pub use edit::{AddResult, Item, SketchError, SketchReport};

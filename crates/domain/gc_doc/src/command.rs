@@ -402,6 +402,21 @@ pub enum SketchOp {
         /// What the second end was snapped to.
         snap_b: EndSnap,
     },
+    /// An arc in a 3D sketch (Three Point Arc or Center Point Arc on the 3D Sketch tab; Inventor 2026 help,
+    /// To Create Lines, Arcs, and Bends, GUID-4F861674-F74C-474E-869A-4C190ED6EC4B): round `centre` from
+    /// `start` towards `end` (only its direction counts) in the plane of the three, the short way round
+    /// (a 3D arc turns less than half a circle). `snaps` are existing points the centre, start and end are
+    /// coincident with.
+    AddSpatialArc {
+        /// Centre.
+        centre: [f64; 3],
+        /// Start (sets the radius).
+        start: [f64; 3],
+        /// Direction of the end.
+        end: [f64; 3],
+        /// Points the centre, start and end were placed on.
+        snaps: [Option<Id<SkPoint>>; 3],
+    },
     /// Adds a rectangle at any angle: `a` to `b` is one side, `c` sets the other side's length (the
     /// three-point rectangle). Four lines, coincident corners, one right angle and two pairs of parallel
     /// sides.
@@ -1888,6 +1903,33 @@ fn sketch_op(
             };
             infer(sketch, ids, tangent, &mut created);
             snap_constraint(sketch, ids, free_end, snap_end, &mut created);
+            "Arc"
+        }
+        SketchOp::AddSpatialArc { centre, start, end, snaps } => {
+            if !sketch.is_spatial() || !centre.iter().chain(start).chain(end).all(|v| v.is_finite()) {
+                return Err(SketchError::InvalidValue.into());
+            }
+            let arc = gc_sketch::Arc3::new(*centre, *start, *end).ok_or(SketchError::InvalidValue)?;
+            if arc.sweep > std::f64::consts::PI - 1e-6 {
+                return Err(SketchError::InvalidValue.into());
+            }
+            let ends = [*centre, *start, arc.at(1.0)];
+            let points = ends.map(|p| sketch.add_point(ids, p));
+            let id: Id<Curve> = ids.alloc();
+            sketch.curves.insert(
+                id,
+                Curve {
+                    geom: gc_sketch::CurveGeom::Arc { c: points[0], s: points[1], e: points[2] },
+                    construction: false,
+                },
+            );
+            created.extend(points.iter().map(|p| Created::Point(*p)));
+            created.push(Created::Curve(id));
+            for (point, snap) in points.iter().zip(snaps) {
+                if let Some(snap) = snap {
+                    require(sketch, ids, GeoConstraint::Coincident(*snap, *point), &mut created)?;
+                }
+            }
             "Arc"
         }
         SketchOp::AddArcThrough { a, b, through, snap_a, snap_b } => {

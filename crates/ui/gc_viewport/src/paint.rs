@@ -131,7 +131,7 @@ pub(crate) fn over(
         } else if session.doc().is_visible(id.erase()) && !session.doc().is_inactive(id.erase()) {
             let stroke = Stroke::new(1.2, colors::inactive());
             for curve in sketch.curves.values() {
-                curve_path(&view, &plane, curve, |p| sketch.pos(p), None, stroke);
+                curve_path(&view, &plane, curve, |p| sketch.pos(p), None, stroke, sketch.is_spatial());
             }
         }
     }
@@ -293,6 +293,7 @@ fn curve_path(
     pos: impl Fn(gc_core::Id<gc_sketch::SkPoint>) -> Option<[f64; 3]>,
     radius: Option<f64>,
     stroke: Stroke,
+    spatial: bool,
 ) {
     const SEGMENTS: usize = 72;
     let tau = std::f64::consts::TAU;
@@ -311,6 +312,17 @@ fn curve_path(
         CurveGeom::Circle { c, r } => {
             if let Some(c) = pos(c) {
                 view.polyline(ring(c, radius.unwrap_or(r), 0.0, tau), stroke);
+            }
+        }
+        // In a 3D sketch an arc lies in the plane of its three points (`gc_sketch::Arc3`).
+        CurveGeom::Arc { c, s, e } if spatial => {
+            if let Some(arc) =
+                pos(c).zip(pos(s)).zip(pos(e)).and_then(|((c, s), e)| gc_sketch::Arc3::new(c, s, e))
+            {
+                view.polyline(
+                    (0..=SEGMENTS).map(|i| plane.world(arc.at(i as f64 / SEGMENTS as f64))),
+                    stroke,
+                );
             }
         }
         CurveGeom::Arc { c, s, e } => {
@@ -339,7 +351,15 @@ fn active_sketch(view: &View<'_>, plane: &SketchPlane, sketch: &Sketch, session:
             colors::constrained()
         };
         let width = if selection.contains(&Item::Curve(*id)) { 2.6 } else { 1.8 };
-        curve_path(view, plane, curve, pos, session.radius(*id), Stroke::new(width, color));
+        curve_path(
+            view,
+            plane,
+            curve,
+            pos,
+            session.radius(*id),
+            Stroke::new(width, color),
+            sketch.is_spatial(),
+        );
     }
     for id in sketch.points.keys() {
         let Some(at) = pos(*id).and_then(|p| view.screen(plane.world(p))) else { continue };
@@ -388,6 +408,21 @@ pub(crate) fn dimension_anchor(
             foot[axis % 3] = 0.0;
             (at, foot)
         }
+        // A radius at the middle of its arc; an angle between the middles of its lines.
+        gc_sketch::DimKind::Radius(curve) | gc_sketch::DimKind::Diameter(curve) => {
+            let gc_sketch::CurveGeom::Arc { c, s, e } = sketch.curves.get(&curve)?.geom else { return None };
+            let arc =
+                gc_sketch::Arc3::new(session.point_pos(c)?, session.point_pos(s)?, session.point_pos(e)?)?;
+            (arc.at(0.5), arc.at(0.5))
+        }
+        gc_sketch::DimKind::Angle { l1, l2, .. } => {
+            let middle = |line| {
+                let (a, b) = sketch.line(line)?;
+                let (a, b) = (session.point_pos(a)?, session.point_pos(b)?);
+                Some([0, 1, 2].map(|k| (a[k] + b[k]) * 0.5))
+            };
+            (middle(l1)?, middle(l2)?)
+        }
         _ => return None,
     };
     Some([(from[0] + to[0]) * 0.5, (from[1] + to[1]) * 0.5, (from[2] + to[2]) * 0.5])
@@ -415,8 +450,13 @@ fn spatial_marks(view: &View<'_>, plane: &SketchPlane, sketch: &Sketch, session:
             view.segment(plane.world(at), plane.world(foot), Stroke::new(1.0, color));
         }
         let value = sketch.measure(&dimension.kind).unwrap_or(dimension.value);
-        let text =
-            if dimension.driving { format_length(value) } else { format!("({})", format_length(value)) };
+        let shown = match dimension.kind {
+            gc_sketch::DimKind::Angle { .. } => format!("{:.2}°", value.to_degrees()),
+            gc_sketch::DimKind::Radius(_) => format!("R{}", format_length(value)),
+            gc_sketch::DimKind::Diameter(_) => format!("Ø{}", format_length(value)),
+            _ => format_length(value),
+        };
+        let text = if dimension.driving { shown } else { format!("({shown})") };
         if let Some(at) = view.screen(plane.world(anchor)) {
             let font = FontId::proportional(13.0);
             let galley = view.painter.layout_no_wrap(text, font, color);
@@ -424,6 +464,9 @@ fn spatial_marks(view: &View<'_>, plane: &SketchPlane, sketch: &Sketch, session:
             view.painter.rect_filled(frame, 2.0, Color32::from_white_alpha(215));
             view.painter.galley(frame.min + vec2(3.0, 1.0), galley, color);
         }
+    }
+    if let Some(points) = session.spatial_arc_preview() {
+        view.polyline(points.into_iter().map(|p| plane.world(p)), Stroke::new(1.6, colors::PREVIEW));
     }
     if let Some((from, to, axis)) = session.spatial_preview() {
         // Locked to an axis, the rubber band takes the axis' colour and name.

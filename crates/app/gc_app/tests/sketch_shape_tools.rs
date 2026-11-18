@@ -328,4 +328,11 @@ fn the_three_dimensional_sketch_offers_parallel_perpendicular_and_equal() {
         harness.run();
         assert_eq!(harness.state().session.tool(), ToolKind::Constraint(kind));
     }
+    // And Center Point Arc and Three Point Arc (To Create Lines, Arcs, and Bends,
+    // GUID-4F861674-F74C-474E-869A-4C190ED6EC4B).
+    for (label, kind) in [("호", ToolKind::Arc), ("3점 호", ToolKind::Arc3)] {
+        harness.get_by_label(label).click();
+        harness.run();
+        assert_eq!(harness.state().session.tool(), kind);
+    }
 }

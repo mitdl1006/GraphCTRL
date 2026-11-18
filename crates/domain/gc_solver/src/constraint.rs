@@ -203,6 +203,17 @@ pub enum Constraint {
         /// Its value.
         value: f64,
     },
+    /// A 3D arc: its start and end are as far from its centre as its radius says.
+    Arc3 {
+        /// Centre.
+        c: P3,
+        /// Radius parameter.
+        r: ParamId,
+        /// Start.
+        start: P3,
+        /// End.
+        end: P3,
+    },
     /// Two 3D lines are parallel.
     Parallel3(Line3, Line3),
     /// Two 3D lines are at right angles (they need not meet).
@@ -450,6 +461,11 @@ impl Constraint {
                 }
             }
             Self::EqualLength3(a, b) => out.rows.push((RowKind::EqualLen3, two3(a, b))),
+            Self::Arc3 { c, r, start, end } => {
+                for p in [start, end] {
+                    out.rows.push((RowKind::PointSphere, [p.as_slice(), c.as_slice(), &[*r]].concat()));
+                }
+            }
             Self::PointOnLine3(p, line) => {
                 for k in across(dir3(line)) {
                     out.rows.push((RowKind::PointLine3 { k }, [p.as_slice(), &line3_vars(line)].concat()));

@@ -1024,6 +1024,7 @@ messages! {
     /// Input box: offset distance.
     HudDistance => ("거리", "Distance"),
     HudX => ("X", "X"),
+    ToolArc3 => ("3점 호", "Three Point Arc"),
     HudY => ("Y", "Y"),
     /// Ribbon group (Inventor: Pattern panel).
     GroupPattern => ("패턴", "Pattern"),

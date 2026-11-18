@@ -49,6 +49,15 @@ impl Binding {
         Ok(Line3 { a: self.p3(a)?, b: self.p3(b)? })
     }
 
+    /// A 3D arc's radius as a [`Round`] for the constraints that read only the radius (equal radius, a
+    /// radius dimension); the centre given is two of its three coordinates and must not be used.
+    fn radius_only(&self, sketch: &Sketch, curve: Id<Curve>) -> Result<Round, SketchError> {
+        let (centre, _) = sketch.round(curve).ok_or(SketchError::WrongCurveKind)?;
+        let r = *self.radii.get(&curve).ok_or(SketchError::WrongCurveKind)?;
+        let c = self.p3(centre)?;
+        Ok(Round { c: [c[0], c[1]], r })
+    }
+
     fn round(&self, sketch: &Sketch, curve: Id<Curve>) -> Result<Round, SketchError> {
         let (centre, _) = sketch.round(curve).ok_or(SketchError::WrongCurveKind)?;
         let r = *self.radii.get(&curve).ok_or(SketchError::WrongCurveKind)?;
@@ -141,9 +150,13 @@ impl Binding {
             GeoConstraint::Collinear(a, b) if spatial => {
                 Constraint::Collinear3(self.line3(sketch, a)?, self.line3(sketch, b)?)
             }
-            GeoConstraint::Equal(a, b) if spatial => {
-                Constraint::EqualLength3(self.line3(sketch, a)?, self.line3(sketch, b)?)
-            }
+            GeoConstraint::Equal(a, b) if spatial => match (self.line3(sketch, a), self.line3(sketch, b)) {
+                (Ok(l1), Ok(l2)) => Constraint::EqualLength3(l1, l2),
+                (Err(_), Err(_)) => {
+                    Constraint::EqualRadius(self.radius_only(sketch, a)?, self.radius_only(sketch, b)?)
+                }
+                _ => return Err(SketchError::WrongCurveKind),
+            },
             GeoConstraint::Horizontal(..)
             | GeoConstraint::Vertical(..)
             | GeoConstraint::Tangent { .. }
@@ -261,6 +274,12 @@ impl Binding {
                 rev2,
                 value,
             },
+            DimKind::Radius(curve) if sketch.is_spatial() => {
+                Constraint::Radius { round: self.radius_only(sketch, curve)?, value }
+            }
+            DimKind::Diameter(curve) if sketch.is_spatial() => {
+                Constraint::Diameter { round: self.radius_only(sketch, curve)?, value }
+            }
             DimKind::Radius(curve) => Constraint::Radius { round: self.round(sketch, curve)?, value },
             DimKind::Diameter(curve) => Constraint::Diameter { round: self.round(sketch, curve)?, value },
             DimKind::PlaneDistance { p, axis, side } if axis < 3 => {
@@ -287,8 +306,15 @@ impl Sketch {
         for (id, curve) in &self.curves {
             match curve.geom {
                 CurveGeom::Line { .. } => {}
-                CurveGeom::Circle { .. } | CurveGeom::Arc { .. } if spatial => {
-                    return Err(SketchError::WrongSpace);
+                CurveGeom::Circle { .. } if spatial => return Err(SketchError::WrongSpace),
+                // A 3D arc lies in the plane of its three points (`Arc3`).
+                CurveGeom::Arc { c, s, e } if spatial => {
+                    let (_, radius) = self.round(*id).ok_or(SketchError::MissingPoint)?;
+                    let r = binding.sys.add_radius(radius);
+                    binding.radii.insert(*id, r);
+                    let arc =
+                        Constraint::Arc3 { c: binding.p3(c)?, r, start: binding.p3(s)?, end: binding.p3(e)? };
+                    binding.sys.add(solver_id(*id), arc);
                 }
                 CurveGeom::Circle { r, .. } => {
                     binding.radii.insert(*id, binding.sys.add_radius(r));

@@ -283,3 +283,69 @@ fn large_rectangular_patterns_are_quick_to_make_and_to_edit() {
         println!("{n} × {n}: made {made:?}, spacing edited {edited:?}");
     }
 }
+
+/// Inventor 2026 help, To Create Lines, Arcs, and Bends (GUID-4F861674-F74C-474E-869A-4C190ED6EC4B): on the
+/// 3D Sketch tab, Three Point Arc (two ends, then a point on the arc) and Center Point Arc (centre, start,
+/// end). Here a 3D arc lies in the plane of its points and turns less than half a circle.
+#[test]
+fn three_dimensional_arcs_by_three_points_or_by_centre() {
+    use gc_doc::SketchOp;
+    use gc_sketch::DimKind;
+    let tilted = |x: f64, y: f64| [x, y * 0.6, y * 0.8]; // a plane through X, tilted up
+    for tool in [ToolKind::Arc3, ToolKind::Arc] {
+        let mut session = Session::new();
+        session.create_sketch_3d().unwrap();
+        session.set_tool(tool);
+        let r = 0.05;
+        let clicks = match tool {
+            // Ends at 0° and 90°, through 45°.
+            ToolKind::Arc3 => [
+                tilted(r, 0.0),
+                tilted(0.0, r),
+                tilted(r * std::f64::consts::FRAC_1_SQRT_2, r * std::f64::consts::FRAC_1_SQRT_2),
+            ],
+            _ => [tilted(0.0, 0.0), tilted(r, 0.0), tilted(0.0, 2.0 * r)],
+        };
+        for (i, at) in clicks.iter().enumerate() {
+            session.spatial_hover(Some((*at, None)));
+            if i == 2 {
+                assert!(
+                    session.spatial_arc_preview().is_some_and(|p| p.len() > 2),
+                    "{tool:?}: the arc follows"
+                );
+            }
+            session.spatial_click(*at, None, None);
+        }
+        let (_, sketch) = session.active_sketch().unwrap();
+        let (arc, curve) = sketch.curves.iter().next().unwrap();
+        let gc_sketch::CurveGeom::Arc { c, s, e } = curve.geom else { panic!("{tool:?}: an arc") };
+        let (c, s, e) = (sketch.pos(c).unwrap(), sketch.pos(s).unwrap(), sketch.pos(e).unwrap());
+        let dist = |p: [f64; 3], q: [f64; 3]| (0..3).map(|k| (p[k] - q[k]).powi(2)).sum::<f64>().sqrt();
+        assert!(dist(c, [0.0; 3]) < 1e-9, "{tool:?}: centre {c:?}");
+        assert!((dist(c, s) - r).abs() < 1e-9 && (dist(c, e) - r).abs() < 1e-9, "{tool:?}");
+        assert!(dist(e, tilted(0.0, r)) < 1e-9, "{tool:?}: end {e:?}");
+        // Centre 3 + start 3 + end 3 + radius, less the two radius rows.
+        let dof = session.report().unwrap().dof;
+        assert_eq!(dof, 8, "{tool:?}");
+        let arc = *arc;
+        session
+            .edit_active_sketch(SketchOp::AddDimension {
+                kind: DimKind::Radius(arc),
+                source: "40".into(),
+                text_pos: [0.0; 2],
+            })
+            .unwrap();
+        assert_eq!(session.report().unwrap().dof, 7, "{tool:?}: a radius dimension");
+        let (_, sketch) = session.active_sketch().unwrap();
+        assert!((sketch.round(arc).unwrap().1 - 0.04).abs() < 1e-9, "{tool:?}");
+    }
+
+    // Through a point on the long way round (more than half a circle): refused, nothing drawn.
+    let mut session = Session::new();
+    session.create_sketch_3d().unwrap();
+    session.set_tool(ToolKind::Arc3);
+    for at in [[0.05, 0.0, 0.0], [0.0, 0.05, 0.0], [-0.05, 0.0, 0.0]] {
+        session.spatial_click(at, None, None);
+    }
+    assert!(session.active_sketch().unwrap().1.curves.is_empty());
+}

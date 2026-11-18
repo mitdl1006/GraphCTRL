@@ -159,9 +159,14 @@ pub(crate) fn show(
                         (ToolKind::Arc, Icon::Arc, Msg::ToolArc),
                         (ToolKind::Rectangle, Icon::Rectangle, Msg::ToolRectangle),
                     ];
-                    // A 3D sketch has points and lines.
-                    let count = if spatial { 2 } else { tools.len() };
-                    for (kind, icon, label) in tools.into_iter().take(count) {
+                    // A 3D sketch has lines and arcs: Center Point Arc and Three Point Arc (Inventor 2026 help,
+                    // To Create Lines, Arcs, and Bends, GUID-4F861674-F74C-474E-869A-4C190ED6EC4B).
+                    let tools: Vec<(ToolKind, Icon, Msg)> = if spatial {
+                        vec![tools[0], tools[1], tools[3], (ToolKind::Arc3, Icon::Arc, Msg::ToolArc3)]
+                    } else {
+                        tools.to_vec()
+                    };
+                    for (kind, icon, label) in tools {
                         if ribbon_button(ui, icon, label.text(lang), current == kind, sketching).clicked() {
                             session.set_tool(kind);
                         }
