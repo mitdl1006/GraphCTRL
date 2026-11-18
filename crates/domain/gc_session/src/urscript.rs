@@ -33,7 +33,7 @@ fn plain(text: &str) -> String {
 /// item's id appended: two such names stay apart.
 fn function_name(name: &str, id: u64) -> String {
     let base = identifier(name);
-    if name.chars().any(|c| !c.is_ascii()) { format!("{base}_{id}") } else { base }
+    if name.is_ascii() { base } else { format!("{base}_{id}") }
 }
 
 fn identifier(name: &str) -> String {
