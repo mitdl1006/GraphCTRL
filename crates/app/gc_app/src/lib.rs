@@ -12,6 +12,7 @@ mod doc_settings;
 mod drive;
 mod example;
 mod interference;
+mod iproperties;
 mod joint_limits;
 mod measure;
 mod parameters;

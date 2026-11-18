@@ -59,6 +59,8 @@ pub enum BrowserAction {
     ContactSet(gc_core::AnyId, bool),
     /// Suppress a relationship (or bring it back) and solve again.
     SuppressRelationship(gc_core::Id<gc_doc::Relationship>, bool),
+    /// Open the iProperties dialog of a component.
+    Properties(gc_doc::Occurrence),
 }
 
 /// What is typed into the parameter editor of the browser.
@@ -1305,6 +1307,10 @@ fn node_row(
                 *action = Some(BrowserAction::Edit(Box::new(command)));
                 ui.close();
             }
+        }
+        if groundable && ui.button(tr!(lang, CmdIProperties)).clicked() {
+            *action = Some(BrowserAction::Properties(occurrence));
+            ui.close();
         }
         if node.suppressible {
             let text = if suppressed_now { tr!(lang, CmdUnsuppress) } else { tr!(lang, CmdSuppress) };

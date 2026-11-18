@@ -5954,3 +5954,46 @@ fn the_document_settings_dialog_changes_the_units_and_the_auto_bend_radius() {
     assert!((harness.state().session.doc_settings().auto_bend_radius - 0.005).abs() < 1e-12);
     assert!(harness.query_by_label("확인").is_none(), "OK closed the dialog");
 }
+
+/// The iProperties dialog (Tools > iProperties…; Inventor 2026 help, iProperties Reference,
+/// GUID-8ABF17C5-B9EB-47B5-92CF-9FBD335334E3, Physical tab GUID-877564AC-78CE-4216-9913-003A2DE8D698): the
+/// Summary values are saved with the document; a bad density is refused.
+#[test]
+fn the_iproperties_dialog_saves_the_summary_and_checks_the_density() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("도구").click();
+    harness.run();
+    harness.get_by_label("iProperties…").click();
+    harness.run_steps(3);
+    let title = harness.get_all_by_label("제목").last().unwrap();
+    title.click();
+    harness.run_steps(2);
+    harness.get_all_by_label("제목").last().unwrap().type_text("Cell A");
+    harness.run_steps(2);
+    // The Physical tab: the Update button is there; a density of zero is refused.
+    harness.get_by_label("물리적").click();
+    harness.run_steps(2);
+    harness.get_by_label("업데이트");
+    let density = harness.get_all_by_label("밀도(kg/m³)").last().unwrap();
+    density.click();
+    harness.run_steps(2);
+    harness.get_all_by_label("밀도(kg/m³)").last().unwrap().type_text("0");
+    harness.run_steps(2);
+    harness.get_by_label("확인").click();
+    harness.run_steps(2);
+    harness.get_by_label("값이 올바르지 않습니다(0보다 큰 길이)");
+    assert_eq!(harness.state().session.properties(None).title, "");
+    // Clearing the density lets OK save the title.
+    harness.get_all_by_label("밀도(kg/m³)").last().unwrap().click();
+    harness.run_steps(2);
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.key_press(egui::Key::Backspace);
+    harness.run_steps(2);
+    harness.get_by_label("확인").click();
+    harness.run_steps(3);
+    assert_eq!(harness.state().session.properties(None).title, "Cell A");
+}
