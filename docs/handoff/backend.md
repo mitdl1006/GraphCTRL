@@ -71,6 +71,29 @@ To Work with Sketch Dimensions GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185.
 | Flip Direction 대상의 "line to an arc (the arc itself)"·"between 2 arcs" 거리 | 없음 | 선-호·호-호 거리 치수 |
 | 구동 치수 토글 | 있음(`SketchOp::SetDriving`) | — |
 
+## 2026-11-18 — Look At·Slice Graphics의 세션 쪽(리드 ②)
+
+원문 대조:
+- Navigation Bar, GUID-3B926737-92BA-46CF-B722-97F68651772B — Look At "zooms and rotates the model to display the selected element planar to the screen or
+  a selected edge or line horizontal to the screen".
+- To Work with Sketches, GUID-F5A5790A-F748-49F0-A81F-BCA56C7C1E89 — Slice Graphics: F7 또는 상태바. 복원은 "Click a feature command. Click the Finish Sketch …
+  Click Slice Graphics … Press F7".
+
+지금:
+- 뷰포트에 Look At 버튼(선택한 원점 평면 또는 활성 스케치 평면만)과 F7 Slice(활성 2D 스케치 평면, 시점 쪽 절단, 스케치 종료 시 해제)가 이미 있다.
+- Slice는 렌더·FE 몫이라 세션 쪽에 할 일이 없다. 피처 명령 클릭 시 해제는 FE에서 확인할 것.
+
+새 세션 API:
+- `Session::look_target(LookItem, forward) -> Option<LookTarget { toward_eye, up, centre, reach }>`.
+- `LookItem::{WorkFeature, Sketch, SketchCurve, ComponentPlane, Face(Selection)}`.
+  - 평면(작업 평면, 스케치, 컴포넌트 원점 평면, 평면 면, 원형 모서리의 평면): 눈이 있는 쪽에서 정면. 평면 프레임의 Y가 위, 면은 월드 Z(안 되면 Y)에 가깝게.
+  - 선(작업 축, 직선 모서리, 원통 축, 3D 스케치 선): 지금 시선에 가장 가까운, 선에 직각인 방향에서 수평으로.
+  - 2D 스케치 선: 스케치 위에서, 선이 수평.
+  - 점·구는 `None`.
+  - `reach`는 줌 맞춤용 크기(스케치는 그린 점들의 반대각선, 선은 반 길이, 원통은 반지름).
+- FE: Look At 버튼이 선택(작업 피처·스케치·곡선·면)을 `look_target`으로 넘기고 카메라를 `toward_eye`·`up`·`centre`(`reach`가 있으면 줌)로 맞추면 된다.
+- 테스트: `gc_session/tests/look_at.rs`.
+
 ## 2026-11-18 — 선과 타원의 Tangent(① 5번)
 
 근거: GUID-A85A7A30-7D81-4C75-8769-CAD034EEA930(Tangent: "click the first curve … Click the second curve").
