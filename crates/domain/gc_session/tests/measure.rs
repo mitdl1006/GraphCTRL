@@ -96,3 +96,35 @@ fn interference_is_found_within_one_set_or_between_two() {
     assert_eq!(between[0].second, b);
     assert!(session.interference(&[a], &[c]).is_empty());
 }
+
+/// "Select Treat subassemblies as components to treat sub-assemblies as single components and ignore
+/// the interferences within the sub-assemblies" (same help page).
+#[test]
+fn interference_within_a_subassembly_is_left_out_when_it_counts_as_one_component() {
+    use gc_doc::{Created, Occurrence, SubassemblyOp, TreeKey};
+    use gc_session::InterferenceOptions;
+    let mut session = Session::new();
+    let place = |x: f64| Placement { xyz: [x, 0.0, 0.0], rpy: [0.0; 3] };
+    let cube = Solid::Box { size: [0.2, 0.2, 0.2] };
+    let body = |session: &mut Session, x: f64| session.add_body(cube.clone(), place(x)).unwrap();
+    let (a, b, c) = (body(&mut session, 0.0), body(&mut session, 0.15), body(&mut session, 0.3));
+    let key = |id: gc_core::Id<gc_doc::Body>| TreeKey::Component(Occurrence::Item(id.erase()));
+    // a and b in one subassembly, that one inside another; c at the top level.
+    let demote = |session: &mut Session, members: Vec<TreeKey>, name: &str| match session
+        .edit_subassemblies(SubassemblyOp::Demote { members, name: name.into() })
+        .unwrap()[..]
+    {
+        [Created::Subassembly(id)] => TreeKey::Subassembly(id),
+        ref other => panic!("{other:?}"),
+    };
+    let inner = demote(&mut session, vec![key(a), key(b)], "Inner");
+    demote(&mut session, vec![inner], "Outer");
+    let items = [CellItem::Body(a), CellItem::Body(b), CellItem::Body(c)];
+    assert_eq!(session.interference(&items, &[]).len(), 2);
+    let options = InterferenceOptions { subassemblies_as_components: true };
+    let rows = session.interference_with(&items, &[], options);
+    assert_eq!(rows.len(), 1, "only b against c: a and b are one component");
+    assert_eq!((rows[0].first, rows[0].second), (CellItem::Body(b), CellItem::Body(c)));
+    // Between two sets the same holds.
+    assert!(session.interference_with(&[CellItem::Body(a)], &[CellItem::Body(b)], options).is_empty());
+}

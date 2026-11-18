@@ -444,6 +444,13 @@ pub struct InterferenceRow {
     pub overlap: gc_collide::Interference,
 }
 
+/// The Interference Analysis dialog's options.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct InterferenceOptions {
+    /// Treat subassemblies as components: interference within a subassembly is not reported.
+    pub subassemblies_as_components: bool,
+}
+
 /// Grid samples per axis when estimating an overlap's volume.
 const INTERFERENCE_CELLS: usize = 24;
 
@@ -454,6 +461,37 @@ impl Session {
     /// components of `first` among themselves. A robot counts as one component. Volumes are estimated
     /// on a grid over each overlap.
     pub fn interference(&self, first: &[CellItem], second: &[CellItem]) -> Vec<InterferenceRow> {
+        self.interference_with(first, second, InterferenceOptions::default())
+    }
+
+    /// The subassembly at the top level that holds a body or robot, if any.
+    fn top_subassembly(&self, item: CellItem) -> Option<gc_doc::TreeKey> {
+        let id = match item {
+            CellItem::Body(id) => id.erase(),
+            CellItem::Robot(id) => id.erase(),
+            _ => return None,
+        };
+        let doc = self.doc();
+        let mut at = doc.tree_parent(gc_doc::TreeKey::Component(gc_doc::Occurrence::Item(id)))?;
+        // A tree is never deeper than the subassemblies in it; the bound guards against a corrupt file.
+        for _ in 0..=doc.subassemblies().len() {
+            match doc.tree_parent(at) {
+                Some(parent) => at = parent,
+                None => break,
+            }
+        }
+        Some(at)
+    }
+
+    /// [`Session::interference`] with the dialog's options (same help page: "Select Treat subassemblies
+    /// as components to treat sub-assemblies as single components and ignore the interferences within
+    /// the sub-assemblies").
+    pub fn interference_with(
+        &self,
+        first: &[CellItem],
+        second: &[CellItem],
+        options: InterferenceOptions,
+    ) -> Vec<InterferenceRow> {
         let geometry: std::collections::BTreeMap<CellItem, Geometry> =
             first.iter().chain(second).filter_map(|item| Some((*item, self.item_geometry(*item)?))).collect();
         // A component listed twice counts once; it never interferes with itself.
@@ -472,6 +510,13 @@ impl Session {
             for a in first {
                 pairs.extend(second.iter().filter(|b| *b != a).map(|b| (*a, *b)));
             }
+        }
+        if options.subassemblies_as_components {
+            // Components of one top-level subassembly are one component: nothing is reported within it.
+            pairs.retain(|(a, b)| {
+                let (unit_a, unit_b) = (self.top_subassembly(*a), self.top_subassembly(*b));
+                unit_a.is_none() || unit_a != unit_b
+            });
         }
         pairs
             .into_iter()
