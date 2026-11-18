@@ -20,7 +20,7 @@
 | 8 | ~~Automatic Dimensions and Constraints~~ **완료** | 126 (P2) | — | 아래 작업 기록 |
 | 9 | ~~치수 방향 뒤집기(Flip)~~ **완료** | 124 (P3) | 선-호·호-호 거리 치수 종류는 없음 | 아래 작업 기록 |
 | 10 | 타원·스플라인(+ Smooth G2) | 60, 61, 108 (P3) | `CurveGeom`에 없음 | 새 곡선 종류 — 영향 큼 |
-| 11 | 어셈블리: 서브어셈블리 계층·활성화, ~~조인트 Lock/Protect~~(**완료**), 3D 그립 스냅, 어셈블리 스케치 소유자, 작업 축(선·모서리 위, 원 중심, 회전 면, 두 평면 교선) | 어셈블리 43, 90, 61, 98, 157 | 작업 축은 두 점·평면 법선만 | 행마다 원문 확인 후 범위 결정 |
+| 11 | 어셈블리: ~~서브어셈블리 계층·활성화~~(**완료**, 단위 드래그는 남음), ~~조인트 Lock/Protect~~(**완료**), 3D 그립 스냅, 어셈블리 스케치 소유자, 작업 축(선·모서리 위, 원 중심, 회전 면, 두 평면 교선) | 어셈블리 43, 90, 61, 98, 157 | 작업 축은 두 점·평면 법선만 | 행마다 원문 확인 후 범위 결정 |
 
 ## 현황 — 완료
 
@@ -53,6 +53,47 @@
 | 모션(오래된 남은 일) | 맨 아래 "남은 일(백엔드)" 절 그대로 |
 
 # 작업 기록(최신 순)
+
+## 2026-11-18 — 서브어셈블리 계층·제자리 편집(우선순위 표 11 일부) — 세션 API 확정
+
+근거 원문:
+- Create Subassemblies in Place(GUID-FCEE3F0E-AAE2-4619-8645-2588FEECD353): Component Demote, 브라우저 드래그로 레벨 이동,
+  부모에서 서브어셈블리는 한 단위, 여러 층 중첩.
+- Edit components in place(GUID-C79C36C9-A6DB-46C5-8864-41F66C750231): 더블클릭으로 편집, 활성 컴포넌트만 음영·나머지 투명,
+  Return / Return to Parent / Return to Top.
+
+**모델(gc_doc)**
+- `Components.subassemblies: Vec<Subassembly{id: SubassemblyId, name, parent}>`, `Components.placed_in: Vec<(Occurrence, SubassemblyId)>`.
+  타임라인 상태라서 실행 취소되고 저장된다. 옛 파일은 비어 있는 채로 열린다(serde default).
+- 서브어셈블리는 `Occurrence`가 아니다. 관계·원점·충돌은 지금처럼 컴포넌트 단위이고, 그룹은 브라우저·선택·편집 범위에만 쓴다.
+- `CellOp::Subassembly(SubassemblyOp)`, 각각 실행 취소 한 단계:
+  - `Demote{members: Vec<TreeKey>, name}`: 같은 레벨의 컴포넌트·서브어셈블리를 새 서브어셈블리로 묶는다.
+    `Created::Subassembly(id)`를 돌려준다. 빈 이름이면 `Subassembly:N`, 이미 있는 이름이면 `NameTaken`.
+  - `Move{members, into: Option<SubassemblyId>}`: 브라우저 드래그. `None`이 최상위다. 자기 자신이나 자기 하위로 넣으면 거부한다.
+  - `Dissolve(id)`: 담긴 것은 부모로 올라간다.
+  - `Rename{id, name}`.
+- 옮길 수 있는 것은 셀에 놓인 컴포넌트(바디·로봇·가져온 어셈블리)와 서브어셈블리뿐이다. 부품·링크·툴은 각자의 트리에 그대로 있다.
+- 컴포넌트를 지우면 소속도 정리된다(`set_timeline` 정리).
+- 질의: `component_tree() -> Vec<TreeRow{key: TreeKey, parent, depth, name, component: Option<ComponentNode>}>`.
+  레벨마다 서브어셈블리(만든 순서) 다음 컴포넌트(모델 순서)이고, 각 컴포넌트 뒤에 부품·로봇 링크·툴이 들여쓰기되어 붙는다.
+  그 밖에 `tree_parent(key)`, `has_tree_row`, `is_under(key, ancestor)`, `subassemblies()`, `subassembly_of(occ)`.
+
+**세션 API(프론트엔드가 화면 상호작용에 쓸 것)**
+- `component_tree()`: 브라우저 들여쓰기용. 서브어셈블리 행은 `component == None`.
+- `edit_subassemblies(SubassemblyOp)`: Demote 메뉴, 드래그 이동, 해제, 이름 바꾸기.
+- `edit_component(TreeKey)`: 더블클릭. 없는 행이면 `BadValue`.
+- `edit_target() -> Option<TreeKey>`: 지워졌거나 실행 취소된 대상은 `None`.
+- `return_edit()`(Return), `return_to_parent()`, `return_to_top()`.
+- `in_edit_scope(Occurrence) -> bool`: false면 흐리게 그리고 선택하지 않는다.
+- `pick_unit(Occurrence) -> Option<TreeKey>`: 클릭한 컴포넌트를 담은 행 중 편집 대상 바로 아래 행이다(서브어셈블리를 한 단위로 선택).
+  편집 대상 밖이면 `None`이다. 가져온 어셈블리의 부품이나 로봇 링크는 그 자신이다.
+- 편집 대상은 세션의 보기 상태다(저장·실행 취소 안 함).
+
+**원문과 다른 점·남은 것**
+- 서브어셈블리를 드래그로 통째로 옮기기(유연성 없는 단위 이동)는 아직 없다. 지금은 컴포넌트마다 따로 움직인다.
+- Demote 때 원문은 새 파일 이름·템플릿·BOM 구조를 묻는다. 우리는 한 파일 안의 그룹이라서 이름만 받는다.
+- 제자리 편집 중 피처 편집(Edit Feature)은 해당 없음(우리 컴포넌트는 메시·기본 도형).
+- 테스트: `gc_session/tests/subassembly.rs`.
 
 ## 2026-11-18 — 관계 사슬 성능(KNOWN_ISSUES "컴포넌트 사슬 관계 추가가 급격히 느려짐")
 
