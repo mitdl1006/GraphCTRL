@@ -597,60 +597,32 @@ pub(crate) fn show(
                 });
             }
             Tab::View => {
-                ribbon_group(ui, tr!(lang, GroupViews), |ui| {
-                    // Home and Fit All are the large buttons; the three standard views are stacked.
-                    if ribbon_button(ui, Icon::Home, tr!(lang, ViewHome), false, true).clicked() {
-                        viewport.look(StandardView::Iso);
-                    }
-                    let views = [
-                        (StandardView::Front, Msg::ViewFront),
-                        (StandardView::Top, Msg::ViewTop),
-                        (StandardView::Right, Msg::ViewRight),
-                    ];
-                    let rows: Vec<gc_ui::StackRow<'_>> = views
+                ribbon_group(ui, tr!(lang, GroupVisibility), |ui| {
+                    // Object Visibility (GUID-BA193171-FAFC-4150-9222-CC43D8D4AA54): one check box a kind.
+                    gc_ui::ribbon_drop_button(ui, Icon::View, tr!(lang, ObjVisTitle), |ui| {
+                        let v = &mut viewport.visibility;
+                        ui.checkbox(&mut v.origin_planes, tr!(lang, ObjVisOriginPlanes));
+                        ui.checkbox(&mut v.origin_axes, tr!(lang, ObjVisOriginAxes));
+                        ui.checkbox(&mut v.origin_points, tr!(lang, ObjVisOriginPoints));
+                        ui.checkbox(&mut v.work_planes, tr!(lang, ObjVisWorkPlanes));
+                        ui.checkbox(&mut v.work_axes, tr!(lang, ObjVisWorkAxes));
+                        ui.checkbox(&mut v.work_points, tr!(lang, ObjVisWorkPoints));
+                        ui.checkbox(&mut v.sketches, tr!(lang, ObjVisSketches));
+                        ui.checkbox(&mut v.sketches_3d, tr!(lang, ObjVisSketches3d));
+                        ui.checkbox(&mut viewport.show_constraints, tr!(lang, ObjVisConstraints));
+                    });
+                    // Degrees of freedom: a symbol at every component that can still move.
+                    let items: Vec<gc_core::AnyId> = session
+                        .components()
                         .iter()
-                        .map(|(_, label)| gc_ui::StackRow {
-                            icon: Icon::View,
-                            label: label.text(lang),
-                            selected: false,
-                            enabled: true,
+                        .filter_map(|node| match node.occurrence {
+                            gc_doc::Occurrence::Item(id) => Some(id),
+                            _ => None,
                         })
                         .collect();
-                    if let Some(index) = gc_ui::ribbon_stack(ui, &rows)
-                        && let Some((view, _)) = views.get(index)
-                    {
-                        viewport.look(*view);
-                    }
-                    if ribbon_button(ui, Icon::Rectangle, tr!(lang, ViewFit), false, true).clicked() {
-                        viewport.fit(session, [1000.0, 700.0]);
-                    }
-                    // Look At turns the view to the selected plane, face or line (the navigation bar's
-                    // Look At, Page Up).
-                    let can_look = viewport.can_look_at(session);
-                    if ribbon_button(ui, Icon::LookAt, tr!(lang, NavLookAt), false, can_look).clicked() {
-                        viewport.look_at(session);
-                    }
-                });
-                ribbon_group(ui, tr!(lang, GroupProjection), |ui| {
-                    let ortho = viewport.camera.ortho;
-                    let rows = [
-                        gc_ui::StackRow {
-                            icon: Icon::View,
-                            label: tr!(lang, ViewOrtho),
-                            selected: ortho,
-                            enabled: true,
-                        },
-                        gc_ui::StackRow {
-                            icon: Icon::Perspective,
-                            label: tr!(lang, ViewPerspective),
-                            selected: !ortho,
-                            enabled: true,
-                        },
-                    ];
-                    match gc_ui::ribbon_stack(ui, &rows) {
-                        Some(0) => viewport.camera.ortho = true,
-                        Some(1) => viewport.camera.ortho = false,
-                        _ => {}
+                    let on = !session.dof_symbols().is_empty();
+                    if ribbon_button(ui, Icon::Orbit, tr!(lang, CmdDof), on, !items.is_empty()).clicked() {
+                        drop(session.set_dof_shown(&items, !on));
                     }
                 });
                 ribbon_group(ui, tr!(lang, GroupAppearance), |ui| {
@@ -673,6 +645,32 @@ pub(crate) fn show(
                         && let Some((style, _)) = styles.get(index)
                     {
                         viewport.style = *style;
+                    }
+                    // Ground Plane: on and off are session-based (GUID-AC7970C5-72DB-409E-AED4-96B9C5E6C4A0).
+                    if ribbon_button(ui, Icon::View, tr!(lang, GroundPlane), viewport.show_ground, true)
+                        .clicked()
+                    {
+                        viewport.show_ground = !viewport.show_ground;
+                    }
+                    let ortho = viewport.camera.ortho;
+                    let rows = [
+                        gc_ui::StackRow {
+                            icon: Icon::View,
+                            label: tr!(lang, ViewOrtho),
+                            selected: ortho,
+                            enabled: true,
+                        },
+                        gc_ui::StackRow {
+                            icon: Icon::Perspective,
+                            label: tr!(lang, ViewPerspective),
+                            selected: !ortho,
+                            enabled: true,
+                        },
+                    ];
+                    match gc_ui::ribbon_stack(ui, &rows) {
+                        Some(0) => viewport.camera.ortho = true,
+                        Some(1) => viewport.camera.ortho = false,
+                        _ => {}
                     }
                     let kinds = [
                         (gc_viewport::SectionKind::Half, Msg::SectionHalf),
@@ -705,35 +703,7 @@ pub(crate) fn show(
                         viewport.section = None;
                     }
                 });
-                ribbon_group(ui, tr!(lang, GroupVisibility), |ui| {
-                    // Object Visibility (GUID-BA193171-FAFC-4150-9222-CC43D8D4AA54): one check box a kind.
-                    gc_ui::ribbon_drop_button(ui, Icon::View, tr!(lang, ObjVisTitle), |ui| {
-                        let v = &mut viewport.visibility;
-                        ui.checkbox(&mut v.origin_planes, tr!(lang, ObjVisOriginPlanes));
-                        ui.checkbox(&mut v.origin_axes, tr!(lang, ObjVisOriginAxes));
-                        ui.checkbox(&mut v.origin_points, tr!(lang, ObjVisOriginPoints));
-                        ui.checkbox(&mut v.work_planes, tr!(lang, ObjVisWorkPlanes));
-                        ui.checkbox(&mut v.work_axes, tr!(lang, ObjVisWorkAxes));
-                        ui.checkbox(&mut v.work_points, tr!(lang, ObjVisWorkPoints));
-                        ui.checkbox(&mut v.sketches, tr!(lang, ObjVisSketches));
-                        ui.checkbox(&mut v.sketches_3d, tr!(lang, ObjVisSketches3d));
-                        ui.checkbox(&mut viewport.show_constraints, tr!(lang, ObjVisConstraints));
-                    });
-                    // Degrees of freedom: a symbol at every component that can still move.
-                    let items: Vec<gc_core::AnyId> = session
-                        .components()
-                        .iter()
-                        .filter_map(|node| match node.occurrence {
-                            gc_doc::Occurrence::Item(id) => Some(id),
-                            _ => None,
-                        })
-                        .collect();
-                    let on = !session.dof_symbols().is_empty();
-                    if ribbon_button(ui, Icon::Orbit, tr!(lang, CmdDof), on, !items.is_empty()).clicked() {
-                        drop(session.set_dof_shown(&items, !on));
-                    }
-                });
-                ribbon_group(ui, tr!(lang, GroupPanels), |ui| {
+                ribbon_group(ui, tr!(lang, GroupWindows), |ui| {
                     let rows = [
                         gc_ui::StackRow {
                             icon: Icon::View,
@@ -752,6 +722,40 @@ pub(crate) fn show(
                         Some(0) => *translucent = !*translucent,
                         Some(1) => *dark = !*dark,
                         _ => {}
+                    }
+                });
+                ribbon_group(ui, tr!(lang, GroupNavigate), |ui| {
+                    // Home and Fit All are the large buttons; the three standard views are stacked.
+                    if ribbon_button(ui, Icon::Home, tr!(lang, ViewHome), false, true).clicked() {
+                        viewport.look(StandardView::Iso);
+                    }
+                    let views = [
+                        (StandardView::Front, Msg::ViewFront),
+                        (StandardView::Top, Msg::ViewTop),
+                        (StandardView::Right, Msg::ViewRight),
+                    ];
+                    let rows: Vec<gc_ui::StackRow<'_>> = views
+                        .iter()
+                        .map(|(_, label)| gc_ui::StackRow {
+                            icon: Icon::View,
+                            label: label.text(lang),
+                            selected: false,
+                            enabled: true,
+                        })
+                        .collect();
+                    if let Some(index) = gc_ui::ribbon_stack(ui, &rows)
+                        && let Some((view, _)) = views.get(index)
+                    {
+                        viewport.look(*view);
+                    }
+                    if ribbon_button(ui, Icon::Rectangle, tr!(lang, ViewFit), false, true).clicked() {
+                        viewport.fit(session, [1000.0, 700.0]);
+                    }
+                    // Look At turns the view to the selected plane, face or line (the navigation bar's
+                    // Look At, Page Up).
+                    let can_look = viewport.can_look_at(session);
+                    if ribbon_button(ui, Icon::LookAt, tr!(lang, NavLookAt), false, can_look).clicked() {
+                        viewport.look_at(session);
                     }
                 });
             }

@@ -154,6 +154,9 @@ pub struct Viewport {
     pub show_constraints: bool,
     /// The visual style of the 3D view (View tab, Appearance panel).
     pub style: VisualStyle,
+    /// The ground plane (the floor grid) is shown; a sketch's own grid stays (View tab, Appearance panel;
+    /// on and off are session-based).
+    pub show_ground: bool,
     /// Object Visibility (View tab, Visibility panel).
     pub visibility: ObjectVisibility,
     /// A selection box being dragged in a sketch: where the mouse went down.
@@ -416,6 +419,7 @@ impl Viewport {
             slice: false,
             show_constraints: true,
             style: VisualStyle::default(),
+            show_ground: true,
             visibility: ObjectVisibility::default(),
             box_select: None,
             frame_time: 0.0,
@@ -776,7 +780,7 @@ impl Viewport {
         }
 
         let scene = Scene::of(session);
-        paint::under(ui, rect, &self.camera, session);
+        paint::under(ui, rect, &self.camera, session, self.show_ground);
         // Finishing the sketch restores the sliced graphics.
         if active.is_none() || session.sketch_is_spatial() {
             self.slice = false;

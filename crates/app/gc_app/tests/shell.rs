@@ -5823,3 +5823,42 @@ fn the_object_visibility_drop_list_switches_kinds_on_and_off() {
     harness.run_steps(2);
     assert!(!harness.state().viewport().visibility.sketches_3d);
 }
+
+/// Ground Plane (View tab, Appearance panel; Inventor 2026 help, About Ground Planes in Model Views,
+/// GUID-AC7970C5-72DB-409E-AED4-96B9C5E6C4A0): on and off for the session.
+#[test]
+fn the_ground_plane_button_switches_the_floor_grid() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("뷰").click();
+    harness.run();
+    assert!(harness.state().viewport().show_ground);
+    harness.get_by_label("바닥 평면").click();
+    harness.run();
+    assert!(!harness.state().viewport().show_ground);
+    harness.get_by_label("바닥 평면").click();
+    harness.run();
+    assert!(harness.state().viewport().show_ground);
+}
+
+/// The View tab's panels follow Inventor's order: Visibility, Appearance, Windows, Navigate (the tab's
+/// panels of Inventor 2026, left to right).
+#[test]
+fn the_view_tab_panels_run_visibility_appearance_windows_navigate() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("뷰").click();
+    harness.run();
+    let x = |h: &egui_kittest::Harness<'_, GraphCtrlApp>, label: &str| h.get_by_label(label).rect().min.x;
+    let visibility = x(&harness, "개체 가시성");
+    let appearance = x(&harness, "바닥 평면");
+    let windows = x(&harness, "패널 반투명");
+    let navigate = x(&harness, "홈");
+    assert!(visibility < appearance && appearance < windows && windows < navigate);
+}

@@ -280,6 +280,14 @@
 - 원문과 차이: 이 설정은 실행 중에만 유지(문서 저장 안 됨). UCS·스케치 치수·와이어 등 우리에게 없는 종류는 없음. 스케치 치수 일괄 표시/숨김(GUID-026FE8D3)은 구속 기호와 별개이므로 아직 없음.
 - 테스트: `the_object_visibility_drop_list_switches_kinds_on_and_off`; 기존 `qa_assembly_ui` 15개 통과.
 
+### 뷰 탭: 바닥 평면, 패널 순서(Visibility · Appearance · Windows · Navigate)
+
+- 근거: Inventor 2026 도움말 GUID-AC7970C5-72DB-409E-AED4-96B9C5E6C4A0 (바닥 평면의 켜기/끄기는 View 탭 Appearance 패널, 세션 단위), GUID-3395B47F-7D8B-47B4-ACDD-0A9489948DB4 (그림자 목록도 Appearance 패널).
+- 바닥 평면 버튼 = 바닥 격자(`Viewport::show_ground`). 스케치를 편집하는 동안에는 스케치 자체의 격자가 남는다. 바닥 평면 설정(위치·불투명도·색·반사)과 문서 저장은 없음.
+- 그림자(전체/바닥/물체/주변)는 렌더러에 그림자 맵이 없어 없음 — 렌더러 작업이 필요하다(리드에 보고).
+- 패널 순서: 가시성(개체 가시성, 자유도) · 외형(시각 스타일, 바닥 평면, 투영, 단면) · 창(패널 반투명, 어두운 테마) · 탐색(홈, 표준 뷰, 전체 보기, 면 보기). 투영 패널은 외형으로 합쳤고, "표준 뷰"는 "탐색", "패널"은 "창"으로 이름을 바꿨다. 단면(Section)을 외형에 둔 것은 이전 배치를 유지한 것(원문 위치 미확인).
+- 테스트: `the_ground_plane_button_switches_the_floor_grid`, `the_view_tab_panels_run_visibility_appearance_windows_navigate`; shell 106개 통과.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

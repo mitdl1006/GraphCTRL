@@ -122,6 +122,8 @@ messages! {
     /// Ribbon group: leave the sketch.
     GroupExit => ("종료", "Exit"),
     /// Ribbon group: standard views.
+    GroupNavigate => ("탐색", "Navigate"),
+    GroupWindows => ("창", "Windows"),
     GroupViews => ("표준 뷰", "Views"),
     /// Ribbon group: projection.
     GroupProjection => ("투영", "Projection"),
@@ -188,6 +190,7 @@ messages! {
     ObjVisSketches => ("스케치", "Sketches"),
     ObjVisSketches3d => ("3D 스케치", "3D Sketches"),
     ObjVisConstraints => ("구속조건 기호", "Constraint Symbols"),
+    GroundPlane => ("바닥 평면", "Ground Plane"),
     VisualStyleTitle => ("시각 스타일", "Visual Style"),
     VisualStyleShaded => ("음영 처리", "Shaded"),
     VisualStyleShadedEdges => ("모서리가 있는 음영 처리", "Shaded with Edges"),
