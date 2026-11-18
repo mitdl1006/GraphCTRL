@@ -5997,3 +5997,58 @@ fn the_iproperties_dialog_saves_the_summary_and_checks_the_density() {
     harness.run_steps(3);
     assert_eq!(harness.state().session.properties(None).title, "Cell A");
 }
+
+/// Find in Window (browser right-click on a component; Inventor 2026 help, Frame Generator browser,
+/// GUID-36AE9264-912D-4D3C-BB24-7EC16FA8777E: "zooms to the element selected in the browser").
+#[test]
+fn find_in_window_centres_the_view_on_a_component() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let app = harness.state_mut();
+    app.session
+        .add_body(gc_doc::Solid::Box { size: [0.1; 3] }, gc_doc::Placement { xyz: [0.0; 3], rpy: [0.0; 3] })
+        .unwrap();
+    let far = app
+        .session
+        .add_body(
+            gc_doc::Solid::Box { size: [0.1; 3] },
+            gc_doc::Placement { xyz: [1.0, 0.5, 0.2], rpy: [0.0; 3] },
+        )
+        .unwrap();
+    let any = gc_core::Id::<gc_doc::Body>::erase(far);
+    // A viewport of its own: the call needs the session and the viewport at once.
+    let mut viewport = gc_viewport::Viewport::new(None);
+    assert!(viewport.find_in_window(&app.session, any));
+    let pivot = viewport.camera.pivot;
+    assert!((pivot - gc_math::DVec3::new(1.0, 0.5, 0.2)).length() < 1e-9, "{pivot:?}");
+}
+
+/// The Quick Access Toolbar beside the menus (Inventor 2026 help, To Customize the Quick Access Toolbar,
+/// GUID-3BF60B85-4BE9-4619-9FD3-0A179FA680E0): Undo and Redo, and Return.
+#[test]
+fn the_quick_access_toolbar_undoes_redoes_and_returns() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness
+        .state_mut()
+        .session
+        .add_body(gc_doc::Solid::Box { size: [0.1; 3] }, gc_doc::Placement { xyz: [0.0; 3], rpy: [0.0; 3] })
+        .unwrap();
+    harness.run();
+    assert_eq!(harness.state().session.doc().bodies().len(), 1);
+    harness.get_by_label("실행 취소 (빠른 실행)").click();
+    harness.run();
+    assert_eq!(harness.state().session.doc().bodies().len(), 0);
+    harness.get_by_label("다시 실행 (빠른 실행)").click();
+    harness.run();
+    assert_eq!(harness.state().session.doc().bodies().len(), 1);
+    // Return does nothing at the top level (disabled), and the other buttons are there.
+    harness.get_by_label("복귀 (빠른 실행)");
+    harness.get_by_label("저장 (빠른 실행)");
+}

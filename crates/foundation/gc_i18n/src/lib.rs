@@ -979,6 +979,7 @@ messages! {
     /// Assemble tab: edit the parent of the edit target.
     CmdReturnParent => ("상위로", "Return to Parent"),
     /// Assemble tab: back to the top-level assembly.
+    QatTitle => ("빠른 실행", "Quick Access"),
     CmdReturnTop => ("최상위로", "Return to Top"),
     /// Browser, right-click a joint: refuse relationships that take its freedom away.
     JointProtectItem => ("보호", "Protect"),
@@ -1168,6 +1169,7 @@ messages! {
     DriveInterfered => ("충돌 감지: {0} ↔ {1} ({2}에서 멈춤)", "Collision detected: {0} ↔ {1} (stopped at {2})"),
     // --- Parameters (Inventor: Manage tab > Parameters panel > Parameters) ---
     /// Tools menu and the dialog title.
+    CmdFindInWindow => ("창에서 찾기", "Find in Window"),
     CmdIProperties => ("iProperties…", "iProperties…"),
     IpTitleDocument => ("iProperties — 문서", "iProperties — Document"),
     IpTabSummary => ("요약", "Summary"),

@@ -61,6 +61,8 @@ pub enum BrowserAction {
     SuppressRelationship(gc_core::Id<gc_doc::Relationship>, bool),
     /// Open the iProperties dialog of a component.
     Properties(gc_doc::Occurrence),
+    /// Zoom the graphics window to a component (Find in Window).
+    FindInWindow(gc_core::AnyId),
 }
 
 /// What is typed into the parameter editor of the browser.
@@ -1307,6 +1309,12 @@ fn node_row(
                 *action = Some(BrowserAction::Edit(Box::new(command)));
                 ui.close();
             }
+        }
+        if matches!(node.any.kind, gc_core::Kind::Body | gc_core::Kind::RobotInstance)
+            && ui.button(tr!(lang, CmdFindInWindow)).clicked()
+        {
+            *action = Some(BrowserAction::FindInWindow(node.any));
+            ui.close();
         }
         if groundable && ui.button(tr!(lang, CmdIProperties)).clicked() {
             *action = Some(BrowserAction::Properties(occurrence));
