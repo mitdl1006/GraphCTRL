@@ -100,6 +100,8 @@ pub struct Viewport {
     nav_tool: Option<NavTool>,
     /// The origin element (plane, axis, point) of a component that is selected in the view or the browser.
     pub origin_selected: Option<(gc_doc::Occurrence, gc_doc::OriginElement)>,
+    /// The work feature selected in the view (drawn heavier; Delete removes it, a double click edits it).
+    pub work_selected: Option<Id<gc_doc::WorkFeature>>,
     /// The heads-up display of the drawing tools.
     hud: hud::Hud,
     /// Whether the heads-up display (dynamic input) is on.
@@ -166,6 +168,7 @@ impl Viewport {
             constrain_pick: None,
             nav_tool: None,
             origin_selected: None,
+            work_selected: None,
             hud: hud::Hud::default(),
             hud_on: true,
             free_tool: None,
@@ -446,7 +449,13 @@ impl Viewport {
             };
             origin::paint(&ui.painter_at(rect), &screen, session, self.origin_selected, self.constrain_mode);
             dof::paint(&ui.painter_at(rect), &screen, session, camera.distance * 0.12);
-            workfeat::paint(&ui.painter_at(rect), &screen, session, camera.distance * 0.6);
+            workfeat::paint(
+                &ui.painter_at(rect),
+                &screen,
+                session,
+                camera.distance * 0.6,
+                self.work_selected,
+            );
         }
         if let Some(section) = &self.section {
             let camera = self.camera;
@@ -1168,6 +1177,17 @@ impl Viewport {
             }
             return;
         }
+        // A double click on a work feature edits it.
+        if response.double_clicked_by(PointerButton::Primary)
+            && !self.constrain_mode
+            && let Some(at) = response.interact_pointer_pos().map(to_view)
+        {
+            let screen = |p: gc_math::DVec3| self.camera.project(p, size);
+            if let Some(id) = workfeat::pick(session, &screen, at, self.camera.distance * 0.6) {
+                self.request = Some(ViewportRequest::EditWorkFeature(id));
+                return;
+            }
+        }
         // A double click on a component edits it in place; a subassembly is edited as one unit.
         if response.double_clicked_by(PointerButton::Primary)
             && !self.constrain_mode
@@ -1191,8 +1211,16 @@ impl Viewport {
         } else if !on_handles && response.clicked_by(PointerButton::Primary) {
             // Origin planes, axes and points that are shown come before the solids behind them.
             let at = response.interact_pointer_pos().map(to_view);
-            self.origin_selected = at.and_then(|at| origin::pick(&self.camera, size, session, at, false));
-            let picked = if self.origin_selected.is_some() {
+            // Work features that are shown come first, as the origin geometry does.
+            let screen = |p: gc_math::DVec3| self.camera.project(p, size);
+            self.work_selected =
+                at.and_then(|at| workfeat::pick(session, &screen, at, self.camera.distance * 0.6));
+            self.origin_selected = if self.work_selected.is_some() {
+                None
+            } else {
+                at.and_then(|at| origin::pick(&self.camera, size, session, at, false))
+            };
+            let picked = if self.origin_selected.is_some() || self.work_selected.is_some() {
                 None
             } else {
                 response.interact_pointer_pos().and_then(|p| self.pick_item(session, to_view(p), size))
@@ -1280,8 +1308,11 @@ impl Viewport {
             if escape {
                 session.select_item(None);
                 self.origin_selected = None;
+                self.work_selected = None;
             }
-            if delete && let Some(item) = session.selected_item() {
+            if delete && let Some(id) = self.work_selected.take() {
+                drop(session.execute(&gc_doc::Command::Cell(gc_doc::CellOp::DeleteWorkFeature(id))));
+            } else if delete && let Some(item) = session.selected_item() {
                 // A refusal (still in use) is explained in the status bar.
                 drop(session.delete_item(item));
             }

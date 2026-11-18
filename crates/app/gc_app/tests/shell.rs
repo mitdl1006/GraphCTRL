@@ -164,6 +164,25 @@ const RIGHT: [f64; 6] = [1.0, 0.2, 0.3, 0.0, 0.5, 0.0];
 
 /// Clicks a node with the mouse (a click through the accessibility tree does not reach widgets that are
 /// drawn by the view itself, such as the marking menu's commands).
+/// Chooses a variant of a split button of the ribbon: the arrow ("<group> 더 보기") opens the list, the
+/// variant's name picks it. (The arrow is drawn with `ui.interact`, so it takes pointer events.)
+fn pick_variant(harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, group: &str, variant: &str) {
+    let at = harness.get_by_label(&format!("{group} 더 보기")).rect().center();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run_steps(3);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run_steps(3);
+    }
+    harness.get_by_label(variant).click();
+    harness.run_steps(3);
+}
+
 fn mouse_click_label(harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, label: &str) {
     let at = harness.get_by_label(label).rect().center();
     harness.event(egui::Event::PointerMoved(at));
@@ -1256,7 +1275,7 @@ fn a_3d_sketch_is_drawn_in_the_viewport() {
     let builder = if gpu { builder.wgpu() } else { builder };
     let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
     harness.run();
-    harness.get_by_label("3D 스케치").click();
+    pick_variant(&mut harness, "스케치", "3D 스케치");
     harness.run();
     assert!(harness.state().session.sketch_is_spatial());
     harness.get_by_label("작업 평면 XY (Tab으로 전환)");
@@ -2069,7 +2088,7 @@ fn a_3d_sketch_point_is_dragged() {
         .with_pixels_per_point(1.0)
         .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
     harness.run();
-    harness.get_by_label("3D 스케치").click();
+    pick_variant(&mut harness, "스케치", "3D 스케치");
     harness.run();
     let app = harness.state_mut();
     app.session.set_tool(ToolKind::Line);
@@ -3617,7 +3636,7 @@ fn the_3d_sketch_ribbon_keeps_finish_sketch_on_screen() {
     let builder = if gpu { builder.wgpu() } else { builder };
     let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
     harness.run();
-    harness.get_by_label("3D 스케치").click();
+    pick_variant(&mut harness, "스케치", "3D 스케치");
     harness.run_steps(3);
     let finish = harness.get_by_label("스케치 마무리").rect();
     assert!(finish.right() <= SIZE.x && finish.left() >= 0.0, "{finish:?} outside the {SIZE:?} window");
@@ -3674,7 +3693,7 @@ fn the_sketch_ribbon_has_split_buttons_and_fits_1280_px() {
     harness.run_steps(3);
     harness.get_by_label("3D 모델").click();
     harness.run_steps(3);
-    harness.get_by_label("3D 스케치").click();
+    pick_variant(&mut harness, "스케치", "3D 스케치");
     harness.run_steps(3);
     let finish = harness.get_by_label("스케치 마무리").rect();
     assert!(finish.right() <= SIZE.x, "{finish:?} outside the window in a 3D sketch");
@@ -4014,7 +4033,7 @@ fn subassemblies_are_made_edited_in_place_and_dissolved_from_the_browser() {
     // Return to Top on the Assemble tab backs out.
     harness.get_by_label("조립").click();
     harness.run();
-    harness.get_by_label("최상위로").click();
+    pick_variant(&mut harness, "편집", "최상위로");
     harness.run_steps(3);
     assert!(harness.state().session.edit_target().is_none());
 
@@ -4143,4 +4162,132 @@ fn a_subassembly_folder_is_nested_from_its_menu() {
     let inner = groups.iter().find(|g| g.name == "Inner").unwrap();
     let outer = groups.iter().find(|g| g.name == "Outer").unwrap();
     assert_eq!(inner.parent, Some(outer.id), "Inner now sits in Outer");
+}
+
+/// Work planes and points have their dialogs; a double click in the browser edits a feature; a click in the
+/// view selects it and Delete removes it.
+#[test]
+fn work_features_are_edited_from_the_browser_and_selected_in_the_view() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .with_step_dt(0.05)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let add = |harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, name: &str, geometry| {
+        let op = gc_doc::CellOp::AddWorkFeature(gc_doc::WorkFeature {
+            name: name.to_owned(),
+            geometry,
+            visible: true,
+        });
+        harness.state_mut().session.execute(&gc_doc::Command::Cell(op)).unwrap();
+    };
+    add(
+        &mut harness,
+        "Plane1",
+        gc_doc::WorkGeometry::PlaneOffset {
+            base: gc_doc::PlaneRef::Origin(gc_doc::OriginPlane::Xy),
+            distance: 0.05,
+        },
+    );
+    add(
+        &mut harness,
+        "Axis1",
+        gc_doc::WorkGeometry::AxisThroughPoints {
+            points: [gc_doc::PointRef::Origin, gc_doc::PointRef::Fixed([0.0, 0.0, 0.2])],
+        },
+    );
+    add(&mut harness, "Point1", gc_doc::WorkGeometry::Point { at: gc_doc::PointRef::Fixed([0.1, 0.0, 0.0]) });
+    harness.run();
+
+    // The ribbon has the three commands.
+    harness.get_by_label("작업 평면");
+    harness.get_by_label("작업 점");
+
+    // A double click on a row in the browser opens the dialog on that feature.
+    let at = harness.get_by_label("Plane1").rect().center();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run();
+    for _ in 0..2 {
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.step();
+        }
+    }
+    harness.run_steps(3);
+    assert!(harness.query_all_by_label("작업 평면").count() >= 2, "the dialog is up on the plane");
+    assert!(harness.query_all_by_label("거리 (mm)").count() >= 1);
+
+    // In the view: a click on the axis selects it, Delete removes it.
+    harness.state_mut().fit_view();
+    harness.state_mut().viewport_mut().camera.pan([0.0, 0.0], [-250.0, 0.0], [1280.0, 700.0]);
+    harness.run();
+    let axis =
+        harness.state().session.doc().work_features().iter().find(|(_, f)| f.name == "Axis1").unwrap().0;
+    let on_axis = harness.state().viewport().screen_of(gc_math::DVec3::new(0.0, 0.0, 0.1)).unwrap();
+    harness.event(egui::Event::PointerMoved(on_axis));
+    harness.run();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: on_axis,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.step();
+    }
+    harness.run_steps(3);
+    assert_eq!(harness.state().viewport().work_selected, Some(axis));
+    harness.key_press(egui::Key::Delete);
+    harness.run_steps(3);
+    assert!(harness.state().session.doc().work_features().iter().all(|(_, f)| f.name != "Axis1"));
+}
+
+/// At 1280 px every ribbon tab keeps all its buttons inside the window (and the Assemble and 3D Model tabs
+/// have room to spare for the commands still to come).
+#[test]
+fn every_ribbon_tab_fits_1280_px() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.05, 0.05, 0.05] };
+    let app = harness.state_mut();
+    app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    app.session.add_body(solid, gc_doc::Placement { xyz: [0.2, 0.0, 0.0], rpy: [0.0; 3] }).unwrap();
+    harness.run();
+    let rightmost = |harness: &egui_kittest::Harness<'_, GraphCtrlApp>| {
+        harness
+            .query_all_by_role(egui::accesskit::Role::Button)
+            .map(|node| node.rect())
+            .filter(|rect| rect.top() > 40.0 && rect.bottom() < 140.0)
+            .map(|rect| rect.right())
+            .fold(0.0_f32, f32::max)
+    };
+    let mut report = Vec::new();
+    for tab in ["3D 모델", "조립", "로봇", "검사", "관리", "뷰"] {
+        harness.get_by_label(tab).click();
+        harness.run_steps(3);
+        let right = rightmost(&harness);
+        report.push((tab, right));
+        if gpu && tab == "조립" {
+            let image = harness.render().unwrap();
+            let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+            std::fs::create_dir_all(&out).unwrap();
+            image.save(out.join("review-53-assemble-tab.png")).unwrap();
+        }
+        assert!(right <= SIZE.x, "{tab}: the ribbon reaches {right} of {}", SIZE.x);
+    }
+    // Room to spare on the two tabs that gain commands: the last button ends well inside the window.
+    for (tab, right) in &report {
+        if matches!(*tab, "3D 모델" | "조립") {
+            assert!(*right <= SIZE.x - 150.0, "{tab} has only {} px to spare", SIZE.x - right);
+        }
+    }
 }

@@ -848,6 +848,30 @@ messages! {
     WaCircleOf => ("원·호", "Circle or arc"),
     /// Browser: the folder of work features.
     BrowserWorkFeatures => ("작업 피처", "Work Features"),
+    /// 3D Model tab: creates a work plane.
+    CmdWorkPlane => ("작업 평면", "Work Plane"),
+    /// 3D Model tab: creates a work point.
+    CmdWorkPoint => ("작업 점", "Work Point"),
+    /// Work plane dialog title.
+    WorkPlaneTitle => ("작업 평면", "Work Plane"),
+    /// Work point dialog title.
+    WorkPointTitle => ("작업 점", "Work Point"),
+    /// Work plane type: Offset from Plane.
+    WpOffset => ("평면에서 간격띄우기", "Offset from Plane"),
+    /// Work plane type: Three Points.
+    WpThreePoints => ("세 점", "Three Points"),
+    /// Work axis type: Normal to Plane Through Point.
+    WaNormal => ("평면에 수직, 점 통과", "Normal to Plane Through Point"),
+    /// Work feature dialog: the plane an offset starts from, or the plane of a normal axis.
+    WaBasePlane => ("평면", "Plane"),
+    /// Work feature dialog: the offset distance in millimetres.
+    WaDistance => ("거리 (mm)", "Distance (mm)"),
+    /// Work feature dialog: the third point.
+    WaThirdPoint => ("세 번째 점", "Third point"),
+    /// Work point dialog: give the position by coordinates.
+    WaTypedPoint => ("좌표로 입력", "Type the coordinates"),
+    /// Browser, right-click a work feature: change its definition.
+    CmdEditWorkFeature => ("정의 편집", "Edit definition"),
     /// Browser, right-click a component or subassembly: edit it in place.
     CmdEditInPlace => ("제자리 편집", "Edit"),
     /// Browser, right-click a component: group it into a new subassembly.

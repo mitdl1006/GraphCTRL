@@ -17,7 +17,7 @@ mod pattern;
 mod replicate;
 mod ribbon;
 mod sketch_dialogs;
-mod work_axis;
+mod work_feature;
 
 pub use app::{FileDialogs, GraphCtrlApp, RunOptions, run};
 pub use diagnostics::{install_diagnostics, recent_log};
