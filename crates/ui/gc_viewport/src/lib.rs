@@ -7,6 +7,7 @@
 mod dof;
 mod freemove;
 mod gizmo;
+mod grip;
 mod hud;
 mod origin;
 mod paint;
@@ -19,7 +20,7 @@ mod workfeat;
 
 use egui::{Key, PointerButton, Sense, vec2};
 use gc_core::Id;
-use gc_doc::Sketch;
+use gc_doc::{GripReference, Sketch};
 use gc_draw::{Camera, NavAction, NavInput, NavPreset, StandardView, nav_action, viewcube};
 use gc_i18n::{Lang, tr};
 use gc_math::{Aabb, DPose3, DVec3, Plane};
@@ -96,12 +97,16 @@ pub struct Viewport {
     pub constrain_mode: bool,
     /// What the last click picked for the Constrain dialog.
     constrain_pick: Option<(gc_doc::Occurrence, gc_doc::OriginElement)>,
+    /// The work feature the last click picked for a relationship dialog.
+    constrain_work: Option<gc_core::Id<gc_doc::WorkFeature>>,
     /// The navigation tool chosen on the navigation bar: it works with the left button until it ends.
     nav_tool: Option<NavTool>,
     /// The origin element (plane, axis, point) of a component that is selected in the view or the browser.
     pub origin_selected: Option<(gc_doc::Occurrence, gc_doc::OriginElement)>,
     /// The work feature selected in the view (drawn heavier; Delete removes it, a double click edits it).
     pub work_selected: Option<Id<gc_doc::WorkFeature>>,
+    /// Select Other: where the list stands and what lies under the cursor there, nearest first.
+    select_other: Option<(egui::Pos2, Vec<gc_session::CellItem>)>,
     /// The heads-up display of the drawing tools.
     hud: hud::Hud,
     /// Whether the heads-up display (dynamic input) is on.
@@ -111,6 +116,12 @@ pub struct Viewport {
     /// A component being dragged with it.
     free_drag: Option<freemove::FreeDrag>,
     placing: Option<place::Placing>,
+    /// What a plain click selects (the Select command's priority menu, opened with Shift + right click).
+    pub select_priority: SelectPriority,
+    /// Where the Select menu is open.
+    select_menu: Option<egui::Pos2>,
+    /// A Grip Snap in progress.
+    grip: Option<grip::Grip>,
     /// The marking menu of the graphics window and the commands it offers.
     marking: gc_ui::marking::MarkingMenu,
     marking_set: radial::Set,
@@ -157,6 +168,17 @@ pub struct Viewport {
     measure_pick: Option<Option<(gc_session::CellItem, gc_session::Feature)>>,
 }
 
+/// What a plain click selects (Inventor 2026 help, About Component Selection Modes and Sets,
+/// GUID-E3E49BD5-3F55-4836-8CD1-2C1855CF9986: the Select command's priority).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SelectPriority {
+    /// Components: bodies, robots, waypoints and the rest (the default).
+    #[default]
+    Component,
+    /// Work features and origin geometry only.
+    Feature,
+}
+
 impl Viewport {
     /// A viewport that renders its background with `render_state` when there is one.
     pub fn new(render_state: Option<egui_wgpu::RenderState>) -> Self {
@@ -166,14 +188,19 @@ impl Viewport {
             spatial_drag: None,
             constrain_mode: false,
             constrain_pick: None,
+            constrain_work: None,
             nav_tool: None,
             origin_selected: None,
             work_selected: None,
+            select_other: None,
             hud: hud::Hud::default(),
             hud_on: true,
             free_tool: None,
             free_drag: None,
             placing: None,
+            grip: None,
+            select_priority: SelectPriority::default(),
+            select_menu: None,
             marking: gc_ui::marking::MarkingMenu::default(),
             marking_set: radial::Set::default(),
             request: None,
@@ -365,13 +392,44 @@ impl Viewport {
                 ui.ctx().request_repaint();
             }
         } else if active.is_none() && self.navigating.is_none() {
-            self.cell_input(ui, &response, rect, session);
+            self.cell_input(ui, &response, rect, session, lang);
         }
+
+        self.select_other_list(ui, session);
+        self.select_menu(ui, session, size, lang);
 
         // The marking menu: a right press opens it (in a sketch or among the components); a quick mark
         // toward a command picks it, otherwise the radial menu and its overflow list show.
         let secondary_pressed = ui.input(|i| i.pointer.button_pressed(PointerButton::Secondary));
-        if secondary_pressed && response.hovered() && self.navigating.is_none() && !self.marking.is_open() {
+        // Shift + right click lists what lies under the cursor (Select Other), as Inventor's Select menu does
+        // (docs/ux/inventor-parity.md: Shift+우클릭 Select 메뉴).
+        let shift_menu = secondary_pressed
+            && ui.input(|i| {
+                i.modifiers.shift
+                    || i.events.iter().any(|event| {
+                        matches!(
+                            event,
+                            egui::Event::PointerButton {
+                                button: PointerButton::Secondary,
+                                pressed: true,
+                                modifiers,
+                                ..
+                            } if modifiers.shift
+                        )
+                    })
+            });
+        if shift_menu
+            && active.is_none()
+            && let Some(at) = response.hover_pos()
+        {
+            self.select_menu = Some(at);
+        }
+        if secondary_pressed
+            && !shift_menu
+            && response.hovered()
+            && self.navigating.is_none()
+            && !self.marking.is_open()
+        {
             let at = ui.input(|i| i.pointer.press_origin().or(i.pointer.interact_pos()));
             self.marking_set = if active.is_some() {
                 radial::Set::sketch(session.sketch_is_spatial())
@@ -405,6 +463,11 @@ impl Viewport {
                 match radial::run(cmd, session) {
                     radial::Effect::None => {}
                     radial::Effect::Request(request) => self.request = Some(request),
+                    radial::Effect::SelectOther => {
+                        if let Some(at) = ui.input(|i| i.pointer.latest_pos()) {
+                            self.open_select_other(session, at, size, &to_view);
+                        }
+                    }
                     radial::Effect::Home => self.camera.look(StandardView::Iso),
                     radial::Effect::Fit => self.fit(session, [1000.0, 700.0]),
                     radial::Effect::Free(tool) => self.free_tool = Some(tool),
@@ -512,6 +575,12 @@ impl Viewport {
     /// What the view asks the application to do, once.
     pub fn take_request(&mut self) -> Option<ViewportRequest> {
         self.request.take()
+    }
+
+    /// The work feature the last click picked for the Constrain or Assemble dialog, once (Inventor 2026
+    /// help, GUID-0F500089-4F69-41C5-AFE8-B58AC9E8E15E: a work feature is selectable geometry).
+    pub fn take_constrain_work(&mut self) -> Option<gc_core::Id<gc_doc::WorkFeature>> {
+        self.constrain_work.take()
     }
 
     /// The origin element the last click picked for the Constrain dialog, once.
@@ -1089,11 +1158,260 @@ impl Viewport {
         self.picker.pick(&scene, &self.camera.ray(at, size)).map(|(_, item)| item)
     }
 
+    /// Opens the Select Other list at `at` (window pixels) when more than one component lies under it.
+    fn open_select_other(
+        &mut self,
+        session: &Session,
+        at: egui::Pos2,
+        size: [f64; 2],
+        to_view: &impl Fn(egui::Pos2) -> [f64; 2],
+    ) {
+        let scene = Scene::of(session);
+        let ray = self.camera.ray(to_view(at), size);
+        let found: Vec<gc_session::CellItem> =
+            self.picker.pick_all(&scene, &ray).into_iter().map(|(_, item)| item).collect();
+        self.select_other = (found.len() > 1).then_some((at, found));
+    }
+
+    /// The Select command's menu (Shift + right click; Inventor 2026 help, shortcut table
+    /// GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E: "Activates the Select command menu"): the selection
+    /// priority, and Select Other. Esc or a click elsewhere closes it.
+    fn select_menu(&mut self, ui: &egui::Ui, session: &Session, size: [f64; 2], lang: Lang) {
+        let Some(at) = self.select_menu.take() else { return };
+        let mut open_other = false;
+        let mut picked = false;
+        let area = egui::Area::new(egui::Id::unique("gc_select_menu"))
+            .fixed_pos(at)
+            .order(egui::Order::Foreground)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    for (priority, label) in [
+                        (SelectPriority::Component, tr!(lang, SelPriorityComponent)),
+                        (SelectPriority::Feature, tr!(lang, SelPriorityFeature)),
+                    ] {
+                        if ui.selectable_label(self.select_priority == priority, label).clicked() {
+                            self.select_priority = priority;
+                            picked = true;
+                        }
+                    }
+                    ui.separator();
+                    open_other = ui.button(tr!(lang, SelOther)).clicked();
+                });
+            });
+        let rect = self.rect;
+        let to_view = |p: egui::Pos2| [f64::from(p.x - rect.left()), f64::from(p.y - rect.top())];
+        if open_other {
+            self.open_select_other(session, at, size, &to_view);
+            return;
+        }
+        let outside = ui.input(|i| i.pointer.any_pressed()) && !area.response.contains_pointer();
+        if !(outside || picked || ui.input(|i| i.key_pressed(Key::Escape))) {
+            self.select_menu = Some(at);
+        }
+    }
+
+    /// The Select Other list: what lies under the cursor, nearest first. Passing over a row highlights that
+    /// component in the view; a click selects it; Esc or a click elsewhere closes the list.
+    fn select_other_list(&mut self, ui: &egui::Ui, session: &mut Session) {
+        let Some((at, items)) = self.select_other.take() else { return };
+        let mut chosen = None;
+        let mut hovered = None;
+        let area = egui::Area::new(egui::Id::unique("gc_select_other"))
+            .fixed_pos(at)
+            .order(egui::Order::Foreground)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    for item in &items {
+                        let name = session.item_name(*item).unwrap_or_else(|| "?".to_owned());
+                        let row = ui.button(&name);
+                        if row.hovered() {
+                            hovered = Some(*item);
+                        }
+                        if row.clicked() {
+                            chosen = Some(*item);
+                        }
+                    }
+                });
+            });
+        session.hover_item(hovered);
+        let outside = ui.input(|i| i.pointer.any_pressed()) && !area.response.contains_pointer();
+        if let Some(item) = chosen {
+            session.select_item(Some(item));
+        } else if !(outside || ui.input(|i| i.key_pressed(Key::Escape))) {
+            self.select_other = Some((at, items));
+        }
+    }
+
     /// Starts placing a component: it hangs on the cursor until Esc or a right click. `copy` marks one
     /// that is dropped when placing ends without a click.
     pub fn start_placing(&mut self, item: gc_session::CellItem, copy: bool) {
         self.placing = Some(place::Placing { item, copy });
         self.free_tool = None;
+    }
+
+    /// Starts Grip Snap: pick an edge, then two points.
+    pub fn start_grip_snap(&mut self) {
+        self.grip = Some(grip::Grip::new());
+        self.free_tool = None;
+    }
+
+    /// Whether a Grip Snap is running.
+    pub fn is_grip_snapping(&self) -> bool {
+        self.grip.is_some()
+    }
+
+    /// Grip Snap's clicks and its panel. True while it is running, so that nothing else takes the click.
+    fn grip_step(
+        &mut self,
+        ui: &egui::Ui,
+        response: &egui::Response,
+        session: &mut Session,
+        size: [f64; 2],
+        to_view: &impl Fn(egui::Pos2) -> [f64; 2],
+        lang: Lang,
+    ) -> bool {
+        let Some(mut grip) = self.grip else { return false };
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) || response.secondary_clicked() {
+            grip::cancel(session, &grip);
+            self.grip = None;
+            return true;
+        }
+        let pointer = response.hover_pos().map(to_view);
+        let clicked = response.clicked_by(PointerButton::Primary);
+        if let Some(target) = grip.target {
+            if grip.from.is_none() {
+                if clicked && let Some(at) = pointer {
+                    let scene = Scene::of(session);
+                    let hit = self.picker.pick_surface(&scene, &self.camera.ray(at, size)).map(|h| h.point);
+                    grip.from = hit.or_else(|| {
+                        grip::on_view_plane(&self.camera, size, grip::anchor(&target.reference), at)
+                    });
+                }
+            } else if let (Some(from), false) = (grip.from, grip.fixed) {
+                let to = pointer.and_then(|at| {
+                    grip::end_point(&self.camera, size, &target.reference, grip.motion, from, at)
+                });
+                if let Some(to) = to {
+                    grip.to = Some(to);
+                    grip.pose = session.grip_snap_pose_on(
+                        target.any,
+                        grip.motion,
+                        target.reference,
+                        from.to_array(),
+                        to.to_array(),
+                    );
+                    grip::show(session, &target, grip.pose.as_ref().or(Some(&target.start)));
+                    ui.ctx().request_repaint();
+                    if clicked && grip.pose.is_some() {
+                        grip.fixed = true;
+                    }
+                }
+            }
+        } else if clicked
+            && let Some(at) = pointer
+            && let Some((item, feature)) = self.pick_feature(session, at, size)
+            && let Some(any) = grip::component_of(item)
+            && let Some(reference) = grip::reference_of(&feature)
+            && let Some((start, _)) = gizmo::pose_of(session, item)
+        {
+            session.select_item(Some(item));
+            grip.motion = grip::motions(&reference)[0];
+            let unit = match session.pick_unit(gc_doc::Occurrence::Item(any)) {
+                Some(gc_doc::TreeKey::Subassembly(id)) => Some(id),
+                _ => None,
+            };
+            grip.target = Some(grip::Target { item, any, reference, start, unit });
+        }
+        // The panel: what to pick next, move or rotate, the freedom report, and the ways to end.
+        let mut end: Option<Option<bool>> = None;
+        let mut motion = grip.motion;
+        let anchor = self.rect.center_top() + egui::vec2(0.0, 12.0);
+        egui::Area::new(egui::Id::unique("gc_grip_snap"))
+            .fixed_pos(anchor)
+            .pivot(egui::Align2::CENTER_TOP)
+            .order(egui::Order::Foreground)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.strong(tr!(lang, GripTitle));
+                    if let Some(target) = &grip.target {
+                        ui.horizontal_wrapped(|ui| {
+                            for option in grip::motions(&target.reference) {
+                                ui.selectable_value(&mut motion, option, grip::motion_name(option, lang));
+                            }
+                        });
+                    }
+                    let hint = match (&grip.target, grip.from, grip.fixed) {
+                        (None, _, _) => tr!(lang, GripPickEdge),
+                        (Some(_), None, _) => tr!(lang, GripPickFrom),
+                        (Some(_), Some(_), false) => tr!(lang, GripPickTo),
+                        (Some(_), Some(_), true) => tr!(lang, GripReady),
+                    };
+                    ui.label(hint);
+                    if let Some(target) = &grip.target {
+                        // With both points: the snap itself; before: a line is judged by its direction alone.
+                        let allowed = match (grip.from, grip.to) {
+                            (Some(from), Some(to)) => session.grip_snap_allowed(
+                                target.any,
+                                motion,
+                                target.reference,
+                                from.to_array(),
+                                to.to_array(),
+                            ),
+                            _ => match target.reference {
+                                GripReference::Line(line) => session.grip_allows(target.any, motion, line),
+                                _ => true,
+                            },
+                        };
+                        let text = if allowed { tr!(lang, GripAllowed) } else { tr!(lang, GripBlocked) };
+                        let colour = if allowed {
+                            egui::Color32::from_rgb(0x2e, 0x9e, 0x4f)
+                        } else {
+                            egui::Color32::from_rgb(0xc9, 0x3b, 0x2f)
+                        };
+                        ui.colored_label(colour, text);
+                    }
+                    ui.horizontal(|ui| {
+                        let ready = grip.pose.is_some();
+                        if ui.add_enabled(ready, egui::Button::new(tr!(lang, GripDone))).clicked() {
+                            end = Some(Some(false));
+                        }
+                        if ui.add_enabled(ready, egui::Button::new(tr!(lang, GripGround))).clicked() {
+                            end = Some(Some(true));
+                        }
+                        if ui.button(tr!(lang, GripCancel)).clicked() {
+                            end = Some(None);
+                        }
+                    });
+                });
+            });
+        if motion != grip.motion {
+            // A different snap starts again from its first point.
+            if let Some(target) = &grip.target {
+                grip::show(session, target, None);
+            }
+            grip = grip::Grip { motion, from: None, to: None, pose: None, fixed: false, ..grip };
+        }
+        match end {
+            Some(Some(ground)) => {
+                if let (Some(target), Some(pose)) = (&grip.target, &grip.pose) {
+                    // The preview goes first; the commit is one undo step.
+                    grip::show(session, target, None);
+                    // A component of a subassembly takes the rest of it along.
+                    let moves = target
+                        .unit
+                        .and_then(|unit| session.subassembly_moved(unit, *pose * target.start.inverse()))
+                        .unwrap_or_else(|| vec![(target.any, *pose)]);
+                    session.grip_snap_commit(&moves, ground).ok();
+                }
+                self.grip = None;
+            }
+            Some(None) => {
+                grip::cancel(session, &grip);
+                self.grip = None;
+            }
+            None => self.grip = Some(grip),
+        }
+        true
     }
 
     /// Whether a component hangs on the cursor.
@@ -1119,11 +1437,15 @@ impl Viewport {
         response: &egui::Response,
         rect: egui::Rect,
         session: &mut Session,
+        lang: Lang,
     ) {
         let size = [f64::from(rect.width()), f64::from(rect.height())];
         let to_view = |p: egui::Pos2| [f64::from(p.x - rect.left()), f64::from(p.y - rect.top())];
         // The move and turn handles of the selected item come first: dragging them is not a selection.
-        let on_handles = gizmo::ui(ui, response, rect, &self.camera, session, &mut self.gizmo);
+        // (Not during Grip Snap or Free Move / Free Rotate: their drags are not drags of the handles.)
+        let on_handles = self.grip.is_none()
+            && self.free_tool.is_none()
+            && gizmo::ui(ui, response, rect, &self.camera, session, &mut self.gizmo);
         let hovered = if on_handles {
             None
         } else {
@@ -1141,11 +1463,12 @@ impl Viewport {
                 session.select_item(Some(item));
                 self.free_drag = freemove::begin(&self.camera, size, session, item, press);
             }
-            if let Some(drag) = self.free_drag {
+            if let Some(mut drag) = self.free_drag {
                 if response.dragged_by(PointerButton::Primary)
                     && let Some(at) = response.hover_pos().or_else(|| ui.input(|i| i.pointer.latest_pos()))
                 {
-                    freemove::update(&drag, tool, &self.camera, size, session, to_view(at));
+                    freemove::update(&mut drag, tool, &self.camera, size, session, to_view(at));
+                    self.free_drag = Some(drag);
                     ui.ctx().request_repaint();
                 }
                 if response.drag_stopped_by(PointerButton::Primary) {
@@ -1156,6 +1479,23 @@ impl Viewport {
             if self.free_drag.is_some() {
                 return;
             }
+        }
+        // Select Other (Ctrl+A over the view): the components under the cursor in a list, nearest first
+        // (Inventor 2026 help, Predefined Command Alias and Shortcut Reference,
+        // GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E: Ctrl+A activates Select Other).
+        let select_other_key = ui.input(|i| {
+            i.events.iter().any(|event| {
+                matches!(
+                    event,
+                    egui::Event::Key { key: egui::Key::A, pressed: true, modifiers, .. } if modifiers.command
+                )
+            })
+        });
+        if select_other_key && let Some(at) = response.hover_pos() {
+            self.open_select_other(session, at, size, &to_view);
+        }
+        if self.grip_step(ui, response, session, size, &to_view, lang) {
+            return;
         }
         // Place Component: the component hangs on the cursor; a click sets it down and attaches a copy.
         if let Some(placing) = self.placing {
@@ -1205,7 +1545,15 @@ impl Viewport {
         }
         if self.constrain_mode && response.clicked_by(PointerButton::Primary) {
             let at = response.interact_pointer_pos().map(to_view);
-            self.constrain_pick = at.and_then(|at| origin::pick(&self.camera, size, session, at, true));
+            // Work features that are shown come before the origin geometry.
+            let screen = |p: gc_math::DVec3| self.camera.project(p, size);
+            self.constrain_work =
+                at.and_then(|at| workfeat::pick(session, &screen, at, self.camera.distance * 0.6));
+            self.constrain_pick = if self.constrain_work.is_some() {
+                None
+            } else {
+                at.and_then(|at| origin::pick(&self.camera, size, session, at, true))
+            };
         } else if self.measure_features && response.clicked_by(PointerButton::Primary) {
             let at = response.interact_pointer_pos().map(to_view);
             self.measure_pick = Some(at.and_then(|at| self.pick_feature(session, at, size)));
@@ -1221,7 +1569,10 @@ impl Viewport {
             } else {
                 at.and_then(|at| origin::pick(&self.camera, size, session, at, false))
             };
-            let picked = if self.origin_selected.is_some() || self.work_selected.is_some() {
+            let picked = if self.origin_selected.is_some()
+                || self.work_selected.is_some()
+                || self.select_priority == SelectPriority::Feature
+            {
                 None
             } else {
                 response.interact_pointer_pos().and_then(|p| self.pick_item(session, to_view(p), size))
@@ -1501,14 +1852,16 @@ fn apply_dimension_text(session: &mut Session, id: Id<gc_sketch::Dimension>, tex
         let identifier = name.chars().next().is_some_and(|c| c.is_alphabetic() || c == '_')
             && name.chars().all(|c| c.is_alphanumeric() || c == '_');
         if identifier && !value.is_empty() {
-            let angle = ["deg", "rad", "°"].iter().any(|unit| value.contains(unit));
             let existing = session.doc().params().iter().find(|(_, p)| p.name == name).map(|(id, _)| id);
-            let command = match existing {
-                Some(param) => gc_doc::Command::SetParam { id: param, source: value.to_owned() },
-                None => gc_doc::Command::AddParam { name: name.to_owned(), source: value.to_owned(), angle },
+            // A new name is added and used in one undo step; a name that is not allowed (a digit first, a
+            // reserved word) is refused whole.
+            return match existing {
+                None => session.edit_dimension_with_param(id, name, value).is_ok(),
+                Some(param) => {
+                    let command = gc_doc::Command::SetParam { id: param, source: value.to_owned() };
+                    session.execute(&command).is_ok() && session.edit_dimension(id, name).is_ok()
+                }
             };
-            // A name that is not allowed (a digit first, a reserved word) is refused here.
-            return session.execute(&command).is_ok() && session.edit_dimension(id, name).is_ok();
         }
     }
     session.edit_dimension(id, text).is_ok()

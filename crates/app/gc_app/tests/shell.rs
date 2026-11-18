@@ -4402,9 +4402,604 @@ fn a_parameter_is_made_from_the_dimension_box() {
     assert_eq!(names(&harness), vec![("HGHT".to_owned(), "5 mm".to_owned())]);
     let session = &harness.state().session;
     assert_eq!(session.active_sketch().unwrap().1.dimensions[&width].source, "HGHT");
+    // One undo step takes back both the parameter and the dimension's use of it.
+    harness.state_mut().session.undo();
+    assert!(names(&harness).is_empty(), "the parameter went with one undo");
+    assert_ne!(harness.state().session.active_sketch().unwrap().1.dimensions[&width].source, "HGHT");
+    harness.state_mut().session.redo();
     // Reusing the name changes the parameter.
     harness.state_mut().edit_dimension(width);
     harness.run();
     retype(&mut harness, "HGHT = 8 mm");
     assert_eq!(names(&harness), vec![("HGHT".to_owned(), "8 mm".to_owned())]);
+}
+
+/// Ctrl+A over the view lists the components under the cursor (Select Other); a click on one selects it
+/// (Inventor 2026 help, Predefined Command Alias and Shortcut Reference,
+/// GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E).
+#[test]
+fn select_other_lists_what_lies_under_the_cursor() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.1, 0.1, 0.1] };
+    let app = harness.state_mut();
+    app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    // The same place: a ray through one passes the other as well.
+    let second = app.session.add_body(solid, gc_doc::Placement::default()).unwrap();
+    app.fit_view();
+    app.viewport_mut().camera.pan([0.0, 0.0], [-250.0, 0.0], [1280.0, 700.0]);
+    harness.run();
+    let at = harness.state().viewport().screen_of(gc_math::DVec3::ZERO).unwrap();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run_steps(3);
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.run_steps(3);
+    let button = egui::accesskit::Role::Button;
+    harness.get_by_role_and_label(button, "Body1");
+    if gpu {
+        let image = harness.render().unwrap();
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        image.save(out.join("review-54-select-other.png")).unwrap();
+    }
+    harness.get_by_role_and_label(button, "Body2").click();
+    harness.run_steps(3);
+    assert_eq!(
+        harness.state().session.selected_item(),
+        Some(gc_session::CellItem::Body(second)),
+        "the second one is selected"
+    );
+    assert!(
+        harness.query_all_by_role_and_label(button, "Body1").next().is_none(),
+        "the list closed after the choice"
+    );
+}
+
+/// Grip Snap (Inventor 2026 help, Grip Snap move or rotate, GUID-E1CA109A-D5A1-4131-AC3A-AE217716DD8C):
+/// pick an edge, click a start point, then an end point; the component moves along the edge by the part
+/// of the way that lies along it; Done sets it down as one undo step.
+#[test]
+fn grip_snap_moves_a_component_along_a_picked_edge() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let app = harness.state_mut();
+    // The first component is grounded; the one that moves is the second.
+    app.session
+        .add_body(
+            gc_doc::Solid::Box { size: [0.1; 3] },
+            gc_doc::Placement { xyz: [-0.5, 0.0, 0.0], rpy: [0.0; 3] },
+        )
+        .unwrap();
+    let id =
+        app.session.add_body(gc_doc::Solid::Box { size: [0.2; 3] }, gc_doc::Placement::default()).unwrap();
+    app.fit_view();
+    app.viewport_mut().camera.pan([0.0, 0.0], [-250.0, 0.0], [1280.0, 700.0]);
+    harness.run();
+    harness.get_by_label("조립").click();
+    harness.run_steps(3);
+    harness.get_by_label("그립 스냅").click();
+    harness.run_steps(3);
+    harness.get_by_label("기준이 될 구성요소의 모서리·꼭짓점·평면을 선택하세요");
+    let screen = |h: &egui_kittest::Harness<'_, GraphCtrlApp>, p: [f64; 3]| {
+        h.state().viewport().screen_of(gc_math::DVec3::from(p)).unwrap()
+    };
+    let click = |h: &mut egui_kittest::Harness<'_, GraphCtrlApp>, at: egui::Pos2| {
+        h.event(egui::Event::PointerMoved(at));
+        h.run_steps(3);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            h.run_steps(3);
+        }
+    };
+    // The top face's edge along Y at x = 0.1 (a little inside, where the top face is hit).
+    let edge = screen(&harness, [0.098, 0.0, 0.1]);
+    click(&mut harness, edge);
+    harness.get_by_label("시작점을 클릭하세요");
+    let from = screen(&harness, [0.0, 0.0, 0.1]);
+    click(&mut harness, from);
+    harness.get_by_label("끝점을 클릭하면 위치가 확정됩니다");
+    let to = screen(&harness, [0.0, 0.06, 0.1]);
+    harness.event(egui::Event::PointerMoved(to));
+    harness.run_steps(3);
+    if gpu {
+        let image = harness.render().unwrap();
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        image.save(out.join("review-55-grip-snap.png")).unwrap();
+    }
+    click(&mut harness, to);
+    harness.get_by_label("완료 또는 접지 후 완료를 누르세요");
+    assert_eq!(harness.state().session.doc().get(id).unwrap().placement.xyz, [0.0; 3], "still a preview");
+    harness.get_by_label("완료").click();
+    harness.run_steps(3);
+    let xyz = harness.state().session.doc().get(id).unwrap().placement.xyz;
+    assert!((xyz[1] - 0.06).abs() < 0.01, "followed the cursor along the edge: {xyz:?}");
+    assert!(xyz[0].abs() < 1e-9 && xyz[2].abs() < 1e-9, "only along it: {xyz:?}");
+    assert!(!harness.state().viewport().is_grip_snapping(), "Done ends the command");
+    harness.state_mut().session.undo();
+    let back = harness.state().session.doc().get(id).unwrap().placement.xyz;
+    assert!(back[1].abs() < 1e-9, "one undo step puts it back: {back:?}");
+}
+
+/// Shift + right click over the view opens the Select command's menu (Inventor 2026 help, shortcut table
+/// GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E: "Activates the Select command menu"): the selection priority
+/// and Select Other. With the work feature priority a click on a body selects nothing.
+#[test]
+fn shift_right_click_opens_the_select_menu() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.1, 0.1, 0.1] };
+    let app = harness.state_mut();
+    app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    app.session.add_body(solid, gc_doc::Placement::default()).unwrap();
+    app.fit_view();
+    app.viewport_mut().camera.pan([0.0, 0.0], [-250.0, 0.0], [1280.0, 700.0]);
+    harness.run();
+    let at = harness.state().viewport().screen_of(gc_math::DVec3::ZERO).unwrap();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run_steps(3);
+    harness.event(egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Secondary,
+        pressed: true,
+        modifiers: egui::Modifiers::SHIFT,
+    });
+    harness.run_steps(3);
+    harness.event(egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Secondary,
+        pressed: false,
+        modifiers: egui::Modifiers::SHIFT,
+    });
+    harness.run_steps(3);
+    harness.get_by_label("구성요소 우선");
+    harness.get_by_label("작업 피처 우선");
+    // Select Other from the menu lists the two bodies.
+    harness.get_by_label("다른 항목 선택").click();
+    harness.run_steps(3);
+    let button = egui::accesskit::Role::Button;
+    harness.get_by_role_and_label(button, "Body1");
+    harness.get_by_role_and_label(button, "Body2");
+}
+
+/// With the work feature priority a click on a body selects nothing.
+#[test]
+fn the_work_feature_priority_leaves_bodies_unselected() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let app = harness.state_mut();
+    app.session.add_body(gc_doc::Solid::Box { size: [0.1; 3] }, gc_doc::Placement::default()).unwrap();
+    app.fit_view();
+    app.viewport_mut().camera.pan([0.0, 0.0], [-250.0, 0.0], [1280.0, 700.0]);
+    app.viewport_mut().select_priority = gc_viewport::SelectPriority::Feature;
+    harness.run();
+    let at = harness.state().viewport().screen_of(gc_math::DVec3::ZERO).unwrap();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run_steps(3);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run_steps(3);
+    }
+    assert_eq!(harness.state().session.selected_item(), None);
+    harness.state_mut().viewport_mut().select_priority = gc_viewport::SelectPriority::Component;
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run_steps(3);
+    }
+    assert!(harness.state().session.selected_item().is_some());
+}
+
+/// A work feature clicked in the view is geometry for the Assemble command (Inventor 2026 help, To Place
+/// Mate or Flush Constraints, GUID-0F500089-4F69-41C5-AFE8-B58AC9E8E15E: "Select the first point, curve,
+/// face, or work feature").
+#[test]
+fn a_work_feature_clicked_in_the_view_fills_the_assemble_selection() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let op = gc_doc::CellOp::AddWorkFeature(gc_doc::WorkFeature {
+        name: "Point1".to_owned(),
+        geometry: gc_doc::WorkGeometry::Point { at: gc_doc::PointRef::Fixed([-0.4, 0.0, 0.0]) },
+        visible: true,
+    });
+    for x in [-0.3, -0.5] {
+        harness
+            .state_mut()
+            .session
+            .add_body(
+                gc_doc::Solid::Box { size: [0.05; 3] },
+                gc_doc::Placement { xyz: [x, 0.0, 0.0], rpy: [0.0; 3] },
+            )
+            .unwrap();
+    }
+    harness.state_mut().session.execute(&gc_doc::Command::Cell(op)).unwrap();
+    harness.state_mut().fit_view();
+    harness.state_mut().viewport_mut().camera.pan([0.0, 0.0], [-250.0, 0.0], [1280.0, 700.0]);
+    harness.run();
+    harness.get_by_label("조립").click();
+    harness.run_steps(3);
+    harness.get_by_label("어셈블").click();
+    harness.run_steps(3);
+    let at = harness.state().viewport().screen_of(gc_math::DVec3::new(-0.4, 0.0, 0.0)).unwrap();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run_steps(3);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run_steps(3);
+    }
+    harness.get_by_label_contains("첫 번째 선택");
+    harness.get_by_label("첫 번째 선택: Point1 · 점");
+}
+
+/// The Limits tab of a joint (Inventor 2026 help, To Define and Manage Joint Relationships,
+/// GUID-21DC3336-5C51-42C1-90FB-4299CD66E0C6): Start and End in degrees for a rotational joint; the
+/// browser then marks the joint +/-.
+#[test]
+fn a_rotational_joint_gets_angular_limits_from_its_dialog() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let app = harness.state_mut();
+    let frame = |z: f64, nz: f64| gc_doc::Geometry::Frame {
+        origin: [0.0, 0.0, z],
+        z: [0.0, 0.0, nz],
+        x: [1.0, 0.0, 0.0],
+    };
+    let sel = |id: gc_core::AnyId, geometry| gc_doc::Selection {
+        occurrence: gc_doc::Occurrence::Item(id),
+        geometry,
+    };
+    let table = app
+        .session
+        .add_body(
+            gc_doc::Solid::Box { size: [2.0, 1.0, 1.0] },
+            gc_doc::Placement { xyz: [0.0, 0.0, 0.5], rpy: [0.0; 3] },
+        )
+        .unwrap();
+    let block = app
+        .session
+        .add_body(
+            gc_doc::Solid::Box { size: [0.2; 3] },
+            gc_doc::Placement { xyz: [0.3, 0.2, 1.6], rpy: [0.0; 3] },
+        )
+        .unwrap();
+    let id = app
+        .session
+        .add_relationship(gc_doc::Relationship::new(
+            "Hinge",
+            gc_doc::RelationKind::Rotational { flip: false },
+            sel(block.erase(), frame(-0.1, -1.0)),
+            sel(table.erase(), frame(0.5, 1.0)),
+        ))
+        .unwrap();
+    harness.run();
+    let at = harness.get_by_label("Hinge").rect().center();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run();
+    }
+    harness.get_by_label("한계…").click();
+    harness.run_steps(3);
+    harness.get_by_label("조인트 한계");
+    harness.get_by_label("각도 한계").click();
+    harness.run_steps(3);
+    let input = egui::accesskit::Role::TextInput;
+    for (label, text) in [("시작", "-30"), ("끝", "45")] {
+        let field = harness.get_by_role_and_label(input, label);
+        field.click();
+        harness.run_steps(2);
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        harness.run_steps(2);
+        harness.get_by_role_and_label(input, label).type_text(text);
+        harness.run_steps(2);
+    }
+    if gc_test_support::gpu().is_some() {
+        harness.run_steps(2);
+        let image = harness.render().unwrap();
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        image.save(out.join("review-56-joint-limits.png")).unwrap();
+    }
+    harness.get_by_label("확인").click();
+    harness.run_steps(3);
+    let (angular, linear) = harness.state().session.joint_limits(id);
+    let range = angular.expect("angular limits set");
+    assert!(linear.is_none());
+    assert!((range.start + 30f64.to_radians()).abs() < 1e-9, "{range:?}");
+    assert!((range.end - 45f64.to_radians()).abs() < 1e-9, "{range:?}");
+    harness.get_by_label("Hinge +/-");
+}
+
+/// Grip Snap with a flat face as the reference (Inventor 2026 help, Grip Snap Move Options Bar Reference,
+/// GUID-C030C32C-7E1E-4F37-BBDF-120412898D00: Plane, Move along normal using reference geometry): the
+/// component moves along the face's normal by the part of the way that lies along it.
+#[test]
+fn grip_snap_moves_a_component_along_the_normal_of_a_picked_face() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let app = harness.state_mut();
+    app.session
+        .add_body(
+            gc_doc::Solid::Box { size: [0.1; 3] },
+            gc_doc::Placement { xyz: [-0.5, 0.0, 0.0], rpy: [0.0; 3] },
+        )
+        .unwrap();
+    let id =
+        app.session.add_body(gc_doc::Solid::Box { size: [0.2; 3] }, gc_doc::Placement::default()).unwrap();
+    app.fit_view();
+    app.viewport_mut().camera.pan([0.0, 0.0], [-250.0, 0.0], [1280.0, 700.0]);
+    harness.run();
+    harness.get_by_label("조립").click();
+    harness.run_steps(3);
+    harness.get_by_label("그립 스냅").click();
+    harness.run_steps(3);
+    let screen = |h: &egui_kittest::Harness<'_, GraphCtrlApp>, p: [f64; 3]| {
+        h.state().viewport().screen_of(gc_math::DVec3::from(p)).unwrap()
+    };
+    let click = |h: &mut egui_kittest::Harness<'_, GraphCtrlApp>, at: egui::Pos2| {
+        h.event(egui::Event::PointerMoved(at));
+        h.run_steps(3);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            h.run_steps(3);
+        }
+    };
+    // The middle of the top face.
+    let face = screen(&harness, [0.0, 0.0, 0.1]);
+    click(&mut harness, face);
+    harness.get_by_label("면 안에서 이동");
+    harness.get_by_label("법선 방향 이동").click();
+    harness.run_steps(3);
+    click(&mut harness, face);
+    let to = screen(&harness, [0.0, 0.0, 0.16]);
+    harness.event(egui::Event::PointerMoved(to));
+    harness.run_steps(3);
+    click(&mut harness, to);
+    harness.get_by_label("완료").click();
+    harness.run_steps(3);
+    let xyz = harness.state().session.doc().get(id).unwrap().placement.xyz;
+    assert!((xyz[2] - 0.06).abs() < 0.01, "followed the cursor along the normal: {xyz:?}");
+    assert!(xyz[0].abs() < 1e-9 && xyz[1].abs() < 1e-9, "only along it: {xyz:?}");
+}
+
+/// A subassembly is one unit in its parent (Inventor 2026 help, Create Subassemblies in Place,
+/// GUID-FCEE3F0E-AAE2-4619-8645-2588FEECD353): Free Move on one of its components moves all of it, as one
+/// undo step; one holding a grounded component does not move.
+#[test]
+fn free_move_drags_a_whole_subassembly() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.1; 3] };
+    let app = harness.state_mut();
+    // The first component is grounded.
+    let ground = app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    let at = |x: f64, y: f64| gc_doc::Placement { xyz: [x, y, 0.0], rpy: [0.0; 3] };
+    let a = app.session.add_body(solid.clone(), at(0.3, 0.0)).unwrap();
+    let b = app.session.add_body(solid, at(0.3, 0.3)).unwrap();
+    let key =
+        |id: gc_core::Id<gc_doc::Body>| gc_doc::TreeKey::Component(gc_doc::Occurrence::Item(id.erase()));
+    app.session
+        .edit_subassemblies(gc_doc::SubassemblyOp::Demote {
+            members: vec![key(a), key(b)],
+            name: "Unit".into(),
+        })
+        .unwrap();
+    app.fit_view();
+    app.viewport_mut().camera.pan([0.0, 0.0], [-250.0, 0.0], [1280.0, 700.0]);
+    app.viewport_mut().free_tool = Some(gc_viewport::FreeTool::Move);
+    harness.run();
+    let drag = |harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, from: egui::Pos2, by: egui::Vec2| {
+        harness.event(egui::Event::PointerMoved(from));
+        harness.run_steps(2);
+        harness.event(egui::Event::PointerButton {
+            pos: from,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run_steps(2);
+        for step in 1..=4 {
+            harness.event(egui::Event::PointerMoved(from + by * (step as f32 / 4.0)));
+            harness.run_steps(2);
+        }
+        harness.event(egui::Event::PointerButton {
+            pos: from + by,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run_steps(2);
+    };
+    let xyz = |h: &egui_kittest::Harness<'_, GraphCtrlApp>, id: gc_core::Id<gc_doc::Body>| {
+        h.state().session.doc().get(id).unwrap().placement.xyz
+    };
+    let (a0, b0) = (xyz(&harness, a), xyz(&harness, b));
+    let depth = harness.state().session.history().undo_depth();
+    let on_a = harness.state().viewport().screen_of(gc_math::DVec3::new(0.3, 0.0, 0.05)).unwrap();
+    // Half way through the drag the whole unit is shown moved; nothing is in the document yet.
+    harness.event(egui::Event::PointerMoved(on_a));
+    harness.run_steps(2);
+    harness.event(egui::Event::PointerButton {
+        pos: on_a,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run_steps(2);
+    for step in 1..=2 {
+        harness.event(egui::Event::PointerMoved(on_a + egui::vec2(30.0 * step as f32, 0.0)));
+        harness.run_steps(2);
+    }
+    let shown = harness.state().session.shown_body(b).unwrap().placement.xyz;
+    assert!(shown[0] > b0[0] + 0.005, "the other component is previewed too: {shown:?}");
+    assert_eq!(xyz(&harness, b), b0, "the document is untouched until the drop");
+    harness.event(egui::Event::PointerMoved(on_a + egui::vec2(60.0, 0.0)));
+    harness.run_steps(2);
+    harness.event(egui::Event::PointerButton {
+        pos: on_a + egui::vec2(60.0, 0.0),
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run_steps(2);
+    let (a1, b1) = (xyz(&harness, a), xyz(&harness, b));
+    let da = [a1[0] - a0[0], a1[1] - a0[1], a1[2] - a0[2]];
+    let db = [b1[0] - b0[0], b1[1] - b0[1], b1[2] - b0[2]];
+    assert!(da.iter().map(|v| v * v).sum::<f64>().sqrt() > 0.01, "the dragged component moved: {da:?}");
+    for i in 0..3 {
+        assert!((da[i] - db[i]).abs() < 1e-9, "the other one went along: {da:?} {db:?}");
+    }
+    assert_eq!(harness.state().session.history().undo_depth(), depth + 1, "one undo step");
+
+    // With the grounded body in the unit nothing moves.
+    let g = harness.state().session.doc().get(ground).unwrap().placement.xyz;
+    let key0 = gc_doc::TreeKey::Component(gc_doc::Occurrence::Item(ground.erase()));
+    let unit = harness.state().session.doc().subassemblies().first().map(|s| s.id).unwrap();
+    harness
+        .state_mut()
+        .session
+        .edit_subassemblies(gc_doc::SubassemblyOp::Move { members: vec![key0], into: Some(unit) })
+        .unwrap();
+    harness.run();
+    let on_a = harness
+        .state()
+        .viewport()
+        .screen_of(gc_math::DVec3::from_array(a1) + gc_math::DVec3::new(0.0, 0.0, 0.05))
+        .unwrap();
+    drag(&mut harness, on_a, egui::vec2(60.0, 0.0));
+    assert_eq!(xyz(&harness, a), a1, "a unit with a grounded component stays");
+    assert_eq!(xyz(&harness, ground), g);
+}
+
+/// Grip Snap on a component of a subassembly takes the rest of the unit along (GUID-FCEE3F0E-AAE2-4619-8645-2588FEECD353).
+#[test]
+fn grip_snap_moves_the_whole_subassembly_of_the_picked_component() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let app = harness.state_mut();
+    // The first component is grounded; the one that moves is the second.
+    app.session
+        .add_body(
+            gc_doc::Solid::Box { size: [0.1; 3] },
+            gc_doc::Placement { xyz: [-0.5, 0.0, 0.0], rpy: [0.0; 3] },
+        )
+        .unwrap();
+    let id =
+        app.session.add_body(gc_doc::Solid::Box { size: [0.2; 3] }, gc_doc::Placement::default()).unwrap();
+    let mate = app
+        .session
+        .add_body(
+            gc_doc::Solid::Box { size: [0.1; 3] },
+            gc_doc::Placement { xyz: [0.0, 0.5, 0.0], rpy: [0.0; 3] },
+        )
+        .unwrap();
+    let key = |b: gc_core::Id<gc_doc::Body>| gc_doc::TreeKey::Component(gc_doc::Occurrence::Item(b.erase()));
+    app.session
+        .edit_subassemblies(gc_doc::SubassemblyOp::Demote {
+            members: vec![key(id), key(mate)],
+            name: "Unit".into(),
+        })
+        .unwrap();
+    app.fit_view();
+    app.viewport_mut().camera.pan([0.0, 0.0], [-250.0, 0.0], [1280.0, 700.0]);
+    harness.run();
+    harness.get_by_label("조립").click();
+    harness.run_steps(3);
+    harness.get_by_label("그립 스냅").click();
+    harness.run_steps(3);
+    harness.get_by_label("기준이 될 구성요소의 모서리·꼭짓점·평면을 선택하세요");
+    let screen = |h: &egui_kittest::Harness<'_, GraphCtrlApp>, p: [f64; 3]| {
+        h.state().viewport().screen_of(gc_math::DVec3::from(p)).unwrap()
+    };
+    let click = |h: &mut egui_kittest::Harness<'_, GraphCtrlApp>, at: egui::Pos2| {
+        h.event(egui::Event::PointerMoved(at));
+        h.run_steps(3);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            h.run_steps(3);
+        }
+    };
+    // The top face's edge along Y at x = 0.1 (a little inside, where the top face is hit).
+    let edge = screen(&harness, [0.098, 0.0, 0.1]);
+    click(&mut harness, edge);
+    harness.get_by_label("시작점을 클릭하세요");
+    let from = screen(&harness, [0.0, 0.0, 0.1]);
+    click(&mut harness, from);
+    harness.get_by_label("끝점을 클릭하면 위치가 확정됩니다");
+    let to = screen(&harness, [0.0, 0.06, 0.1]);
+    harness.event(egui::Event::PointerMoved(to));
+    harness.run_steps(3);
+    click(&mut harness, to);
+    harness.get_by_label("완료 또는 접지 후 완료를 누르세요");
+    assert_eq!(harness.state().session.doc().get(id).unwrap().placement.xyz, [0.0; 3], "still a preview");
+    harness.get_by_label("완료").click();
+    harness.run_steps(3);
+    let xyz = harness.state().session.doc().get(id).unwrap().placement.xyz;
+    assert!((xyz[1] - 0.06).abs() < 0.01, "followed the cursor along the edge: {xyz:?}");
+    assert!(xyz[0].abs() < 1e-9 && xyz[2].abs() < 1e-9, "only along it: {xyz:?}");
+    let other = harness.state().session.doc().get(mate).unwrap().placement.xyz;
+    assert!((other[1] - 0.5 - xyz[1]).abs() < 1e-9, "the rest of the unit went along: {other:?}");
+    assert!(!harness.state().viewport().is_grip_snapping(), "Done ends the command");
 }

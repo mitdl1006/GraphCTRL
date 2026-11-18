@@ -704,6 +704,16 @@ fn preview(view: &View<'_>, plane: &SketchPlane, session: &Session) {
             stroke,
         );
     }
+    // What Trim would remove, in red and dashed over the sketch (Inventor 2026 help, Trim,
+    // GUID-DD00037F-... : the part to be trimmed is highlighted before the click).
+    let cut = Stroke::new(2.6, Color32::from_rgb(0xE0, 0x30, 0x30));
+    for piece in &preview.cut {
+        let points: Vec<Pos2> =
+            piece.polyline(72).into_iter().filter_map(|p| view.screen(world(p))).collect();
+        if points.len() >= 2 {
+            view.painter.extend(egui::Shape::dashed_line(&points, cut, 7.0, 4.0));
+        }
+    }
     if let Some(snap) = preview.snap {
         let Some(at) = view.screen(world(snap.pos)) else { return };
         match snap.kind {

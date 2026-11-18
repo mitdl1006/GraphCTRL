@@ -572,3 +572,242 @@ fn editing_in_place_scopes_viewport_clicks_and_the_return_buttons_walk_back() {
     assert_eq!(harness.state().session.edit_target(), None, "the dissolved folder is still the edit target");
     assert!(harness.state().session.doc().subassemblies().iter().all(|s| s.id != inner));
 }
+
+// ---- Work feature dialog ----
+
+/// The Work Plane dialog parses its distance with Rust's float parser, which accepts `NaN`, `inf` and `1e999`.
+/// Whatever is typed, nothing invalid reaches the document: an unusable entry creates nothing and leaves the
+/// dialog open for a correction; a good one creates exactly one plane and closes it.
+#[test]
+fn the_work_plane_dialog_creates_nothing_from_unusable_distances() {
+    let mut harness = harness();
+    two_bodies(&mut harness);
+    harness.get_by_label("3D 모델").click();
+    harness.run_steps(3);
+    // The ribbon button (a split button may share the name with other rows): the first node.
+    harness.query_all_by_label("작업 평면").next().unwrap().click();
+    harness.run_steps(3);
+    let input = egui::accesskit::Role::TextInput;
+    let count =
+        |h: &egui_kittest::Harness<'_, GraphCtrlApp>| h.state().session.doc().work_features().iter().count();
+    let before = harness.state().session.doc().clone();
+    let depth = harness.state().session.history().undo_depth();
+    for text in ["NaN", "inf", "-inf", "1e999", "abc", "", "1,5", "10 mm"] {
+        harness.get_by_role_and_label(input, "거리 (mm)").click();
+        harness.run();
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        harness.run();
+        harness.key_press(egui::Key::Backspace);
+        harness.run();
+        if !text.is_empty() {
+            harness.get_by_role_and_label(input, "거리 (mm)").type_text(text);
+        }
+        harness.run();
+        // The field holds exactly what was typed (so the cases below test what they say).
+        let shown = harness.get_by_role_and_label(input, "거리 (mm)").value();
+        assert_eq!(shown.as_deref().unwrap_or(""), text, "the field was not set to {text:?}");
+        harness.query_all_by_label("확인").last().unwrap().click();
+        harness.run_steps(3);
+        assert_eq!(count(&harness), 0, "distance {text:?} created a work plane");
+        assert!(
+            harness.state().session.doc().same_content(&before),
+            "distance {text:?} changed the document"
+        );
+        assert_eq!(harness.state().session.history().undo_depth(), depth, "distance {text:?}");
+        assert!(harness.query_all_by_label("거리 (mm)").count() > 0, "distance {text:?} closed the dialog");
+    }
+    // A good value makes one plane, one undo step, and the dialog closes.
+    harness.get_by_role_and_label(input, "거리 (mm)").click();
+    harness.run();
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.run();
+    harness.key_press(egui::Key::Backspace);
+    harness.run();
+    harness.get_by_role_and_label(input, "거리 (mm)").type_text("25");
+    harness.run();
+    let shown = harness.get_by_role_and_label(input, "거리 (mm)").value();
+    assert_eq!(shown.as_deref().unwrap_or(""), "25");
+    harness.query_all_by_label("확인").last().unwrap().click();
+    harness.run_steps(3);
+    assert_eq!(count(&harness), 1);
+    assert_eq!(harness.state().session.history().undo_depth(), depth + 1);
+    assert!(
+        harness.query_all_by_label("거리 (mm)").count() == 0,
+        "the dialog stayed open after a good value"
+    );
+    let plane = harness.state().session.doc().work_features().iter().next().map(|(id, _)| id).unwrap();
+    let Some(gc_doc::WorkShape::Plane(pose)) = harness.state().session.work_shape(plane) else {
+        panic!("no plane")
+    };
+    assert!((pose.translation.z - 0.025).abs() < 1e-9, "{:?}", pose.translation);
+}
+
+// ---- Select menu (Shift + right click) ----
+
+fn shift_secondary_click(harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, at: egui::Pos2, shift: bool) {
+    let modifiers = if shift { egui::Modifiers::SHIFT } else { egui::Modifiers::NONE };
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run_steps(3);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers,
+        });
+        harness.run_steps(3);
+    }
+}
+
+fn select_menu_scene(
+    harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>,
+) -> (gc_core::Id<gc_doc::Body>, gc_core::Id<gc_doc::Body>, egui::Pos2) {
+    let solid = gc_doc::Solid::Box { size: [0.1; 3] };
+    let first = harness.state_mut().session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    let second = harness.state_mut().session.add_body(solid, gc_doc::Placement::default()).unwrap();
+    harness.state_mut().fit_view();
+    harness.state_mut().viewport_mut().camera.pan([0.0, 0.0], [-250.0, 0.0], [1280.0, 700.0]);
+    harness.run();
+    let at = harness.state().viewport().screen_of(gc_math::DVec3::ZERO).unwrap();
+    (first, second, at)
+}
+
+/// The Select menu is chosen with the mouse: "작업 피처 우선" sets the priority and closes the menu; then a click
+/// on a body selects nothing, a click on a work feature selects it; "구성요소 우선" brings the bodies back.
+#[test]
+fn the_select_menu_switches_the_priority_and_the_click_follows() {
+    let mut harness = harness();
+    let (_first, _second, at) = select_menu_scene(&mut harness);
+    // A work point far from the bodies, to click when features have the priority.
+    let op = gc_doc::CellOp::AddWorkFeature(gc_doc::WorkFeature {
+        name: "Point1".to_owned(),
+        geometry: gc_doc::WorkGeometry::Point { at: gc_doc::PointRef::Fixed([0.09, 0.0, 0.0]) },
+        visible: true,
+    });
+    harness.state_mut().session.execute(&gc_doc::Command::Cell(op)).unwrap();
+    harness.run();
+    let plain_click = |harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, at: egui::Pos2| {
+        harness.event(egui::Event::PointerMoved(at));
+        harness.run_steps(2);
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.run_steps(3);
+        }
+    };
+    // Component priority (the default): a click selects a body.
+    plain_click(&mut harness, at);
+    assert!(
+        harness.state().session.selected_item().is_some(),
+        "the default priority did not select the body"
+    );
+    // The menu: choose the work feature priority.
+    shift_secondary_click(&mut harness, at, true);
+    harness.get_by_label("작업 피처 우선").click();
+    harness.run_steps(3);
+    assert_eq!(harness.state().viewport().select_priority, gc_viewport::SelectPriority::Feature);
+    assert!(harness.query_by_label("작업 피처 우선").is_none(), "the menu stayed open after a choice");
+    // (A selected body shows its move handles at its centre, which take the click: start from nothing selected.)
+    harness.state_mut().session.select_item(None);
+    harness.run();
+    plain_click(&mut harness, at);
+    assert_eq!(
+        harness.state().session.selected_item(),
+        None,
+        "a body was selected under the feature priority"
+    );
+    let on_point = harness.state().viewport().screen_of(gc_math::DVec3::new(0.09, 0.0, 0.0)).unwrap();
+    plain_click(&mut harness, on_point);
+    assert!(harness.state().viewport().work_selected.is_some(), "the work feature was not selected");
+    // Back to components.
+    shift_secondary_click(&mut harness, at, true);
+    harness.get_by_label("구성요소 우선").click();
+    harness.run_steps(3);
+    assert_eq!(harness.state().viewport().select_priority, gc_viewport::SelectPriority::Component);
+    plain_click(&mut harness, at);
+    assert!(harness.state().session.selected_item().is_some());
+}
+
+/// Esc and a click elsewhere close the menu without changing the priority; a plain right click (no Shift) does
+/// not open it; over an empty spot the menu opens and Select Other lists nothing without a panic.
+#[test]
+fn the_select_menu_closes_cleanly_and_only_opens_with_shift() {
+    let mut harness = harness();
+    let (_first, _second, at) = select_menu_scene(&mut harness);
+    // No Shift: no Select menu.
+    shift_secondary_click(&mut harness, at, false);
+    assert!(harness.query_by_label("작업 피처 우선").is_none(), "a plain right click opened the Select menu");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(2);
+    // Shift: the menu; Esc closes it.
+    shift_secondary_click(&mut harness, at, true);
+    assert!(harness.query_by_label("작업 피처 우선").is_some());
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(3);
+    assert!(harness.query_by_label("작업 피처 우선").is_none(), "Esc left the menu open");
+    assert_eq!(harness.state().viewport().select_priority, gc_viewport::SelectPriority::Component);
+    // A click outside closes it too.
+    shift_secondary_click(&mut harness, at, true);
+    let elsewhere = egui::pos2(at.x + 300.0, at.y + 150.0);
+    harness.event(egui::Event::PointerMoved(elsewhere));
+    harness.run_steps(2);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: elsewhere,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run_steps(3);
+    }
+    assert!(harness.query_by_label("작업 피처 우선").is_none(), "a click elsewhere left the menu open");
+    assert_eq!(harness.state().viewport().select_priority, gc_viewport::SelectPriority::Component);
+    // An empty spot: the menu opens; Select Other has nothing to list and nothing breaks.
+    shift_secondary_click(&mut harness, elsewhere, true);
+    if harness.query_by_label("다른 항목 선택").is_some() {
+        harness.get_by_label("다른 항목 선택").click();
+        harness.run_steps(3);
+        let button = egui::accesskit::Role::Button;
+        assert!(harness.query_by_role_and_label(button, "Body1").is_none(), "an empty spot listed a body");
+        harness.key_press(egui::Key::Escape);
+        harness.run_steps(2);
+    }
+    assert_eq!(harness.state().session.selected_item(), None);
+}
+
+/// Select Other lists the components under the cursor, a click on a row selects that one, hidden components are
+/// not listed, and Esc closes the list leaving the selection as it was.
+#[test]
+fn select_other_lists_visible_components_and_selects_the_chosen_one() {
+    let mut harness = harness();
+    let (first, second, at) = select_menu_scene(&mut harness);
+    shift_secondary_click(&mut harness, at, true);
+    harness.get_by_label("다른 항목 선택").click();
+    harness.run_steps(3);
+    let button = egui::accesskit::Role::Button;
+    harness.get_by_role_and_label(button, "Body1");
+    harness.get_by_role_and_label(button, "Body2");
+    // Esc closes the list and selects nothing.
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(3);
+    assert!(harness.query_by_role_and_label(button, "Body2").is_none(), "Esc left the list open");
+    assert_eq!(harness.state().session.selected_item(), None);
+    // Choose the second.
+    shift_secondary_click(&mut harness, at, true);
+    harness.get_by_label("다른 항목 선택").click();
+    harness.run_steps(3);
+    harness.get_by_role_and_label(button, "Body2").click();
+    harness.run_steps(3);
+    assert_eq!(harness.state().session.selected_item(), Some(gc_session::CellItem::Body(second)));
+    // A hidden body is not listed.
+    harness.state_mut().session.set_visible(first.erase(), false).unwrap();
+    harness.run();
+    shift_secondary_click(&mut harness, at, true);
+    harness.get_by_label("다른 항목 선택").click();
+    harness.run_steps(3);
+    assert!(harness.query_by_role_and_label(button, "Body1").is_none(), "a hidden body was listed");
+}

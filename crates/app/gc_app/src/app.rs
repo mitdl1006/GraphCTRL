@@ -258,6 +258,7 @@ pub struct GraphCtrlApp {
     interference: crate::interference::Interference,
     /// The Drive dialog.
     drive: crate::drive::Drive,
+    joint_limits: crate::joint_limits::JointLimits,
     /// The Constrain dialog.
     constrain: crate::constrain::Constrain,
     assemble: crate::assemble::Assemble,
@@ -368,6 +369,7 @@ impl GraphCtrlApp {
             measure: crate::measure::Measure::default(),
             interference: crate::interference::Interference::default(),
             drive: crate::drive::Drive::default(),
+            joint_limits: crate::joint_limits::JointLimits::default(),
             constrain: crate::constrain::Constrain::default(),
             assemble: crate::assemble::Assemble::default(),
             work_feature: crate::work_feature::WorkFeatureDialog::default(),
@@ -1318,6 +1320,7 @@ impl eframe::App for GraphCtrlApp {
                             // A refusal is explained in the status bar.
                             drop(self.session.set_joint_lock(id, on));
                         }
+                        Some(BrowserAction::JointLimits(id)) => self.joint_limits.start(&self.session, id),
                         Some(BrowserAction::JointProtect(id, on)) => {
                             drop(self.session.set_joint_protect(id, on));
                         }
@@ -1391,6 +1394,7 @@ impl eframe::App for GraphCtrlApp {
                 ui.set_max_width(ui.available_width());
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     gc_panels::properties(ui, &mut self.session, lang, &mut self.expression);
+                    self.cell.hold_previews = self.viewport.is_grip_snapping();
                     gc_panels::cell(ui, &mut self.session, lang, &mut self.cell);
                 });
             },
@@ -1415,6 +1419,16 @@ impl eframe::App for GraphCtrlApp {
             || self.pattern.open
             || self.replicate.picking()
             || self.assemble.picking();
+        if let Some(id) = self.viewport.take_constrain_work()
+            && let Some(selection) = self.session.work_feature_selection(id)
+        {
+            // Only the Assemble command and the Constrain dialog take work features as geometry.
+            if self.assemble.picking() {
+                self.assemble.pick_selection(&self.session, selection);
+            } else if self.constrain.picking() {
+                self.constrain.pick_selection(&self.session, selection);
+            }
+        }
         if let Some((occurrence, element)) = self.viewport.take_constrain_pick() {
             if self.assemble.picking() {
                 self.assemble.pick(&self.session, occurrence, element);
@@ -1430,6 +1444,9 @@ impl eframe::App for GraphCtrlApp {
         }
         if self.joint.open {
             self.joint.window(&ctx, &mut self.session, lang);
+        }
+        if self.joint_limits.open {
+            self.joint_limits.window(&ctx, &mut self.session, lang);
         }
         if self.pattern.open {
             self.pattern.window(&ctx, &mut self.session, lang);

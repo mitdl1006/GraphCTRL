@@ -91,6 +91,73 @@
 
 - 스케치 P1 잔여(리드 새 1순위 ③·④의 일부): ① Trim·Extend·Fillet 리본 버튼("자르기"·"연장"·"모깎기")을 스케치 탭 수정 그룹 작은 버튼 줄에 추가(`ToolKind::Trim/Extend/Fillet`; 반지름 상자는 백엔드 HUD `Radius` 필드가 처리). 폭을 위해 "절단 모서리 투영"을 큰 버튼에서 중심점 토글 아래 작은 버튼으로 옮김 — 스케치 탭에서 "스케치 마무리"가 1280 px 안에 40 px 이상 여유(테스트 단언). 원문 To Split, Trim, or Extend Curves(GUID-DD00037F-6BBA-4B95-AA90-4F99DCEB667D) 읽음: Split·Trim·Extend 모두 Modify 패널, 커서를 올리면 미리보기, 클릭, 우클릭으로 Split/Trim/Extend 전환·Done. 원문과 다른 점: Fillet이 원문은 Create 패널(우리는 수정 그룹), 우클릭 전환 메뉴는 없음(마킹 메뉴가 우클릭을 씀), Shift 전환 시 도구 이름 갱신·Fillet 반지름 상자 유지·미리보기는 백엔드가 하는 부분만 확인하지 않음(QA `p1_8…` 보류 테스트가 확인). ② 치수 편집 상자: 더블클릭하면 종속(참조) 치수도 열리고 "종속 치수" 체크박스로 `SetDriving` 토글(실행 취소 1단계, 구속 과다가 되는 되돌리기는 거부되어 상태바가 설명; 종속 치수는 표현식 칸 없이 체크박스만), `이름 = 값` 입력은 매개변수를 만들고(이미 있으면 값을 바꾸고) 치수가 그 이름을 참조 — `Command::AddParam/SetParam` 후 `edit_dimension`이라 실행 취소는 두 단계(백엔드가 한 단계로 묶어 주면 좋음), 숫자로 시작하는 이름·예약어는 거부되고 상자가 열린 채 남음. 근거 원문 To Add Dimensions(GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185)의 위 동작은 QA 보류 테스트 설명을 따름(원문 페이지 자체는 읽지 않음). ③ 단축키: 스케치 밖에서 C = 구속(어셈블리), P = 배치, 스케치 안 C = 원 유지 — 원문 Predefined Command Alias and Shortcut Reference(GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E)는 C=조립 구속, D=치수, L=선, P=컴포넌트 배치, R=회전체(스케치 안 R은 우리 사각형이라 다름), S=스케치, T=프레젠테이션 트윅만 적혀 있고 **TR(자르기)·T 같은 스케치 별칭은 이 문서에 없어** 만들지 않음(QA 설명의 TR 근거 확인 불가). 테스트 `trim_extend_and_fillet_have_ribbon_buttons_and_c_means_constrain_outside_sketches`, `the_dimension_box_toggles_driven_and_driving`, `a_parameter_is_made_from_the_dimension_box`.
 
+### 다른 항목 선택 (Select Other)
+
+- 근거: 인벤터 도움말 Select Other (선택 항목 겹침 목록). 원문 GUID는 커밋 메시지 참고.
+- 뷰 위에서 Ctrl+A를 누르면 커서 아래에 겹친 구성요소를 거리순으로 나열한다(`Picker::pick_all`, 중복 제거). 항목에 마우스를 올리면 강조, 클릭하면 선택하고 목록이 닫힌다.
+- 증거: `docs/evidence/img/review-54-select-other.png`, 테스트 `select_other_lists_what_lies_under_the_cursor`.
+- Ctrl+A 근거: 단축키 원문 GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E에 "Ctrl + A Activates Select Other." (재확인). Shift+우클릭은 Select 명령 메뉴(아래)를 연다. 일반 우클릭(마킹 메뉴) 목록에도 "다른 항목 선택" 항목이 있다.
+- 원문과 차이: 보통 우클릭 메뉴(마킹 메뉴)에는 "다른 항목 선택" 없음, 멈춤 지연 설정 없음, 화살표 키 순환 없음, 구성요소만 대상.
+
+### 그립 스냅 (Grip Snap)
+
+- 근거: 인벤터 도움말 Grip Snap move or rotate, GUID-E1CA109A-D5A1-4131-AC3A-AE217716DD8C (백엔드 `grip_snap_pose` / `grip_allows` / `grip_snap_commit`).
+- 조립 탭 > 위치 > "그립 스냅". 흐름: 구성요소의 모서리 클릭(기준선) → "축을 따라 이동"/"선 기준 회전" 선택 → 시작점 클릭 → 끝점 위로 움직이면 미리보기, 클릭하면 확정 → 완료 / 접지 후 완료 / 취소(Esc·우클릭). 완료는 Undo 한 단계.
+- HUD 줄: `grip_allows`로 남은 자유도가 이 동작을 허용하는지 초록/빨강으로 표시.
+- 이동은 시작점을 지나는 기준선과 평행한 선 위에서 커서에 가장 가까운 점을 끝점으로 써서 커서를 따라가고, 회전은 시점 평면 위의 점을 쓴다.
+- 미리보기는 세션 미리보기를 쓰므로 `CellUi::hold_previews`로 속성 패널이 마우스를 뗀 순간 커밋하지 않게 했다. 그립 스냅 중에는 이동/회전 핸들(기즈모)을 끈다.
+- 증거: `docs/evidence/img/review-55-grip-snap.png`, 테스트 `grip_snap_moves_a_component_along_a_picked_edge`.
+- 원문과 차이: (점·면 기준은 아래 항목) 인벤터의 화면 내 조작 핸들·HUD 아이콘 대신 상단 패널, 시작점은 표면 클릭(스냅 점 보조 없음), 여러 구성요소 동시 조작 없음.
+
+### 작업 피처를 어셈블/구속의 뷰 선택으로
+
+- 근거: To Place Mate or Flush Constraints, GUID-0F500089-4F69-41C5-AFE8-B58AC9E8E15E ("Select the first point, curve, face, or work feature"). 백엔드 `work_feature_selection(id)`.
+- 어셈블 명령과 구속 대화상자가 뷰에서 보이는 작업 피처(축 선 / 평면 테두리 / 점 십자)를 누르면 `work_feature_selection`을 첫째·둘째 선택으로 쓴다. 작업 피처가 원점 기하보다 먼저 잡힌다. 선택 이름은 작업 피처 이름(예: `Point1 · 점`).
+- 테스트 `a_work_feature_clicked_in_the_view_fills_the_assemble_selection`.
+- 원문과 차이: 조인트·패턴·복사·미러 대화상자는 원점 기하만 받는다(작업 피처 선택 연결 없음). 곡선·면 선택은 아직 없음.
+- 같이: Shift+우클릭 = Select 명령 메뉴(아래 항목).
+
+### `이름 = 값` 한 단계 Undo
+
+- 치수 상자의 새 매개변수 이름은 백엔드 `edit_dimension_with_param`(한 Txn)으로 만든다. 이미 있는 이름은 값 변경(SetParam) 후 치수 연결의 두 단계로 남는다(백엔드 API가 추가만 지원). 테스트 `a_parameter_is_made_from_the_dimension_box`가 한 번의 Undo로 매개변수와 연결이 함께 사라지는지 확인.
+
+### Select 명령 메뉴 (Shift+우클릭)
+
+- 근거: 단축키 원문 GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E "Shift+ right-click Activates the Select command menu."; 선택 모드는 GUID-E3E49BD5-3F55-4836-8CD1-2C1855CF9986(Select Bodies/Features/Faces/Sketches 등), 선택 방법 GUID-B8F6E805-2E4B-4366-8FF6-33F0ED1C1C4A("right-click, choose Select Other").
+- 메뉴: 구성요소 우선(기본) / 작업 피처 우선 + 다른 항목 선택. 작업 피처 우선에서는 평범한 클릭이 작업 피처·원점 기하만 잡고 본체는 선택하지 않는다(`Viewport::select_priority`). 마킹 메뉴(일반 우클릭) 목록에도 "다른 항목 선택".
+- 테스트 `shift_right_click_opens_the_select_menu`, `the_work_feature_priority_leaves_bodies_unselected`.
+- 원문과 차이: 원문의 모드(본체·피처·면·스케치 선택, 부품 우선 등)는 앱에 해당 선택 대상이 없어 둘만 둔다. 상태 표시(어느 우선순위인지)는 메뉴에서만 보인다. 면과 모서리 선택은 측정 명령에서만.
+
+### 조인트 한계 (Limits 탭)
+
+- 근거: To Define and Manage Joint Relationships, GUID-21DC3336-5C51-42C1-90FB-4299CD66E0C6 (Limits 탭: Start / Current / End). 백엔드 `set_joint_limits` / `joint_limits` / `joint_position`.
+- 브라우저 조인트 행 우클릭 > "한계…" 로 "조인트 한계" 창. 회전 조인트는 각도(°), 슬라이더는 선형(mm), 원통형은 둘 다(`takes_limits`). 각 한계는 체크로 켜고 시작·끝, "현재"를 체크하면 그 값에 고정. 현재 위치(`joint_position`)를 창에 표시. 확인/적용/취소. 값이 숫자가 아니거나 시작>끝, 현재가 범위 밖이면 버튼이 막힌다.
+- 한계가 있는 조인트 행은 이름 뒤에 `+/-`. 구동(Drive) 대화상자의 시작·끝 기본값이 조인트 한계(시작·끝)가 된다.
+- 증거: `docs/evidence/img/review-56-joint-limits.png`, 테스트 `a_rotational_joint_gets_angular_limits_from_its_dialog`.
+- 원문과 차이: 원문은 조인트 편집 대화상자의 탭이지만 우리는 조인트 만들기 대화상자에 탭이 없어 별도 창으로 둔다. 슬라이더·원통형 입력은 같은 코드지만 테스트는 회전 조인트만. 한계에서 막힌 위치를 뷰에 그리지 않는다.
+
+### 그립 스냅: 점·면 기준
+
+- 근거: Grip Snap Move Options Bar Reference, GUID-C030C32C-7E1E-4F37-BBDF-120412898D00 (백엔드 `grip_snap_pose_on` / `grip_snap_allowed`, `GripReference::{Point, Line, Plane}`).
+- 첫 선택으로 모서리(선), 꼭짓점(점), 평평한 면(평면)을 고른다. 이동 옵션은 기준에 따라: 점 = 점 기준 이동 / 점 기준 회전, 선 = 축을 따라 이동 / 선 기준 회전, 면 = 면 안에서 이동 / 법선 방향 이동. 법선·선 방향 이동은 끝점이 커서를 따라가고 나머지는 시점 평면의 점을 쓴다. HUD는 두 점이 있으면 `grip_snap_allowed`로 판정.
+- 테스트 `grip_snap_moves_a_component_along_the_normal_of_a_picked_face`.
+- 원문과 차이: Free Drag·Free Rotate(참조 기하 없는 옵션), 두 번째·세 번째 선택으로 점·선·면을 고르는 방식(두 점으로만), 원형 모서리·곡면·NURB 첫 선택(원통 면은 선택 불가), 오프셋 값 입력은 없다. 꼭짓점은 측정 명령의 점 줍기(8 px)를 쓴다.
+
+### 서브어셈블리를 통째로 이동
+
+- 근거: Create Subassemblies in Place, GUID-FCEE3F0E-AAE2-4619-8645-2588FEECD353 (서브어셈블리는 부모 안에서 하나의 단위). 백엔드 `subassembly_moved` / `move_subassembly`.
+- 자유 이동·자유 회전: 서브어셈블리에 속한 구성요소를 끌면 서브어셈블리 전체가 움직이고(`delta = 새 포즈 × 시작 포즈⁻¹`) 놓을 때 Undo 한 단계. 접지된 구성요소가 있는 서브어셈블리는 끌려가지 않는다(드래그 시작 안 함). 그립 스냅: 서브어셈블리의 구성요소를 잡으면 확정 때 나머지도 함께 이동(접지 후 완료는 모두 접지).
+- 같이 고침: 자유 이동/회전이 켜져 있으면 이동·회전 핸들(기즈모)을 끈다. 선택한 구성요소의 핸들 위로 끌면 핸들이 드래그를 가로채 자유 이동이 끝나지 않던 버그.
+- 끄는 동안 서브어셈블리 전체가 `preview_components`로 미리보기되고, 놓을 때 `end_component_preview` 후 `move_subassembly`(문서·Undo는 놓을 때만).
+- 원문과 차이: 핸들(기즈모) 드래그와 속성 패널 위치 입력은 서브어셈블리 단위가 아니다. 그립 스냅의 미리보기는 잡은 구성요소만 보이고 나머지는 확정 때 따라온다.
+- 테스트 `free_move_drags_a_whole_subassembly`, `grip_snap_moves_the_whole_subassembly_of_the_picked_component`.
+
+### Trim 미리보기 (지울 조각 강조)
+
+- 근거: Trim/Extend/Split 원문 GUID-DD00037F(원문 목록은 앞 항목 참고): 지워질 부분이 클릭 전에 강조된다.
+- `Preview.cut`(Trim이 지울 조각)을 스케치 뷰에서 빨간 점선(2.6 px)으로 그린다. `Piece::polyline`으로 선분·호·원·타원호(`EllipseArc`)를 모두 그린다.
+- 증거 `docs/evidence/img/review-57-trim-preview.png`, 테스트 `trim_highlights_the_piece_that_would_go`.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹
