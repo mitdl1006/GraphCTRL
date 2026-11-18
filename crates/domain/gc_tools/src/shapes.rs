@@ -11,19 +11,33 @@
 //! - Arc slot: three clicks for the centre arc (start, end, a point on it; or centre, start, end), then the
 //!   width.
 //! - Offset: click a curve, then where the offset goes (or type the distance).
+//! - Midpoint Line: the midpoint, then an end (To Create Lines, Arcs, and Bends,
+//!   GUID-4F861674-F74C-474E-869A-4C190ED6EC4B).
+//! - Center rectangles: the centre, then a corner; or the centre, a side's middle and the other half-size.
+//! - Tangent Circle: three lines, the circle touching them nearest the clicks.
 
 use gc_doc::{ArcSlotKind, SketchOp, preview_sketch_op};
 use gc_math::fm;
 use gc_sketch::{CurveGeom, Sketch};
 
-use super::{HudField, Preview, Prompt, Tool, ToolEvent, ToolKind, ToolOutput, arc_through, distance};
+use super::{
+    HudField, Preview, Prompt, Tool, ToolEvent, ToolKind, ToolOutput, arc_through, distance, end_snap,
+};
 use crate::pick::{closest_on_curve, nearest_curve};
 
 /// The kinds these tools cover.
 pub(super) fn is_shape_tool(kind: ToolKind) -> bool {
     matches!(
         kind,
-        ToolKind::Point | ToolKind::Polygon | ToolKind::Slot(_) | ToolKind::ArcSlot(_) | ToolKind::Offset
+        ToolKind::Point
+            | ToolKind::Polygon
+            | ToolKind::Slot(_)
+            | ToolKind::ArcSlot(_)
+            | ToolKind::Offset
+            | ToolKind::MidpointLine
+            | ToolKind::CenterRectangle
+            | ToolKind::CenterRectangle3
+            | ToolKind::TangentCircle
     )
 }
 
@@ -164,6 +178,15 @@ impl Tool {
             ToolKind::ArcSlot(ArcSlotKind::ThreePoint) if self.slot_third.is_none() => Prompt::ArcSlotThrough,
             ToolKind::ArcSlot(_) if self.slot_third.is_none() => Prompt::ArcSlotEnd,
             ToolKind::ArcSlot(_) => Prompt::SlotWidth,
+            ToolKind::MidpointLine if self.anchor.is_none() => Prompt::MidpointLineMid,
+            ToolKind::MidpointLine => Prompt::MidpointLineEnd,
+            ToolKind::CenterRectangle | ToolKind::CenterRectangle3 if self.anchor.is_none() => {
+                Prompt::CenterRectCentre
+            }
+            ToolKind::CenterRectangle => Prompt::CenterRectCorner,
+            ToolKind::CenterRectangle3 if self.second.is_none() => Prompt::CenterRectSide,
+            ToolKind::CenterRectangle3 => Prompt::CenterRectWidth,
+            ToolKind::TangentCircle => Prompt::TangentCircleLine,
             ToolKind::Offset if self.offset_pick.is_none() => Prompt::OffsetPick,
             _ => Prompt::OffsetPlace,
         }
@@ -238,6 +261,26 @@ impl Tool {
                 })
             }
             ToolKind::Offset => self.offset_op(self.offset_distance(sketch, cursor)?),
+            ToolKind::MidpointLine => {
+                let mid = self.anchor?;
+                (distance(mid, cursor) > 1e-12).then(|| SketchOp::AddMidpointLine {
+                    mid: xyz(mid),
+                    end: xyz(cursor),
+                    snap_mid: self.anchor_snap.as_ref().map(end_snap).unwrap_or_default(),
+                    snap_end: self.cursor.as_ref().map(end_snap).unwrap_or_default(),
+                })
+            }
+            ToolKind::CenterRectangle => Some(SketchOp::AddCenterRectangle {
+                centre: xyz(self.anchor?),
+                corner: xyz(cursor),
+                snap_centre: self.anchor_snap.as_ref().map(end_snap).unwrap_or_default(),
+            }),
+            ToolKind::CenterRectangle3 => Some(SketchOp::AddCenterRectangle3 {
+                centre: xyz(self.anchor?),
+                side: xyz(self.second?.pos),
+                width: xyz(cursor),
+                snap_centre: self.anchor_snap.as_ref().map(end_snap).unwrap_or_default(),
+            }),
             _ => None,
         }
     }
@@ -259,6 +302,10 @@ impl Tool {
                 let sweep = (angle(end) - angle(start)).rem_euclid(std::f64::consts::TAU);
                 preview.arcs.push((centre, distance(centre, start), angle(start), sweep));
             }
+            return;
+        }
+        if let (ToolKind::CenterRectangle3, Some(c), None) = (self.kind, self.anchor, self.second) {
+            preview.lines.push((c, cursor));
             return;
         }
         if let Some(op) = self.shape_op(sketch, cursor)
@@ -380,6 +427,55 @@ impl Tool {
                         self.reset();
                         return Some(out.into_iter().collect());
                     }
+                }
+                Vec::new()
+            }
+            ToolKind::MidpointLine | ToolKind::CenterRectangle => {
+                let here = self.place(sketch, pos, px, None, modifier);
+                if self.anchor.is_none() {
+                    self.anchor = Some(here.pos);
+                    self.anchor_snap = Some(here);
+                    return Some(Vec::new());
+                }
+                self.cursor = Some(here);
+                let out = self.shape_op(sketch, here.pos).map(|op| self.emit(op, &[]));
+                self.reset();
+                out.into_iter().collect()
+            }
+            ToolKind::CenterRectangle3 => {
+                let here = self.place(sketch, pos, px, None, modifier);
+                match (self.anchor, self.second) {
+                    (None, _) => {
+                        self.anchor = Some(here.pos);
+                        self.anchor_snap = Some(here);
+                        Vec::new()
+                    }
+                    (Some(c), None) => {
+                        if distance(c, here.pos) > px.max(1e-12) {
+                            self.second = Some(here);
+                        }
+                        Vec::new()
+                    }
+                    (Some(_), Some(_)) => {
+                        let out = self.shape_op(sketch, here.pos).map(|op| self.emit(op, &[]));
+                        self.reset();
+                        out.into_iter().collect()
+                    }
+                }
+            }
+            ToolKind::TangentCircle => {
+                let line = nearest_curve(sketch, pos, px, &[])
+                    .map(|(c, _)| c)
+                    .filter(|c| sketch.line(*c).is_some() && !self.tangent_lines.iter().any(|(l, _)| l == c));
+                if let Some(line) = line {
+                    self.tangent_lines.push((line, pos));
+                }
+                if let [(a, pa), (b, pb), (c, pc)] = self.tangent_lines[..] {
+                    self.tangent_lines.clear();
+                    return Some(vec![ToolOutput::Edit(SketchOp::AddTangentCircle {
+                        lines: [a, b, c],
+                        near: [pa, pb, pc],
+                    })]);
                 }
                 Vec::new()
             }

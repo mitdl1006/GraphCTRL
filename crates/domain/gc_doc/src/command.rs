@@ -430,6 +430,50 @@ pub enum SketchOp {
         /// What the first corner was snapped to.
         snap_a: EndSnap,
     },
+    /// Midpoint Line (Inventor 2026 help, To Create Lines, Arcs, and Bends,
+    /// GUID-4F861674-F74C-474E-869A-4C190ED6EC4B): a line through `end` whose midpoint is at `mid`; the
+    /// midpoint is a point of the sketch held at the line's middle, and takes what it was snapped to.
+    AddMidpointLine {
+        /// The midpoint.
+        mid: [f64; 3],
+        /// One end.
+        end: [f64; 3],
+        /// What the midpoint was snapped to.
+        snap_mid: EndSnap,
+        /// What the end was snapped to.
+        snap_end: EndSnap,
+    },
+    /// Two Point Center Rectangle (To Create 2D Shape Geometry, GUID-D489CE6D-7299-4211-A43A-F3580A4BA357):
+    /// an axis-aligned rectangle round `centre` with a corner at `corner`, and a construction diagonal
+    /// whose midpoint is the centre point.
+    AddCenterRectangle {
+        /// Centre.
+        centre: [f64; 3],
+        /// A corner.
+        corner: [f64; 3],
+        /// What the centre was snapped to.
+        snap_centre: EndSnap,
+    },
+    /// Three Point Center Rectangle (same help): round `centre`, `side` the middle of one side (its
+    /// direction and distance), `width` setting how far the adjacent sides reach.
+    AddCenterRectangle3 {
+        /// Centre.
+        centre: [f64; 3],
+        /// The middle of one side.
+        side: [f64; 3],
+        /// A point setting the other half-size.
+        width: [f64; 3],
+        /// What the centre was snapped to.
+        snap_centre: EndSnap,
+    },
+    /// Tangent Circle: the circle touching three lines — of the (up to four) such circles, the one whose
+    /// touching points are nearest to where each line was clicked (`near`).
+    AddTangentCircle {
+        /// The three lines.
+        lines: [Id<Curve>; 3],
+        /// Where each was clicked.
+        near: [[f64; 2]; 3],
+    },
     /// Applies a drawing edit and attaches values typed into the input boxes as driving dimensions of
     /// what it created (the HUD). One undo step; a value the sketch cannot take refuses the whole edit.
     WithDimensions {
@@ -1006,6 +1050,94 @@ impl PatternBuild {
             circles: self.circles,
         });
     }
+}
+
+/// The centre point of a rectangle just made (`inner`, its four lines first): a construction diagonal
+/// between opposite corners, and a point at its middle that takes what the centre was snapped to.
+fn centre_point(
+    sketch: &mut Sketch,
+    ids: &mut IdAlloc,
+    inner: &[Created],
+    centre: [f64; 3],
+    snap: &EndSnap,
+    created: &mut Vec<Created>,
+) -> Result<(), EditError> {
+    let lines: Vec<Id<Curve>> =
+        inner.iter().filter_map(|c| if let Created::Curve(id) = c { Some(*id) } else { None }).collect();
+    let corner = |k: usize| lines.get(k).and_then(|l| sketch.line(*l)).map(|(a, _)| a);
+    let (Some(first), Some(third)) = (corner(0), corner(2)) else {
+        return Err(SketchError::InvalidValue.into());
+    };
+    let diagonal = construction_between(sketch, ids, first, third, created)?;
+    let middle = sketch.add_point(ids, [centre[0], centre[1], 0.0]);
+    created.push(Created::Point(middle));
+    require(sketch, ids, GeoConstraint::Midpoint(middle, diagonal), created)?;
+    snap_constraint(sketch, ids, middle, snap, created);
+    Ok(())
+}
+
+/// The circle touching the three lines (as infinite lines) whose touching points are nearest to `near`.
+fn tangent_circle(sketch: &Sketch, lines: &[Id<Curve>; 3], near: &[[f64; 2]; 3]) -> Option<([f64; 2], f64)> {
+    // Each line as a unit normal and offset: n · p = d.
+    let mut forms = Vec::new();
+    for line in lines {
+        let (a, b) = sketch.line(*line)?;
+        let (a, b) = (sketch.pos(a)?, sketch.pos(b)?);
+        let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+        let length = gc_math::fm::hypot(dx, dy);
+        if length < 1e-12 {
+            return None;
+        }
+        let n = [-dy / length, dx / length];
+        forms.push((n, n[0] * a[0] + n[1] * a[1]));
+    }
+    let mut best: Option<(f64, [f64; 2], f64)> = None;
+    // A centre at signed distance r from each line, on the chosen sides: s_i (n_i · c - d_i) = r.
+    for signs in [[1.0, 1.0, 1.0], [1.0, 1.0, -1.0], [1.0, -1.0, 1.0], [-1.0, 1.0, 1.0]] {
+        for flip in [1.0, -1.0] {
+            let s: Vec<f64> = signs.iter().map(|v| v * flip).collect();
+            // Unknowns c.x, c.y, r: s_i n_i · c - r = s_i d_i.
+            let row = |i: usize| -> [f64; 4] {
+                let (n, d) = forms[i];
+                [s[i] * n[0], s[i] * n[1], -1.0, s[i] * d]
+            };
+            let (r0, r1, r2) = (row(0), row(1), row(2));
+            let det = |m: [[f64; 3]; 3]| {
+                m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+                    - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+                    + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
+            };
+            let a = [[r0[0], r0[1], r0[2]], [r1[0], r1[1], r1[2]], [r2[0], r2[1], r2[2]]];
+            let d = det(a);
+            if d.abs() < 1e-12 {
+                continue;
+            }
+            let replace = |k: usize| {
+                let mut m = a;
+                for (i, r) in [r0, r1, r2].iter().enumerate() {
+                    m[i][k] = r[3];
+                }
+                det(m) / d
+            };
+            let (cx, cy, r) = (replace(0), replace(1), replace(2));
+            if !(r.is_finite() && r > 1e-9) {
+                continue;
+            }
+            // How far the touching points are from the clicks.
+            let miss: f64 = (0..3)
+                .map(|i| {
+                    let (n, dd) = forms[i];
+                    let off = n[0] * cx + n[1] * cy - dd;
+                    let touch = [cx - n[0] * off, cy - n[1] * off];
+                    gc_math::fm::hypot(touch[0] - near[i][0], touch[1] - near[i][1])
+                })
+                .sum();
+            if best.is_none_or(|(m, ..)| miss < m) {
+                best = Some((miss, [cx, cy], r));
+            }
+        }
+    }
+    best.map(|(_, c, r)| (c, r))
 }
 
 /// What a pattern added, as sketch items.
@@ -1989,6 +2121,79 @@ fn sketch_op(
                 snap_constraint(sketch, ids, *corner, snap_a, &mut created);
             }
             "Rectangle"
+        }
+        SketchOp::AddMidpointLine { mid, end, snap_mid, snap_end } => {
+            if !mid.iter().chain(end).all(|v| v.is_finite()) {
+                return Err(SketchError::InvalidValue.into());
+            }
+            let start = [2.0 * mid[0] - end[0], 2.0 * mid[1] - end[1], 0.0];
+            if gc_math::fm::hypot(end[0] - mid[0], end[1] - mid[1]) < 1e-12 {
+                return Err(SketchError::InvalidValue.into());
+            }
+            let line = sketch.add_line(ids, start, [end[0], end[1], 0.0]);
+            created.push(Created::Curve(line));
+            let middle = sketch.add_point(ids, [mid[0], mid[1], 0.0]);
+            created.push(Created::Point(middle));
+            require(sketch, ids, GeoConstraint::Midpoint(middle, line), &mut created)?;
+            snap_constraint(sketch, ids, middle, snap_mid, &mut created);
+            if let Some((_, b)) = sketch.line(line) {
+                snap_constraint(sketch, ids, b, snap_end, &mut created);
+            }
+            "Midpoint line"
+        }
+        SketchOp::AddCenterRectangle { centre, corner, snap_centre } => {
+            let (c, k) = ([centre[0], centre[1]], [corner[0], corner[1]]);
+            if !c.iter().chain(&k).all(|v| v.is_finite())
+                || (k[0] - c[0]).abs() < 1e-12
+                || (k[1] - c[1]).abs() < 1e-12
+            {
+                return Err(SketchError::InvalidValue.into());
+            }
+            let rectangle = SketchOp::AddRectangle {
+                a: [2.0 * c[0] - k[0], 2.0 * c[1] - k[1]],
+                b: k,
+                snap_a: EndSnap::default(),
+            };
+            let (inner, _) = sketch_op(sketch, ids, &rectangle, scope)?;
+            centre_point(sketch, ids, &inner, *centre, snap_centre, &mut created)?;
+            created.splice(0..0, inner);
+            "Rectangle"
+        }
+        SketchOp::AddCenterRectangle3 { centre, side, width, snap_centre } => {
+            let u = [side[0] - centre[0], side[1] - centre[1]];
+            let half = gc_math::fm::hypot(u[0], u[1]);
+            if !(half.is_finite() && half > 1e-12) || !width.iter().all(|v| v.is_finite()) {
+                return Err(SketchError::InvalidValue.into());
+            }
+            // Across: the width point's distance from the line through the centre and the side's middle.
+            let n = [-u[1] / half, u[0] / half];
+            let h = (width[0] - centre[0]) * n[0] + (width[1] - centre[1]) * n[1];
+            if h.abs() < 1e-12 {
+                return Err(SketchError::InvalidValue.into());
+            }
+            let at = |su: f64, sn: f64| {
+                [centre[0] + su * u[0] + sn * h * n[0], centre[1] + su * u[1] + sn * h * n[1], 0.0]
+            };
+            let rectangle = SketchOp::AddRectangle3 {
+                a: at(1.0, -1.0),
+                b: at(1.0, 1.0),
+                c: at(-1.0, 1.0),
+                snap_a: EndSnap::default(),
+            };
+            let (inner, _) = sketch_op(sketch, ids, &rectangle, scope)?;
+            centre_point(sketch, ids, &inner, *centre, snap_centre, &mut created)?;
+            created.splice(0..0, inner);
+            "Rectangle"
+        }
+        SketchOp::AddTangentCircle { lines, near } => {
+            let (centre, radius) = tangent_circle(sketch, lines, near).ok_or(SketchError::InvalidValue)?;
+            let circle = sketch.add_circle(ids, [centre[0], centre[1], 0.0], radius)?;
+            created.push(Created::Curve(circle));
+            for line in lines {
+                let tangent = tangency(sketch, *line, circle).ok_or(SketchError::InvalidValue)?;
+                require(sketch, ids, tangent, &mut created)?;
+            }
+            "Tangent circle"
         }
         SketchOp::WithDimensions { op, dims } => {
             if matches!(**op, SketchOp::WithDimensions { .. }) {
