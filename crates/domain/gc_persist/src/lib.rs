@@ -405,6 +405,7 @@ mod tests {
                 sketch,
                 kind: gc_doc::RoleKind::Waypoint { point: a },
                 aim: gc_doc::ToolAim { reference: gc_doc::AimReference::SketchPlane, rpy: [0.0, 0.25, 0.0] },
+                travel: gc_doc::PathTravel::default(),
             }),
         );
         // The design side: a work plane, an extrusion of the sketch, an imported assembly, and a stored
