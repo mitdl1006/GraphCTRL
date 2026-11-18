@@ -385,6 +385,9 @@ impl Entity for MotionPath {
 /// An edit of the robot cell.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum CellOp {
+    /// Document Settings (To Change Document Settings, GUID-FB49837F-7832-4713-928E-1CEDBDB0C3BD): replaces
+    /// the settings saved with the document. Refused when they are not valid (`DocSettings::is_valid`).
+    SetDocSettings(crate::settings::DocSettings),
     /// Adds a work plane, axis or point at the rollback marker of the model tree.
     AddWorkFeature(crate::design::WorkFeature),
     /// Replaces a work feature.
@@ -1196,6 +1199,13 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
                 p.contacts.retain(|c| c.index < waypoints.len());
             })?;
             Ok((Vec::new(), "Edit path"))
+        }
+        CellOp::SetDocSettings(settings) => {
+            if !settings.is_valid() {
+                return Err(EditError::BadValue);
+            }
+            set_timeline(txn, |t| t.settings = *settings)?;
+            Ok((Vec::new(), "Document Settings"))
         }
         CellOp::AddWorkFeature(feature) => {
             work_feature_ok(txn, feature, None)?;

@@ -71,6 +71,49 @@ To Work with Sketch Dimensions GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185.
 | Flip Direction 대상의 "line to an arc (the arc itself)"·"between 2 arcs" 거리 | 없음 | 선-호·호-호 거리 치수 |
 | 구동 치수 토글 | 있음(`SketchOp::SetDriving`) | — |
 
+## 2026-11-18 — 문서 설정(Document Settings, 리드 다음 ①)
+
+근거:
+- To Change Document Settings, GUID-FB49837F-7832-4713-928E-1CEDBDB0C3BD — 탭 목록. Units: "Units of measure, Modeling Dimension Display, Default Parameter Input
+  Display"; Sketch: snap spacing, grid display, lineweight.
+- Sketch Tab Reference(Document Settings), GUID-58DD9A89-84C7-48F3-8E4E-0303E755B10F — "3D Sketch Auto-Bend Radius".
+- About Units of Measure, GUID-671A8679-AEC1-413A-A23B-428967648CE6 — "Unit value settings are saved with the file."
+- 표시 모드: To Work with Sketch Dimensions, GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185(Value/Name/Expression/Tolerance/Precise Value).
+
+데이터·API:
+- `gc_doc::DocSettings`는 Timeline에 저장되고 실행 취소된다. 기본값이면 저장하지 않으므로 옛 파일은 기본값으로 읽힌다.
+- `Document::settings()`, `CellOp::SetDocSettings(DocSettings)`(유효하지 않으면 거부, 한 번의 실행 취소).
+- `Session::{doc_settings, set_doc_settings}`.
+- 도우미: `DocSettings::{format_length, format_angle, dimension_text, length(), angle(), auto_bend_text, is_valid}`.
+- 뷰포트 치수 글자가 단위·자릿수·표시 모드를 따른다(`dimension_text`).
+- Auto-Bend: `Session::set_auto_bend(bool)` / `auto_bend() -> bool`(응용 옵션, 세션 값). 반지름은 문서의 `auto_bend_radius`. **API 바뀜**: 이전 `Option<String>`.
+
+FE 대화상자 필드(Tools > Document Settings):
+
+| 탭 | 필드 | 타입·범위 | 기본 |
+|---|---|---|---|
+| Units | Length | `LengthUnit::{Mm, Cm, M, In}` | Mm |
+| Units | Angle | `AngleUnit::{Deg, Rad}` | Deg |
+| Units | Modeling Dimension Display: Linear 자릿수 | 0–8 | 3 |
+| Units | Angular 자릿수 | 0–8 | 3 |
+| Units | Dimension display | `DimensionDisplay::{Value, Name, Expression, PreciseValue}` | Value |
+| Units | Default Parameter Input Display: 식으로 표시 | bool | true |
+| Sketch | Snap Spacing X, Y | m, > 0 | 1 mm |
+| Sketch | Snaps per minor | 1–100 | 10 |
+| Sketch | Major every N minor lines | 1–100 | 10 |
+| Sketch | 3D Sketch Auto-Bend Radius | m, > 0 | 10 mm |
+| Sketch(구속 추론) | Infer constraints / Persist constraints | bool | true / true |
+
+아직 연결 안 됨(필드만 저장):
+- 단위 없이 친 값이 문서 단위로 읽히는 것. 지금은 mm·deg로 고정되어 있고 `DocSettings::length()`로 바꿀 자리만 마련했다.
+- `input_as_expression`, 스냅·격자 값(격자 표시는 FE).
+- 구속 추론 두 값: FE가 `suppress_snap`이나 도구 옵션으로 넘기면 된다.
+
+없음: Tolerance 표시(치수에 허용차 없음), Modeling·Drawing·BOM·Default Tolerance 탭, Lineweight.
+
+- 테스트: `gc_session/tests/doc_settings.rs`, `gc_doc` 단위 테스트 `settings::tests`.
+- QA 브랜치 영향: QA 브랜치의 `sketch_bend.rs`는 내 파일의 옛 사본이라 병합하면 내 쪽(`set_auto_bend(bool)`)으로 바뀐다. 다른 영향 없음(`Timeline` 구조체 리터럴 없음).
+
 ## 2026-11-18 — 스플라인 Tangent·Smooth(G2)(① 6번)
 
 근거: GUID-A85A7A30-7D81-4C75-8769-CAD034EEA930 — "The Smooth (G2) constraint causes a continuous curvature (G2) condition between a spline and another curve, such

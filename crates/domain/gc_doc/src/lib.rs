@@ -23,6 +23,7 @@ mod project;
 mod relate;
 mod replicate;
 mod representation;
+mod settings;
 mod sketch_offset;
 mod subassembly;
 mod tree;
@@ -58,6 +59,7 @@ pub use relate::{
 };
 pub use replicate::Replacement;
 pub use representation::{PositionalRepresentation, Representations, ViewRepresentation};
+pub use settings::{AngleUnit, DimensionDisplay, DocSettings, LengthUnit};
 pub use subassembly::{Subassembly, SubassemblyId, SubassemblyOp, TreeKey, TreeRow};
 pub use tree::ComponentNode;
 pub use txn::{DocError, Txn};

@@ -442,6 +442,11 @@ impl Document {
         self.timelines.iter().next()
     }
 
+    /// The Document Settings (the defaults for a document that has none saved).
+    pub fn settings(&self) -> crate::settings::DocSettings {
+        self.timeline().map(|(_, t)| t.settings).unwrap_or_default()
+    }
+
     /// The design items of the model tree (sketches, work features, features, assemblies) in order: the
     /// stored order without ids that no longer exist, then the items it does not list, oldest first.
     pub fn model_order(&self) -> Vec<AnyId> {

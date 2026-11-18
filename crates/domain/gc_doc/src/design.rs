@@ -603,6 +603,9 @@ pub struct Timeline {
     /// View and positional representations.
     #[serde(default, skip_serializing_if = "crate::representation::Representations::is_empty")]
     pub representations: crate::representation::Representations,
+    /// Document Settings (units, dimension display, sketch settings).
+    #[serde(default, skip_serializing_if = "crate::settings::DocSettings::is_default")]
+    pub settings: crate::settings::DocSettings,
 }
 
 /// An occurrence in the assembly tree (docs/ux/inventor-assembly-parity.md, P1-1): a component placed
