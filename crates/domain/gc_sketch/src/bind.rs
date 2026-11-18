@@ -46,6 +46,15 @@ impl Binding {
         Ok(Line2 { a: self.p2(a)?, b: self.p2(b)? })
     }
 
+    /// A line, or an ellipse's major axis (from its centre to the major axis end): what Parallel,
+    /// Perpendicular and Collinear take ("lines or ellipse axes", GUID-A85A7A30-7D81-4C75-8769-CAD034EEA930).
+    fn axis_line(&self, sketch: &Sketch, curve: Id<Curve>) -> Result<Line2, SketchError> {
+        if let Some(CurveGeom::Ellipse { c, major, .. }) = sketch.curves.get(&curve).map(|k| &k.geom) {
+            return Ok(Line2 { a: self.p2(*c)?, b: self.p2(*major)? });
+        }
+        self.line(sketch, curve)
+    }
+
     fn line3(&self, sketch: &Sketch, curve: Id<Curve>) -> Result<Line3, SketchError> {
         let (a, b) = sketch.line(curve).ok_or(SketchError::WrongCurveKind)?;
         Ok(Line3 { a: self.p3(a)?, b: self.p3(b)? })
@@ -239,13 +248,16 @@ impl Binding {
             GeoConstraint::Horizontal(p, q) => Constraint::Horizontal(self.p2(p)?, self.p2(q)?),
             GeoConstraint::Vertical(p, q) => Constraint::Vertical(self.p2(p)?, self.p2(q)?),
             GeoConstraint::Parallel(a, b) => {
-                Constraint::Parallel(self.line(sketch, a)?, self.line(sketch, b)?)
+                Constraint::Parallel(self.axis_line(sketch, a)?, self.axis_line(sketch, b)?)
             }
             GeoConstraint::Perpendicular(a, b) => {
-                Constraint::Perpendicular(self.line(sketch, a)?, self.line(sketch, b)?)
+                Constraint::Perpendicular(self.axis_line(sketch, a)?, self.axis_line(sketch, b)?)
             }
             GeoConstraint::Collinear(a, b) => {
-                Constraint::Collinear(self.line(sketch, a)?, self.line(sketch, b)?)
+                // The second's points are put on the first's line: an ellipse goes second, so that its
+                // centre and axis end come onto the line rather than its axis shrinking to nothing.
+                let (a, b) = if sketch.ellipse(a).is_some() { (b, a) } else { (a, b) };
+                Constraint::Collinear(self.axis_line(sketch, a)?, self.axis_line(sketch, b)?)
             }
             GeoConstraint::Tangent { a, b, side, external } => {
                 // Curves that meet at an end are tangent *there*: written as "the radius at the joint is

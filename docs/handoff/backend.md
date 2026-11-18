@@ -71,6 +71,18 @@ To Work with Sketch Dimensions GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185.
 | Flip Direction 대상의 "line to an arc (the arc itself)"·"between 2 arcs" 거리 | 없음 | 선-호·호-호 거리 치수 |
 | 구동 치수 토글 | 있음(`SketchOp::SetDriving`) | — |
 
+## 2026-11-18 — 타원 축을 선 구속에(① 2번)
+
+근거: GUID-A85A7A30-7D81-4C75-8769-CAD034EEA930 — Collinear "an ellipse axis", Parallel/Perpendicular "lines, curves, or ellipse axes",
+Horizontal/Vertical "a line, an ellipse axis, or two points".
+
+- `Parallel`·`Perpendicular`·`Collinear`가 타원(타원 호 포함)을 주축(중심→주축 끝) 선으로 받는다(바인딩 `axis_line`).
+- Collinear는 타원 쪽 점을 선 위로 올리게 순서를 바꿔 낮춘다. 반대로 하면 축이 0으로 줄어드는 퇴화 해가 나온다.
+- 수평·수직 구속 도구가 타원 클릭을 받아 중심-주축 끝 점 쌍에 건다.
+- 차이: 원문은 두 축 중 어느 것이든 고를 수 있다. 여기는 주축만 쓴다(단축은 주축에 Perpendicular로 대신).
+- 테스트: `gc_session/tests/sketch_ellipse_axis.rs`.
+- QA 브랜치 영향: 없음(새 타입 없음; QA 테스트에 타원 Parallel 거부 단언 없음).
+
 ## 2026-11-18 — Fix를 곡선에(① 1번)
 
 - `GeoConstraint::FixCurve(curve)`:
