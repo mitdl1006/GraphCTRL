@@ -5,7 +5,10 @@
 //! Reference: Inventor 2026 help, To Create Work Features (GUID-38A9748E-FA2D-44D3-928C-DFE1326A9385).
 
 use gc_core::Id;
-use gc_doc::{CellOp, Command, CurveRef, OriginPlane, PlaneRef, PointRef, WorkFeature, WorkGeometry};
+use gc_doc::{
+    CellOp, Command, CurveRef, LineRef, OriginAxis, OriginPlane, PlaneRef, PointRef, WorkFeature,
+    WorkGeometry,
+};
 use gc_i18n::{Lang, tr};
 use gc_session::Session;
 
@@ -28,13 +31,32 @@ enum Kind {
     AxisTwoPlanes,
     AxisNormalToPlane,
     AxisCircleCentre,
+    PlaneParallelThrough,
+    PlaneMidplane,
+    PlaneAngle,
+    PlaneLinePoint,
+    PlaneNormalLine,
+    PlaneNormalCurve,
     PointAt,
+    PointLines,
+    PointPlaneLine,
+    PointThreePlanes,
+    PointCurveCentre,
 }
 
 impl Kind {
     fn of(category: Category) -> &'static [Kind] {
         match category {
-            Category::Plane => &[Kind::PlaneOffset, Kind::PlaneThreePoints],
+            Category::Plane => &[
+                Kind::PlaneOffset,
+                Kind::PlaneThreePoints,
+                Kind::PlaneParallelThrough,
+                Kind::PlaneMidplane,
+                Kind::PlaneAngle,
+                Kind::PlaneLinePoint,
+                Kind::PlaneNormalLine,
+                Kind::PlaneNormalCurve,
+            ],
             Category::Axis => &[
                 Kind::AxisOnLine,
                 Kind::AxisParallelThrough,
@@ -43,7 +65,13 @@ impl Kind {
                 Kind::AxisNormalToPlane,
                 Kind::AxisCircleCentre,
             ],
-            Category::Point => &[Kind::PointAt],
+            Category::Point => &[
+                Kind::PointAt,
+                Kind::PointLines,
+                Kind::PointPlaneLine,
+                Kind::PointThreePlanes,
+                Kind::PointCurveCentre,
+            ],
         }
     }
 }
@@ -60,6 +88,8 @@ pub(crate) struct WorkFeatureDialog {
     third: usize,
     /// Millimetres, of an offset plane.
     distance: String,
+    /// Degrees, of a plane turned about a line.
+    angle: String,
     /// A point given by coordinates (millimetres) instead of picked.
     typed: bool,
     coordinates: [String; 3],
@@ -76,6 +106,7 @@ impl Default for WorkFeatureDialog {
             second: 0,
             third: 0,
             distance: "10".to_owned(),
+            angle: "45".to_owned(),
             typed: false,
             coordinates: ["0".to_owned(), "0".to_owned(), "0".to_owned()],
         }
@@ -93,6 +124,65 @@ fn curves(session: &Session, round: bool) -> Vec<(CurveRef, String)> {
                 found.push((
                     CurveRef { sketch: sketch_id, curve: *curve },
                     format!("{} · {word} {}", sketch.name, found.len() + 1),
+                ));
+            }
+        }
+    }
+    found
+}
+
+/// Every curve of the sketches that has a centre (a circle, an arc or an ellipse), or any curve that a plane
+/// can stand square to (those and splines).
+fn curves_where(session: &Session, keep: impl Fn(&gc_sketch::CurveGeom) -> bool) -> Vec<(CurveRef, String)> {
+    let mut found = Vec::new();
+    for (sketch_id, sketch) in session.doc().sketches().iter() {
+        for (curve, data) in &sketch.curves {
+            if keep(&data.geom) {
+                found.push((
+                    CurveRef { sketch: sketch_id, curve: *curve },
+                    format!("{} · {}", sketch.name, found.len() + 1),
+                ));
+            }
+        }
+    }
+    found
+}
+
+/// The curves a work axis or point can be built on the centre of: circles, arcs and ellipses.
+fn centred(session: &Session) -> Vec<(CurveRef, String)> {
+    curves_where(session, |geom| {
+        matches!(
+            geom,
+            gc_sketch::CurveGeom::Circle { .. }
+                | gc_sketch::CurveGeom::Arc { .. }
+                | gc_sketch::CurveGeom::Ellipse { .. }
+        )
+    })
+}
+
+/// The curves a plane can be put square to: arcs, circles, ellipses and splines.
+fn squarable(session: &Session) -> Vec<(CurveRef, String)> {
+    curves_where(session, |geom| !matches!(geom, gc_sketch::CurveGeom::Line { .. }))
+}
+
+/// The lines to build on: sketch lines, work axes, the origin axes of the assembly and of each component.
+fn lines(session: &Session) -> Vec<(LineRef, String)> {
+    let mut found: Vec<(LineRef, String)> =
+        curves(session, false).into_iter().map(|(curve, name)| (LineRef::Sketch(curve), name)).collect();
+    for (id, feature) in session.doc().work_features().iter() {
+        if feature.geometry.is_axis() {
+            found.push((LineRef::Work(id), feature.name.clone()));
+        }
+    }
+    for (axis, name) in [(OriginAxis::X, "X"), (OriginAxis::Y, "Y"), (OriginAxis::Z, "Z")] {
+        found.push((LineRef::Origin(axis), format!("{name} axis")));
+    }
+    for node in session.components() {
+        if matches!(node.occurrence, gc_doc::Occurrence::Item(_)) {
+            for (axis, name) in [(OriginAxis::X, "X"), (OriginAxis::Y, "Y"), (OriginAxis::Z, "Z")] {
+                found.push((
+                    LineRef::Component(node.occurrence, axis),
+                    format!("{}:1 {name} axis", node.name),
                 ));
             }
         }
@@ -192,7 +282,7 @@ impl WorkFeatureDialog {
             }
             WorkGeometry::AxisThroughCircle { curve } => {
                 dialog.kind = Kind::AxisCircleCentre;
-                dialog.first = index_of(&curves(session, true), curve);
+                dialog.first = index_of(&centred(session), curve);
             }
             WorkGeometry::Point { at } => {
                 dialog.category = Category::Point;
@@ -205,9 +295,68 @@ impl WorkFeatureDialog {
                     other => dialog.first = index_of(&all_points, other),
                 }
             }
-            // Definitions the backend adds later cannot be edited here yet.
-            #[allow(unreachable_patterns, reason = "room for work geometry still to come")]
-            _ => return,
+            WorkGeometry::PlaneParallelThrough { base, through } => {
+                dialog.category = Category::Plane;
+                dialog.kind = Kind::PlaneParallelThrough;
+                dialog.first = index_of(&all_planes, base);
+                dialog.second = index_of(&all_points, through);
+            }
+            WorkGeometry::PlaneMidplane { planes: p } => {
+                dialog.category = Category::Plane;
+                dialog.kind = Kind::PlaneMidplane;
+                dialog.first = index_of(&all_planes, p[0]);
+                dialog.second = index_of(&all_planes, p[1]);
+            }
+            WorkGeometry::PlaneAngleToPlane { base, line, angle } => {
+                dialog.category = Category::Plane;
+                dialog.kind = Kind::PlaneAngle;
+                dialog.first = index_of(&all_planes, base);
+                dialog.second = index_of(&lines(session), line);
+                dialog.angle = format!("{}", angle.to_degrees());
+            }
+            WorkGeometry::PlaneLineAndPoint { line, through } => {
+                dialog.category = Category::Plane;
+                dialog.kind = Kind::PlaneLinePoint;
+                dialog.first = index_of(&lines(session), line);
+                dialog.second = index_of(&all_points, through);
+            }
+            WorkGeometry::PlaneNormalToLine { line, through } => {
+                dialog.category = Category::Plane;
+                dialog.kind = Kind::PlaneNormalLine;
+                dialog.first = index_of(&lines(session), line);
+                dialog.second = index_of(&all_points, through);
+            }
+            WorkGeometry::PlaneNormalToCurve { curve, at } => {
+                dialog.category = Category::Plane;
+                dialog.kind = Kind::PlaneNormalCurve;
+                dialog.first = index_of(&squarable(session), curve);
+                dialog.second = index_of(&all_points, at);
+            }
+            WorkGeometry::PointLinesIntersection { lines: l } => {
+                dialog.category = Category::Point;
+                dialog.kind = Kind::PointLines;
+                let all_lines = lines(session);
+                dialog.first = index_of(&all_lines, l[0]);
+                dialog.second = index_of(&all_lines, l[1]);
+            }
+            WorkGeometry::PointPlaneLine { plane, line } => {
+                dialog.category = Category::Point;
+                dialog.kind = Kind::PointPlaneLine;
+                dialog.first = index_of(&all_planes, plane);
+                dialog.second = index_of(&lines(session), line);
+            }
+            WorkGeometry::PointThreePlanes { planes: p } => {
+                dialog.category = Category::Point;
+                dialog.kind = Kind::PointThreePlanes;
+                dialog.first = index_of(&all_planes, p[0]);
+                dialog.second = index_of(&all_planes, p[1]);
+                dialog.third = index_of(&all_planes, p[2]);
+            }
+            WorkGeometry::PointCurveCentre { curve } => {
+                dialog.category = Category::Point;
+                dialog.kind = Kind::PointCurveCentre;
+                dialog.first = index_of(&centred(session), curve);
+            }
         }
         *self = dialog;
     }
@@ -245,8 +394,49 @@ impl WorkFeatureDialog {
                 through: point(self.second)?,
             }),
             Kind::AxisCircleCentre => {
-                let curve = curves(session, true).get(self.first)?.0;
+                let curve = centred(session).get(self.first)?.0;
                 Some(WorkGeometry::AxisThroughCircle { curve })
+            }
+            Kind::PlaneParallelThrough => Some(WorkGeometry::PlaneParallelThrough {
+                base: plane(self.first)?,
+                through: point(self.second)?,
+            }),
+            Kind::PlaneMidplane => {
+                Some(WorkGeometry::PlaneMidplane { planes: [plane(self.first)?, plane(self.second)?] })
+            }
+            Kind::PlaneAngle => {
+                let angle = self.angle.trim().parse::<f64>().ok()?.to_radians();
+                let line = lines(session).get(self.second)?.0;
+                Some(WorkGeometry::PlaneAngleToPlane { base: plane(self.first)?, line, angle })
+            }
+            Kind::PlaneLinePoint => {
+                let line = lines(session).get(self.first)?.0;
+                Some(WorkGeometry::PlaneLineAndPoint { line, through: point(self.second)? })
+            }
+            Kind::PlaneNormalLine => {
+                let line = lines(session).get(self.first)?.0;
+                Some(WorkGeometry::PlaneNormalToLine { line, through: point(self.second)? })
+            }
+            Kind::PlaneNormalCurve => {
+                let curve = squarable(session).get(self.first)?.0;
+                Some(WorkGeometry::PlaneNormalToCurve { curve, at: point(self.second)? })
+            }
+            Kind::PointLines => {
+                let all = lines(session);
+                Some(WorkGeometry::PointLinesIntersection {
+                    lines: [all.get(self.first)?.0, all.get(self.second)?.0],
+                })
+            }
+            Kind::PointPlaneLine => {
+                let line = lines(session).get(self.second)?.0;
+                Some(WorkGeometry::PointPlaneLine { plane: plane(self.first)?, line })
+            }
+            Kind::PointThreePlanes => Some(WorkGeometry::PointThreePlanes {
+                planes: [plane(self.first)?, plane(self.second)?, plane(self.third)?],
+            }),
+            Kind::PointCurveCentre => {
+                let curve = centred(session).get(self.first)?.0;
+                Some(WorkGeometry::PointCurveCentre { curve })
             }
             Kind::PointAt => {
                 let at = if self.typed {
@@ -290,6 +480,9 @@ impl WorkFeatureDialog {
             let point_names = names(points(session).into_iter().map(|p| p.1).collect());
             let plane_names = names(planes(session).into_iter().map(|p| p.1).collect());
             let line_names = names(curves(session, false).into_iter().map(|c| c.1).collect());
+            let all_line_names = names(lines(session).into_iter().map(|c| c.1).collect());
+            let square_names = names(squarable(session).into_iter().map(|c| c.1).collect());
+            let centre_names = names(centred(session).into_iter().map(|c| c.1).collect());
             match self.kind {
                 Kind::PlaneOffset => {
                     choose(ui, tr!(lang, WaBasePlane), &plane_names, &mut self.first);
@@ -317,10 +510,42 @@ impl WorkFeatureDialog {
                     choose(ui, tr!(lang, WaBasePlane), &plane_names, &mut self.first);
                     choose(ui, tr!(lang, WaPoint), &point_names, &mut self.second);
                 }
-                Kind::AxisCircleCentre => {
-                    let round: Vec<String> = curves(session, true).into_iter().map(|c| c.1).collect();
-                    choose(ui, tr!(lang, WaCircleOf), &round, &mut self.first);
+                Kind::AxisCircleCentre => choose(ui, tr!(lang, WaCircleOf), &centre_names, &mut self.first),
+                Kind::PlaneParallelThrough => {
+                    choose(ui, tr!(lang, WaBasePlane), &plane_names, &mut self.first);
+                    choose(ui, tr!(lang, WaPoint), &point_names, &mut self.second);
                 }
+                Kind::PlaneMidplane => {
+                    choose(ui, tr!(lang, WaFirstPlane), &plane_names, &mut self.first);
+                    choose(ui, tr!(lang, WaSecondPlane), &plane_names, &mut self.second);
+                }
+                Kind::PlaneAngle => {
+                    choose(ui, tr!(lang, WaBasePlane), &plane_names, &mut self.first);
+                    choose(ui, tr!(lang, WaLine), &all_line_names, &mut self.second);
+                    labelled(ui, tr!(lang, WaAngleDeg), &mut self.angle);
+                }
+                Kind::PlaneLinePoint | Kind::PlaneNormalLine => {
+                    choose(ui, tr!(lang, WaLine), &all_line_names, &mut self.first);
+                    choose(ui, tr!(lang, WaPoint), &point_names, &mut self.second);
+                }
+                Kind::PlaneNormalCurve => {
+                    choose(ui, tr!(lang, WaCurve), &square_names, &mut self.first);
+                    choose(ui, tr!(lang, WaPoint), &point_names, &mut self.second);
+                }
+                Kind::PointLines => {
+                    choose(ui, tr!(lang, WaFirstLine), &all_line_names, &mut self.first);
+                    choose(ui, tr!(lang, WaSecondLine), &all_line_names, &mut self.second);
+                }
+                Kind::PointPlaneLine => {
+                    choose(ui, tr!(lang, WaBasePlane), &plane_names, &mut self.first);
+                    choose(ui, tr!(lang, WaLine), &all_line_names, &mut self.second);
+                }
+                Kind::PointThreePlanes => {
+                    choose(ui, tr!(lang, WaFirstPlane), &plane_names, &mut self.first);
+                    choose(ui, tr!(lang, WaSecondPlane), &plane_names, &mut self.second);
+                    choose(ui, tr!(lang, WaThirdPlane), &plane_names, &mut self.third);
+                }
+                Kind::PointCurveCentre => choose(ui, tr!(lang, WaCurve), &centre_names, &mut self.first),
                 Kind::PointAt => {
                     ui.checkbox(&mut self.typed, tr!(lang, WaTypedPoint));
                     if self.typed {
@@ -387,6 +612,16 @@ fn kind_name(kind: Kind, lang: Lang) -> &'static str {
         Kind::AxisNormalToPlane => tr!(lang, WaNormal),
         Kind::AxisCircleCentre => tr!(lang, WaCircle),
         Kind::PointAt => tr!(lang, WorkPointTitle),
+        Kind::PlaneParallelThrough => tr!(lang, WpParallelThrough),
+        Kind::PlaneMidplane => tr!(lang, WpMidplane),
+        Kind::PlaneAngle => tr!(lang, WpAngle),
+        Kind::PlaneLinePoint => tr!(lang, WpLinePoint),
+        Kind::PlaneNormalLine => tr!(lang, WpNormalLine),
+        Kind::PlaneNormalCurve => tr!(lang, WpNormalCurve),
+        Kind::PointLines => tr!(lang, WpPointLines),
+        Kind::PointPlaneLine => tr!(lang, WpPointPlaneLine),
+        Kind::PointThreePlanes => tr!(lang, WpThreePlanes),
+        Kind::PointCurveCentre => tr!(lang, WpCurveCentre),
     }
 }
 
@@ -467,5 +702,64 @@ mod tests {
         session.execute(&Command::Cell(op)).unwrap();
         let moved = session.work_shape(id).unwrap();
         assert!(matches!(moved, gc_doc::WorkShape::Plane(pose) if (pose.translation.z - 0.04).abs() < 1e-9));
+    }
+
+    /// The newer kinds: a midplane, a point where two origin axes meet, three planes meeting in a point, a
+    /// plane through a line and a point; each is read back by the dialog when it is edited.
+    #[test]
+    fn midplanes_and_intersection_points_are_made_and_read_back() {
+        let mut session = Session::new();
+        let mut dialog = WorkFeatureDialog::default();
+
+        // A plane 40 mm above XY, then the midplane between them.
+        dialog.start(Category::Plane);
+        dialog.distance = "40".to_owned();
+        let above = dialog.geometry(&session).unwrap();
+        add(&mut session, "Plane1", above).unwrap();
+        dialog.kind = Kind::PlaneMidplane;
+        dialog.first = 0; // XY
+        dialog.second = 3; // Plane1
+        let middle = dialog.geometry(&session).expect("midplane");
+        assert!(matches!(middle, WorkGeometry::PlaneMidplane { .. }));
+        add(&mut session, "Plane2", middle).unwrap();
+        let (id, _) = session.doc().work_features().iter().find(|(_, f)| f.name == "Plane2").unwrap();
+        assert!(
+            matches!(session.work_shape(id), Some(gc_doc::WorkShape::Plane(p)) if (p.translation.z - 0.02).abs() < 1e-9)
+        );
+        let mut again = WorkFeatureDialog::default();
+        again.edit(&session, id);
+        assert_eq!(again.kind, Kind::PlaneMidplane);
+        assert_eq!((again.first, again.second), (0, 3));
+
+        // Two origin axes meet at the origin; three origin planes meet there too.
+        dialog.start(Category::Point);
+        dialog.kind = Kind::PointLines;
+        dialog.first = 0; // X axis
+        dialog.second = 1; // Y axis
+        let meet = dialog.geometry(&session).expect("two lines");
+        add(&mut session, "Point1", meet).unwrap();
+        dialog.kind = Kind::PointThreePlanes;
+        dialog.first = 0;
+        dialog.second = 1;
+        dialog.third = 2;
+        let three = dialog.geometry(&session).expect("three planes");
+        add(&mut session, "Point2", three).unwrap();
+        for name in ["Point1", "Point2"] {
+            let (id, _) = session.doc().work_features().iter().find(|(_, f)| f.name == name).unwrap();
+            assert!(
+                matches!(session.work_shape(id), Some(gc_doc::WorkShape::Point(p)) if p.length() < 1e-9),
+                "{name}"
+            );
+        }
+
+        // A plane through the X axis and a point above the origin.
+        dialog.start(Category::Plane);
+        dialog.kind = Kind::PlaneLinePoint;
+        dialog.first = 0; // X axis
+        let origin_index = points(&session).iter().position(|(p, _)| *p == PointRef::Origin).unwrap();
+        dialog.second = origin_index;
+        // The origin lies on the X axis: no plane results, and the definition is refused by the document.
+        let degenerate = dialog.geometry(&session).expect("it is a definition");
+        assert!(add(&mut session, "Plane3", degenerate).is_err());
     }
 }

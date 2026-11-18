@@ -5573,3 +5573,44 @@ fn the_browser_menu_hides_work_features_and_edits_a_constraint_value_in_place() 
     let gc_doc::RelationKind::Mate { offset, .. } = kind else { panic!("{kind:?}") };
     assert!((offset - 0.025).abs() < 1e-9, "the offset was typed in the browser: {offset}");
 }
+
+/// The Work Plane and Work Point dialogs list the newer ways to define a feature (Inventor 2026 help, To
+/// Create Work Features, GUID-38A9748E-FA2D-44D3-928C-DFE1326A9385); a midplane is made through the dialog.
+#[test]
+fn the_work_plane_dialog_offers_the_newer_definitions_and_makes_a_midplane() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let op = gc_doc::CellOp::AddWorkFeature(gc_doc::WorkFeature {
+        name: "Above".to_owned(),
+        geometry: gc_doc::WorkGeometry::PlaneOffset {
+            base: gc_doc::PlaneRef::Origin(gc_doc::OriginPlane::Xy),
+            distance: 0.04,
+        },
+        visible: true,
+    });
+    harness.state_mut().session.execute(&gc_doc::Command::Cell(op)).unwrap();
+    harness.run();
+    harness.get_by_label("작업 평면").click();
+    harness.run_steps(3);
+    for name in [
+        "평면에 평행, 점 통과",
+        "두 평면의 중간면",
+        "평면에 대한 각도 (선 기준)",
+        "선과 점",
+        "선에 수직, 점 통과",
+        "곡선에 수직, 점 통과",
+    ] {
+        harness.get_by_label(name);
+    }
+    harness.get_by_label("두 평면의 중간면").click();
+    harness.run_steps(3);
+    if gpu {
+        let image = harness.render().unwrap();
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        image.save(out.join("review-65-work-plane-kinds.png")).unwrap();
+    }
+}
