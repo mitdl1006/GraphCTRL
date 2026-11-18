@@ -124,6 +124,19 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 원뿔 선택 기하(Tangent·축), 메시의 원뿔면 인식
+
+근거: Place Tangent constraints in assemblies(`GUID-FF270566-CA9E-420A-A00A-F52DD0FDFD8E`) — "A Tangent constraint positions faces, planes, cylinders, spheres, cones, and ruled splines tangent to one another."
+
+- `Geometry::Cone { apex, direction, half_angle }`(추가): 꼭짓점, 꼭짓점에서 원뿔 안쪽으로 향하는 축 방향, 축과 면 사이 각(0 < 각 < 90°).
+  - Tangent: 원뿔–평면(원뿔이 평면에 모선 하나로 눕는다: 축이 평면에서 원뿔 각만큼 기울고 꼭짓점이 평면에서 `offset`만큼), 원뿔–구(구 중심이 원뿔 면에서 반지름 + `offset`). Inside는 반대쪽. 원뿔–원통, 원뿔–원뿔은 풀지 않는다(`BadValue`).
+  - 축으로 쓰기: Mate(축 일치)·Angle·Motion·패턴 축에서 원통처럼 쓴다(`selection_axis`는 꼭짓점과 축). Assemble의 `possible_relations`는 원뿔에도 Tangent를 내놓는다.
+- 메시에서 고르기: `gc_mesh::region::conical_region(mesh, triangle, bend, tolerance) -> Option<ConeRegion { triangles, apex, axis, half_angle, span }>`(`conical_region_in`은 인접 정보 재사용). 잘린 원뿔도 된다(꼭짓점이 면 밖). 평면·원통·불규칙 면은 `None`.
+  - **프런트/리드 몫**: 뷰포트 픽(`gc_scene`의 `cylindrical_region_in` 부르는 곳, lib.rs:471 근처)에서 원통이 아니면 `conical_region_in`을 시도해 `Geometry::Cone`을 만들면 된다. 렌더 레이어라 백엔드는 건드리지 않았다.
+- `gc_session/src/look.rs`(Look At)의 Geometry match에 원뿔 한 줄을 더했다(축을 바라봄).
+- 하지 않은 것: 토러스(원문에서 Tangent 대상이 아니고, "Midplane of Torus"·"Center Point of Torus"는 작업 피처 종류라 토러스 면 인식 + 작업 피처 종류 추가가 필요), ruled spline.
+- 테스트: `gc_mesh` `region::tests::a_frustum_side_is_a_cone_and_a_cylinder_or_a_cube_is_not`, `gc_doc/tests/relate.rs::a_cone_is_tangent_to_a_plane_and_to_a_sphere`.
+
 ## 2026-11-18 — 미러의 Mirror 상태: 진짜 거울상 메시 (리드 결정 방식)
 
 근거: Mirror Components: Reference(`GUID-7B19CA69-8D14-40DA-9543-115A8AFE6336`) — 상태 Mirror "Creates a mirrored component and saves it in a new file", Reuse "Adds a component instance …".

@@ -227,6 +227,9 @@ fn map_selection(
         Geometry::Cylinder { point, direction, radius } => {
             Geometry::Cylinder { point: p(point), direction: d(direction), radius }
         }
+        Geometry::Cone { apex, direction, half_angle } => {
+            Geometry::Cone { apex: p(apex), direction: d(direction), half_angle }
+        }
         Geometry::Sphere { centre, radius } => Geometry::Sphere { centre: p(centre), radius },
     };
     Some(Selection { occurrence, geometry })

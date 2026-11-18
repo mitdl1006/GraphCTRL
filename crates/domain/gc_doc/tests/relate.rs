@@ -1262,3 +1262,75 @@ fn a_planar_joint_leaves_sliding_on_the_plane_and_turning_about_its_normal() {
     assert!(!gc_doc::takes_limits(&RelationKind::Planar { flip: false }, true));
     assert!(bench.doc.driven(id, 0.1).is_err());
 }
+
+/// Tangent takes cones (Inventor 2026 help, Place Tangent constraints in assemblies,
+/// GUID-FF270566-CA9E-420A-A00A-F52DD0FDFD8E: "positions faces, planes, cylinders, spheres, cones, and
+/// ruled splines tangent to one another"): a cone lies on a plane along one of its lines; a sphere sits
+/// against a cone's surface.
+#[test]
+fn a_cone_is_tangent_to_a_plane_and_to_a_sphere() {
+    let mut bench = Bench::new();
+    let (table, block) = table_and_box(&mut bench);
+    let angle = 30f64.to_radians();
+    let cone = Geometry::Cone { apex: [0.0, 0.0, 0.1], direction: [0.0, 0.0, -1.0], half_angle: angle };
+    let tangent = |offset: f64| Relationship {
+        limits: None,
+        name: "Tangent:1".into(),
+        kind: RelationKind::Tangent { offset, inside: false },
+        first: on(block, cone),
+        second: on(table, top(1.0)),
+    };
+    let id = bench.relate(tangent(0.0)).unwrap();
+    let lies = |bench: &Bench, offset: f64| {
+        let pose = bench.pose(block);
+        let apex = pose.translation + pose.rotation * DVec3::new(0.0, 0.0, 0.1);
+        let axis = pose.rotation * -DVec3::Z;
+        // The apex on the plane (or `offset` above it), the axis leaning out of it by the cone's angle.
+        assert!((apex.z - 1.0 - offset).abs() < 1e-7, "{apex:?}");
+        assert!((axis.z - gc_math::fm::sin(angle)).abs() < 1e-7, "{axis:?}");
+    };
+    lies(&bench, 0.0);
+    bench.cell(CellOp::SetRelationship { id, relationship: tangent(0.02) }).unwrap();
+    lies(&bench, 0.02);
+    // It has a model parameter like any offset, and mates by its axis.
+    assert_eq!(bench.doc.relation_param(id).unwrap().source, "20 mm");
+    let axis = bench.doc.selection_axis(&on(block, cone)).unwrap().1;
+    assert!((axis.z - gc_math::fm::sin(angle)).abs() < 1e-7);
+
+    // A ball against the cone: its centre one radius off the cone's surface.
+    let ball = bench.body("Ball", [0.1; 3], Placement { xyz: [1.0, 0.5, 2.0], rpy: [0.0; 3] });
+    let sphere = Geometry::Sphere { centre: [0.0; 3], radius: 0.05 };
+    let touch = Relationship::new(
+        "Tangent:2",
+        RelationKind::Tangent { offset: 0.0, inside: false },
+        on(ball, sphere),
+        on(block, cone),
+    );
+    bench.relate(touch).unwrap();
+    let pose = bench.pose(block);
+    let (apex, axis) =
+        (pose.translation + pose.rotation * DVec3::new(0.0, 0.0, 0.1), pose.rotation * -DVec3::Z);
+    let centre = bench.pose(ball).translation - apex;
+    let along = centre.dot(axis);
+    let away = (centre - axis * along).length() * gc_math::fm::cos(angle) - along * gc_math::fm::sin(angle);
+    assert!((away - 0.05).abs() < 1e-7, "{away}");
+    // Not against a cylinder or another cone; a cone needs an angle between 0 and a quarter turn.
+    let cylinder = Geometry::Cylinder { point: [0.0; 3], direction: [0.0, 0.0, 1.0], radius: 0.05 };
+    for other in [cylinder, cone] {
+        let bad = Relationship::new(
+            "Bad",
+            RelationKind::Tangent { offset: 0.0, inside: false },
+            on(ball, other),
+            on(block, cone),
+        );
+        assert_eq!(bench.relate(bad), Err(EditError::BadValue));
+    }
+    let flat = Geometry::Cone { apex: [0.0; 3], direction: [0.0, 0.0, 1.0], half_angle: 1.6 };
+    let bad = Relationship::new(
+        "Flat",
+        RelationKind::Tangent { offset: 0.0, inside: false },
+        on(block, flat),
+        on(table, top(1.0)),
+    );
+    assert_eq!(bench.relate(bad), Err(EditError::BadValue));
+}

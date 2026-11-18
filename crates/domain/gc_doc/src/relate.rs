@@ -61,6 +61,19 @@ pub enum Geometry {
         /// Radius, metres.
         radius: f64,
     },
+    /// A conical face (Inventor 2026 help, Place Tangent constraints in assemblies,
+    /// GUID-FF270566-CA9E-420A-A00A-F52DD0FDFD8E: "positions faces, planes, cylinders, spheres, cones …
+    /// tangent to one another"): the apex, the axis direction from the apex into the cone, and the
+    /// angle between the axis and the surface. It mates by its axis; Tangent takes it against a plane
+    /// or a sphere.
+    Cone {
+        /// The apex.
+        apex: [f64; 3],
+        /// The axis direction, away from the apex.
+        direction: [f64; 3],
+        /// The angle between axis and surface, radians (between 0 and a quarter turn).
+        half_angle: f64,
+    },
     /// A joint origin: a point with a Z axis (out of the face it sits on) and an X axis.
     Frame {
         /// The point.
@@ -174,6 +187,7 @@ impl Geometry {
                 (v(point), DVec3::Z, Some(DVec3::X))
             }
             Geometry::Cylinder { point, direction, .. } => (v(point), v(direction), None),
+            Geometry::Cone { apex, direction, .. } => (v(apex), v(direction), None),
         };
         let z = z.normalize_or_zero();
         let helper = x.unwrap_or(if z.x.abs() < 0.9 { DVec3::X } else { DVec3::Y });
@@ -192,6 +206,12 @@ impl Geometry {
                     return false;
                 }
                 (point, direction)
+            }
+            Geometry::Cone { apex, direction, half_angle } => {
+                if !(half_angle > 0.0 && half_angle < std::f64::consts::FRAC_PI_2) {
+                    return false;
+                }
+                (apex, direction)
             }
             Geometry::Sphere { centre, radius } => {
                 if !(radius.is_finite() && radius > 0.0) {
@@ -540,7 +560,14 @@ impl Relationship {
                 angle.is_finite() && direction_of(&g1).is_some() && direction_of(&g2).is_some()
             }
             RelationKind::Tangent { offset, .. } => {
-                offset.is_finite() && round_or_flat(&g1) && round_or_flat(&g2)
+                // A cone is taken against a plane or a sphere only.
+                let cone = |g: &Geometry| matches!(g, Geometry::Cone { .. });
+                let partner = |g: &Geometry| matches!(g, Geometry::Plane { .. } | Geometry::Sphere { .. });
+                offset.is_finite()
+                    && round_or_flat(&g1)
+                    && round_or_flat(&g2)
+                    && (!cone(&g1) || partner(&g2))
+                    && (!cone(&g2) || partner(&g1))
             }
             RelationKind::Symmetry { plane } => {
                 matches!(plane.geometry, Geometry::Plane { .. }) && plane.geometry.is_finite()
@@ -611,7 +638,9 @@ impl AssembleSolution {
 /// The solutions Assemble offers for two picked selections, in Inventor's order; empty when nothing fits
 /// (both on one component, a joint origin picked).
 pub fn possible_relations(first: &Selection, second: &Selection) -> Vec<AssembleSolution> {
-    let round = |g: &Geometry| matches!(g, Geometry::Cylinder { .. } | Geometry::Sphere { .. });
+    let round = |g: &Geometry| {
+        matches!(g, Geometry::Cylinder { .. } | Geometry::Sphere { .. } | Geometry::Cone { .. })
+    };
     let linear = |g: &Geometry| {
         matches!(g, Geometry::Axis { .. } | Geometry::Cylinder { .. } | Geometry::Circle { .. })
     };
@@ -659,6 +688,7 @@ fn world(pose: &DPose3, geometry: &Geometry) -> (World, Option<(DVec3, DVec3)>) 
         Geometry::Frame { origin, z, .. } => (World::Axis(p(origin), d(z)), None),
         // A cylinder mates by its axis, a sphere by its centre.
         Geometry::Cylinder { point, direction, .. } => (World::Axis(p(point), d(direction)), None),
+        Geometry::Cone { apex, direction, .. } => (World::Axis(p(apex), d(direction)), None),
         Geometry::Sphere { centre, .. } => (World::Point(p(centre)), None),
     }
 }
@@ -680,15 +710,20 @@ fn is_joint(kind: &RelationKind) -> bool {
 fn direction_of(geometry: &Geometry) -> Option<[f64; 3]> {
     match *geometry {
         Geometry::Plane { normal, .. } | Geometry::Circle { normal, .. } => Some(normal),
-        Geometry::Axis { direction, .. } | Geometry::Cylinder { direction, .. } => Some(direction),
+        Geometry::Axis { direction, .. }
+        | Geometry::Cylinder { direction, .. }
+        | Geometry::Cone { direction, .. } => Some(direction),
         Geometry::Frame { z, .. } => Some(z),
         Geometry::Point(_) | Geometry::Sphere { .. } => None,
     }
 }
 
-/// Geometry a tangent constraint takes: planes, cylinders, spheres.
+/// Geometry a tangent constraint takes: planes, cylinders, spheres, cones.
 fn round_or_flat(geometry: &Geometry) -> bool {
-    matches!(geometry, Geometry::Plane { .. } | Geometry::Cylinder { .. } | Geometry::Sphere { .. })
+    matches!(
+        geometry,
+        Geometry::Plane { .. } | Geometry::Cylinder { .. } | Geometry::Sphere { .. } | Geometry::Cone { .. }
+    )
 }
 
 /// The part of `v` across direction `d`.
@@ -897,6 +932,9 @@ impl Document {
             Geometry::Cylinder { point, direction, radius } => {
                 Geometry::Cylinder { point: p(point), direction: d(direction), radius }
             }
+            Geometry::Cone { apex, direction, half_angle } => {
+                Geometry::Cone { apex: p(apex), direction: d(direction), half_angle }
+            }
             Geometry::Sphere { centre, radius } => Geometry::Sphere { centre: p(centre), radius },
         })
     }
@@ -1084,6 +1122,7 @@ impl Document {
             | Geometry::Cylinder { point, .. } => point,
             Geometry::Circle { centre, .. } => centre,
             Geometry::Frame { origin, .. } => origin,
+            Geometry::Cone { apex, .. } => apex,
             Geometry::Point(_) | Geometry::Sphere { .. } => return None,
         };
         (direction.length() > 0.5)
@@ -2586,8 +2625,12 @@ fn tangent_residuals(
         Plane(DVec3, DVec3),
         Cylinder(DVec3, DVec3, f64),
         Sphere(DVec3, f64),
+        Cone(DVec3, DVec3, f64),
     }
     let shape = |pose: &DPose3, g: &Geometry| match *g {
+        Geometry::Cone { apex, direction, half_angle } => {
+            Some(Shape::Cone(p(pose, apex), d(pose, direction), half_angle))
+        }
         Geometry::Plane { point, normal } => Some(Shape::Plane(p(pose, point), d(pose, normal))),
         Geometry::Cylinder { point, direction, radius } => {
             Some(Shape::Cylinder(p(pose, point), d(pose, direction), radius))
@@ -2626,6 +2669,21 @@ fn tangent_residuals(
             out.extend([v.x, v.y, v.z]);
             out.push(across(a1 - a2, u2).length() - touching(r1, r2));
         }
+        // A plane touches a cone along one of its lines: the axis leans out of the plane by the cone's
+        // angle (into the side the plane looks to, or the other with Inside), the apex `offset` away.
+        (Shape::Cone(a, u, angle), Shape::Plane(q, n)) | (Shape::Plane(q, n), Shape::Cone(a, u, angle)) => {
+            out.push(u.dot(n) - side * gc_math::fm::sin(angle));
+            out.push((a - q).dot(n) - side * offset);
+        }
+        // A sphere touches a cone where its centre is its radius away from the cone's surface.
+        (Shape::Cone(a, u, angle), Shape::Sphere(c, r)) | (Shape::Sphere(c, r), Shape::Cone(a, u, angle)) => {
+            let (sin, cos) = gc_math::fm::sin_cos(angle);
+            let along = (c - a).dot(u);
+            let away = across(c - a, u).length() * cos - along * sin;
+            out.push(away - side * (r + offset));
+        }
+        // Cones against cylinders and other cones are not solved.
+        (Shape::Cone(..), _) | (_, Shape::Cone(..)) => out.push(1.0),
     }
 }
 
@@ -2641,6 +2699,9 @@ fn transformed(geometry: &Geometry, local: &DPose3) -> Geometry {
         Geometry::Frame { origin, z, x } => Geometry::Frame { origin: p(origin), z: d(z), x: d(x) },
         Geometry::Cylinder { point, direction, radius } => {
             Geometry::Cylinder { point: p(point), direction: d(direction), radius }
+        }
+        Geometry::Cone { apex, direction, half_angle } => {
+            Geometry::Cone { apex: p(apex), direction: d(direction), half_angle }
         }
         Geometry::Sphere { centre, radius } => Geometry::Sphere { centre: p(centre), radius },
     }
