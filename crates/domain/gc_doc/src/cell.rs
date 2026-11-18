@@ -372,6 +372,12 @@ pub struct MotionPath {
     /// Robot parts allowed closer to obstacles than the padding, per motion.
     #[serde(default)]
     pub contacts: Vec<ContactAllowance>,
+    /// Path roles of sketch curves the robot follows, in order, instead of going through waypoints
+    /// (`waypoints` is then empty). The curves, how they are travelled, the speed and the tool's attitude
+    /// are read from the roles when the path is planned; the robot moves freely to the start of each.
+    /// A contact allowance's `index` is then a position in this list.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub follow: Vec<Id<crate::role::SketchRole>>,
 }
 
 impl Entity for MotionPath {
@@ -379,6 +385,7 @@ impl Entity for MotionPath {
     fn refs(&self, out: &mut Vec<AnyId>) {
         out.push(self.robot.erase());
         out.extend(self.waypoints.iter().map(|w| w.erase()));
+        out.extend(self.follow.iter().map(|r| r.erase()));
     }
 }
 
@@ -792,6 +799,41 @@ pub enum CellOp {
     },
     /// Deletes a path.
     DeletePath(Id<MotionPath>),
+    /// Gives sketch elements a role: a point becomes a waypoint, a chain of open curves a path. Refused
+    /// (`InUse`) when the point already is a waypoint or a curve already belongs to a path role, and
+    /// (`BadValue`) when the curves are closed or do not join into one chain.
+    AddRole(crate::role::SketchRole),
+    /// Replaces a role: its elements, how the path is travelled, the speed, the tool's attitude, its name.
+    SetRole {
+        /// The role.
+        id: Id<crate::role::SketchRole>,
+        /// Its new data.
+        role: crate::role::SketchRole,
+    },
+    /// Takes a role away from its sketch elements. Refused while a robot's path follows it.
+    DeleteRole(Id<crate::role::SketchRole>),
+    /// Replaces the path roles a path follows (a path that goes through waypoints cannot follow roles).
+    SetPathFollow {
+        /// The path.
+        id: Id<MotionPath>,
+        /// The path roles, in order, each once.
+        follow: Vec<Id<crate::role::SketchRole>>,
+    },
+    /// Adds path roles and a path that follows them (after those in `path.follow`), in one step.
+    AddFollowPath {
+        /// The path; without waypoints.
+        path: MotionPath,
+        /// Path roles to add first.
+        roles: Vec<crate::role::SketchRole>,
+    },
+    /// Adds a path through sketch points, in one step: after the waypoints in `path.waypoints`, the
+    /// robot's waypoint on each point (the one it has, or a new one).
+    AddPathThrough {
+        /// The path; it follows no roles.
+        path: MotionPath,
+        /// The sketch points, in order; at least one.
+        stops: Vec<(Id<Sketch>, Id<SkPoint>)>,
+    },
 }
 
 fn finite(values: &[f64]) -> bool {
@@ -1044,6 +1086,12 @@ fn target_ok(txn: &Txn<'_>, robot: Id<Robot>, target: &WaypointTarget) -> Result
 
 pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'static str), EditError> {
     match op {
+        CellOp::AddRole(_)
+        | CellOp::SetRole { .. }
+        | CellOp::DeleteRole(_)
+        | CellOp::SetPathFollow { .. }
+        | CellOp::AddFollowPath { .. }
+        | CellOp::AddPathThrough { .. } => crate::role::run(txn, op),
         CellOp::AddBody(body) => {
             placed(&body.placement)?;
             if !body.solid.is_valid() {
@@ -1163,7 +1211,11 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
                 .waypoints()
                 .iter()
                 .any(|(_, w)| matches!(w.target, WaypointTarget::InFrame { frame, .. } if frame == *id));
-            if used {
+            // A sketch role whose tool attitude is measured from the frame keeps it too.
+            let aimed = txn.doc().roles().iter().any(
+                |(_, r)| matches!(r.aim.reference, crate::role::AimReference::Frame(frame) if frame == *id),
+            );
+            if used || aimed {
                 return Err(EditError::InUse);
             }
             txn.remove(*id)?;
@@ -1190,7 +1242,9 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
             let doc = txn.doc();
             let same_robot =
                 path.waypoints.iter().all(|w| doc.get(*w).is_some_and(|w| w.robot == path.robot));
-            if path.waypoints.is_empty() || !same_robot {
+            // A path goes through waypoints or follows path roles, not both.
+            let follows = !path.follow.is_empty() && crate::role::follow_ok(doc, &path.follow);
+            if path.waypoints.is_empty() != follows || !same_robot || doc.get(path.robot).is_none() {
                 return Err(EditError::BadValue);
             }
             Ok((vec![Created::Path(txn.insert(path.clone()))], "Add path"))
@@ -1613,8 +1667,9 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
         }
         CellOp::SetSuppressed { item, suppressed } => {
             // Waypoints, paths and assembly relationships are not in the model order but can be suppressed.
-            let outside = matches!(item.kind, Kind::Waypoint | Kind::Path | Kind::Relationship)
-                && txn.doc().contains(*item);
+            let outside =
+                matches!(item.kind, Kind::Waypoint | Kind::Path | Kind::Relationship | Kind::SketchRole)
+                    && txn.doc().contains(*item);
             if !outside && !txn.doc().model_order().contains(item) {
                 return Err(EditError::BadValue);
             }

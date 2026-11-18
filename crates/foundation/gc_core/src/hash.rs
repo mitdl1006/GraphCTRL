@@ -192,6 +192,7 @@ impl StableHash for Kind {
             Self::Assembly => 16,
             Self::Timeline => 17,
             Self::Relationship => 18,
+            Self::SketchRole => 19,
         };
         tag.stable_hash(hasher);
     }

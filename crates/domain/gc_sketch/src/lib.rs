@@ -19,6 +19,7 @@ mod drag;
 mod edit;
 mod model;
 mod pattern;
+mod route;
 mod spline_ends;
 mod transform;
 

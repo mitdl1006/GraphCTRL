@@ -14,14 +14,14 @@ use gc_doc::{
     Waypoint, WaypointTarget, WorkFrame,
 };
 use gc_jobs::{CancelToken, Executor, JobHandle, JobOutcome};
-use gc_math::{DPose3, DQuat, DVec3, pose_from_xyz_rpy, rpy_from_quat};
+use gc_math::{DPose3, DVec3, pose_from_xyz_rpy, rpy_from_quat};
 use gc_mesh::MeshData;
 use gc_motion::{
     Goal, Guarantee, LinkPair, MotionPlan, MotionRequest, Obstacle, PairReason, RobotScene, StateProblem,
 };
 use gc_plan::{Algorithm, Control, Options};
 use gc_robot::{Chain, RobotModel, Shape};
-use gc_sketch::{SkPoint, Space};
+use gc_sketch::SkPoint;
 
 use crate::Session;
 
@@ -750,14 +750,10 @@ pub(crate) fn pose_of(placement: &Placement) -> DPose3 {
     pose_from_xyz_rpy(placement.xyz, placement.rpy)
 }
 
-/// The world pose the tool takes at a sketch point: tip on the point, tool axis against the plane normal.
+/// The world pose the tool takes at a sketch point: tip on the point, held as the point's waypoint role
+/// says, or without one with the tool axis against the plane normal.
 fn pose_at_point(doc: &Document, sketch: Id<Sketch>, point: Id<SkPoint>) -> Option<DPose3> {
-    let sketch = doc.get(sketch)?;
-    let (Space::Planar(frame) | Space::Spatial(frame)) = sketch.space;
-    let frame = doc.frame_world_pose(Id::from_raw(frame.raw))?;
-    let pos = sketch.points.get(&point)?.pos;
-    let world = frame.translation + frame.rotation * DVec3::from_array(pos);
-    Some(DPose3::from_parts(world, frame.rotation * DQuat::from_rotation_x(std::f64::consts::PI)))
+    doc.sketch_point_pose(sketch, point)
 }
 
 /// The world pose of a work frame: at its origin point, with the sketch's axes turned by its angles.
@@ -766,35 +762,7 @@ fn work_frame_pose(doc: &Document, frame: Id<WorkFrame>) -> Option<DPose3> {
 }
 
 fn frame_pose_of(doc: &Document, frame: &WorkFrame) -> Option<DPose3> {
-    let sketch = doc.get(frame.sketch)?;
-    let (Space::Planar(base) | Space::Spatial(base)) = sketch.space;
-    let base = doc.frame_world_pose(Id::from_raw(base.raw))?;
-    let world = |point: Id<SkPoint>| {
-        Some(base.translation + base.rotation * DVec3::from_array(sketch.points.get(&point)?.pos))
-    };
-    let origin = world(frame.point)?;
-    let axes = match frame.x_point {
-        None => base.rotation,
-        Some(x_point) => {
-            // Points closer than a micrometre, or within a microradian of one line, give no direction.
-            let towards = world(x_point)? - origin;
-            let x = towards.try_normalize().filter(|_| towards.length() > 1e-6)?;
-            // The XY plane: through the third point, or square to the sketch's normal.
-            let z = match frame.xy_point {
-                Some(xy_point) => {
-                    let side = world(xy_point)? - origin;
-                    let normal = x.cross(side);
-                    normal.try_normalize().filter(|_| normal.length() > 1e-6 * side.length().max(1e-6))?
-                }
-                None => {
-                    let normal = base.rotation * DVec3::Z;
-                    (normal - x * normal.dot(x)).try_normalize()?
-                }
-            };
-            DQuat::from_mat3(&gc_math::DMat3::from_cols(x, z.cross(x), z)).normalize()
-        }
-    };
-    Some(DPose3::from_parts(origin, axes * gc_math::quat_from_rpy(frame.rpy[0], frame.rpy[1], frame.rpy[2])))
+    doc.work_frame_pose_of(frame)
 }
 
 /// The world pose of the tool centre point at a waypoint target given as a pose; `base` is the world pose
@@ -2263,6 +2231,7 @@ impl Session {
             seed: 1,
             tcp_speed: None,
             contacts: Vec::new(),
+            follow: Vec::new(),
         };
         match self.cell_op(CellOp::AddPath(path))?.first() {
             Some(Created::Path(id)) => Ok(*id),
@@ -2270,50 +2239,74 @@ impl Session {
         }
     }
 
-    /// Makes a path that follows the lines of a sketch in the order they were drawn: a waypoint on the
-    /// first point, then one at the end of every line, approached in a straight line. Where a line does
-    /// not start at the end of the one before, the robot moves there freely first. The waypoints stay
-    /// attached to the sketch points, so the path follows when the sketch is edited.
+    /// Makes a path of `robot` that follows the curves of a sketch: every chain of open curves (lines,
+    /// arcs, elliptical arcs, open splines) joined end to end becomes a path role, unless it already is
+    /// one, and the path follows them all in the order they were drawn, moving freely from the end of one
+    /// chain to the start of the next. The path reads the curves when it is planned, so it follows when
+    /// the sketch is edited. One undo step. Refused for a sketch without open curves.
     pub fn path_from_sketch(
         &mut self,
         robot: Id<Robot>,
         sketch_id: Id<Sketch>,
     ) -> Result<Id<MotionPath>, EditError> {
         let sketch = self.doc.get(sketch_id).ok_or(EditError::BadValue)?;
-        let mut stops: Vec<(Id<SkPoint>, bool)> = Vec::new();
-        let mut end: Option<[f64; 3]> = None;
+        // Chains in drawing order: each starts at its first-drawn curve.
+        let mut seen: Vec<Id<gc_sketch::Curve>> = Vec::new();
+        let mut follow = Vec::new();
+        let mut roles = Vec::new();
+        let mut count = self.doc.roles().len();
         for curve in sketch.curves.keys() {
-            let Some((a, b)) = sketch.line(*curve) else { continue };
-            let (Some(start), Some(finish)) = (sketch.pos(a), sketch.pos(b)) else { continue };
-            let joined = end.is_some_and(|e| (0..3).all(|k| (e[k] - start[k]).abs() < 1e-9));
-            if !joined {
-                stops.push((a, false));
+            if seen.contains(curve) || sketch.curve_ends(*curve).is_none() {
+                continue;
             }
-            stops.push((b, true));
-            end = Some(finish);
+            if let Some(role) = self.doc.path_role(sketch_id, *curve) {
+                if let Some(gc_doc::RoleKind::Path { curves, .. }) = self.doc.get(role).map(|r| &r.kind) {
+                    seen.extend(curves);
+                }
+                // Roles there already come before the new ones (the document adds new ones at the end).
+                follow.push(role);
+                continue;
+            }
+            let taken: Vec<Id<gc_sketch::Curve>> = sketch
+                .curves
+                .keys()
+                .filter(|c| self.doc.path_role(sketch_id, **c).is_some())
+                .copied()
+                .collect();
+            let mut chain = sketch.chain_at(*curve, &taken);
+            // Travel it from the curve drawn first.
+            if chain.last() == Some(curve) && chain.len() > 1 {
+                chain.reverse();
+            }
+            seen.extend(&chain);
+            count += 1;
+            roles.push(gc_doc::SketchRole {
+                name: format!("Route{count}"),
+                sketch: sketch_id,
+                kind: gc_doc::RoleKind::Path {
+                    curves: chain,
+                    reversed: false,
+                    motion: gc_doc::PathMotion::Follow,
+                    tcp_speed: None,
+                },
+                aim: gc_doc::ToolAim::default(),
+            });
         }
-        if stops.is_empty() {
+        if follow.is_empty() && roles.is_empty() {
             return Err(EditError::BadValue);
         }
-        let mut waypoints = Vec::with_capacity(stops.len());
-        for (point, _) in &stops {
-            waypoints.push(
-                self.add_waypoint(robot, WaypointTarget::SketchPoint { sketch: sketch_id, point: *point })?,
-            );
-        }
-        let name = format!("Path{}", self.doc.paths().len() + 1);
-        let linear = stops.iter().map(|(_, linear)| *linear).collect();
         let path = MotionPath {
-            name,
+            name: format!("Path{}", self.doc.paths().len() + 1),
             robot,
-            waypoints,
-            linear,
+            waypoints: Vec::new(),
+            linear: Vec::new(),
             planner: PLANNERS[0].0.to_owned(),
             seed: 1,
             tcp_speed: None,
             contacts: Vec::new(),
+            follow,
         };
-        match self.cell_op(CellOp::AddPath(path))?.first() {
+        match self.cell_op(CellOp::AddFollowPath { path, roles })?.last() {
             Some(Created::Path(id)) => Ok(*id),
             _ => Err(EditError::BadValue),
         }
@@ -2369,7 +2362,23 @@ impl Session {
                 " {:?} {:?}",
                 doc.is_inactive(path_id.erase()),
                 path.waypoints.iter().map(|w| doc.is_inactive(w.erase())).collect::<Vec<_>>()
-            ),
+            ) + &path
+                .follow
+                .iter()
+                .map(|role| {
+                    // The curves as they are now, how they are travelled and how the tool is held.
+                    let travel = doc.get(*role).map(|r| match &r.kind {
+                        gc_doc::RoleKind::Path { motion, tcp_speed, .. } => (Some(*motion), *tcp_speed),
+                        gc_doc::RoleKind::Waypoint { .. } => (None, None),
+                    });
+                    format!(
+                        " {:?} {:?} {travel:?} {}",
+                        doc.role_runs(*role),
+                        doc.role_rotation(*role),
+                        doc.is_inactive(role.erase())
+                    )
+                })
+                .collect::<String>(),
         )
     }
 
@@ -2634,6 +2643,106 @@ fn gc_plugin_planners_names() -> Vec<(String, String, String)> {
         .collect()
 }
 
+/// How the tool gets to the goal of a step.
+enum Travel {
+    /// Freely: the straight joint move, or the planner where that is blocked.
+    Free,
+    /// The tool tip in a straight line.
+    Linear,
+    /// The tool tip along a curve, through these poses.
+    Along(Vec<DPose3>),
+}
+
+/// One motion of a path.
+struct Step {
+    /// What it is called in messages.
+    name: String,
+    goal: Goal,
+    travel: Travel,
+    tcp_speed: Option<f64>,
+    contacts: Vec<gc_motion::ContactAllowance>,
+}
+
+/// The motions of a path, in order: one into each waypoint, or for a path that follows path roles of
+/// sketch curves, a free move to the start of each role and then along it as the role says. Suppressed
+/// waypoints and roles are skipped.
+fn path_steps(
+    doc: &Document,
+    loaded: &LoadedRobot,
+    path: &MotionPath,
+    robot: &Robot,
+) -> Result<Vec<Step>, String> {
+    let mut steps = Vec::new();
+    for (index, waypoint_id) in path.waypoints.iter().enumerate() {
+        let waypoint = doc.get(*waypoint_id).ok_or("a waypoint no longer exists")?;
+        // A suppressed waypoint is skipped: the motion goes on to the next one.
+        if doc.is_inactive(waypoint_id.erase()) {
+            continue;
+        }
+        let goal = match &waypoint.target {
+            WaypointTarget::Joints(q) => Goal::Joints(q.clone()),
+            target => {
+                Goal::Pose(target_pose(doc, target, Some(base_frame(loaded, &robot.placement))).ok_or_else(
+                    || format!("{}: its sketch point or frame no longer exists", waypoint.name),
+                )?)
+            }
+        };
+        steps.push(Step {
+            name: waypoint.name.clone(),
+            goal,
+            travel: if path.linear.get(index).copied().unwrap_or(false) {
+                Travel::Linear
+            } else {
+                Travel::Free
+            },
+            tcp_speed: path.tcp_speed,
+            contacts: contacts_of(doc, path, index),
+        });
+    }
+    for (index, role_id) in path.follow.iter().enumerate() {
+        let role = doc.get(*role_id).ok_or("a path role no longer exists")?;
+        if doc.is_inactive(role_id.erase()) {
+            continue;
+        }
+        let gc_doc::RoleKind::Path { motion, tcp_speed, .. } = &role.kind else {
+            return Err(format!("{} is not a path", role.name));
+        };
+        let gone =
+            || format!("{}: its sketch curves no longer exist or no longer join end to end", role.name);
+        let runs = doc.role_runs(*role_id).ok_or_else(gone)?;
+        let rotation = doc.role_rotation(*role_id).ok_or_else(gone)?;
+        let pose = |point: &DVec3| DPose3::from_parts(*point, rotation);
+        let first = runs.first().and_then(|run| run.first()).ok_or_else(gone)?;
+        let step = |name: String, goal: DPose3, travel: Travel| Step {
+            name,
+            goal: Goal::Pose(goal),
+            travel,
+            tcp_speed: tcp_speed.or(path.tcp_speed),
+            contacts: contacts_of(doc, path, index),
+        };
+        steps.push(step(format!("{} (start)", role.name), pose(first), Travel::Free));
+        match motion {
+            gc_doc::PathMotion::Follow => {
+                // One motion along every curve, without the points where one curve hands over to the next
+                // twice.
+                let mut along: Vec<DPose3> =
+                    runs.iter().flat_map(|run| run.iter().skip(1)).map(pose).collect();
+                let last = along.pop().ok_or_else(gone)?;
+                steps.push(step(role.name.clone(), last, Travel::Along(along)));
+            }
+            gc_doc::PathMotion::Linear | gc_doc::PathMotion::Joint => {
+                for (number, run) in runs.iter().enumerate() {
+                    let end = run.last().ok_or_else(gone)?;
+                    let travel =
+                        if *motion == gc_doc::PathMotion::Linear { Travel::Linear } else { Travel::Free };
+                    steps.push(step(format!("{} ({})", role.name, number + 1), pose(end), travel));
+                }
+            }
+        }
+    }
+    Ok(steps)
+}
+
 fn plan_path(
     doc: &Document,
     loaded: &LoadedRobot,
@@ -2687,47 +2796,37 @@ fn plan_path(
     )
     .map_err(|e| e.to_string())?;
     let scene = scene.with_tool(pose_of(&robot.tcp)).with_pair_choices(&pair_choices(robot));
+    let steps = path_steps(doc, loaded, path, robot)?;
     let mut start = robot.joints.clone();
-    let mut segments = Vec::with_capacity(path.waypoints.len());
-    for (index, waypoint_id) in path.waypoints.iter().enumerate() {
-        let waypoint = doc.get(*waypoint_id).ok_or("a waypoint no longer exists")?;
-        // A suppressed waypoint is skipped: the motion goes on to the next one.
-        if doc.is_inactive(waypoint_id.erase()) {
-            continue;
-        }
-        let goal = match &waypoint.target {
-            WaypointTarget::Joints(q) => Goal::Joints(q.clone()),
-            target => {
-                Goal::Pose(target_pose(doc, target, Some(base_frame(loaded, &robot.placement))).ok_or_else(
-                    || format!("{}: its sketch point or frame no longer exists", waypoint.name),
-                )?)
-            }
-        };
-        let goal_pose = match &goal {
+    let mut segments = Vec::with_capacity(steps.len());
+    for step in steps {
+        let goal_pose = match &step.goal {
             Goal::Pose(world) => Some(*world),
             Goal::Joints(_) => None,
         };
         let request = MotionRequest {
             start: start.clone(),
-            goal,
+            goal: step.goal,
             algorithm,
             options: Options::default(),
             seed,
             runs,
             max_acc: vec![robot.max_acc; start.len()],
-            linear: path.linear.get(index).copied().unwrap_or(false),
-            max_tcp_speed: path.tcp_speed,
+            linear: !matches!(step.travel, Travel::Free),
+            max_tcp_speed: step.tcp_speed,
             goal_seeds: match &goal_pose {
                 Some(world) => analytic_goals(loaded, &scene.flange_target(world), &start),
                 None => Vec::new(),
             },
-            contacts: contacts_of(doc, path, index),
+            contacts: step.contacts,
         };
-        let planned = match previous.and_then(|p| p.segments.get(segments.len())) {
-            Some(old) => gc_motion::replan_using(&scene, &request, old, plugin, control),
-            None => gc_motion::plan_motion_using(&scene, &request, plugin, control),
+        let planned = match (&step.travel, previous.and_then(|p| p.segments.get(segments.len()))) {
+            // A curve is followed anew each time: the same curve gives the same motion.
+            (Travel::Along(via), _) => gc_motion::plan_follow(&scene, &request, via, control),
+            (_, Some(old)) => gc_motion::replan_using(&scene, &request, old, plugin, control),
+            (_, None) => gc_motion::plan_motion_using(&scene, &request, plugin, control),
         };
-        let plan = planned.map_err(|e| format!("{}: {e}", waypoint.name))?;
+        let plan = planned.map_err(|e| format!("{}: {e}", step.name))?;
         if let Some(end) = plan.path.last() {
             start.clone_from(end);
         }

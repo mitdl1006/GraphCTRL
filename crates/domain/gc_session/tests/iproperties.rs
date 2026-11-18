@@ -94,3 +94,27 @@ fn a_robot_has_physical_properties_from_its_links() {
     // Above the base, the arm standing up.
     assert!(p.centre.z > 0.0, "{p:?}");
 }
+
+/// A mesh with faces missing does not enclose a volume: the Physical tab says so instead of giving a
+/// wrong mass as if it were right (QA observation, 2026-11-18).
+#[test]
+fn a_mesh_that_is_not_closed_is_flagged() {
+    let directory = tempfile::tempdir().unwrap();
+    let whole = gc_mesh::primitives::cuboid([0.2, 0.2, 0.2]).unwrap();
+    let mut indices = whole.indices().to_vec();
+    indices.truncate(indices.len() - 6); // one face of the box gone
+    let holed = gc_mesh::MeshData::new(whole.positions().to_vec(), indices).unwrap();
+    let mut s = Session::new();
+    let mut add = |name: &str, mesh: &gc_mesh::MeshData| {
+        let file = directory.path().join(name);
+        std::fs::write(&file, gc_mesh::stl::to_binary(mesh)).unwrap();
+        Occurrence::Item(s.add_mesh_body(&file).unwrap().erase())
+    };
+    let (closed, open) = (add("closed.stl", &whole), add("open.stl", &holed));
+    let p = s.physical_properties(Some(closed)).unwrap();
+    assert!(!p.open && (p.volume - 0.008).abs() < 1e-9, "{p:?}");
+    assert!(s.physical_properties(Some(open)).unwrap().open);
+    assert!(s.physical_properties(None).unwrap().open, "the document's totals include it");
+    let primitive = body(&mut s, Solid::Sphere { radius: 0.1 }, [1.0, 0.0, 0.0]);
+    assert!(!s.physical_properties(Some(Occurrence::Item(primitive.erase()))).unwrap().open);
+}
