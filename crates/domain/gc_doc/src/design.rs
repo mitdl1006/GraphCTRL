@@ -437,6 +437,10 @@ pub struct Components {
     /// Interactive Contact: which components the contact solver analyses.
     #[serde(default, skip_serializing_if = "ContactSolver::is_off")]
     pub contact_solver: ContactSolver,
+    /// Lock and Protect of joints.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub joint_conditions:
+        std::collections::BTreeMap<Id<crate::relate::Relationship>, crate::relate::JointCondition>,
 }
 
 /// Interactive Contact (Document Settings, Modeling tab): the contact solver off, on for the contact set

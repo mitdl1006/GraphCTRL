@@ -413,7 +413,8 @@ pub(crate) fn prune_states(txn: &mut Txn<'_>) -> Result<(), EditError> {
         .chain(&c.dof_shown)
         .copied()
         .chain(c.origins_shown.iter().map(|(o, _)| *o))
-        .any(|o| !txn.doc().has_occurrence(o));
+        .any(|o| !txn.doc().has_occurrence(o))
+        || c.joint_conditions.keys().any(|id| txn.doc().get(*id).is_none());
     if stale {
         // Writing the timeline drops them.
         crate::cell::set_timeline(txn, |_| {})?;

@@ -569,6 +569,16 @@ pub enum CellOp {
     },
     /// Interactive Contact: the contact solver off, for the contact set only, or for all components.
     SetContactSolver(crate::design::ContactSolver),
+    /// Lock and Protect on a joint (Inventor 2026 help, To Define and Manage Joint Relationships,
+    /// GUID-21DC3336-5C51-42C1-90FB-4299CD66E0C6). Refused for constraints.
+    SetJointCondition {
+        /// The joint.
+        id: Id<crate::relate::Relationship>,
+        /// Lock it where it stands now.
+        lock: bool,
+        /// Protect its freedom.
+        protect: bool,
+    },
     /// Ground and Root, "Ground at origin": moves the components (bodies, robots, assemblies) to the
     /// assembly's origin, aligned with it, and grounds them. Refused when constraints then cannot be met.
     GroundAtOrigin(Vec<AnyId>),
@@ -752,6 +762,18 @@ fn finite(values: &[f64]) -> bool {
 }
 
 /// Changes the model tree's order, creating it on first use (with the current order written out).
+/// Protect: a relationship that takes freedom away from a protected joint's component is refused.
+fn check_protected(txn: &Txn<'_>, before: &[(Id<crate::relate::Relationship>, u8)]) -> Result<(), EditError> {
+    let after = txn.doc().protected_freedom();
+    for (id, was) in before {
+        if after.iter().any(|(other, now)| other == id && now < was) {
+            let name = txn.doc().get(*id).map(|r| r.name.clone()).unwrap_or_default();
+            return Err(EditError::Protected(name));
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn set_timeline(
     txn: &mut Txn<'_>,
     edit: impl FnOnce(&mut crate::design::Timeline),
@@ -778,6 +800,14 @@ pub(crate) fn set_timeline(
                 .collect()
         })
         .unwrap_or_default();
+    // Conditions of joints that no longer exist go too.
+    let dropped: Vec<Id<crate::relate::Relationship>> = txn
+        .doc()
+        .timeline()
+        .map(|(_, t)| {
+            t.components.joint_conditions.keys().copied().filter(|id| txn.doc().get(*id).is_none()).collect()
+        })
+        .unwrap_or_default();
     let edit = |t: &mut crate::design::Timeline| {
         if !gone.is_empty() {
             let c = &mut t.components;
@@ -788,6 +818,7 @@ pub(crate) fn set_timeline(
             c.contact_set.retain(|o| !gone.contains(o));
             c.dof_shown.retain(|o| !gone.contains(o));
         }
+        t.components.joint_conditions.retain(|id, _| !dropped.contains(id));
         edit(t);
     };
     match existing {
@@ -1155,8 +1186,10 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
             {
                 return Err(EditError::BadValue);
             }
+            let before = txn.doc().protected_freedom();
             let id = txn.insert(relationship.clone());
             settle(txn)?;
+            check_protected(txn, &before)?;
             Ok((vec![Created::Relationship(id)], "Constrain"))
         }
         CellOp::SetRelationship { id, relationship } => {
@@ -1166,8 +1199,10 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
             {
                 return Err(EditError::BadValue);
             }
+            let before = txn.doc().protected_freedom();
             txn.modify(*id, |r: &mut crate::relate::Relationship, _| r.clone_from(relationship))?;
             settle(txn)?;
+            check_protected(txn, &before)?;
             Ok((Vec::new(), "Edit constraint"))
         }
         CellOp::DeleteRelationship(id) => {
@@ -1287,6 +1322,28 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
         CellOp::SetContactSolver(mode) => {
             set_timeline(txn, |t| t.components.contact_solver = *mode)?;
             Ok((Vec::new(), "Interactive contact"))
+        }
+        CellOp::SetJointCondition { id, lock, protect } => {
+            let relationship = txn.doc().get(*id).ok_or(EditError::BadValue)?.clone();
+            if !crate::relate::is_joint_kind(&relationship.kind) {
+                return Err(EditError::BadValue);
+            }
+            let kept = txn.doc().joint_condition(*id).and_then(|c| c.locked);
+            let locked = match (*lock, kept) {
+                (false, _) => None,
+                (true, Some(kept)) => Some(kept),
+                (true, None) => Some(txn.doc().lock_pose(&relationship).ok_or(EditError::BadValue)?),
+            };
+            let condition = crate::relate::JointCondition { locked, protected: *protect };
+            set_timeline(txn, |t| {
+                if condition == crate::relate::JointCondition::default() {
+                    t.components.joint_conditions.remove(id);
+                } else {
+                    t.components.joint_conditions.insert(*id, condition);
+                }
+            })?;
+            settle(txn)?;
+            Ok((Vec::new(), "Joint condition"))
         }
         CellOp::GroundAtOrigin(items) => {
             use crate::design::Occurrence;

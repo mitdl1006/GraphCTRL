@@ -436,3 +436,55 @@ fn a_tool_is_mounted_on_the_flange_or_the_mount_is_refused() {
     assert!(s.undo());
     assert_eq!(s.doc().get(robot).unwrap().tool.as_deref().unwrap().placement, plain);
 }
+
+/// Lock and Protect (Inventor 2026 help, To Define and Manage Joint Relationships,
+/// GUID-21DC3336-5C51-42C1-90FB-4299CD66E0C6): Lock removes all motion but the component still follows
+/// what it is joined to; Protect refuses relationships that take the joint's freedom away; neither is
+/// for constraints.
+#[test]
+fn lock_and_protect_a_joint() {
+    let (mut s, table, block) = table_and_block();
+    let (t, b) = (table.erase(), block.erase());
+    let joint = s
+        .add_relationship(relation(
+            RelationKind::Rotational { flip: false },
+            sel(b, ring(-0.1, true)),
+            sel(t, ring(0.5, false)),
+        ))
+        .unwrap();
+    assert_eq!(s.component_dof(b).unwrap().total, 1, "the turn");
+    s.set_joint_lock(joint, true).unwrap();
+    assert!(s.joint_condition(joint).locked.is_some());
+    assert_eq!(s.component_dof(b).unwrap().total, 0, "locked: no motion");
+    // The table moves: the locked block goes with it.
+    let mut moved = s.doc().get(table).unwrap().clone();
+    moved.placement.xyz = [1.0, 0.0, 0.5];
+    s.execute(&gc_doc::Command::Cell(gc_doc::CellOp::SetBody { id: table, body: moved })).unwrap();
+    assert!((pose_of(&s, block).xyz[0] - 1.0).abs() < 1e-7);
+    s.set_joint_lock(joint, false).unwrap();
+    assert_eq!(s.component_dof(b).unwrap().total, 1, "free to turn again");
+
+    // Protected: an angle that would stop the turn is refused.
+    s.set_joint_protect(joint, true).unwrap();
+    // The block's +X face at a right angle to the table's +Y face (as they stand): it stops the turn.
+    let angle = relation(
+        RelationKind::Angle {
+            angle: std::f64::consts::FRAC_PI_2,
+            solution: gc_doc::AngleSolution::Undirected,
+        },
+        sel(b, Geometry::Plane { point: [0.1, 0.0, 0.0], normal: [1.0, 0.0, 0.0] }),
+        sel(t, Geometry::Plane { point: [0.0, 0.5, 0.0], normal: [0.0, 1.0, 0.0] }),
+    );
+    let result = s.add_relationship(angle.clone());
+    assert!(
+        matches!(result, Err(gc_doc::EditError::Protected(_))),
+        "{result:?} dof {:?}",
+        s.component_dof(b)
+    );
+    s.set_joint_protect(joint, false).unwrap();
+    s.add_relationship(angle).unwrap();
+
+    // A constraint has neither.
+    let mate = s.relationships().into_iter().find(|(id, _)| *id != joint).map(|(id, _)| id).unwrap();
+    assert!(s.set_joint_lock(mate, true).is_err());
+}

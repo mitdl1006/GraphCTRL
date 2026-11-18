@@ -1087,6 +1087,7 @@ messages! {
     ToolScale => ("축척", "Scale"),
     ToolStretch => ("신축", "Stretch"),
     HudScale => ("축척 비율", "Scale factor"),
+    ErrProtected => ("보호된 조인트의 움직임을 막아 거부했습니다", "Refused: it would stop a protected joint's motion"),
     AutoDimTitle => ("자동 치수", "Auto Dimension"),
     AutoDimDimensions => ("치수", "Dimensions"),
     AutoDimConstraints => ("구속", "Constraints"),
