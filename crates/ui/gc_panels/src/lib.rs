@@ -57,6 +57,10 @@ pub enum BrowserAction {
     JointLimits(gc_core::Id<gc_doc::Relationship>),
     /// Edit a work feature (double-click, or its menu).
     EditWorkFeature(Id<gc_doc::WorkFeature>),
+    /// Ground and Root: move these components to the assembly origin, aligned, and ground them.
+    GroundAtOrigin(Vec<gc_core::AnyId>),
+    /// Place at Component Origin: a new component (the app asks for its file) on this component's origin.
+    PlaceAtOrigin(gc_doc::Occurrence),
     /// Copy these rows to the clipboard (the row menu's Copy; the marked rows go together).
     Copy(Vec<gc_doc::TreeKey>),
     /// Paste what was copied (the app waits for the click that gives its place).
@@ -1669,6 +1673,27 @@ fn node_row(
             let key = gc_doc::TreeKey::Component(occurrence);
             let keys = if state.marked.contains(&key) { state.marked.clone() } else { vec![key] };
             copy_paste_items(ui, session, lang, action, keys);
+        }
+        // Ground and Root, and Place at Component Origin (Inventor 2026 help, GUID-98FA88B2-AA32-4A27-946A-DCECB36A6696
+        // and GUID-E7A45820-E297-449D-AFBF-3C8D8EAE8A0E).
+        if groundable {
+            let key = gc_doc::TreeKey::Component(occurrence);
+            let keys = if state.marked.contains(&key) { state.marked.clone() } else { vec![key] };
+            let items: Vec<gc_core::AnyId> = keys
+                .iter()
+                .filter_map(|k| match k {
+                    gc_doc::TreeKey::Component(gc_doc::Occurrence::Item(any)) => Some(*any),
+                    _ => None,
+                })
+                .collect();
+            if !items.is_empty() && ui.button(tr!(lang, CmdGroundAndRoot)).clicked() {
+                *action = Some(BrowserAction::GroundAtOrigin(items));
+                ui.close();
+            }
+            if ui.button(tr!(lang, CmdPlaceAtOrigin)).clicked() {
+                *action = Some(BrowserAction::PlaceAtOrigin(occurrence));
+                ui.close();
+            }
         }
         if groundable {
             folder_menu(ui, session, lang, state, action, gc_doc::TreeKey::Component(occurrence));
