@@ -35,6 +35,9 @@ pub(crate) struct Replicate {
     plane: Option<Selection>,
     relationships: bool,
     ground: bool,
+    /// Mirror: "Create mirror pattern" (associative, a Mirror node in the browser) instead of "Create flat
+    /// structure" (Inventor 2026 help, Mirror Components: Reference, GUID-7B19CA69-8D14-40DA-9543-115A8AFE6336).
+    pattern: bool,
     /// The copy's offset in millimetres.
     offset: [String; 3],
     shape: Shape,
@@ -54,6 +57,7 @@ impl Default for Replicate {
             plane: None,
             relationships: true,
             ground: false,
+            pattern: false,
             offset: ["100".to_owned(), "0".to_owned(), "0".to_owned()],
             shape: Shape::Box,
             size: ["100".to_owned(), "100".to_owned(), "100".to_owned()],
@@ -117,6 +121,12 @@ impl Replicate {
     fn run(&mut self, session: &mut Session) -> bool {
         let result = match self.mode {
             Mode::Mirror => match self.plane {
+                Some(plane) if self.pattern => {
+                    let name = format!("Mirror:{}", session.patterns().len() + 1);
+                    session
+                        .add_pattern(&name, &self.items, gc_doc::PatternLayout::Mirror { plane })
+                        .map(|()| Vec::new())
+                }
                 Some(plane) => session.mirror_components(&self.items, plane, self.relationships, self.ground),
                 None => return false,
             },
@@ -227,7 +237,13 @@ impl Replicate {
                     ui.checkbox(&mut self.all, tr!(lang, ReplicateAll));
                 }
             }
-            if self.mode != Mode::Replace {
+            if self.mode == Mode::Mirror {
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut self.pattern, false, tr!(lang, MirrorFlat));
+                    ui.selectable_value(&mut self.pattern, true, tr!(lang, MirrorPattern));
+                });
+            }
+            if self.mode != Mode::Replace && !(self.mode == Mode::Mirror && self.pattern) {
                 ui.checkbox(&mut self.relationships, tr!(lang, ReplicateRelationships));
                 ui.checkbox(&mut self.ground, tr!(lang, ReplicateGround));
             }
@@ -325,5 +341,19 @@ mod tests {
         assert!(dialog.ready());
         assert!(dialog.run(&mut session));
         assert_eq!(session.components().len(), count + 2);
+    }
+    /// "Create mirror pattern" makes a Mirror pattern node instead of a flat copy (GUID-7B19CA69-8D14-40DA-9543-115A8AFE6336).
+    #[test]
+    fn a_mirror_pattern_is_made_instead_of_a_flat_copy() {
+        let (mut session, floor, part) = session();
+        let mut dialog = Replicate::default();
+        dialog.start(Mode::Mirror);
+        dialog.items = vec![part];
+        dialog.pattern = true;
+        dialog.pick(Occurrence::Item(floor), OriginElement::Plane(gc_doc::OriginPlane::Yz));
+        assert!(dialog.ready());
+        assert!(dialog.run(&mut session));
+        assert_eq!(session.patterns().len(), 1, "a Mirror node in the browser");
+        assert!(matches!(session.patterns()[0].layout, gc_doc::PatternLayout::Mirror { .. }));
     }
 }

@@ -610,6 +610,14 @@
 - 위치 표현이 [Primary]가 아닐 때 비활성(툴팁 "Primary 위치 표현이 활성일 때만…")을 브라우저의 서브어셈블리·컴포넌트 메뉴(Demote·Move to top·Dissolve), 패턴·작업 피처 삭제 단추·메뉴, 붙여넣기 항목·Ctrl+V, 서브어셈블리 머리글에 끌어 놓기로 넓혔다. 아직: "다른 서브어셈블리로 이동" 목록, 폴더로 끌기(폴더는 트리 이동이 아니라 영향 없을 수 있음), 서브어셈블리 만들기 이름 입력 확인.
 - 테스트: `the_interference_dialog_has_the_subassembly_option`.
 
+## Mirror: 미러 패턴 / 평평한 구조 (백엔드 36e2759)
+
+근거: Mirror Components: Reference GUID-7B19CA69-8D14-40DA-9543-115A8AFE6336.
+
+- 미러 대화상자에 "평평한 구조 만들기 (Create flat structure)"(기본, 기존 `mirror_components`)와 "미러 패턴 만들기 (Create mirror pattern)"(`add_pattern(.., PatternLayout::Mirror{plane})`, 연관 유지, 브라우저 패턴 노드 "Mirror:N")를 고른다. 패턴이면 "관계 유지·고정" 체크는 숨긴다. 컴포넌트별 Exclude는 목록에서 체크를 빼는 것으로.
+- 하지 않은 것: Mirror/Reuse/Exclude/Mixed 상태 열(백엔드가 Mirror=Reuse로 처리), 미러 패턴 노드 전용 아이콘.
+- 테스트: `replicate.rs`의 `a_mirror_pattern_is_made_instead_of_a_flat_copy`.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹
