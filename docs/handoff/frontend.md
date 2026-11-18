@@ -654,6 +654,15 @@
 - 오류를 대화상자로 띄우진 않고 상태 줄 알림으로 보인다(리드 요청은 InUse 대화상자 오류).
 - 테스트: `a_robot_is_replaced_from_its_menu`(라이브러리 UR5e로 제자리 교체), `replicate.rs`의 기존 테스트.
 
+## BOM 설정·Static Quantity (백엔드 3f56a6a)
+
+근거: To Work with Bill of Materials GUID-7A1FC6F1-8833-4A76-9E2B-AA6FE5FDF223(BOM Settings, Hide Suppressed), 병합·Static Quantity는 백엔드 doc의 GUID-EBBCAEA4…·37BA8DB6….
+
+- BOM 창에 접이식 "BOM 설정": "부품 번호가 같으면 행 합치기"(`merge_part_numbers`), "합치지 않을 부품 번호(쉼표로 구분)"(`merge_excluded`, 포커스를 잃을 때 적용), "억제된 컴포넌트를 BOM에서 숨기기"(`hide_suppressed`) = `set_bom_settings`.
+- 수량 칸은 편집 가능한 숫자 칸(끌기 또는 입력 후 Enter)이고 `set_bom_quantity(key, Some(n))`; 직접 입력한 수량(`static_quantity`) 옆에 "×"로 되돌리기(`None`). 억제 행의 수량 0과 병합 Description "Varies"는 백엔드가 준 값을 그대로 보인다.
+- 하지 않은 것: 직접 입력한 수량을 파란색으로 표시(Inventor는 진한 파랑), BOM 설정의 열 사용자 정의·First Level 보기.
+- 테스트: `the_bom_dialog_has_settings_and_static_quantities`.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

@@ -7669,3 +7669,41 @@ fn a_robot_is_replaced_from_its_menu() {
     assert_eq!(harness.state().session.doc().robots().iter().count(), 1);
     assert_eq!(harness.state().session.doc().robots().iter().next().unwrap().1.placement, before);
 }
+
+/// The BOM dialog's settings and Static Quantity (Inventor 2026 help, To Work with Bill of Materials,
+/// GUID-7A1FC6F1-8833-4A76-9E2B-AA6FE5FDF223): Hide Suppressed components is a setting; a Static Quantity entered for
+/// a row shows with its way back.
+#[test]
+fn the_bom_dialog_has_settings_and_static_quantities() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let body = harness
+        .state_mut()
+        .session
+        .add_body(gc_doc::Solid::Box { size: [0.1; 3] }, gc_doc::Placement::default())
+        .unwrap();
+    harness.run();
+    harness.get_by_label("도구").click();
+    harness.run();
+    harness.get_by_label("자재 명세서(BOM)").click();
+    harness.run_steps(3);
+    harness.get_by_label("BOM 설정").click();
+    harness.run_steps(2);
+    assert!(!harness.state().session.bom_settings().hide_suppressed);
+    harness.get_by_label("억제된 컴포넌트를 BOM에서 숨기기").click();
+    harness.run_steps(2);
+    assert!(harness.state().session.bom_settings().hide_suppressed);
+    // A Static Quantity is shown as entered, with the way back to the counted one.
+    let key = gc_doc::TreeKey::Component(gc_doc::Occurrence::Item(body.erase()));
+    harness.state_mut().session.set_bom_quantity(key, Some(5)).unwrap();
+    harness.run_steps(2);
+    let rows = harness.state().session.bill_of_materials(gc_session::BomView::Structured);
+    assert!(rows[0].static_quantity && rows[0].quantity == 5);
+    harness.get_by_label("×").click();
+    harness.run_steps(2);
+    let rows = harness.state().session.bill_of_materials(gc_session::BomView::Structured);
+    assert!(!rows[0].static_quantity && rows[0].quantity == 1);
+}

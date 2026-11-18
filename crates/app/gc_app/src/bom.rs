@@ -17,6 +17,8 @@ pub(crate) struct BomDialog {
     pub export: bool,
     /// The first tree row of the selected line.
     selected: Option<TreeKey>,
+    /// The Excluded Part Numbers being typed (comma separated), and the settings they were read from.
+    excluded: Option<String>,
 }
 
 impl BomDialog {
@@ -37,6 +39,9 @@ impl BomDialog {
                     ui.selectable_value(&mut self.parts_only, false, tr!(lang, BomStructured));
                     ui.selectable_value(&mut self.parts_only, true, tr!(lang, BomPartsOnly));
                 });
+                // BOM Settings (Inventor 2026 help, To Work with Bill of Materials, GUID-7A1FC6F1-8833-4A76-9E2B-AA6FE5FDF223):
+                // Merge Rows on Part Number Match, Excluded Part Numbers, Hide Suppressed components in BOM.
+                self.settings(ui, session, lang);
                 ui.separator();
                 let rows = session.bill_of_materials(self.view());
                 if rows.is_empty() {
@@ -52,9 +57,37 @@ impl BomDialog {
         self.open = open;
     }
 
+    fn settings(&mut self, ui: &mut egui::Ui, session: &mut Session, lang: Lang) {
+        let current = session.bom_settings();
+        let mut next = current.clone();
+        egui::CollapsingHeader::new(tr!(lang, BomSettingsTitle)).id_salt("gc_bom_settings").show(ui, |ui| {
+            ui.checkbox(&mut next.merge_part_numbers, tr!(lang, BomMerge));
+            ui.checkbox(&mut next.hide_suppressed, tr!(lang, BomHideSuppressed));
+            ui.horizontal(|ui| {
+                let label = ui.label(tr!(lang, BomExcluded));
+                let text = self.excluded.get_or_insert_with(|| current.merge_excluded.join(", "));
+                let field = ui.add(egui::TextEdit::singleline(text).desired_width(200.0));
+                field.clone().labelled_by(label.id);
+                if field.lost_focus() {
+                    next.merge_excluded = text
+                        .split(',')
+                        .map(|part| part.trim().to_owned())
+                        .filter(|part| !part.is_empty())
+                        .collect();
+                    self.excluded = None;
+                }
+            });
+        });
+        if next != current {
+            // A refusal shows in the status bar.
+            drop(session.set_bom_settings(next));
+        }
+    }
+
     fn table(&mut self, ui: &mut egui::Ui, session: &mut Session, rows: &[BomRow], lang: Lang) {
         let mut chosen: Option<(TreeKey, BomStructure)> = None;
         let mut select: Option<TreeKey> = None;
+        let mut set_quantity: Option<(TreeKey, Option<u32>)> = None;
         egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
             egui::Grid::new("gc_bom_table").num_columns(5).striped(true).spacing([14.0, 4.0]).show(
                 ui,
@@ -75,7 +108,37 @@ impl BomDialog {
                         let indent = "  ".repeat(row.level as usize);
                         let item = ui.selectable_label(picked, format!("{indent}{}", row.item));
                         let part = ui.selectable_label(picked, &row.part_number);
-                        let quantity = ui.selectable_label(picked, row.quantity.to_string());
+                        // The quantity can be set by hand (a Static Quantity, shown in blue); the arrow puts back the
+                        // counted one.
+                        let quantity = ui
+                            .horizontal(|ui| {
+                                let mut value = row.quantity;
+                                let mut drag = egui::DragValue::new(&mut value).range(0..=99_999);
+                                if row.static_quantity {
+                                    drag = drag.custom_formatter(|n, _| format!("{n}"));
+                                }
+                                let response = ui.add(drag);
+                                response.widget_info(|| {
+                                    egui::WidgetInfo::labeled(
+                                        egui::Role::SpinButton,
+                                        true,
+                                        format!("{} {}", row.part_number, tr!(lang, BomQuantity)),
+                                    )
+                                });
+                                if (response.drag_stopped() || (response.lost_focus() && response.changed()))
+                                    && value != row.quantity
+                                    && let Some(key) = row.keys.first()
+                                {
+                                    set_quantity = Some((*key, Some(value)));
+                                }
+                                if row.static_quantity
+                                    && ui.small_button("×").on_hover_text(tr!(lang, BomCountAgain)).clicked()
+                                    && let Some(key) = row.keys.first()
+                                {
+                                    set_quantity = Some((*key, None));
+                                }
+                            })
+                            .response;
                         let description = ui.selectable_label(picked, &row.description);
                         if let Some(key) = first
                             && (item.clicked()
@@ -120,6 +183,9 @@ impl BomDialog {
             if let TreeKey::Component(occurrence) = key {
                 session.select_occurrence(Some(occurrence));
             }
+        }
+        if let Some((key, quantity)) = set_quantity {
+            drop(session.set_bom_quantity(key, quantity));
         }
         if let Some((key, structure)) = chosen {
             // A refusal shows in the status bar.
