@@ -195,3 +195,88 @@ fn place_reports_missing_and_empty_files_and_recovers() {
     harness.run_steps(4);
     assert_eq!(harness.state().session.doc().assemblies().len(), 1, "a good file works after the failures");
 }
+
+// ---- Place: Esc and right click leave nothing behind ----
+
+/// A small ASCII STL (one triangle fan of a plate), written to `dir`.
+fn plate_stl(dir: &std::path::Path) -> std::path::PathBuf {
+    let file = dir.join("plate.stl");
+    let mut stl = String::from("solid plate\n");
+    for tri in [
+        [[0.0, 0.0, 0.0], [0.04, 0.0, 0.0], [0.04, 0.04, 0.0]],
+        [[0.0, 0.0, 0.0], [0.04, 0.04, 0.0], [0.0, 0.04, 0.0]],
+    ] {
+        stl.push_str("facet normal 0 0 1\nouter loop\n");
+        for [x, y, z] in tri {
+            stl.push_str(&format!("vertex {x} {y} {z}\n"));
+        }
+        stl.push_str("endloop\nendfacet\n");
+    }
+    stl.push_str("endsolid plate\n");
+    std::fs::write(&file, stl).unwrap();
+    file
+}
+
+/// Place with a component already in the cell hangs the new one on the cursor. Ending with Esc (cursor never
+/// moved, or moved) or with a right click leaves no placing state, no extra component, no pending preview
+/// (what is shown equals the document) and, because nothing was set down, no half step on the undo stack.
+#[test]
+fn escaping_or_right_clicking_during_place_leaves_nothing_behind() {
+    for how in ["esc, no move", "esc after move", "right click after move"] {
+        let dir = tempfile::tempdir().unwrap();
+        let chosen = std::sync::Arc::new(std::sync::Mutex::new(plate_stl(dir.path())));
+        let mut harness = harness_with_dialogs(&chosen);
+        let first = harness
+            .state_mut()
+            .session
+            .add_body(gc_doc::Solid::Box { size: [0.05; 3] }, gc_doc::Placement::default())
+            .unwrap();
+        harness.state_mut().fit_view();
+        harness.run();
+        harness.get_by_label("배치").click();
+        harness.run_steps(4);
+        assert!(harness.state().viewport().is_placing(), "{how}: the new component hangs on the cursor");
+        let bodies =
+            |h: &egui_kittest::Harness<'_, GraphCtrlApp>| h.state().session.doc().bodies().iter().count();
+        assert_eq!(bodies(&harness), 2, "{how}");
+        let hanging =
+            harness.state().session.doc().bodies().iter().map(|(id, _)| id).find(|id| *id != first).unwrap();
+
+        if how != "esc, no move" {
+            let at = harness.state().viewport().screen_of(gc_math::DVec3::new(0.03, 0.02, 0.0)).unwrap();
+            harness.event(egui::Event::PointerMoved(at));
+            harness.run_steps(3);
+        }
+        let depth = harness.state().session.history().undo_depth();
+        if how == "right click after move" {
+            let at = harness.state().viewport().screen_of(gc_math::DVec3::new(0.03, 0.02, 0.0)).unwrap();
+            for pressed in [true, false] {
+                harness.event(egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Secondary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                });
+                harness.run_steps(3);
+            }
+        } else {
+            harness.key_press(egui::Key::Escape);
+            harness.run_steps(3);
+        }
+        assert!(!harness.state().viewport().is_placing(), "{how}: still placing");
+        assert_eq!(bodies(&harness), 2, "{how}: the placed component stays, nothing extra appears");
+        assert_eq!(
+            harness.state().session.history().undo_depth(),
+            depth,
+            "{how}: a step was recorded for nothing"
+        );
+        let session = &harness.state().session;
+        let shown = session.shown_body(hanging).unwrap().placement;
+        let stored = session.doc().get(hanging).unwrap().placement;
+        assert_eq!(shown, stored, "{how}: a preview of the hanging component is left over");
+        // Esc again does nothing more and does not panic.
+        harness.key_press(egui::Key::Escape);
+        harness.run_steps(2);
+        assert_eq!(bodies(&harness), 2, "{how}: second Esc");
+    }
+}
