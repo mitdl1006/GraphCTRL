@@ -1150,6 +1150,7 @@ impl Viewport {
         } else {
             self.hud.cancel();
         }
+        self.elastic_bands(ui, rect, session, size);
         if self.show_view_cube {
             self.view_cube(ui, rect, session, lang);
         } else {
@@ -1435,6 +1436,29 @@ impl Viewport {
             if keep && !outside && !ui.input(|i| i.key_pressed(Key::Escape)) {
                 self.cube_menu = Some((at, age.saturating_add(1)));
             }
+        }
+    }
+
+    /// The relationships of components that Free Move or Free Rotate left out of place, as elastic bands from each
+    /// component to where its relationship wants it (Inventor 2026 help, Move assembly components,
+    /// GUID-9796C22B-23C1-4D69-BC2E-54056E46F255: "The Free Move command displays component relationships as an
+    /// elastic band").
+    fn elastic_bands(&self, ui: &egui::Ui, rect: egui::Rect, session: &Session, size: [f64; 2]) {
+        if !session.needs_update() {
+            return;
+        }
+        let painter = ui.painter_at(rect);
+        for band in session.relationship_bands() {
+            let [a, b] = band.ends;
+            let (Some(a), Some(b)) = (self.camera.project(a, size), self.camera.project(b, size)) else {
+                continue;
+            };
+            let at = |p: [f64; 2]| {
+                #[allow(clippy::cast_possible_truncation, reason = "screen coordinates fit f32")]
+                egui::pos2(rect.left() + p[0] as f32, rect.top() + p[1] as f32)
+            };
+            let colour = if band.satisfied { colors::SELECTED } else { colors::ERROR };
+            painter.line_segment([at(a), at(b)], egui::Stroke::new(1.5, colour));
         }
     }
 

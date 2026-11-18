@@ -590,6 +590,7 @@ messages! {
     StatusPickPlaceOrigin => ("원점에 맞출 기존 컴포넌트를 선택하십시오", "Select the component whose origin the new component is placed on"),
     CmdGroundAndRoot => ("원점에 고정 (Ground and Root)", "Ground and Root"),
     CmdPlaceAtOrigin => ("이 컴포넌트의 원점에 배치…", "Place at Component Origin…"),
+    CmdUpdate => ("업데이트", "Update"),
     CmdPaste => ("붙여넣기", "Paste"),
     CmdUseAsA => ("A로", "As A"),
     MenuPoseCalc => ("포즈 변환 계산기", "Pose calculator"),

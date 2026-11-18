@@ -121,5 +121,19 @@ pub(crate) fn end(drag: &FreeDrag, session: &mut Session) {
         drop(session.grip_snap_commit(&moves, false));
         return;
     }
+    // A body or a robot is put where it was dropped and its relationships are left alone until Update (Inventor
+    // 2026 help, Move assembly components, GUID-9796C22B-23C1-4D69-BC2E-54056E46F255: "snaps back ... when you
+    // update the assembly"). The rest (a waypoint, a frame) is committed as before.
+    let any = match drag.item {
+        gc_session::CellItem::Body(id) => Some(id.erase()),
+        gc_session::CellItem::Robot(id) => Some(id.erase()),
+        _ => None,
+    };
+    if let Some(any) = any {
+        gizmo::preview(session, drag.item, &drag.start);
+        gizmo::commit(session, drag.item);
+        drop(session.free_move(any, gizmo::placement(&(drag.delta * drag.start))));
+        return;
+    }
     gizmo::commit(session, drag.item);
 }

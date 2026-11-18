@@ -1216,6 +1216,13 @@ impl GraphCtrlApp {
             if qat(ui, "↑", tr!(lang, CmdReturn), editing) {
                 self.session.return_edit();
             }
+            // Update: the components dropped by Free Move or Free Rotate snap back to their relationships (Inventor
+            // 2026 help, Move assembly components, GUID-9796C22B-23C1-4D69-BC2E-54056E46F255); available while
+            // something is out of place.
+            let stale = self.session.needs_update();
+            if qat(ui, "U", tr!(lang, CmdUpdate), stale) {
+                drop(self.session.update_assembly());
+            }
         });
     }
 

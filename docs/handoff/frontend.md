@@ -543,6 +543,16 @@
 - ③ 브라우저 노드 이름 옆 값 표시 형식("Mate:1 (d3 = 10 mm)")은 원문에 형식이 없어 넣지 않았다(Edit assembly constraints는 "브라우저 아래 편집 상자에 값을 입력"만 말한다).
 - 테스트: `a_constraints_offset_is_a_model_parameter_edited_as_an_expression`.
 
+## Free Move/Free Rotate 놓기·고무줄·Update (백엔드 ee91fd5)
+
+근거(원문, 백엔드 handoff 표): Move assembly components GUID-9796C22B-23C1-4D69-BC2E-54056E46F255, Rotate assembly components GUID-7EAE9DFD-899A-4FD1-B63F-92DD41D0A916.
+
+- 조립 탭 Position 그룹의 Free Move/Free Rotate는 이미 있었다(드래그 미리보기). 이번에 놓을 때 바디·로봇은 `session.free_move`로 확정해 관계를 풀지 않고 그 자리에 둔다(예전엔 SetBody라 바로 제자리로 돌아갔다). 하위 어셈블리 묶음과 웨이포인트·프레임은 이전 방식 그대로.
+- 관계가 어긋난 동안(`needs_update()`) 뷰에 고무줄 선: `relationship_bands()` 두 끝을 잇고 맞으면 선택 색, 안 맞으면 오류 색.
+- 신속 접근 막대에 "U"(업데이트) 단추: `needs_update()`일 때만 활성, `update_assembly()`. 리본 단추는 1280px 너비 때문에 QAT로만 했다.
+- 하지 않은 것: 회전 기호 손잡이(안쪽=임의, 위·아래=수평축, 좌·우=수직축, 테두리=화면 평면; 지금은 화면 기준 드래그), 드래그 중 고무줄, 브라우저에서 어긋남을 오류와 구별해 표시.
+- 테스트: `update_brings_a_free_moved_component_back_to_its_relationships`.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

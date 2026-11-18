@@ -7289,3 +7289,42 @@ fn a_constraints_offset_is_a_model_parameter_edited_as_an_expression() {
     type_into(&mut harness, &name, "apples +");
     assert!((value(&harness) - 0.015).abs() < 1e-9);
 }
+
+/// A component dropped by Free Move stays where it was put until Update snaps it back to its relationship
+/// (Inventor 2026 help, Move assembly components, GUID-9796C22B-23C1-4D69-BC2E-54056E46F255); the Quick Access
+/// Toolbar's Update is available only then.
+#[test]
+fn update_brings_a_free_moved_component_back_to_its_relationships() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.05, 0.05, 0.05] };
+    let app = harness.state_mut();
+    let fixed = app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    let moving =
+        app.session.add_body(solid, gc_doc::Placement { xyz: [0.0, 0.0, 0.2], rpy: [0.0; 3] }).unwrap();
+    let plane = gc_doc::Geometry::origin(gc_doc::OriginElement::Plane(gc_doc::OriginPlane::Xy));
+    let select = |body: gc_core::Id<gc_doc::Body>| gc_doc::Selection {
+        occurrence: gc_doc::Occurrence::Item(body.erase()),
+        geometry: plane,
+    };
+    app.session
+        .add_relationship(gc_doc::Relationship::new(
+            "Mate:1",
+            gc_doc::RelationKind::Mate { offset: 0.0, sense: gc_doc::AxisSense::Opposed },
+            select(moving),
+            select(fixed),
+        ))
+        .unwrap();
+    let held = app.session.doc().get(moving).unwrap().placement;
+    app.session.free_move(moving.erase(), gc_doc::Placement { xyz: [0.3, 0.0, 0.5], rpy: [0.0; 3] }).unwrap();
+    harness.run_steps(3);
+    assert!(harness.state().session.needs_update());
+    harness.get_by_label("업데이트 (빠른 실행)").click();
+    harness.run_steps(3);
+    assert!(!harness.state().session.needs_update());
+    let back = harness.state().session.doc().get(moving).unwrap().placement;
+    assert!(back.xyz[2] < 0.1, "snapped back from z = 0.5 to the mate: {back:?} (was {held:?})");
+}
