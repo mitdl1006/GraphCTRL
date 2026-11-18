@@ -272,6 +272,8 @@ impl Binding {
         let spatial = sketch.is_spatial();
         Ok(match *c {
             GeoConstraint::FixCurve(curve) => self.fix_curve(sketch, curve)?,
+            // Shapes a spline; never solved (`Sketch::shapes_spline`).
+            GeoConstraint::Smooth(..) => return Err(SketchError::WrongCurveKind),
             GeoConstraint::Coincident(p, q) if spatial => Constraint::Coincident3(self.p3(p)?, self.p3(q)?),
             GeoConstraint::Coincident(p, q) => Constraint::Coincident(self.p2(p)?, self.p2(q)?),
             // A 3D sketch has lines only; their relations are written in space (Inventor 2026 help, To Apply
@@ -554,7 +556,8 @@ impl Sketch {
             }
         }
         for (id, constraint) in &self.constraints {
-            if Some(solver_id(*id)) != skip {
+            // A spline's Tangent and Smooth shape it; there is nothing to solve.
+            if Some(solver_id(*id)) != skip && !self.shapes_spline(constraint) {
                 binding.prepare(self, constraint)?;
                 let lowered = binding.lower_constraint(self, constraint)?;
                 binding.sys.add(solver_id(*id), lowered);

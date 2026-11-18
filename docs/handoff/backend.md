@@ -71,6 +71,27 @@ To Work with Sketch Dimensions GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185.
 | Flip Direction 대상의 "line to an arc (the arc itself)"·"between 2 arcs" 거리 | 없음 | 선-호·호-호 거리 치수 |
 | 구동 치수 토글 | 있음(`SketchOp::SetDriving`) | — |
 
+## 2026-11-18 — 스플라인 Tangent·Smooth(G2)(① 6번)
+
+근거: GUID-A85A7A30-7D81-4C75-8769-CAD034EEA930 — "The Smooth (G2) constraint causes a continuous curvature (G2) condition between a spline and another curve, such
+as a line, arc, or spline. … click the spline and the curve attached to the spline endpoint. The spline curvature adjusts as required to create a G2 condition."
+
+- 새 `GeoConstraint::Smooth(spline, other)`. `Tangent { a, b }`도 한쪽이 스플라인이면 받는다.
+- 둘 다 스플라인 끝의 모양을 정하는 조건이다(솔버에 들어가지 않음: `Sketch::shapes_spline`). 스플라인은 원래 맞춤점만 따르고 풀 것이 없다.
+  - Tangent: 그 끝을 붙은 곡선의 진행 방향으로 클램프.
+  - Smooth: 클램프 + 곡률 일치(끝 구간 1/3 지점에 보조 매듭을 넣고, 곡률이 맞도록 선형으로 위치를 정함).
+  - 붙은 곡선: 선(곡률 0), 호(1/r, 중심 쪽), 열린 스플라인(그 자체 모양의 끝 방향·곡률).
+  - `gc_sketch::{SplineEnd, shaped_spline_points3}`, `Sketch::{spline_ends, spline_ends_with}`. `spline_outline(3)`과 뷰포트 그리기가 끝 조건을 쓴다.
+- 추가 조건: 스플라인 끝이 다른 곡선의 끝과 같은 점이거나 일치 구속이어야 한다. 아니면 거부. 이미 조건이 걸린 끝에 또 걸면 Redundant. 자유도는 바뀌지 않는다.
+- 도구:
+  - `ConstraintKind::Smooth`(새 변형): 스플라인 + 끝에 붙은 곡선 두 클릭.
+  - 접선 도구도 스플라인이 끼면 이 경로를 쓴다.
+  - FE: 구속 패널에 Smooth(G2) 버튼(`ribbon.rs` CONSTRAINTS)과 글리프 "G2"(paint 반영됨).
+- 저장 호환: 새 변형만 추가했고 옛 파일은 그대로 읽힌다. 저장·불러오기 뒤 모양이 같은 것을 테스트로 확인.
+- 차이: 원문 스플라인은 핸들(크기·방향)이 있는 곡선이다. 여기는 끝 조건만 있고 핸들 편집·장력은 없다. 닫힌 스플라인 끝 조건은 해당 없음. Trim 등으로 이음이 끊긴 조건은 남지만 효과가 없다.
+- 테스트: `gc_session/tests/spline_smooth.rs`(선·호 Smooth, Tangent, 중복·미연결 거부, 저장·불러오기, 도구).
+- QA 브랜치 영향: 없음(`GeoConstraint`·`ConstraintKind` 변형 추가뿐; QA 테스트에 스플라인 접선 거부 단언 없음).
+
 ## 2026-11-18 — QA: 풀리지 않는 접선이 퇴화로 수락되던 것
 
 - 증상: 고정 직선이 고정 원·타원을 가로지르는 상태에서 Tangent를 걸면 수락되고 Solved, 두 구속이 degenerate로만 보고된다.
