@@ -868,6 +868,30 @@ impl Sketch {
         Ok(result)
     }
 
+    /// Splits a spline at one of its inner fit points: the spline ends there and a new spline (returned)
+    /// carries on from there through the rest of the fit points. The two share the point.
+    pub fn split_spline(
+        &mut self,
+        alloc: &mut IdAlloc,
+        curve: Id<Curve>,
+        point: Id<SkPoint>,
+    ) -> Result<Id<Curve>, SketchError> {
+        let found = self.curves.get(&curve).ok_or(SketchError::MissingCurve)?;
+        let CurveGeom::Spline { points } = &found.geom else { return Err(SketchError::InvalidValue) };
+        let construction = found.construction;
+        let k = points.iter().position(|p| *p == point).ok_or(SketchError::InvalidValue)?;
+        if k == 0 || k + 1 >= points.len() {
+            return Err(SketchError::InvalidValue);
+        }
+        let (head, tail) = (points[..=k].to_vec(), points[k..].to_vec());
+        if let Some(c) = self.curves.get_mut(&curve) {
+            c.geom = CurveGeom::Spline { points: head };
+        }
+        let id = alloc.alloc();
+        self.curves.insert(id, Curve { geom: CurveGeom::Spline { points: tail }, construction });
+        Ok(id)
+    }
+
     /// Where a chamfer cutting `distances` back from the corner of two lines would join them: the corner,
     /// and the two cut points. Each line keeps the side of the corner where it was picked.
     pub fn chamfer_plan(

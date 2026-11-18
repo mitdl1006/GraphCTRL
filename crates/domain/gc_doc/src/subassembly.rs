@@ -29,6 +29,11 @@ pub struct Subassembly {
     pub name: String,
     /// The subassembly it sits in; `None` at the top level.
     pub parent: Option<SubassemblyId>,
+    /// Flexible (Inventor 2026 help, Create and edit flexible components,
+    /// GUID-30817F08-A5C2-44B7-B237-4791ACA3F854): the freedom its components have among themselves is
+    /// available in the parent. Otherwise (the default) it moves in the parent as one rigid unit.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub flexible: bool,
 }
 
 /// A row of the browser's assembly tree.
@@ -89,6 +94,13 @@ pub enum SubassemblyOp {
         offset: crate::cell::Placement,
         /// Where they go.
         into: Option<SubassemblyId>,
+    },
+    /// Flexible on or off.
+    SetFlexible {
+        /// Which.
+        id: SubassemblyId,
+        /// On.
+        flexible: bool,
     },
     /// Renames a subassembly.
     Rename {
@@ -167,6 +179,38 @@ impl Document {
                     .is_some_and(|s| self.is_under(TreeKey::Subassembly(s), TreeKey::Subassembly(id)))
             })
             .collect()
+    }
+
+    /// The rigid unit a component placed in the cell moves with: the outermost subassembly around it that
+    /// is not flexible (a rigid subassembly keeps everything in it rigid in its parent). `None` when every
+    /// subassembly around it is flexible, or it is at the top level.
+    pub fn rigid_unit(&self, item: gc_core::AnyId) -> Option<SubassemblyId> {
+        let all = self.subassemblies();
+        let mut at = self.subassembly_of(Occurrence::Item(item));
+        let mut unit = None;
+        for _ in 0..=all.len() {
+            let Some(id) = at else { break };
+            let Some(s) = all.iter().find(|s| s.id == id) else { break };
+            if !s.flexible {
+                unit = Some(id);
+            }
+            at = s.parent;
+        }
+        unit
+    }
+
+    /// The component that stands for a component in the relationship solver: the first component of its
+    /// rigid unit, or itself.
+    pub(crate) fn solver_owner(&self, item: gc_core::AnyId) -> gc_core::AnyId {
+        self.rigid_unit(item).and_then(|u| self.subassembly_components(u).first().copied()).unwrap_or(item)
+    }
+
+    /// The components that move with `item` as one rigid unit (itself alone when it is in none).
+    pub fn rigid_unit_members(&self, item: gc_core::AnyId) -> Vec<gc_core::AnyId> {
+        match self.rigid_unit(item) {
+            Some(u) => self.subassembly_components(u),
+            None => vec![item],
+        }
     }
 
     /// True when the row exists.
@@ -352,7 +396,7 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &SubassemblyOp) -> Outcome {
             }
             let members = members.clone();
             crate::cell::set_timeline(txn, |t| {
-                t.components.subassemblies.push(Subassembly { id, name, parent: level });
+                t.components.subassemblies.push(Subassembly { id, name, parent: level, flexible: false });
                 t.components.next_subassembly = id.0 + 1;
                 place(&mut t.components, &members, Some(id));
             })?;
@@ -400,6 +444,20 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &SubassemblyOp) -> Outcome {
             Ok((Vec::new(), "Dissolve subassembly"))
         }
         SubassemblyOp::Paste { keys, offset, into } => paste(txn, keys, offset, *into),
+        SubassemblyOp::SetFlexible { id, flexible } => {
+            if !all.iter().any(|s| s.id == *id) {
+                return Err(EditError::BadValue);
+            }
+            crate::cell::set_timeline(txn, |t| {
+                for s in &mut t.components.subassemblies {
+                    if s.id == *id {
+                        s.flexible = *flexible;
+                    }
+                }
+            })?;
+            crate::cell::settle(txn)?;
+            Ok((Vec::new(), if *flexible { "Flexible" } else { "Rigid" }))
+        }
         SubassemblyOp::Rename { id, name } => {
             let name = name.trim().to_owned();
             if name.is_empty() || !all.iter().any(|s| s.id == *id) {
@@ -480,7 +538,7 @@ fn paste(
         let name = (1..).map(|n| format!("{stem}:{n}")).find(|n| !taken.contains(n)).unwrap_or_default();
         taken.push(name.clone());
         renumbered.push((g.id, id));
-        made.push(Subassembly { id, name, parent: g.parent });
+        made.push(Subassembly { id, name, parent: g.parent, flexible: g.flexible });
     }
     let new_id = |old: Option<SubassemblyId>| {
         old.and_then(|o| renumbered.iter().find(|(a, _)| *a == o).map(|(_, b)| *b))

@@ -853,6 +853,7 @@ impl Document {
     /// (a robot whose joints were just set keeps its base; what is tied to its links follows).
     pub fn solve_relationships_holding(&self, held: &[AnyId]) -> Result<Vec<(AnyId, DPose3)>, Unsolved> {
         let (mut owners, terms) = self.gather()?;
+        let held: Vec<AnyId> = held.iter().map(|h| self.solver_owner(*h)).collect();
         for owner in &mut owners {
             if held.contains(&owner.item) {
                 owner.free = false;
@@ -889,13 +890,22 @@ impl Document {
         if !sick.is_empty() {
             return Err(Unsolved { sick });
         }
-        Ok(owners
-            .iter()
-            .zip(&poses)
-            .zip(&start)
-            .filter(|((o, now), before)| o.free && **now != **before)
-            .map(|((o, now), _)| (o.item, *now))
-            .collect())
+        // A rigid unit's components all move as the one that stands for it.
+        let mut moved = Vec::new();
+        for ((o, now), before) in owners.iter().zip(&poses).zip(&start) {
+            if !(o.free && *now != *before) {
+                continue;
+            }
+            let shift = *now * before.inverse();
+            for member in self.rigid_unit_members(o.item) {
+                if member == o.item {
+                    moved.push((member, *now));
+                } else if let Some(pose) = self.owner_pose(member) {
+                    moved.push((member, shift * pose));
+                }
+            }
+        }
+        Ok(moved)
     }
 
     /// Which active relationships stand in the way: for a new relationship `candidate` (or, without one,
@@ -940,15 +950,32 @@ impl Document {
         let active = self.active_position();
         let mut owners: Vec<Owner> = Vec::new();
         let mut terms: Vec<Term> = Vec::new();
+        // A rigid subassembly is one owner, stood for by its first component; it is held when any of its
+        // components is grounded.
         let index_of = |doc: &Document, owners: &mut Vec<Owner>, item: AnyId| -> Option<usize> {
+            let item = doc.solver_owner(item);
             if let Some(i) = owners.iter().position(|o| o.item == item) {
                 return Some(i);
             }
             let pose = doc.owner_pose(item)?;
             let free = item.kind != Kind::WorkFeature
-                && !doc.component_flag(Occurrence::Item(item), ComponentFlag::Grounded);
+                && !doc
+                    .rigid_unit_members(item)
+                    .iter()
+                    .any(|m| doc.component_flag(Occurrence::Item(*m), ComponentFlag::Grounded));
             owners.push(Owner { item, pose, free });
             Some(owners.len() - 1)
+        };
+        // A selection's geometry in the frame of the owner that stands for it.
+        let in_solver_owner = |doc: &Document, selection: &Selection| -> Option<Geometry> {
+            let geometry = doc.in_owner(selection)?;
+            let item = selection.occurrence.owner();
+            let owner = doc.solver_owner(item);
+            if owner == item {
+                return Some(geometry);
+            }
+            let local = doc.owner_pose(owner)?.inverse() * doc.owner_pose(item)?;
+            Some(transformed(&geometry, &local))
         };
         for (id, relationship) in self.relationships().iter() {
             // The active positional representation may suppress, bring back or change relationships.
@@ -967,16 +994,21 @@ impl Document {
             let (Some(a), Some(b), Some(g1), Some(g2)) = (
                 index_of(self, &mut owners, relationship.first.occurrence.owner()),
                 index_of(self, &mut owners, relationship.second.occurrence.owner()),
-                self.in_owner(&relationship.first),
-                self.in_owner(&relationship.second),
+                in_solver_owner(self, &relationship.first),
+                in_solver_owner(self, &relationship.second),
             ) else {
                 return Err(Unsolved { sick: vec![id] });
             };
+            // Within one rigid unit: kept as it is, nothing to solve.
+            if a == b {
+                continue;
+            }
             let third = match relationship.third() {
                 Some(selection) => {
-                    let (Some(c), Some(g3)) =
-                        (index_of(self, &mut owners, selection.occurrence.owner()), self.in_owner(selection))
-                    else {
+                    let (Some(c), Some(g3)) = (
+                        index_of(self, &mut owners, selection.occurrence.owner()),
+                        in_solver_owner(self, selection),
+                    ) else {
                         return Err(Unsolved { sick: vec![id] });
                     };
                     Some((c, g3))
@@ -1833,7 +1865,7 @@ impl Document {
             return false;
         }
         let gathered = self.gather().ok();
-        let Some((jac, m)) = dof_jacobian(gathered.as_ref(), item) else { return true };
+        let Some((jac, m)) = dof_jacobian(gathered.as_ref(), self.solver_owner(item)) else { return true };
         (0..m).all(|row| {
             let rate: f64 = (0..6).map(|c| jac[row * 6 + c] * twist[c] / norm).sum();
             rate.abs() <= 1e-6
@@ -1842,10 +1874,17 @@ impl Document {
 
     /// [`Document::component_dof`] from relationships gathered once.
     fn dof_in(&self, gathered: Option<&(Vec<Owner>, Vec<Term>)>, item: AnyId) -> Dof {
-        if self.component_flag(Occurrence::Item(item), ComponentFlag::Grounded) {
+        // A rigid unit's components share its freedom, and a grounded one holds them all.
+        if self
+            .rigid_unit_members(item)
+            .iter()
+            .any(|m| self.component_flag(Occurrence::Item(*m), ComponentFlag::Grounded))
+        {
             return Dof { total: 0, translation: 0 };
         }
-        let Some((jac, m)) = dof_jacobian(gathered, item) else { return Dof { total: 6, translation: 3 } };
+        let Some((jac, m)) = dof_jacobian(gathered, self.solver_owner(item)) else {
+            return Dof { total: 6, translation: 3 };
+        };
         let fixed = rank(&jac, m, 6, &[0, 1, 2, 3, 4, 5]);
         let fixed_translation = rank(&jac, m, 6, &[0, 1, 2]);
         #[allow(clippy::cast_possible_truncation, reason = "ranks are at most 6")]
@@ -1870,7 +1909,7 @@ impl Document {
             return Some(symbol);
         }
         let gathered = self.gather().ok();
-        let (jac, m) = dof_jacobian(gathered.as_ref(), item).unwrap_or_default();
+        let (jac, m) = dof_jacobian(gathered.as_ref(), self.solver_owner(item)).unwrap_or_default();
         let rows: Vec<[f64; 6]> = (0..m)
             .map(|r| {
                 let mut row = [0.0; 6];
@@ -1964,7 +2003,8 @@ impl Document {
         };
         let (owners, terms) = found;
         let poses: Vec<DPose3> = owners.iter().map(|o| o.pose).collect();
-        let index = owners.iter().position(|o| o.item == item);
+        let owner = self.solver_owner(item);
+        let index = owners.iter().position(|o| o.item == owner);
         let sick = index.is_some_and(|index| {
             terms
                 .iter()
@@ -2213,5 +2253,22 @@ fn tangent_residuals(
             out.extend([v.x, v.y, v.z]);
             out.push(across(a1 - a2, u2).length() - touching(r1, r2));
         }
+    }
+}
+
+/// A geometry carried by a pose: from the frame `local` describes into the frame it is given in.
+fn transformed(geometry: &Geometry, local: &DPose3) -> Geometry {
+    let p = |v: [f64; 3]| (local.translation + local.rotation * DVec3::from_array(v)).to_array();
+    let d = |v: [f64; 3]| (local.rotation * DVec3::from_array(v)).to_array();
+    match *geometry {
+        Geometry::Plane { point, normal } => Geometry::Plane { point: p(point), normal: d(normal) },
+        Geometry::Axis { point, direction } => Geometry::Axis { point: p(point), direction: d(direction) },
+        Geometry::Point(point) => Geometry::Point(p(point)),
+        Geometry::Circle { centre, normal } => Geometry::Circle { centre: p(centre), normal: d(normal) },
+        Geometry::Frame { origin, z, x } => Geometry::Frame { origin: p(origin), z: d(z), x: d(x) },
+        Geometry::Cylinder { point, direction, radius } => {
+            Geometry::Cylinder { point: p(point), direction: d(direction), radius }
+        }
+        Geometry::Sphere { centre, radius } => Geometry::Sphere { centre: p(centre), radius },
     }
 }
