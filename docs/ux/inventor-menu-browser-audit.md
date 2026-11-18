@@ -63,7 +63,7 @@ Suppress, Visibility, Grounded, iProperties)을 기준으로 했고, 완전한 �
 | Show Extended Names | 없음 | ✗ |
 | Show Constraint State(●/○/—) | "…" 메뉴, 관계 상태 점 | ✓ |
 | 폴더: Model States / Relationships / Representations | 관계·표현 폴더 있음, Model States 없음 | △ |
-| 사용자 정의 폴더(User-defined Folder) | 없음 (서브어셈블리 "묶기"만) | ✗ |
+| 사용자 정의 폴더(User-defined Folder) | 컴포넌트·서브어셈블리 행 우클릭 "새 폴더(이 항목으로)"·"폴더로 이동"·"폴더에서 빼기", 폴더 우클릭 이름 바꾸기·삭제 | △ 끌어 놓기 없음, 한 번에 한 행, 폴더 안 폴더·관계/스케치 넣기 없음(백엔드 범위) |
 | 노드 이름 바꾸기: 선택 후 한 번 더 클릭(더블클릭 아님) | 있음 | ✓ |
 | 더블클릭 = 편집 상태 진입 | 스케치·작업 피처·컴포넌트 | ✓ |
 | 패널 도킹·끌어 옮기기·+ 로 패널 추가 | 좌/우 패널 접기만 | △ |
@@ -103,8 +103,8 @@ Suppress, Visibility, Grounded, iProperties)을 기준으로 했고, 완전한 �
 | 원문 | 우리 앱 | 상태 |
 |---|---|---|
 | 위치 표현 끌어 이동·재정렬, Ctrl/Shift 선택 | 표현 재정렬 없음 | ✗ |
-| 컴포넌트를 끌어 다른 폴더(서브어셈블리)로 옮기기 | 우클릭 "이동"(MoveInto) | △ 끌어 놓기 없음 |
-| 여러 컴포넌트 선택 후 우클릭 (Open 등) | 다중 선택 Ctrl/Shift 일부 | △ 확인 필요 |
+| 컴포넌트를 끌어 다른 폴더(서브어셈블리)로 옮기기 | 행을 끌어 폴더·서브어셈블리 머리글에 놓기 + 우클릭 "이동" | ✓ |
+| 여러 컴포넌트 선택 후 우클릭 (Open 등) | Ctrl+클릭으로 표시한 행을 한꺼번에 끌기·"새 폴더"·"폴더로 이동" | △ 다른 명령(Open·삭제 등)은 한 행씩 |
 
 ## 4. 마킹 메뉴(뷰 우클릭)
 
@@ -117,7 +117,6 @@ Suppress, Visibility, Grounded, iProperties)을 기준으로 했고, 완전한 �
 
 다음(원문 근거가 있는 것부터):
 2. 브라우저 Display Preferences: Show Extended Names(부품 피처 전용이라 해당 없음)
-3. 사용자 정의 폴더(백엔드 저장 필요)
 5. 서브어셈블리의 Enabled·Grounded·Suppress, 컴포넌트 끌어 놓기로 폴더 이동
 
 리드에게 요청(백엔드 데이터 필요): 사용자 정의 폴더 저장, Isolate 상태(실행 취소 가능한 가시성 묶음), 브라우저 필터용 상태 질의,

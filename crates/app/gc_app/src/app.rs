@@ -1536,6 +1536,13 @@ impl eframe::App for GraphCtrlApp {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     self.params.origin_selected = self.viewport.origin_selected;
                     match gc_panels::browser(ui, &self.session, lang, &mut self.params) {
+                        // A refusal (a name taken, something still in use) is explained in the status bar.
+                        Some(BrowserAction::Work(op)) => drop(self.session.edit_work(op)),
+                        // A refusal (rows of two levels, a name taken) is explained in the status bar.
+                        Some(BrowserAction::Folder(op)) => {
+                            drop(self.session.edit_folders(op));
+                            self.params.marked.clear();
+                        }
                         Some(BrowserAction::Isolate(keep)) => drop(self.session.isolate(&keep)),
                         Some(BrowserAction::UndoIsolate) => drop(self.session.undo_isolate()),
                         Some(BrowserAction::SelectRole(role)) => self.viewport.role_selected = role,
@@ -1593,6 +1600,7 @@ impl eframe::App for GraphCtrlApp {
                             drop(self.session.edit_component(key));
                         }
                         Some(BrowserAction::Subassembly(op)) => {
+                            self.params.marked.clear();
                             // A refusal (a name in use) is explained in the status bar.
                             drop(self.session.edit_subassemblies(op));
                         }
@@ -1662,6 +1670,11 @@ impl eframe::App for GraphCtrlApp {
                         self.viewport.role_selected.filter(|id| self.session.doc().get(*id).is_some())
                     {
                         gc_panels::role_properties(ui, &mut self.session, lang, role);
+                        ui.separator();
+                    }
+                    // What is selected in the work node has its editor.
+                    if self.params.work.selected.is_some() {
+                        gc_panels::work_properties(ui, &mut self.session, lang, &self.params.work);
                         ui.separator();
                     }
                     gc_panels::properties(ui, &mut self.session, lang, &mut self.expression);
