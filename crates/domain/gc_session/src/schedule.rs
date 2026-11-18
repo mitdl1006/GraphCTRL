@@ -168,6 +168,8 @@ type ToolOutcome = (Option<String>, Vec<(String, String)>);
 struct World {
     variables: BTreeMap<String, CondValue>,
     objects: BTreeMap<String, String>,
+    /// The signals the cell drives (set by steps and tool actions); all start off.
+    signals: BTreeMap<String, bool>,
 }
 
 impl CondScope for World {
@@ -197,6 +199,7 @@ impl Planning<'_> {
                 .filter_map(|(_, v)| Some((v.name.clone(), doc.variable(&v.name)?)))
                 .collect(),
             objects: doc.objects().iter().map(|(_, o)| (o.name.clone(), o.state.clone())).collect(),
+            signals: doc.driven_signals().into_iter().map(|name| (name, false)).collect(),
         }
     }
 
@@ -270,6 +273,8 @@ impl Planning<'_> {
         // Where robots have already been sent away from: each place once.
         let mut moved_away: std::collections::BTreeSet<(Id<Robot>, Vec<u64>)> =
             std::collections::BTreeSet::new();
+        // The idle robots found standing in the way of a ready task since the last look.
+        let mut blockers: std::collections::BTreeSet<Id<Robot>> = std::collections::BTreeSet::new();
         let mut running: Vec<Assignment> = Vec::new();
         let mut out = Schedule::default();
         let mut reasons: BTreeMap<Id<Task>, String> = BTreeMap::new();
@@ -278,6 +283,7 @@ impl Planning<'_> {
             if self.control.cancelled() || out.cut_short {
                 break;
             }
+            blockers.clear();
             let mut index = 0;
             while index < pending.len() {
                 let id = pending[index];
@@ -287,6 +293,20 @@ impl Planning<'_> {
                 };
                 if !world.holds(&task.precondition) {
                     reasons.insert(id, "its precondition does not hold".to_owned());
+                    index += 1;
+                    continue;
+                }
+                // A wait for a signal the cell drives: a task that sets it must have ended (a wait for any
+                // other signal is taken to be answered).
+                let unmet = task.steps.iter().find_map(|step| match step {
+                    gc_doc::Step::WaitIo { condition, .. } => {
+                        let (name, value) = gc_doc::signal_condition(condition)?;
+                        world.signals.get(&name).is_some_and(|now| *now != value).then_some(name)
+                    }
+                    _ => None,
+                });
+                if let Some(name) = unmet {
+                    reasons.insert(id, format!("it waits for the signal `{name}`"));
                     index += 1;
                     continue;
                 }
@@ -310,32 +330,64 @@ impl Planning<'_> {
                         .collect();
                     let key =
                         (id, robot, bits(joints), parked.iter().map(|(o, at)| (*o, bits(at))).collect());
-                    let bid = bids.entry(key).or_insert_with(|| {
-                        let others: Vec<gc_motion::Obstacle> = parked
-                            .iter()
-                            .filter_map(|(other, at)| {
-                                let name = doc.get(*other).map(|r| r.name.clone())?;
-                                Some(scenes.get(other)?.as_obstacles(at, &name))
-                            })
-                            .flatten()
-                            .collect();
-                        self.task_plan_among(id, robot, joints, &others)
-                    });
+                    let standing: Vec<gc_motion::Obstacle> = parked
+                        .iter()
+                        .filter_map(|(other, at)| {
+                            let name = doc.get(*other).map(|r| r.name.clone())?;
+                            Some(scenes.get(other)?.as_obstacles(at, &name))
+                        })
+                        .flatten()
+                        .collect();
+                    let mut bid: Bid = bids
+                        .entry(key)
+                        .or_insert_with(|| self.task_plan_among(id, robot, joints, &standing))
+                        .clone();
+                    // A robot standing in the way of this task is one to send away if nothing else helps.
+                    if let Err(why) = &bid {
+                        blockers.extend(parked.iter().map(|(other, _)| *other).filter(|other| {
+                            doc.get(*other)
+                                .is_some_and(|r| why.contains(&format!("collides with `{}`", r.name)))
+                        }));
+                    }
                     // The robots that are moving must be clear of this motion all the way.
-                    if let Ok(plan) = bid.as_ref() {
-                        let moving: Vec<Id<Robot>> = robots
+                    if let Ok(plan) = &bid {
+                        let moving: Vec<(Id<Robot>, f64)> = robots
                             .iter()
                             .filter(|(other, (_, free))| **other != robot && *free > now)
-                            .map(|(other, _)| *other)
+                            .map(|(other, (_, free))| (*other, *free))
                             .collect();
-                        if let Some(other) = moving.into_iter().find(|other| {
-                            let at = |time: f64| out.joints_at(*other, time);
-                            crosses(scenes.get(&robot), plan, now, scenes.get(other), &at)
-                        }) {
+                        let crossing = |plan: &crate::TaskPlan| {
+                            moving.iter().copied().find(|(other, _)| {
+                                let at = |time: f64| out.joints_at(*other, time);
+                                crosses(scenes.get(&robot), plan, now, scenes.get(other), &at)
+                            })
+                        };
+                        if let Some((other, free)) = crossing(plan) {
+                            // Waiting for it would end about when it is done plus this motion. A way round
+                            // it, planned with it standing at moments of the rest of its motion, is taken
+                            // when that is clear of every moving robot and ends sooner.
+                            let mut swept = standing.clone();
                             let name = doc.get(other).map(|r| r.name.clone()).unwrap_or_default();
-                            reasons.insert(id, format!("it waits for {name} to be out of the way"));
-                            waiting.entry(id).or_insert((now, other));
-                            continue;
+                            for k in 0..=4 {
+                                let at = now + (free - now) * f64::from(k) / 4.0;
+                                if let (Some(q), Some(scene)) = (out.joints_at(other, at), scenes.get(&other))
+                                {
+                                    swept.extend(scene.as_obstacles(&q, &name));
+                                }
+                            }
+                            let round =
+                                self.task_plan_among(id, robot, joints, &swept).ok().filter(|round| {
+                                    crossing(round).is_none()
+                                        && now + round.duration() < free + plan.duration()
+                                });
+                            match round {
+                                Some(round) => bid = Ok(round),
+                                None => {
+                                    reasons.insert(id, format!("it waits for {name} to be out of the way"));
+                                    waiting.entry(id).or_insert((now, other));
+                                    continue;
+                                }
+                            }
                         }
                     }
                     // Its tool must be in a state to do the task's tool actions.
@@ -349,11 +401,11 @@ impl Planning<'_> {
                     };
                     match bid {
                         Ok(plan) if best.as_ref().is_none_or(|(b, _)| plan.duration() < b.duration()) => {
-                            best = Some((plan.clone(), outcome));
+                            best = Some((plan, outcome));
                         }
                         Ok(_) => {}
                         Err(why) => {
-                            reasons.insert(id, why.clone());
+                            reasons.insert(id, why);
                         }
                     }
                 }
@@ -392,22 +444,24 @@ impl Planning<'_> {
                 });
                 let parked = ready
                     .then(|| {
-                        robots.iter().find_map(|(robot, (at, _))| {
-                            let park = doc.robot_park(*robot)?;
-                            if bits(at) == bits(&park) || !moved_away.insert((*robot, bits(at))) {
-                                return None;
-                            }
-                            let others: Vec<gc_motion::Obstacle> = robots
-                                .iter()
-                                .filter(|(other, _)| *other != robot)
-                                .filter_map(|(other, (stands, _))| {
-                                    let name = doc.get(*other).map(|r| r.name.clone())?;
-                                    Some(scenes.get(other)?.as_obstacles(stands, &name))
-                                })
-                                .flatten()
-                                .collect();
-                            self.park_plan(*robot, at, &park, &others).ok()
-                        })
+                        robots.iter().filter(|(robot, _)| blockers.contains(robot)).find_map(
+                            |(robot, (at, _))| {
+                                let park = doc.robot_park(*robot)?;
+                                if bits(at) == bits(&park) || !moved_away.insert((*robot, bits(at))) {
+                                    return None;
+                                }
+                                let others: Vec<gc_motion::Obstacle> = robots
+                                    .iter()
+                                    .filter(|(other, _)| *other != robot)
+                                    .filter_map(|(other, (stands, _))| {
+                                        let name = doc.get(*other).map(|r| r.name.clone())?;
+                                        Some(scenes.get(other)?.as_obstacles(stands, &name))
+                                    })
+                                    .flatten()
+                                    .collect();
+                                self.park_plan(*robot, at, &park, &others).ok()
+                            },
+                        )
                     })
                     .flatten();
                 let Some(plan) = parked else { break };
@@ -425,6 +479,18 @@ impl Planning<'_> {
                 world.objects.extend(changes.remove(&assignment.task).unwrap_or_default());
                 if let Some(task) = doc.get(assignment.task) {
                     self.apply_effects(&mut world, task);
+                    // The signals it set, in the order of its steps.
+                    let kit = doc.robot_tool_kit(assignment.robot).and_then(|(kit, _)| doc.get(kit));
+                    for step in &task.steps {
+                        let set = match step {
+                            gc_doc::Step::SetIo { name, value } => Some((name.clone(), *value)),
+                            gc_doc::Step::ToolAction { action, .. } => {
+                                kit.and_then(|k| k.action(action)).and_then(|a| a.set.clone())
+                            }
+                            _ => None,
+                        };
+                        world.signals.extend(set);
+                    }
                 }
                 // A task that repeats goes back among those to do, in its place by priority.
                 let times = done.entry(assignment.task).or_insert(0);

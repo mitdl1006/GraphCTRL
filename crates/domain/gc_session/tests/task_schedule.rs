@@ -413,3 +413,56 @@ fn a_task_repeats_while_its_condition_holds_and_counts_with_an_expression() {
     assert!(schedule.cut_short);
     assert_eq!(schedule.assignments.len(), gc_session::MAX_ASSIGNMENTS);
 }
+
+#[test]
+fn candidates_asked_for_in_the_background_are_kept_per_task() {
+    let Cell { mut s, roles, .. } = cell();
+    let (executor, queue) = gc_jobs::Executor::manual();
+    s.set_executor(executor);
+    let first = add(&mut s, task("First", roles[0]));
+    let second = add(&mut s, task("Second", roles[1]));
+    assert!(s.task_candidates_result(first).is_none() && s.task_candidates_pending().is_none());
+
+    s.request_task_candidates(first);
+    s.request_task_candidates(first);
+    assert_eq!(s.task_candidates_pending(), Some(first));
+    queue.run_all();
+    assert!(s.poll_jobs());
+    let (candidates, current) = s.task_candidates_result(first).unwrap();
+    assert!(current);
+    assert_eq!(candidates, s.task_candidates(first).as_slice(), "the same as working them out here");
+    // Asked again for the same document: nothing is started.
+    s.request_task_candidates(first);
+    assert!(s.task_candidates_pending().is_none());
+
+    // Another task: the first one's result stays; an edit makes both out of date.
+    s.request_task_candidates(second);
+    queue.run_all();
+    assert!(s.poll_jobs());
+    assert!(s.task_candidates_result(first).unwrap().1 && s.task_candidates_result(second).unwrap().1);
+    s.set_suppressed(second.erase(), true).unwrap();
+    assert!(!s.task_candidates_result(first).unwrap().1);
+    // Asking for another task while one is being worked out cancels it.
+    s.request_task_candidates(first);
+    s.request_task_candidates(second);
+    assert_eq!(s.task_candidates_pending(), Some(second));
+    queue.run_all();
+    assert!(s.poll_jobs());
+    assert!(!s.task_candidates_result(first).unwrap().1 && s.task_candidates_result(second).unwrap().1);
+}
+
+#[test]
+fn only_a_robot_that_stands_in_the_way_is_sent_to_its_park_pose() {
+    let Cell { mut s, left, right, sketch, points, roles } = cell();
+    // Left is not at its park pose, but it is not in anyone's way: right's task is simply out of reach.
+    s.edit_work(WorkOp::SetRobotPark { robot: left, joints: Some(vec![1.2, -0.3, 0.6, 0.0, 0.6, 0.0]) })
+        .unwrap();
+    let far = SketchOp::SetCoords { points: vec![(points[1], [5.0, 0.5, 0.0])], radii: Vec::new() };
+    s.execute(&Command::Sketch { sketch, op: far }).unwrap();
+    let reach =
+        add(&mut s, Task { robots: RobotChoice::Only(vec![right]), ..task("Out of reach", roles[1]) });
+    let schedule = s.schedule();
+    assert!(schedule.parks.is_empty(), "nobody is moved for nothing");
+    assert_eq!(schedule.blocked.len(), 1);
+    assert_eq!(schedule.blocked[0].0, reach);
+}

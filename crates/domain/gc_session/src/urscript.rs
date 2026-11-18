@@ -23,6 +23,19 @@ const LINEAR: (f64, f64) = (1.2, 0.25);
 const BLEND: (f64, f64) = (0.01, 0.001);
 
 /// A name as a URScript identifier: letters, digits and underscores, not starting with a digit.
+/// User text as it may stand in a comment: on one line, without control characters (a line break in a
+/// name must not start a new command).
+fn plain(text: &str) -> String {
+    text.chars().map(|c| if c.is_control() { ' ' } else { c }).collect()
+}
+
+/// A name as a function name. Letters outside ASCII cannot be kept, so a name that has any gets the
+/// item's id appended: two such names stay apart.
+fn function_name(name: &str, id: u64) -> String {
+    let base = identifier(name);
+    if name.is_ascii() { base } else { format!("{base}_{id}") }
+}
+
 fn identifier(name: &str) -> String {
     let mut out: String =
         name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect();
@@ -32,17 +45,36 @@ fn identifier(name: &str) -> String {
     out
 }
 
-fn numbers(values: &[f64]) -> String {
-    values.iter().map(|v| format!("{v:.6}")).collect::<Vec<_>>().join(", ")
+/// A number with a fixed count of decimals (the same text on every machine; no "-0.000").
+fn fixed(value: f64, decimals: usize) -> String {
+    let text = format!("{value:.decimals$}");
+    if text.trim_start_matches('-').chars().all(|c| c == '0' || c == '.') {
+        return text.trim_start_matches('-').to_owned();
+    }
+    text
 }
 
-/// A pose as URScript writes it: position and rotation vector.
+/// Joint values: six decimals (radians).
+fn numbers(values: &[f64]) -> String {
+    values.iter().map(|v| fixed(*v, 6)).collect::<Vec<_>>().join(", ")
+}
+
+/// Seconds, speeds, accelerations and blend radii: three decimals.
+fn short(value: f64) -> String {
+    fixed(value, 3)
+}
+
+/// A pose as URScript writes it: position (metres, five decimals) and rotation vector (six).
 fn pose(pose: &DPose3) -> String {
     let turn = gc_math::rotvec_from_quat(pose.rotation);
-    format!(
-        "p[{}]",
-        numbers(&[pose.translation.x, pose.translation.y, pose.translation.z, turn.x, turn.y, turn.z])
-    )
+    let at = [pose.translation.x, pose.translation.y, pose.translation.z].map(|v| fixed(v, 5));
+    let turned = [turn.x, turn.y, turn.z].map(|v| fixed(v, 6));
+    format!("p[{}, {}]", at.join(", "), turned.join(", "))
+}
+
+/// A joint move to `q` with a blend radius.
+fn joint_move(q: &[f64], blend: f64) -> String {
+    format!("movej([{}], a={}, v={}, r={})", numbers(q), short(JOINT.0), short(JOINT.1), short(blend))
 }
 
 fn boolean(value: bool) -> &'static str {
@@ -62,7 +94,8 @@ impl Session {
         };
         let mut line = |text: String| {
             out.push_str("  ");
-            out.push_str(&text);
+            // One command or comment per line, whatever names and conditions hold.
+            out.push_str(&plain(&text));
             out.push('\n');
         };
         let set = |name: &str, value: bool| match pin(name, IoDirection::Out) {
@@ -74,17 +107,23 @@ impl Session {
                 ProgramStep::Joints(points) => {
                     for (index, q) in points.iter().enumerate() {
                         let blend = if index + 1 == points.len() { 0.0 } else { BLEND.0 };
-                        line(format!("movej([{}], a={}, v={}, r={blend})", numbers(q), JOINT.0, JOINT.1));
+                        line(joint_move(q, blend));
                     }
                 }
                 ProgramStep::Linear { poses, speed } => {
                     let v = speed.unwrap_or(LINEAR.1);
                     for (index, world) in poses.iter().enumerate() {
                         let blend = if index + 1 == poses.len() { 0.0 } else { BLEND.1 };
-                        line(format!("movel({}, a={}, v={v}, r={blend})", pose(&(base * *world)), LINEAR.0));
+                        line(format!(
+                            "movel({}, a={}, v={}, r={})",
+                            pose(&(base * *world)),
+                            short(LINEAR.0),
+                            short(v),
+                            short(blend)
+                        ));
                     }
                 }
-                ProgramStep::Pause(seconds) => line(format!("sleep({seconds})")),
+                ProgramStep::Pause(seconds) => line(format!("sleep({})", short(*seconds))),
                 ProgramStep::Output { name, value } => line(set(name, *value)),
                 ProgramStep::Action(name) => {
                     line(format!("# tool action: {name}"));
@@ -102,32 +141,67 @@ impl Session {
                     {
                         // Wait for the confirmation, at most as long as the action allows.
                         Some((input, value)) if action.timeout > 0.0 => {
+                            let limit = short(action.timeout);
                             line("waited = 0.0".to_owned());
                             line(format!(
-                                "while (get_digital_in({input}) != {} and waited < {}):",
-                                boolean(value),
-                                action.timeout
+                                "while (get_digital_in({input}) != {} and waited < {limit}):",
+                                boolean(value)
                             ));
                             line("  sleep(0.01)".to_owned());
                             line("  waited = waited + 0.01".to_owned());
                             line("end".to_owned());
+                            // No confirmation in time: say so and stop, never carry on.
+                            line(format!("if (waited >= {limit}):"));
+                            line(format!(
+                                "  popup(\"{}: no confirmation on input {input}\", \"GraphCTRL\", False, True)",
+                                identifier(name)
+                            ));
+                            line("  halt".to_owned());
+                            line("end".to_owned());
                         }
-                        _ if action.duration > 0.0 => line(format!("sleep({})", action.duration)),
+                        _ if action.duration > 0.0 => line(format!("sleep({})", short(action.duration))),
                         _ => {}
                     }
                 }
                 ProgramStep::WaitFor { condition, timeout } => {
+                    let limit = short(*timeout);
+                    let wait = gc_doc::signal_condition(condition)
+                        .and_then(|(name, value)| Some((pin(&name, IoDirection::In)?, name, value)));
+                    let Some((input, name, value)) = wait else {
+                        line(format!(
+                            "# TODO wait for: {condition} (at most {limit} s): no such input on this robot"
+                        ));
+                        continue;
+                    };
+                    line(format!("# wait for {name}"));
+                    line("waited = 0.0".to_owned());
                     line(format!(
-                        "# TODO wait for: {condition} (at most {timeout} s); signals have no model yet"
+                        "while (get_digital_in({input}) != {} and waited < {limit}):",
+                        boolean(value)
                     ));
+                    line("  sleep(0.01)".to_owned());
+                    line("  waited = waited + 0.01".to_owned());
+                    line("end".to_owned());
+                    line(format!("if (waited >= {limit}):"));
+                    line(format!(
+                        "  popup(\"{}: not seen on input {input}\", \"GraphCTRL\", False, True)",
+                        identifier(&name)
+                    ));
+                    line("  halt".to_owned());
+                    line("end".to_owned());
                 }
             }
         }
     }
 
-    fn urscript_head(&self, robot: Id<Robot>, name: &str, out: &mut String) {
+    fn urscript_head(&self, robot: Id<Robot>, name: &str, id: u64, out: &mut String) {
+        out.push_str(&format!(
+            "# Generated by GraphCTRL {}, document revision {}\n",
+            env!("CARGO_PKG_VERSION"),
+            self.doc().revision().0
+        ));
         let tcp = self.doc().get(robot).map(|r| gc_math::pose_from_xyz_rpy(r.tcp.xyz, r.tcp.rpy));
-        out.push_str(&format!("def {}():\n", identifier(name)));
+        out.push_str(&format!("def {}():\n", function_name(name, id)));
         out.push_str(&format!("  set_tcp({})\n", pose(&tcp.unwrap_or(DPose3::IDENTITY))));
     }
 
@@ -140,8 +214,8 @@ impl Session {
         let plan = self.task_plan(task, robot)?;
         let name = self.doc().get(task).map(|t| t.name.clone()).unwrap_or_default();
         let mut out = String::new();
-        self.urscript_head(robot, &name, &mut out);
-        out.push_str(&format!("  movej([{}], a={}, v={}, r=0)\n", numbers(&plan.start), JOINT.0, JOINT.1));
+        self.urscript_head(robot, &name, task.raw().get(), &mut out);
+        out.push_str(&format!("  {}\n", joint_move(&plan.start, 0.0)));
         self.urscript_lines(&plan, &mut out);
         out.push_str("end\n");
         Ok(out)
@@ -173,19 +247,14 @@ impl Session {
             }
             entries.sort_by(|a, b| a.0.total_cmp(&b.0));
             let mut out = String::new();
-            self.urscript_head(robot, &data.name, &mut out);
-            out.push_str(&format!(
-                "  movej([{}], a={}, v={}, r=0)\n",
-                numbers(&entries[0].3.start),
-                JOINT.0,
-                JOINT.1
-            ));
+            self.urscript_head(robot, &data.name, robot.raw().get(), &mut out);
+            out.push_str(&format!("  {}\n", joint_move(&entries[0].3.start, 0.0)));
             let mut clock = 0.0;
             for (start, end, title, plan) in entries {
                 if start > clock + 1e-9 {
-                    out.push_str(&format!("  sleep({:.3})\n", start - clock));
+                    out.push_str(&format!("  sleep({})\n", short(start - clock)));
                 }
-                out.push_str(&format!("  # {title}\n"));
+                out.push_str(&format!("  # {}\n", plain(&title)));
                 self.urscript_lines(plan, &mut out);
                 clock = end;
             }
