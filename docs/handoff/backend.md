@@ -54,6 +54,22 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 컴포넌트 복사·붙여넣기(Ctrl+C/V, 리드 다음 ①)
+
+근거: About Placing Components(GUID-249C50F9-5A8C-48BD-8341-D1BDB7A16B19)의 "Use Copy and Paste to place new instances using the same orientation".
+- `SubassemblyOp::Paste{keys, offset, into}`:
+  - 셀에 놓인 컴포넌트와 서브어셈블리를 새 인스턴스로 만든다. 같은 방향으로 놓고 `offset`만큼 옮긴다. 관계는 복사하지 않는다.
+  - 서브어셈블리는 구조째로 복사한다(중첩 포함). 새 id(`next_subassembly`)와 빈 이름 `이름:N`을 준다.
+  - 맨 위 복사본은 `into` 레벨에 넣는다. 로봇은 툴째로 복사된다(`Robot` 복제).
+  - 실행 취소 한 단계다. 없어진 행은 건너뛰고, 남은 것이 없으면 `BadValue`.
+- `replicate::copy_mapped`: 원본→복사본 짝을 돌려주는 복사. 기존 `CopyComponents`와 같은 인스턴스 규칙(이름 `:N`, 상태 복사, 접지 안 함).
+- 세션:
+  - `copy_to_clipboard(&[TreeKey])`: 부품·링크·없는 행은 빼고, 남는 것이 없으면 `BadValue`.
+  - `clipboard()`.
+  - `paste(offset) -> Vec<Created>`: 서브어셈블리를 제자리 편집 중이면 그 안으로, 아니면 최상위로 넣는다.
+  - 클립보드는 세션 상태다(문서·저장과 무관). OS 클립보드와는 연결하지 않는다.
+- 테스트: `gc_session/tests/subassembly.rs::copy_and_paste_places_new_instances_and_keeps_subassembly_structure`.
+
 ## 2026-11-18 — 긴급: 손상된 조인트 범위로 인한 패닉(QA)
 
 - 원인: `JointRange::target`이 `f64::clamp(start, end)`를 썼다. 손상·손편집된 파일에서 Start > End(또는 NaN)면 패닉했다.
@@ -67,7 +83,7 @@
   열기는 계속한다. 세션 `load_warnings()`(상태 표시줄용, 프론트엔드).
 - 검색 결과: 나머지 `.clamp(`는 상수 경계뿐이다(0..1, -1..1, 개수 상한 등).
 - 테스트: `gc_session/tests/joint_limits.rs::a_damaged_joint_range_in_a_file_is_dropped_not_a_panic`, `gc_math` `clamp_between_never_panics`.
-  QA 테스트 `qa_joint_limits.rs::a_damaged_joint_range…`는 리드 브랜치에 아직 없어서 못 돌렸다.
+  QA 테스트 `qa_joint_limits.rs::a_damaged_joint_range_in_a_file_does_not_crash_the_solver`가 통과해서 `#[ignore]`를 풀었다.
 
 ## 2026-11-18 — 스플라인(보간, 리드 다음 ②)
 

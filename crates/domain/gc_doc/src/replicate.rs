@@ -419,6 +419,32 @@ pub(crate) fn copy(
     finish(txn, copies, relationships, false, created).map(|c| (c, "Copy components"))
 }
 
+/// What a copy made, and each source with its copy.
+pub(crate) type CopiedPairs = (Vec<Created>, Vec<(AnyId, AnyId)>);
+
+/// Copies components moved by `offset` without their relationships, and says which copy is which source's
+/// (for Paste).
+pub(crate) fn copy_mapped(
+    txn: &mut Txn<'_>,
+    items: &[AnyId],
+    offset: &Placement,
+) -> Result<CopiedPairs, EditError> {
+    check_items(txn.doc(), items)?;
+    if !offset.xyz.iter().chain(&offset.rpy).all(|v| v.is_finite()) {
+        return Err(EditError::BadValue);
+    }
+    let shift = gc_math::pose_from_xyz_rpy(offset.xyz, offset.rpy);
+    let mut created = Vec::new();
+    let mut pairs = Vec::with_capacity(items.len());
+    for item in items {
+        let pose = shift * txn.doc().owner_pose(*item).ok_or(EditError::BadValue)?;
+        let copy = instance(txn, *item, &pose, &mut created)?;
+        copy_states(txn, *item, copy, false)?;
+        pairs.push((*item, copy));
+    }
+    Ok((created, pairs))
+}
+
 fn finish(
     txn: &mut Txn<'_>,
     copies: Vec<(AnyId, AnyId, Mapping)>,

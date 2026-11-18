@@ -376,3 +376,91 @@ fn several_components_preview_together_without_touching_the_document() {
 fn sub_key_item() -> gc_core::AnyId {
     gc_core::Id::<gc_doc::WorkFeature>::from_raw(std::num::NonZeroU64::new(9999).unwrap()).erase()
 }
+
+fn six_axis() -> String {
+    let path = format!("{}/../../../fixtures/urdf/six_axis.urdf", env!("CARGO_MANIFEST_DIR"));
+    std::fs::read_to_string(path).unwrap()
+}
+
+/// Copy and Paste (help, About Placing Components: "Use Copy and Paste to place new instances using the
+/// same orientation"): components (a robot with its tool too) and whole subassemblies, moved by an offset,
+/// without relationships, one undo step; into the subassembly being edited.
+#[test]
+fn copy_and_paste_places_new_instances_and_keeps_subassembly_structure() {
+    use gc_doc::{CellOp, Command, Placement, RelationKind, Relationship, Selection, Tool};
+    let mut s = Session::new();
+    let _first = body(&mut s, 5.0);
+    let (a, b) = (body(&mut s, 0.0), body(&mut s, 0.3));
+    let robot = s.add_robot("Robot1", &six_axis()).unwrap();
+    let tool = Tool { solid: Solid::Box { size: [0.04; 3] }, placement: Placement::default() };
+    s.execute(&Command::Cell(CellOp::SetTool { id: robot, tool: Some(tool) })).unwrap();
+    let inner = demote(&mut s, vec![key(a)], "Inner");
+    let jig = demote(&mut s, vec![TreeKey::Subassembly(inner), key(b)], "Jig");
+    // A relationship between A and B is not pasted.
+    let plane = |x: Id<Body>, z: f64, nz: f64| Selection {
+        occurrence: occ(x),
+        geometry: gc_doc::Geometry::Plane { point: [0.0, 0.0, z], normal: [0.0, 0.0, nz] },
+    };
+    s.add_relationship(Relationship::new(
+        "Flush",
+        RelationKind::Flush { offset: 0.0 },
+        plane(a, 0.05, 1.0),
+        plane(b, 0.05, 1.0),
+    ))
+    .unwrap();
+    let relationships = s.doc().relationships().len();
+
+    s.copy_to_clipboard(&[TreeKey::Subassembly(jig), TreeKey::Component(Occurrence::Item(robot.erase()))])
+        .unwrap();
+    let bodies = s.doc().bodies().len();
+    let steps = s.history().undo_depth();
+    let offset = Placement { xyz: [0.0, 1.0, 0.0], rpy: [0.0; 3] };
+    let created = s.paste(offset).unwrap();
+    assert_eq!(s.history().undo_depth(), steps + 1, "one undo step");
+    assert_eq!(s.doc().bodies().len(), bodies + 2);
+    assert_eq!(s.doc().robots().len(), 2);
+    assert!(s.doc().robots().iter().all(|(_, r)| r.tool.is_some()), "the robot's tool comes along");
+    assert_eq!(s.doc().relationships().len(), relationships, "no relationships pasted");
+    // The structure: a new Jig with B's copy and a new Inner holding A's copy.
+    let new_subs: Vec<SubassemblyId> = created
+        .iter()
+        .filter_map(|c| if let Created::Subassembly(id) = c { Some(*id) } else { None })
+        .collect();
+    assert_eq!(new_subs.len(), 2);
+    let tree = s.component_tree();
+    let names: Vec<&str> = tree.iter().filter(|r| r.component.is_none()).map(|r| r.name.as_str()).collect();
+    assert!(names.contains(&"Jig:1") && names.contains(&"Inner:1"), "{names:?}");
+    let new_jig = new_subs
+        .iter()
+        .copied()
+        .find(|id| tree.iter().any(|r| r.key == TreeKey::Subassembly(*id) && r.name == "Jig:1"))
+        .unwrap();
+    let pasted_bodies: Vec<Id<Body>> =
+        created.iter().filter_map(|c| if let Created::Body(id) = c { Some(*id) } else { None }).collect();
+    for copy in &pasted_bodies {
+        assert!(s.doc().is_under(key(*copy), TreeKey::Subassembly(new_jig)), "the copies are in the new Jig");
+        let y = s.doc().component_origin(occ(*copy)).unwrap().pose.translation.y;
+        assert!((y - 1.0).abs() < 1e-9, "moved by the offset, same orientation");
+    }
+    s.undo();
+    assert_eq!(s.doc().bodies().len(), bodies);
+    assert_eq!(s.doc().subassemblies().len(), 2);
+
+    // Pasting while a subassembly is edited puts the copy in it; a deleted source is skipped.
+    s.copy_to_clipboard(&[key(b)]).unwrap();
+    s.edit_component(TreeKey::Subassembly(jig)).unwrap();
+    let created = s.paste(Placement::default()).unwrap();
+    let copy = created.iter().find_map(|c| if let Created::Body(id) = c { Some(*id) } else { None }).unwrap();
+    assert_eq!(s.doc().subassembly_of(occ(copy)), Some(jig));
+    s.return_to_top();
+    // Nothing usable: refused.
+    assert_eq!(
+        s.copy_to_clipboard(&[TreeKey::Component(Occurrence::Link { robot, index: 1 })]),
+        Err(EditError::BadValue)
+    );
+    s.copy_to_clipboard(&[key(copy)]).unwrap();
+    s.delete_item(gc_session::CellItem::Body(copy)).unwrap();
+    let before = s.doc().clone();
+    assert_eq!(s.paste(Placement::default()), Err(EditError::BadValue));
+    assert!(s.doc().same_content(&before));
+}

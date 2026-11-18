@@ -14,11 +14,12 @@ use gc_doc::{EditError, Occurrence, SubassemblyOp, TreeKey, TreeRow};
 
 use crate::Session;
 
-/// The edit target and the targets before it.
+/// The edit target and the targets before it, and the component clipboard.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct EditStack {
     target: Option<TreeKey>,
     back: Vec<Option<TreeKey>>,
+    clipboard: Vec<TreeKey>,
 }
 
 impl Session {
@@ -56,6 +57,48 @@ impl Session {
     /// The sketches an owner holds (`None`: the top-level assembly's).
     pub fn sketches_of(&self, owner: Option<TreeKey>) -> Vec<gc_core::Id<gc_doc::Sketch>> {
         self.doc().sketches_of(owner)
+    }
+
+    /// Copy (Ctrl+C): remembers components placed in the cell and subassemblies to paste. Rows that are not
+    /// components or subassemblies (parts, links, missing rows) are left out; refused when none is left.
+    pub fn copy_to_clipboard(&mut self, keys: &[TreeKey]) -> Result<(), EditError> {
+        let doc = self.doc();
+        let usable: Vec<TreeKey> = keys
+            .iter()
+            .copied()
+            .filter(|k| match k {
+                TreeKey::Subassembly(_) => doc.has_tree_row(*k),
+                TreeKey::Component(Occurrence::Item(item)) => {
+                    matches!(
+                        item.kind,
+                        gc_core::Kind::Body | gc_core::Kind::RobotInstance | gc_core::Kind::Assembly
+                    ) && doc.has_tree_row(*k)
+                }
+                TreeKey::Component(_) => false,
+            })
+            .collect();
+        if usable.is_empty() {
+            return Err(EditError::BadValue);
+        }
+        self.editing.clipboard = usable;
+        Ok(())
+    }
+
+    /// What Copy remembered (some rows may since have been deleted; Paste skips them).
+    pub fn clipboard(&self) -> &[TreeKey] {
+        &self.editing.clipboard
+    }
+
+    /// Paste (Ctrl+V): new instances of what was copied, same orientation, moved by `offset`, without
+    /// relationships; whole subassemblies keep their structure. They go into the subassembly being edited
+    /// in place (the top level otherwise). One undo step. Refused when nothing copied is left.
+    pub fn paste(&mut self, offset: gc_doc::Placement) -> Result<Vec<gc_doc::Created>, EditError> {
+        let into = match self.edit_target() {
+            Some(TreeKey::Subassembly(id)) => Some(id),
+            Some(TreeKey::Component(_)) | None => None,
+        };
+        let keys = self.editing.clipboard.clone();
+        self.edit_subassemblies(SubassemblyOp::Paste { keys, offset, into })
     }
 
     /// The component or subassembly being edited in place; `None` at the top level.
