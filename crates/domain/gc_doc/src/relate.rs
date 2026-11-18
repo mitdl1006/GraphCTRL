@@ -764,6 +764,14 @@ impl Document {
                 continue;
             }
             let subset: Vec<Term> = subset.into_iter().cloned().collect();
+            // Fast path: one component at a time out from what holds still (a chain is a row of six-unknown
+            // problems instead of one big one). Anything left unsatisfied (a loop, a component that needs a
+            // later one to settle, a conflict) is solved as a whole from where it started, as before.
+            let before: Vec<DPose3> = poses.clone();
+            if staged(&owners, &free, &subset, &mut poses) {
+                continue;
+            }
+            poses.copy_from_slice(&before);
             rough_turns(&owners, &subset, &mut poses);
             least_squares_on(&free, &subset, &mut poses);
         }
@@ -1112,10 +1120,6 @@ fn plain_residuals(term: &Term, poses: &[DPose3]) -> Vec<f64> {
     out
 }
 
-fn all_residuals(terms: &[Term], poses: &[DPose3]) -> Vec<f64> {
-    terms.iter().flat_map(|t| term_residuals(t, poses)).collect()
-}
-
 /// Turns a moving component half a turn where its direction points the wrong way, so that the least
 /// squares do not start at the saddle where opposite directions have no gradient.
 fn rough_turns(owners: &[Owner], terms: &[Term], poses: &mut [DPose3]) {
@@ -1211,67 +1215,219 @@ fn islands(owners: &[Owner], terms: &[Term]) -> Vec<(Vec<usize>, Vec<usize>)> {
     by_root.into_values().filter(|(_, terms)| !terms.is_empty()).collect()
 }
 
-/// Damped least squares over the poses of the owners `free`.
-fn least_squares_on(free: &[usize], terms: &[Term], poses: &mut [DPose3]) {
-    let n = free.len() * 6;
-    if n == 0 || terms.is_empty() {
-        return;
-    }
-    let cost = |r: &[f64]| r.iter().map(|v| v * v).sum::<f64>();
-    let mut r = all_residuals(terms, poses);
-    let mut lambda = 1e-3;
-    for _ in 0..200 {
-        if cost(&r) < 1e-24 {
-            break;
-        }
-        // The Jacobian by forward differences.
-        let h = 1e-7;
-        let m = r.len();
-        let mut jac = vec![0.0; m * n];
-        for (k, owner) in free.iter().enumerate() {
-            for p in 0..6 {
-                let mut step = [0.0; 6];
-                step[p] = h;
-                let saved = poses[*owner];
-                poses[*owner] = stepped(&saved, &step);
-                let moved = all_residuals(terms, poses);
-                poses[*owner] = saved;
-                for row in 0..m {
-                    jac[row * n + k * 6 + p] = (moved[row] - r[row]) / h;
+/// Solves an island one component at a time, breadth first from the fixed components it touches (from its
+/// first component when it touches none, which then stays put): each component meets the relationships
+/// to the components already placed. True when every relationship of the island is satisfied after.
+fn staged(owners: &[Owner], free: &[usize], terms: &[Term], poses: &mut [DPose3]) -> bool {
+    let members = |t: &Term| -> Vec<usize> {
+        t.owners.iter().copied().chain(t.third.as_ref().map(|(i, _)| *i)).collect()
+    };
+    let mut placed: Vec<bool> = owners.iter().map(|o| !o.free).collect();
+    let mut queue: std::collections::VecDeque<usize> = std::collections::VecDeque::new();
+    let mut queued = vec![false; owners.len()];
+    let seed = |queue: &mut std::collections::VecDeque<usize>, queued: &mut Vec<bool>, placed: &[bool]| {
+        for term in terms {
+            let m = members(term);
+            if m.iter().any(|i| placed[*i]) {
+                for i in m {
+                    if !placed[i] && !queued[i] {
+                        queued[i] = true;
+                        queue.push_back(i);
+                    }
                 }
             }
         }
-        let mut normal = vec![0.0; n * n];
+    };
+    seed(&mut queue, &mut queued, &placed);
+    if queue.is_empty() {
+        // Floating: the first component holds still.
+        let Some(first) = free.first() else { return true };
+        placed[*first] = true;
+        seed(&mut queue, &mut queued, &placed);
+    }
+    // Terms by owner, to find a component's relationships quickly.
+    let mut by_owner: Vec<Vec<usize>> = vec![Vec::new(); owners.len()];
+    for (index, term) in terms.iter().enumerate() {
+        for i in members(term) {
+            by_owner[i].push(index);
+        }
+    }
+    while let Some(node) = queue.pop_front() {
+        let ready: Vec<Term> = by_owner[node]
+            .iter()
+            .map(|t| &terms[*t])
+            .filter(|t| members(t).iter().all(|i| *i == node || placed[*i]))
+            .cloned()
+            .collect();
+        placed[node] = true;
+        for t in &by_owner[node] {
+            for i in members(&terms[*t]) {
+                if !placed[i] && !queued[i] {
+                    queued[i] = true;
+                    queue.push_back(i);
+                }
+            }
+        }
+        if ready.iter().all(|t| term_residuals(t, poses).iter().all(|r| r.abs() <= 1e-9)) {
+            continue;
+        }
+        // Only this component may move (the rough turns too).
+        let local: Vec<Owner> =
+            owners.iter().enumerate().map(|(i, o)| Owner { free: i == node, ..*o }).collect();
+        rough_turns(&local, &ready, poses);
+        least_squares_on(&[node], &ready, poses);
+    }
+    free.iter().all(|i| placed[*i])
+        && terms.iter().all(|t| term_residuals(t, poses).iter().all(|r| r.abs() <= 1e-9))
+}
+
+/// Damped least squares over the poses of the owners `free`. The normal matrix is stored by its envelope
+/// with the owners in breadth-first order, so a chain (or any long, thin assembly) costs about as much per
+/// component as one component on its own.
+fn least_squares_on(free: &[usize], terms: &[Term], poses: &mut [DPose3]) {
+    if free.is_empty() || terms.is_empty() {
+        return;
+    }
+    // Owners each term touches (free ones only), and terms by owner.
+    let mut touched: Vec<Vec<usize>> = Vec::with_capacity(terms.len());
+    let mut by_owner: Vec<Vec<usize>> = vec![Vec::new(); poses.len()];
+    for (index, term) in terms.iter().enumerate() {
+        let mut m: Vec<usize> = term
+            .owners
+            .iter()
+            .copied()
+            .chain(term.third.as_ref().map(|(i, _)| *i))
+            .filter(|i| free.contains(i))
+            .collect();
+        m.sort_unstable();
+        m.dedup();
+        for i in &m {
+            by_owner[*i].push(index);
+        }
+        touched.push(m);
+    }
+    // Breadth-first order keeps the envelope narrow.
+    let mut order: Vec<usize> = Vec::with_capacity(free.len());
+    let mut seen = vec![false; poses.len()];
+    for root in free {
+        if seen[*root] {
+            continue;
+        }
+        seen[*root] = true;
+        let mut queue = std::collections::VecDeque::from([*root]);
+        while let Some(o) = queue.pop_front() {
+            order.push(o);
+            for t in &by_owner[o] {
+                for i in &touched[*t] {
+                    if !seen[*i] {
+                        seen[*i] = true;
+                        queue.push_back(*i);
+                    }
+                }
+            }
+        }
+    }
+    let mut block = vec![usize::MAX; poses.len()];
+    for (k, o) in order.iter().enumerate() {
+        block[*o] = k;
+    }
+    let n = order.len() * 6;
+    // The envelope: the first column of each row of the (symmetric) normal matrix.
+    let mut first: Vec<usize> = (0..n).collect();
+    for m in &touched {
+        let Some(lo) = m.iter().map(|o| block[*o] * 6).min() else { continue };
+        for o in m {
+            for p in 0..6 {
+                let row = block[*o] * 6 + p;
+                first[row] = first[row].min(lo);
+            }
+        }
+    }
+    let residuals =
+        |poses: &[DPose3]| -> Vec<Vec<f64>> { terms.iter().map(|t| term_residuals(t, poses)).collect() };
+    let cost = |r: &[Vec<f64>]| r.iter().flatten().map(|v| v * v).sum::<f64>();
+    let mut r = residuals(poses);
+    let mut lambda = 1e-3;
+    let mut stalled = 0;
+    for _ in 0..200 {
+        let current = cost(&r);
+        if current < 1e-24 {
+            break;
+        }
+        // The Jacobian by forward differences, term by term: jac[t][k] holds the columns of the k-th owner
+        // the term touches (rows × 6, row-major).
+        let h = 1e-7;
+        let mut jac: Vec<Vec<Vec<f64>>> =
+            touched.iter().zip(&r).map(|(m, rows)| vec![vec![0.0; rows.len() * 6]; m.len()]).collect();
+        for o in &order {
+            for p in 0..6 {
+                let mut step = [0.0; 6];
+                step[p] = h;
+                let saved = poses[*o];
+                poses[*o] = stepped(&saved, &step);
+                for t in &by_owner[*o] {
+                    let moved = term_residuals(&terms[*t], poses);
+                    let Some(k) = touched[*t].iter().position(|i| i == o) else { continue };
+                    let cols = &mut jac[*t][k];
+                    for (row, (after, before)) in moved.iter().zip(&r[*t]).enumerate() {
+                        cols[row * 6 + p] = (after - before) / h;
+                    }
+                }
+                poses[*o] = saved;
+            }
+        }
+        // Normal matrix (lower envelope) and gradient.
+        let mut normal: Vec<Vec<f64>> = (0..n).map(|i| vec![0.0; i - first[i] + 1]).collect();
         let mut gradient = vec![0.0; n];
-        for row in 0..m {
-            for i in 0..n {
-                let ji = jac[row * n + i];
-                gradient[i] -= ji * r[row];
-                for j in 0..n {
-                    normal[i * n + j] += ji * jac[row * n + j];
+        for (t, m) in touched.iter().enumerate() {
+            let rows = r[t].len();
+            for (ka, a) in m.iter().enumerate() {
+                let ja = &jac[t][ka];
+                for row in 0..rows {
+                    for p in 0..6 {
+                        gradient[block[*a] * 6 + p] -= ja[row * 6 + p] * r[t][row];
+                    }
+                }
+                for (kb, b) in m.iter().enumerate() {
+                    if block[*b] > block[*a] {
+                        continue;
+                    }
+                    let jb = &jac[t][kb];
+                    for p in 0..6 {
+                        let i = block[*a] * 6 + p;
+                        for q in 0..6 {
+                            let j = block[*b] * 6 + q;
+                            if j > i {
+                                continue;
+                            }
+                            let sum: f64 = (0..rows).map(|row| ja[row * 6 + p] * jb[row * 6 + q]).sum();
+                            normal[i][j - first[i]] += sum;
+                        }
+                    }
                 }
             }
         }
         let mut improved = false;
         for _ in 0..12 {
             let mut a = normal.clone();
-            for i in 0..n {
-                a[i * n + i] += lambda * (1.0 + normal[i * n + i]);
+            for (i, row) in a.iter_mut().enumerate() {
+                let d = i - first[i];
+                row[d] += lambda * (1.0 + normal[i][d]);
             }
-            let Some(dx) = solve_linear(a, gradient.clone(), n) else {
+            let Some(dx) = envelope_solve(a, &first, gradient.clone()) else {
                 lambda *= 10.0;
                 continue;
             };
-            let candidate: Vec<DPose3> = poses
-                .iter()
-                .enumerate()
-                .map(|(i, pose)| match free.iter().position(|f| *f == i) {
-                    Some(k) => stepped(pose, &dx[k * 6..k * 6 + 6]),
-                    None => *pose,
-                })
-                .collect();
-            let r_new = all_residuals(terms, &candidate);
-            if cost(&r_new) < cost(&r) {
+            let mut candidate = poses.to_vec();
+            for o in &order {
+                let k = block[*o] * 6;
+                candidate[*o] = stepped(&poses[*o], &dx[k..k + 6]);
+            }
+            let r_new = residuals(&candidate);
+            let new_cost = cost(&r_new);
+            if new_cost < current {
+                // Stuck at a minimum that is not zero (a conflict): stop once progress stalls.
+                stalled = if current - new_cost < 1e-9 * current { stalled + 1 } else { 0 };
                 poses.copy_from_slice(&candidate);
                 r = r_new;
                 lambda = (lambda * 0.3).max(1e-12);
@@ -1280,39 +1436,49 @@ fn least_squares_on(free: &[usize], terms: &[Term], poses: &mut [DPose3]) {
             }
             lambda *= 10.0;
         }
-        if !improved {
+        if !improved || stalled >= 3 {
             break;
         }
     }
 }
 
-/// Solves `a x = b` (n × n, row-major) by Gaussian elimination with partial pivoting.
-fn solve_linear(mut a: Vec<f64>, mut b: Vec<f64>, n: usize) -> Option<Vec<f64>> {
-    for col in 0..n {
-        let pivot = (col..n).max_by(|x, y| a[x * n + col].abs().total_cmp(&a[y * n + col].abs()))?;
-        if a[pivot * n + col].abs() < 1e-300 {
-            return None;
-        }
-        if pivot != col {
-            for k in 0..n {
-                a.swap(pivot * n + k, col * n + k);
+/// Solves `a x = b` for a symmetric positive definite `a` given by the lower envelope of its rows (row
+/// `i` holds columns `first[i]..=i`), by Cholesky factorisation within the envelope.
+fn envelope_solve(mut a: Vec<Vec<f64>>, first: &[usize], mut b: Vec<f64>) -> Option<Vec<f64>> {
+    let n = b.len();
+    for i in 0..n {
+        for j in first[i]..=i {
+            let start = first[i].max(first[j]);
+            let mut sum = a[i][j - first[i]];
+            for k in start..j {
+                sum -= a[i][k - first[i]] * a[j][k - first[j]];
             }
-            b.swap(pivot, col);
-        }
-        for row in col + 1..n {
-            let f = a[row * n + col] / a[col * n + col];
-            for k in col..n {
-                a[row * n + k] -= f * a[col * n + k];
+            if i == j {
+                if sum.is_nan() || sum <= 1e-300 {
+                    return None;
+                }
+                a[i][i - first[i]] = sum.sqrt();
+            } else {
+                a[i][j - first[i]] = sum / a[j][j - first[j]];
             }
-            b[row] -= f * b[col];
         }
     }
-    let mut x = vec![0.0; n];
-    for row in (0..n).rev() {
-        let tail: f64 = (row + 1..n).map(|k| a[row * n + k] * x[k]).sum();
-        x[row] = (b[row] - tail) / a[row * n + row];
+    // L y = b, then Lᵀ x = y.
+    for i in 0..n {
+        let mut sum = b[i];
+        for k in first[i]..i {
+            sum -= a[i][k - first[i]] * b[k];
+        }
+        b[i] = sum / a[i][i - first[i]];
     }
-    x.iter().all(|v| v.is_finite()).then_some(x)
+    for i in (0..n).rev() {
+        b[i] /= a[i][i - first[i]];
+        let x = b[i];
+        for k in first[i]..i {
+            b[k] -= a[i][k - first[i]] * x;
+        }
+    }
+    b.iter().all(|v| v.is_finite()).then_some(b)
 }
 
 /// The rough turns of a joint: Z axes the right way, then (rigid) X axes alike, each by half a turn.
