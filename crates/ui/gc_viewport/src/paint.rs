@@ -74,7 +74,7 @@ fn view_of<'a>(ui: &egui::Ui, rect: Rect, camera: &'a Camera) -> View<'a> {
 }
 
 /// Paints what lies under the solids: the background and the grid.
-pub(crate) fn under(ui: &egui::Ui, rect: Rect, camera: &Camera, session: &Session) {
+pub(crate) fn under(ui: &egui::Ui, rect: Rect, camera: &Camera, session: &Session, ground: bool) {
     let view = view_of(ui, rect, camera);
     // A gradient from light at the top to a little darker at the bottom, as in CAD programs.
     let mut gradient = egui::Mesh::default();
@@ -107,7 +107,10 @@ pub(crate) fn under(ui: &egui::Ui, rect: Rect, camera: &Camera, session: &Sessio
         Some((_, sketch)) => plane_of(session, sketch),
         None => world_xy,
     };
-    grid(&view, &grid_plane);
+    // The floor grid is the ground plane; a sketch brings its own grid, which stays.
+    if ground || session.active_sketch().is_some() {
+        grid(&view, &grid_plane);
+    }
 }
 
 /// Paints what lies over the solids: axes, sketches, traces, waypoints and tool previews.
@@ -119,6 +122,7 @@ pub(crate) fn over(
     scene: &Scene,
     gpu: bool,
     show_constraints: bool,
+    vis: &crate::ObjectVisibility,
 ) {
     let mut view = view_of(ui, rect, camera);
     view.show_constraints = show_constraints;
@@ -128,7 +132,10 @@ pub(crate) fn over(
         let plane = plane_of(session, sketch);
         if active.is_some_and(|(active_id, _)| active_id == id) {
             active_sketch(&view, &plane, sketch, session);
-        } else if session.doc().is_visible(id.erase()) && !session.doc().is_inactive(id.erase()) {
+        } else if session.doc().is_visible(id.erase())
+            && !session.doc().is_inactive(id.erase())
+            && (if sketch.is_spatial() { vis.sketches_3d } else { vis.sketches })
+        {
             let stroke = Stroke::new(1.2, colors::inactive());
             for (id, curve) in &sketch.curves {
                 let ends = sketch.spline_ends(*id);

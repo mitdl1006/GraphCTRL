@@ -122,6 +122,8 @@ messages! {
     /// Ribbon group: leave the sketch.
     GroupExit => ("종료", "Exit"),
     /// Ribbon group: standard views.
+    GroupNavigate => ("탐색", "Navigate"),
+    GroupWindows => ("창", "Windows"),
     GroupViews => ("표준 뷰", "Views"),
     /// Ribbon group: projection.
     GroupProjection => ("투영", "Projection"),
@@ -178,6 +180,21 @@ messages! {
     /// View: orthographic projection.
     ViewOrtho => ("직교", "Orthographic"),
     /// View: perspective projection.
+    ObjVisTitle => ("개체 가시성", "Object Visibility"),
+    ObjVisOriginPlanes => ("원점 평면", "Origin Planes"),
+    ObjVisOriginAxes => ("원점 축", "Origin Axes"),
+    ObjVisOriginPoints => ("원점 점", "Origin Points"),
+    ObjVisWorkPlanes => ("작업 평면", "Work Planes"),
+    ObjVisWorkAxes => ("작업 축", "Work Axes"),
+    ObjVisWorkPoints => ("작업 점", "Work Points"),
+    ObjVisSketches => ("스케치", "Sketches"),
+    ObjVisSketches3d => ("3D 스케치", "3D Sketches"),
+    ObjVisConstraints => ("구속조건 기호", "Constraint Symbols"),
+    GroundPlane => ("바닥 평면", "Ground Plane"),
+    VisualStyleTitle => ("시각 스타일", "Visual Style"),
+    VisualStyleShaded => ("음영 처리", "Shaded"),
+    VisualStyleShadedEdges => ("모서리가 있는 음영 처리", "Shaded with Edges"),
+    VisualStyleWireframe => ("와이어프레임", "Wireframe"),
     ViewPerspective => ("원근", "Perspective"),
     /// Panel title: model browser.
     PanelBrowser => ("모델", "Model"),

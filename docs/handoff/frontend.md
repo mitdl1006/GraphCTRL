@@ -265,6 +265,29 @@
 - 안내 글자는 그려진 텍스트 대신 레이블(Area)이라 접근성 노드가 있다 → 화면 테스트에서 모드 확인 가능.
 - 테스트: `the_spline_menu_inserts_points_and_closes_the_curve`에 안내 레이블·먼 클릭 무시 단언 추가.
 
+### 뷰 탭: 시각 스타일(Visual Style) 분할 버튼
+
+- 근거: Inventor 2026 도움말 GUID-8D59A8BF-49A8-4214-A3A7-F184DB73E68F (About Visual Styles in Models: View 탭 Appearance 패널에서 스타일 선택), 그림자·바닥 GUID-3395B47F-7D8B-47B4-ACDD-0A9489948DB4 / GUID-AC7970C5-72DB-409E-AED4-96B9C5E6C4A0.
+- 외형 패널의 분할 버튼: 음영 처리(모서리 없음) / 모서리가 있는 음영 처리(기본, 현재 렌더) / 와이어프레임(면 없이 모서리 전체). 면·모서리 그리기 여부만으로 되는 것이라 렌더러 변경 없이 `VisualStyle`(gc_viewport)로 처리.
+- 렌더러 지원이 필요한 나머지: 숨은 모서리 표시(음영/와이어프레임 + 숨은 모서리 점선·옅은 색: 깊이 반전 패스), 가시 모서리만 있는 와이어프레임(색 쓰기 없는 깊이 전용 패스), 사실적(재질), 흑백·수채화·스케치 일러스트.
+- 테스트: `the_visual_style_drop_down_switches_shaded_edges_and_wireframe`.
+
+### 뷰 탭: 개체 가시성(Object Visibility) 드롭리스트
+
+- 근거: Inventor 2026 도움말 GUID-BA193171-FAFC-4150-9222-CC43D8D4AA54 (View 탭 Visibility 패널 Object Visibility: 드롭리스트에서 체크 해제=끄기, 선택=켜기, 같은 종류 전체에 적용. 컨텍스트 메뉴 가시성과 충돌하면 개별 설정이 우선이라는 주의 문구).
+- 구현: `ribbon_drop_button`(gc_ui, 체크 클릭에는 열린 채, 바깥 클릭에 닫힘) + `ObjectVisibility`(gc_viewport). 종류: 원점 평면·축·점, 작업 평면·축·점, 스케치(비활성 2D), 3D 스케치, 구속조건 기호. 그리기와 선택(pick) 둘 다 같은 필터를 따른다.
+- 의미: 작업 피처·스케치는 기본 켜짐이고 끄면 전부 숨김(개별로 숨긴 것은 그대로 숨김). 원점 종류는 기본 꺼짐(Inventor 원점 폴더처럼)이고 켜면 모든 컴포넌트의 해당 원점 요소가 개별 표시에 더해 보인다.
+- 원문과 차이: 이 설정은 실행 중에만 유지(문서 저장 안 됨). UCS·스케치 치수·와이어 등 우리에게 없는 종류는 없음. 스케치 치수 일괄 표시/숨김(GUID-026FE8D3)은 구속 기호와 별개이므로 아직 없음.
+- 테스트: `the_object_visibility_drop_list_switches_kinds_on_and_off`; 기존 `qa_assembly_ui` 15개 통과.
+
+### 뷰 탭: 바닥 평면, 패널 순서(Visibility · Appearance · Windows · Navigate)
+
+- 근거: Inventor 2026 도움말 GUID-AC7970C5-72DB-409E-AED4-96B9C5E6C4A0 (바닥 평면의 켜기/끄기는 View 탭 Appearance 패널, 세션 단위), GUID-3395B47F-7D8B-47B4-ACDD-0A9489948DB4 (그림자 목록도 Appearance 패널).
+- 바닥 평면 버튼 = 바닥 격자(`Viewport::show_ground`). 스케치를 편집하는 동안에는 스케치 자체의 격자가 남는다. 바닥 평면 설정(위치·불투명도·색·반사)과 문서 저장은 없음.
+- 그림자(전체/바닥/물체/주변)는 렌더러에 그림자 맵이 없어 없음 — 렌더러 작업이 필요하다(리드에 보고).
+- 패널 순서: 가시성(개체 가시성, 자유도) · 외형(시각 스타일, 바닥 평면, 투영, 단면) · 창(패널 반투명, 어두운 테마) · 탐색(홈, 표준 뷰, 전체 보기, 면 보기). 투영 패널은 외형으로 합쳤고, "표준 뷰"는 "탐색", "패널"은 "창"으로 이름을 바꿨다. 단면(Section)을 외형에 둔 것은 이전 배치를 유지한 것(원문 위치 미확인).
+- 테스트: `the_ground_plane_button_switches_the_floor_grid`, `the_view_tab_panels_run_visibility_appearance_windows_navigate`; shell 106개 통과.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹
