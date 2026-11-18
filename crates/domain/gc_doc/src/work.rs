@@ -584,6 +584,8 @@ fn task_ok(doc: &Document, task: &Task) -> Result<(), EditError> {
         }
     }
     match &task.robots {
+        // "While this holds" needs something to hold.
+        RobotChoice::When(text) if text.trim().is_empty() => Err(EditError::BadValue),
         RobotChoice::Any | RobotChoice::When(_) => Ok(()),
         RobotChoice::Only(robots) => {
             let distinct = robots.iter().enumerate().all(|(i, r)| !robots[..i].contains(r));

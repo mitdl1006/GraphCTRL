@@ -415,6 +415,8 @@ pub(crate) struct CellState {
     /// A schedule being worked out for a revision of the document, and the last one worked out.
     schedule_job: Option<(gc_core::Revision, JobHandle<Option<crate::Schedule>>)>,
     schedule: Option<(gc_core::Revision, crate::Schedule)>,
+    /// The moment of the schedule the robots are shown at.
+    schedule_time: Option<f64>,
     compare_job: Option<CompareJob>,
     /// An assembly file being read in the background, and what came of the last one.
     import_job: Option<JobHandle<ImportLoad>>,
@@ -481,6 +483,7 @@ impl Default for CellState {
             job: None,
             schedule_job: None,
             schedule: None,
+            schedule_time: None,
             compare_job: None,
             import_job: None,
             import_result: None,
@@ -1309,6 +1312,12 @@ impl Session {
     /// The joint values a robot is shown with: the playback position, else the jog preview, else the
     /// document's.
     pub fn robot_joints(&self, robot: Id<Robot>) -> Option<Vec<f64>> {
+        // A schedule being played back shows every robot where it is at that moment.
+        if let (Some(time), Some((_, schedule))) = (self.cell.schedule_time, &self.cell.schedule)
+            && let Some(joints) = schedule.joints_at(robot, time)
+        {
+            return Some(joints);
+        }
         if let Some((path, time)) = self.cell.playback
             && self.doc.get(path).is_some_and(|p| p.robot == robot)
             && let Some(planned) = self.planned(path)
@@ -2991,12 +3000,39 @@ pub struct TaskPlan {
     pub waiting: f64,
     /// The joint values the robot ends in.
     pub end: Vec<f64>,
+    /// The joint values it starts in.
+    pub start: Vec<f64>,
+    /// Where it stands still (waits, tool actions): after how many of the motions, and for how long.
+    pub pauses: Vec<(usize, f64)>,
 }
 
 impl TaskPlan {
     /// Expected time in seconds: the motions and the waits.
     pub fn duration(&self) -> f64 {
         self.segments.iter().map(|s| s.trajectory.duration()).sum::<f64>() + self.waiting
+    }
+
+    /// The joint values `t` seconds into the task (clamped to it): along the motions, standing still
+    /// during the waits and tool actions where they come.
+    pub fn sample(&self, t: f64) -> Vec<f64> {
+        let mut t = t.max(0.0);
+        let mut at = self.start.clone();
+        for index in 0..=self.segments.len() {
+            // What stands between the motions before this one and it.
+            let pause: f64 = self.pauses.iter().filter(|(after, _)| *after == index).map(|(_, s)| s).sum();
+            if t <= pause {
+                return at;
+            }
+            t -= pause;
+            let Some(segment) = self.segments.get(index) else { break };
+            let duration = segment.trajectory.duration();
+            if t <= duration {
+                return segment.trajectory.sample(t).q;
+            }
+            t -= duration;
+            at = segment.trajectory.sample(duration).q;
+        }
+        self.end.clone()
     }
 }
 
@@ -3029,6 +3065,24 @@ impl Planning<'_> {
         robot_id: Id<Robot>,
         start: &[f64],
     ) -> Result<TaskPlan, String> {
+        self.task_plan_among(task_id, robot_id, start, &[])
+    }
+
+    /// The planning scene of a robot in the cell as it stands (other robots are not in it).
+    pub(crate) fn scene_of(&self, robot_id: Id<Robot>) -> Result<RobotScene, String> {
+        let robot = self.doc.get(robot_id).ok_or("the robot no longer exists")?;
+        let loaded = self.robots.get(&robot_id).ok_or("the robot description could not be read")?;
+        robot_scene(self.doc, loaded, self.meshes, robot, &self.equipment)
+    }
+
+    /// [`Planning::task_plan_from`] with more obstacles in the way: other robots where they stand.
+    pub(crate) fn task_plan_among(
+        &self,
+        task_id: Id<gc_doc::Task>,
+        robot_id: Id<Robot>,
+        start: &[f64],
+        others: &[Obstacle],
+    ) -> Result<TaskPlan, String> {
         use gc_doc::{Location, MoveTarget, RobotChoice};
         let doc = self.doc;
         let task = doc.get(task_id).ok_or("the task no longer exists")?;
@@ -3051,6 +3105,8 @@ impl Planning<'_> {
         let kit = doc.robot_tool_kit(robot_id).and_then(|(kit, _)| doc.get(kit));
         let mut steps = Vec::new();
         let mut waiting = 0.0;
+        // Where the robot stands still: after how many motions, and for how long.
+        let mut pauses: Vec<(usize, f64)> = Vec::new();
         let free = |name: &str, goal: Goal, travel: Travel| Step {
             name: name.to_owned(),
             goal,
@@ -3068,6 +3124,7 @@ impl Planning<'_> {
                 }
                 gc_doc::Step::Wait { seconds } => {
                     waiting += seconds;
+                    pauses.push((steps.len(), *seconds));
                     continue;
                 }
                 gc_doc::Step::ToolAction { action, target } => {
@@ -3081,6 +3138,7 @@ impl Planning<'_> {
                             return Err(format!("`{action}` is not done to this kind of object"));
                         }
                         waiting += found.duration;
+                        pauses.push((steps.len(), found.duration));
                     }
                     continue;
                 }
@@ -3106,11 +3164,15 @@ impl Planning<'_> {
                 }
             });
         }
-        let scene = robot_scene(doc, loaded, self.meshes, robot, &self.equipment)?;
+        let mut obstacles = self.equipment.clone();
+        if let Ok(list) = &mut obstacles {
+            list.extend_from_slice(others);
+        }
+        let scene = robot_scene(doc, loaded, self.meshes, robot, &obstacles)?;
         let how = (PLANNERS[0].1, 1, 4, None);
         let segments = run_steps(loaded, robot, &scene, steps, start.to_vec(), how, None, self.control)?;
         let end = segments.last().and_then(|s| s.path.last()).map_or_else(|| start.to_vec(), Vec::clone);
-        Ok(TaskPlan { robot: robot_id, segments, waiting, end })
+        Ok(TaskPlan { robot: robot_id, segments, waiting, end, start: start.to_vec(), pauses })
     }
 
     /// The robots a task may be given to as the states stand: the robot it is located at, the ones it
@@ -3269,6 +3331,21 @@ impl Session {
     pub fn schedule_result(&self) -> Option<(&crate::Schedule, bool)> {
         let (made, schedule) = self.cell.schedule.as_ref()?;
         Some((schedule, *made == self.doc.revision()))
+    }
+
+    /// Shows every robot where the last schedule worked out ([`Session::schedule_result`]) has it at
+    /// `time` seconds: along its task's motion, standing still in waits, tool actions and between tasks.
+    /// The document is not changed. `None` shows the robots where they are. Ignored without a schedule.
+    pub fn set_schedule_playback(&mut self, time: Option<f64>) {
+        self.cell.schedule_time = time.filter(|t| t.is_finite() && self.cell.schedule.is_some());
+        if self.cell.schedule_time.is_some() {
+            self.cell.playback = None;
+        }
+    }
+
+    /// The moment of the schedule being shown, if any.
+    pub fn schedule_playback(&self) -> Option<f64> {
+        self.cell.schedule_time
     }
 
     /// True while a schedule is being worked out.

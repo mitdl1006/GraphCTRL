@@ -191,7 +191,11 @@ struct Parser {
     at: usize,
     end: usize,
     depth: usize,
+    terms: usize,
 }
+
+/// The most `and`s and `or`s one condition can hold.
+const MAX_TERMS: usize = 256;
 
 impl Parser {
     fn peek(&self) -> Option<&Token> {
@@ -202,9 +206,20 @@ impl Parser {
         self.tokens.get(self.at).map_or(Span { start: self.end, end: self.end }, |(_, span)| *span)
     }
 
+    /// Counts an `and` or `or`. A chain is a tree as deep as it is long, which is walked by recursion:
+    /// its length is bounded so that no input can exhaust the stack.
+    fn term(&mut self) -> Result<(), CondError> {
+        self.terms += 1;
+        if self.terms > MAX_TERMS {
+            return error(format!("a condition can combine at most {MAX_TERMS} terms"), self.here());
+        }
+        Ok(())
+    }
+
     fn or(&mut self) -> Result<Condition, CondError> {
         let mut left = self.and()?;
         while self.peek() == Some(&Token::Or) {
+            self.term()?;
             self.at += 1;
             left = Condition::Or(Box::new(left), Box::new(self.and()?));
         }
@@ -214,6 +229,7 @@ impl Parser {
     fn and(&mut self) -> Result<Condition, CondError> {
         let mut left = self.not()?;
         while self.peek() == Some(&Token::And) {
+            self.term()?;
             self.at += 1;
             left = Condition::And(Box::new(left), Box::new(self.not()?));
         }
@@ -298,7 +314,7 @@ impl Condition {
     /// Reads a condition. Empty text is refused.
     pub fn parse(source: &str) -> Result<Condition, CondError> {
         let tokens = tokens(source)?;
-        let mut parser = Parser { tokens, at: 0, end: source.len(), depth: 0 };
+        let mut parser = Parser { tokens, at: 0, end: source.len(), depth: 0, terms: 0 };
         let condition = parser.or()?;
         if parser.at < parser.tokens.len() {
             return error("this is not expected here", parser.here());
@@ -473,6 +489,11 @@ mod tests {
         assert_eq!(at("armed # 1"), (6, 7));
         assert!(eval(&"(".repeat(10_000)).is_err());
         assert!(eval(&"not ".repeat(10_000)).is_err());
+        // A long chain is refused instead of being walked to the end of the stack.
+        let long = vec!["armed"; 20_000].join(" and ");
+        assert!(eval(&long).unwrap_err().message.contains("256"));
+        assert_eq!(eval(&vec!["armed"; 257].join(" or ")), Ok(true), "256 terms are fine");
+        assert!(eval(&vec!["armed"; 258].join(" and ")).is_err());
     }
 
     #[test]

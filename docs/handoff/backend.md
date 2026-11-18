@@ -124,6 +124,30 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 스케줄에서 로봇 간 회피 (PLAN 9.3·9.5)
+
+- **쉬는 로봇 = 정지 장애물**: 입찰을 계획할 때 그 시점에 쉬고 있는 다른 로봇을 서 있는 자세 그대로 장애물로 넣는다(`RobotScene::as_obstacles(q, name)`를 `gc_motion`에 추가, `Planning::task_plan_among`). 그래서 스케줄의 입찰은 `task_candidates`(다른 로봇을 안 넣음)와 다를 수 있다.
+- **움직이는 로봇 = 시간 표본 검사**: 계획된 동작을 50 ms마다, 그 시각에 다른 로봇이 있는 자세(진행 중이면 궤적 위, 끝났으면 끝 자세)와 링크·툴 형상끼리 거리 검사한다. 패딩(`PADDING`)보다 가까우면 그 로봇에는 **지금 주지 않는다(대기)**: 작업은 준비 상태로 남고 다음 작업이 끝나는 시점에 다시 본다. 그때 상대는 쉬는 로봇이므로 정지 장애물로 다시 계획된다(= 재계획).
+- 결과: 대기는 `Assignment.start`가 늦어지는 것으로 나타난다. 끝까지 못 가면 `blocked`에 이유가 남는다(예: "W1: the goal is not valid: `link_4` collides with `Left`" — 상대가 목표 위에 서 있음, "it waits for Left to be out of the way").
+- 기본 정책을 "대기"로 한 이유: 결정적이고, 이미 확정된 다른 로봇의 계획을 건드리지 않는다. 우회 재계획은 상대가 멈춘 뒤에만 한다.
+- 한계: 표본 시각 사이는 검사하지 않는다(패딩으로 보완). 움직이는 상대를 피해 돌아가는 계획은 없다(기다림). 목표 위에 서 있는 로봇을 비키게 하는 작업을 스스로 만들지 않는다(교착은 `blocked`). `task_plan`·`task_candidates`·경로 계획(`plan`)은 여전히 다른 로봇을 보지 않는다.
+- 테스트: `task_schedule.rs::robots_keep_clear_of_each_other_…`.
+
+## 2026-11-18 — 스케줄 재생 (여러 로봇 동시)
+
+- `Schedule.plans: Vec<TaskPlan>`(할당과 같은 순서) 추가. `Schedule`의 `==`는 할당과 막힌 작업만 비교한다(궤적은 비교 안 함).
+- `TaskPlan`에 `start`(시작 관절값), `pauses: Vec<(몇 번째 동작 뒤, 초)>`(대기·툴 동작으로 서 있는 구간), `sample(t)`(작업 시작 후 t초의 관절값) 추가.
+- `Schedule::joints_at(robot, t) -> Option<Vec<f64>>`: 그 시각 하고 있는 작업의 동작 위, 또는 마지막 작업이 끝난 자세. 첫 작업 전·작업 없는 로봇은 `None`. `Schedule::robots_at(t)`: 작업이 있는 모든 로봇의 자세.
+- 뷰포트용: `session.set_schedule_playback(Some(t))` → `session.robot_joints(robot)`(뷰포트가 이미 쓰는 함수)이 모든 로봇을 그 시각 자세로 돌려준다. 문서는 안 바뀐다. `None`으로 해제, `session.schedule_playback()`으로 조회. 대상은 `request_schedule`로 받은 마지막 스케줄(`schedule_result`)이며 스케줄이 없으면 무시된다. 켜면 경로 재생(`set_playback`)은 꺼진다.
+- 프론트 할 일: 시간축 슬라이더·재생 버튼에서 `set_schedule_playback(t)`를 부르고 `0..=schedule.makespan()` 범위로 움직이면 된다.
+- 테스트: `task_schedule.rs::a_schedule_is_played_back_…`.
+
+## 2026-11-18 — 조건식 길이 상한, 빈 로봇 조건 (QA)
+
+- `gc_expr::Condition`: `and`/`or`를 256개까지만 받는다(넘으면 그 자리의 `CondError` "a condition can combine at most 256 terms"). 긴 연쇄는 깊이가 길이만큼인 트리가 되어 평가·순회·해제가 재귀로 스택을 다 쓰던 것(약 5000항에서 프로세스 종료)을 막는다. 괄호·`not` 중첩 상한 64는 그대로.
+- `RobotChoice::When("")`(빈 조건)는 `BadValue`. 빈 전제조건(`Task.precondition`)은 여전히 "항상".
+- QA 브랜치의 `qa_work_model.rs::a_long_chain_of_and_terms…`는 이 브랜치에 없어 `#[ignore]`를 못 뗐다(QA/리드가 병합 때).
+
 ## 2026-11-18 — 스케줄을 작업 스레드에서 (`request_schedule` / `schedule_result`)
 
 - `session.request_schedule()`: 지금 문서의 스케줄을 실행기(앱은 스레드, 기본은 그 자리에서)에서 계산하기 시작한다. 같은 리비전에 대해 이미 계산 중이거나 결과가 있으면 아무것도 하지 않는다. 더 옛 리비전의 계산은 취소한다.

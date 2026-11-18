@@ -3,7 +3,12 @@
 //! holds are taken by priority (higher first), then in the order they were made; each goes to the idle
 //! robot that would finish it soonest from where that robot then is (its bid: the planned time of the
 //! task's motions plus its waits). When a task ends, its effects change the states, which can make other
-//! tasks ready. Robots do not avoid each other yet: each is planned against the cell as it stands.
+//! tasks ready.
+//!
+//! Robots keep clear of each other: a robot that stands idle is an obstacle where it stands for the one
+//! being planned, and a planned motion is checked, every 50 ms of it, against the robots that are moving
+//! at that time. A motion that would come too close waits: the task stays ready and is tried again when
+//! the next task ends. (Checked at those moments, not in between; the padding covers the rest.)
 
 use std::collections::BTreeMap;
 
@@ -26,21 +31,89 @@ pub struct Assignment {
     pub end: f64,
 }
 
-/// What [`Session::schedule`] worked out.
-#[derive(Clone, Debug, Default, PartialEq)]
+/// What [`Session::schedule`] worked out. Two schedules are equal when they give the same tasks to the
+/// same robots at the same times and block the same tasks for the same reasons.
+#[derive(Clone, Debug, Default)]
 pub struct Schedule {
     /// The tasks that are done, in the order they start (ties: priority, then the order made).
     pub assignments: Vec<Assignment>,
     /// The tasks that are never done, each with why: its precondition never holds, or no robot can do it
     /// (with the robot's reason).
     pub blocked: Vec<(Id<Task>, String)>,
+    /// The planned motions of each assignment, in the same order.
+    pub plans: Vec<crate::TaskPlan>,
+}
+
+impl PartialEq for Schedule {
+    fn eq(&self, other: &Self) -> bool {
+        self.assignments == other.assignments && self.blocked == other.blocked
+    }
 }
 
 impl Schedule {
+    /// The joint values of a robot at `time` seconds into the schedule: along the motion of the task it
+    /// is doing, or standing where its last task left it. `None` before its first task (it is where the
+    /// document has it) and for a robot without tasks.
+    pub fn joints_at(&self, robot: Id<Robot>, time: f64) -> Option<Vec<f64>> {
+        let (assignment, plan) = self
+            .assignments
+            .iter()
+            .zip(&self.plans)
+            .filter(|(a, _)| a.robot == robot && a.start <= time)
+            .max_by(|(a, _), (b, _)| a.start.total_cmp(&b.start))?;
+        Some(plan.sample(time - assignment.start))
+    }
+
+    /// Every robot that has tasks, with its joint values at `time` ([`Schedule::joints_at`]; before its
+    /// first task, where that task starts from).
+    pub fn robots_at(&self, time: f64) -> Vec<(Id<Robot>, Vec<f64>)> {
+        let mut robots: Vec<Id<Robot>> = self.assignments.iter().map(|a| a.robot).collect();
+        robots.sort();
+        robots.dedup();
+        robots
+            .into_iter()
+            .filter_map(|robot| {
+                let first = || {
+                    let (_, plan) =
+                        self.assignments.iter().zip(&self.plans).find(|(a, _)| a.robot == robot)?;
+                    Some(plan.start.clone())
+                };
+                Some((robot, self.joints_at(robot, time).or_else(first)?))
+            })
+            .collect()
+    }
+
     /// When the last task ends.
     pub fn makespan(&self) -> f64 {
         self.assignments.iter().map(|a| a.end).fold(0.0, f64::max)
     }
+}
+
+/// True when a robot's planned motion, started at `start`, comes closer than the padding to another robot
+/// that is where `other_at` says at each moment (checked every 50 ms). Unknown shapes count as crossing.
+fn crosses(
+    scene: Option<&gc_motion::RobotScene>,
+    plan: &crate::TaskPlan,
+    start: f64,
+    other: Option<&gc_motion::RobotScene>,
+    other_at: &dyn Fn(f64) -> Option<Vec<f64>>,
+) -> bool {
+    const STEP: f64 = 0.05;
+    let (Some(scene), Some(other)) = (scene, other) else { return true };
+    let duration = plan.duration();
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "a count of 50 ms steps")]
+    let steps = (duration / STEP).ceil().clamp(1.0, 100_000.0) as usize;
+    (0..=steps).any(|k| {
+        #[allow(clippy::cast_precision_loss, reason = "a count of 50 ms steps")]
+        let t = (k as f64 * STEP).min(duration);
+        let Some(theirs) = other_at(start + t) else { return true };
+        let mine = scene.geometry(&plan.sample(t));
+        match mine.closest(&other.geometry(&theirs)) {
+            Ok(Some(closest)) => closest.distance < crate::PADDING,
+            Ok(None) => false,
+            Err(_) => true,
+        }
+    })
 }
 
 /// A tool's state after a task's tool actions, and the states they leave their objects in.
@@ -121,8 +194,12 @@ impl Planning<'_> {
         let mut robots: BTreeMap<Id<Robot>, (Vec<f64>, f64)> =
             doc.robots().iter().map(|(id, r)| (id, (r.joints.clone(), 0.0))).collect();
         // Bids already worked out: a task for a robot from given joint values.
-        type Bid = Result<(f64, Vec<f64>), String>;
-        type BidKey = (Id<Task>, Id<Robot>, Vec<u64>);
+        type Bid = Result<crate::TaskPlan, String>;
+        type BidKey = (Id<Task>, Id<Robot>, Vec<u64>, Vec<(Id<Robot>, Vec<u64>)>);
+        // Each robot's own scene, for standing in another's way and for checking two motions.
+        let scenes: BTreeMap<Id<Robot>, gc_motion::RobotScene> =
+            doc.robots().iter().filter_map(|(id, _)| Some((id, self.scene_of(id).ok()?))).collect();
+        let bits = |joints: &[f64]| joints.iter().map(|q| q.to_bits()).collect::<Vec<u64>>();
         let mut bids: BTreeMap<BidKey, Bid> = BTreeMap::new();
         // The state of each robot's tool, and what the tool actions of a running task do to their objects
         // when it ends.
@@ -157,17 +234,48 @@ impl Planning<'_> {
                     reasons.insert(id, "no robot may do it".to_owned());
                 }
                 // The idle robot that would finish soonest; the first of equals.
-                let mut best: Option<(f64, Id<Robot>, Vec<f64>, ToolOutcome)> = None;
+                let mut best: Option<(crate::TaskPlan, ToolOutcome)> = None;
                 for robot in allowed {
                     let Some((joints, free_at)) = robots.get(&robot) else { continue };
                     if *free_at > now {
                         reasons.entry(id).or_insert_with(|| "its robots are busy".to_owned());
                         continue;
                     }
-                    let key = (id, robot, joints.iter().map(|q| q.to_bits()).collect());
+                    // The robots that stand idle are in the way where they stand.
+                    let parked: Vec<(Id<Robot>, &Vec<f64>)> = robots
+                        .iter()
+                        .filter(|(other, (_, free))| **other != robot && *free <= now)
+                        .map(|(other, (at, _))| (*other, at))
+                        .collect();
+                    let key =
+                        (id, robot, bits(joints), parked.iter().map(|(o, at)| (*o, bits(at))).collect());
                     let bid = bids.entry(key).or_insert_with(|| {
-                        self.task_plan_from(id, robot, joints).map(|plan| (plan.duration(), plan.end))
+                        let others: Vec<gc_motion::Obstacle> = parked
+                            .iter()
+                            .filter_map(|(other, at)| {
+                                let name = doc.get(*other).map(|r| r.name.clone())?;
+                                Some(scenes.get(other)?.as_obstacles(at, &name))
+                            })
+                            .flatten()
+                            .collect();
+                        self.task_plan_among(id, robot, joints, &others)
                     });
+                    // The robots that are moving must be clear of this motion all the way.
+                    if let Ok(plan) = bid.as_ref() {
+                        let moving: Vec<Id<Robot>> = robots
+                            .iter()
+                            .filter(|(other, (_, free))| **other != robot && *free > now)
+                            .map(|(other, _)| *other)
+                            .collect();
+                        if let Some(other) = moving.into_iter().find(|other| {
+                            let at = |time: f64| out.joints_at(*other, time);
+                            crosses(scenes.get(&robot), plan, now, scenes.get(other), &at)
+                        }) {
+                            let name = doc.get(other).map(|r| r.name.clone()).unwrap_or_default();
+                            reasons.insert(id, format!("it waits for {name} to be out of the way"));
+                            continue;
+                        }
+                    }
                     // Its tool must be in a state to do the task's tool actions.
                     let tool = tools.get(&robot).cloned().flatten();
                     let outcome = match self.tool_outcome(task, robot, &world, tool) {
@@ -178,8 +286,8 @@ impl Planning<'_> {
                         }
                     };
                     match bid {
-                        Ok((time, end)) if best.as_ref().is_none_or(|(t, ..)| *time < *t) => {
-                            best = Some((*time, robot, end.clone(), outcome));
+                        Ok(plan) if best.as_ref().is_none_or(|(b, _)| plan.duration() < b.duration()) => {
+                            best = Some((plan.clone(), outcome));
                         }
                         Ok(_) => {}
                         Err(why) => {
@@ -188,9 +296,12 @@ impl Planning<'_> {
                     }
                 }
                 match best {
-                    Some((time, robot, end, (tool, objects))) => {
-                        let assignment = Assignment { task: id, robot, start: now, end: now + time };
-                        robots.insert(robot, (end, assignment.end));
+                    Some((plan, (tool, objects))) => {
+                        let robot = plan.robot;
+                        let assignment =
+                            Assignment { task: id, robot, start: now, end: now + plan.duration() };
+                        robots.insert(robot, (plan.end.clone(), assignment.end));
+                        out.plans.push(plan);
                         tools.insert(robot, tool);
                         changes.insert(id, objects);
                         running.push(assignment.clone());
