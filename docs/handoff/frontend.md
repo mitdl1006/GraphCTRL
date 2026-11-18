@@ -91,6 +91,13 @@
 
 - 스케치 P1 잔여(리드 새 1순위 ③·④의 일부): ① Trim·Extend·Fillet 리본 버튼("자르기"·"연장"·"모깎기")을 스케치 탭 수정 그룹 작은 버튼 줄에 추가(`ToolKind::Trim/Extend/Fillet`; 반지름 상자는 백엔드 HUD `Radius` 필드가 처리). 폭을 위해 "절단 모서리 투영"을 큰 버튼에서 중심점 토글 아래 작은 버튼으로 옮김 — 스케치 탭에서 "스케치 마무리"가 1280 px 안에 40 px 이상 여유(테스트 단언). 원문 To Split, Trim, or Extend Curves(GUID-DD00037F-6BBA-4B95-AA90-4F99DCEB667D) 읽음: Split·Trim·Extend 모두 Modify 패널, 커서를 올리면 미리보기, 클릭, 우클릭으로 Split/Trim/Extend 전환·Done. 원문과 다른 점: Fillet이 원문은 Create 패널(우리는 수정 그룹), 우클릭 전환 메뉴는 없음(마킹 메뉴가 우클릭을 씀), Shift 전환 시 도구 이름 갱신·Fillet 반지름 상자 유지·미리보기는 백엔드가 하는 부분만 확인하지 않음(QA `p1_8…` 보류 테스트가 확인). ② 치수 편집 상자: 더블클릭하면 종속(참조) 치수도 열리고 "종속 치수" 체크박스로 `SetDriving` 토글(실행 취소 1단계, 구속 과다가 되는 되돌리기는 거부되어 상태바가 설명; 종속 치수는 표현식 칸 없이 체크박스만), `이름 = 값` 입력은 매개변수를 만들고(이미 있으면 값을 바꾸고) 치수가 그 이름을 참조 — `Command::AddParam/SetParam` 후 `edit_dimension`이라 실행 취소는 두 단계(백엔드가 한 단계로 묶어 주면 좋음), 숫자로 시작하는 이름·예약어는 거부되고 상자가 열린 채 남음. 근거 원문 To Add Dimensions(GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185)의 위 동작은 QA 보류 테스트 설명을 따름(원문 페이지 자체는 읽지 않음). ③ 단축키: 스케치 밖에서 C = 구속(어셈블리), P = 배치, 스케치 안 C = 원 유지 — 원문 Predefined Command Alias and Shortcut Reference(GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E)는 C=조립 구속, D=치수, L=선, P=컴포넌트 배치, R=회전체(스케치 안 R은 우리 사각형이라 다름), S=스케치, T=프레젠테이션 트윅만 적혀 있고 **TR(자르기)·T 같은 스케치 별칭은 이 문서에 없어** 만들지 않음(QA 설명의 TR 근거 확인 불가). 테스트 `trim_extend_and_fillet_have_ribbon_buttons_and_c_means_constrain_outside_sketches`, `the_dimension_box_toggles_driven_and_driving`, `a_parameter_is_made_from_the_dimension_box`.
 
+### 다른 항목 선택 (Select Other)
+
+- 근거: 인벤터 도움말 Select Other (선택 항목 겹침 목록). 원문 GUID는 커밋 메시지 참고.
+- 뷰 위에서 Ctrl+A를 누르면 커서 아래에 겹친 구성요소를 거리순으로 나열한다(`Picker::pick_all`, 중복 제거). 항목에 마우스를 올리면 강조, 클릭하면 선택하고 목록이 닫힌다.
+- 증거: `docs/evidence/img/review-54-select-other.png`, 테스트 `select_other_lists_what_lies_under_the_cursor`.
+- 원문과 차이: 오른쪽 클릭 메뉴의 "다른 항목 선택" 없음, 지연 시간 설정 없음, 화살표 키 순환 없음, 구성요소만 대상.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹
