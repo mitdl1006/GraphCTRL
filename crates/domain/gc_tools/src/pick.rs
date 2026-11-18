@@ -98,6 +98,10 @@ pub(crate) fn closest_on_curve(sketch: &Sketch, curve: &Curve, at: [f64; 2]) -> 
             .0
             .into_iter()
             .min_by(|p, q| distance(*p, at).total_cmp(&distance(*q, at))),
+        CurveGeom::Spline { .. } => sketch
+            .spline_outline(&curve.geom, 32)?
+            .into_iter()
+            .min_by(|p, q| distance(*p, at).total_cmp(&distance(*q, at))),
         CurveGeom::Arc { c, s, e } => {
             let (c, s, e) = (xy(sketch, c)?, xy(sketch, s)?, xy(sketch, e)?);
             let (r, d) = (distance(s, c), distance(at, c));
@@ -202,8 +206,8 @@ pub(crate) fn curve_shape(sketch: &Sketch, c: &Curve) -> Option<Shape> {
             let (c, s, e) = (xy(sketch, c)?, xy(sketch, s)?, xy(sketch, e)?);
             Shape::Round(c, distance(c, s), Some((s, e)))
         }
-        // Intersections with ellipses are not found yet.
-        CurveGeom::Ellipse { .. } => return None,
+        // Ellipses cross through the sketch's own intersections; splines are not intersected yet.
+        CurveGeom::Ellipse { .. } | CurveGeom::Spline { .. } => return None,
     })
 }
 
@@ -363,6 +367,8 @@ pub fn snap(sketch: &Sketch, at: [f64; 2], px: f64, previous: Option<[f64; 2]>, 
                 };
                 offer(distance(mid, at), snap);
             }
+            // Its fit points are sketch points (snapped as such).
+            CurveGeom::Spline { .. } => {}
             // The ends of its axes (its centre is a sketch point, snapped as one).
             CurveGeom::Ellipse { .. } => {
                 for pos in sketch.ellipse_quadrants(*id) {
@@ -409,7 +415,7 @@ pub fn snap(sketch: &Sketch, at: [f64; 2], px: f64, previous: Option<[f64; 2]>, 
                     }
                     _ => continue,
                 },
-                CurveGeom::Line { .. } | CurveGeom::Ellipse { .. } => continue,
+                CurveGeom::Line { .. } | CurveGeom::Ellipse { .. } | CurveGeom::Spline { .. } => continue,
             };
             let d = distance(from, centre);
             if d <= radius * (1.0 + 1e-9) {

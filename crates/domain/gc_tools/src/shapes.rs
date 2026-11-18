@@ -42,6 +42,7 @@ pub(super) fn is_shape_tool(kind: ToolKind) -> bool {
             | ToolKind::CenterRectangle
             | ToolKind::CenterRectangle3
             | ToolKind::Ellipse
+            | ToolKind::Spline
             | ToolKind::TangentCircle
             | ToolKind::Split
             | ToolKind::Chamfer
@@ -113,6 +114,11 @@ fn draw_new(preview: &mut Preview, before: &Sketch, op: &SketchOp) {
             CurveGeom::Ellipse { .. } => {
                 if let Some((points, closed)) = after.ellipse_geom_outline(&curve.geom, 64) {
                     push_polyline(preview, &points, closed);
+                }
+            }
+            CurveGeom::Spline { .. } => {
+                if let Some(points) = after.spline_outline(&curve.geom, 16) {
+                    push_polyline(preview, &points, false);
                 }
             }
             CurveGeom::Circle { c, r } => {
@@ -220,6 +226,8 @@ impl Tool {
             ToolKind::Ellipse if self.anchor.is_none() => Prompt::EllipseCentre,
             ToolKind::Ellipse if self.second.is_none() => Prompt::EllipseAxis,
             ToolKind::Ellipse => Prompt::EllipseMinor,
+            ToolKind::Spline if self.chain.is_empty() => Prompt::SplineFirst,
+            ToolKind::Spline => Prompt::SplineNext,
             ToolKind::TangentCircle => Prompt::TangentCircleLine,
             ToolKind::Split => Prompt::SplitPick,
             ToolKind::Move | ToolKind::Copy | ToolKind::Stretch if self.anchor.is_none() => Prompt::MoveBase,
@@ -424,6 +432,14 @@ impl Tool {
             return;
         }
         let Some(cursor) = self.cursor.map(|c| c.pos) else { return };
+        if self.kind == ToolKind::Spline {
+            let mut fit = self.chain.clone();
+            if fit.last().is_none_or(|last| distance(*last, cursor) > 1e-12) {
+                fit.push(cursor);
+            }
+            push_polyline(preview, &gc_sketch::spline_points(&fit, 16), false);
+            return;
+        }
         if let (ToolKind::Slot(_) | ToolKind::ArcSlot(_), Some(a), None) =
             (self.kind, self.anchor, self.second)
         {
@@ -502,8 +518,46 @@ impl Tool {
         }
     }
 
+    /// The Spline tool: a click adds a fit point; Enter, or a click on the last fit point again, finishes.
+    fn spline_event(&mut self, sketch: &Sketch, event: &ToolEvent) -> Vec<ToolOutput> {
+        let finish = |tool: &mut Self| {
+            if tool.chain.len() < 2 {
+                return Vec::new();
+            }
+            let op = SketchOp::AddSpline {
+                points: tool.chain.iter().map(|p| xyz(*p)).collect(),
+                snaps: tool.spline_snaps.clone(),
+            };
+            let out = tool.emit(op, &[]);
+            tool.reset();
+            vec![out]
+        };
+        match *event {
+            ToolEvent::Key(super::Key::Enter) => finish(self),
+            ToolEvent::Click { pos, px, modifier } => {
+                let here = self.place(sketch, pos, px, None, modifier);
+                if self.chain.last().is_some_and(|last| distance(*last, here.pos) <= px.max(1e-12)) {
+                    return finish(self);
+                }
+                self.chain.push(here.pos);
+                self.spline_snaps.push(end_snap(&here));
+                if self.anchor.is_none() {
+                    self.anchor = Some(here.pos);
+                    self.anchor_snap = Some(here);
+                }
+                Vec::new()
+            }
+            _ => Vec::new(),
+        }
+    }
+
     /// Handles a click or Enter for these tools.
     pub(super) fn shape_event(&mut self, sketch: &Sketch, event: &ToolEvent) -> Option<Vec<ToolOutput>> {
+        if self.kind == ToolKind::Spline
+            && matches!(event, ToolEvent::Click { .. } | ToolEvent::Key(super::Key::Enter))
+        {
+            return Some(self.spline_event(sketch, event));
+        }
         let (pos, px, modifier) = match *event {
             ToolEvent::Click { pos, px, modifier } => (pos, px, modifier),
             ToolEvent::Key(super::Key::Enter) => {

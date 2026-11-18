@@ -314,6 +314,13 @@ fn curve_path(
                 view.polyline(ring(c, radius.unwrap_or(r), 0.0, tau), stroke);
             }
         }
+        CurveGeom::Spline { ref points } => {
+            let fit: Option<Vec<[f64; 2]>> = points.iter().map(|p| pos(*p).map(|q| [q[0], q[1]])).collect();
+            if let Some(fit) = fit {
+                let line = gc_sketch::spline_points(&fit, 24);
+                view.polyline(line.iter().map(|p| plane.world([p[0], p[1], 0.0])), stroke);
+            }
+        }
         CurveGeom::Ellipse { c, major, minor, arc } => {
             let flat = |p: [f64; 3]| [p[0], p[1]];
             let ends = match arc {
@@ -523,6 +530,7 @@ pub(crate) fn glyph_spots(
                 Some(point(c)? + (plane.u + plane.v) * (r * std::f64::consts::FRAC_1_SQRT_2))
             }
             CurveGeom::Ellipse { major, .. } => point(major),
+            CurveGeom::Spline { ref points } => point(*points.get(points.len() / 2)?),
         }
     };
     let mut used: std::collections::BTreeMap<(i32, i32), f32> = std::collections::BTreeMap::new();

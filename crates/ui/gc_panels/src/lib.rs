@@ -1118,7 +1118,7 @@ pub fn properties(ui: &mut Ui, session: &mut Session, lang: Lang, expression: &m
                 ui.label(tr!(lang, PropPoint, length(pos[0]), length(pos[1])));
             }
         }
-        [Item::Curve(c)] => match sketch.curves.get(c).map(|c| c.geom) {
+        [Item::Curve(c)] => match sketch.curves.get(c).map(|c| c.geom.clone()) {
             Some(CurveGeom::Line { a, b }) => {
                 if let Some(value) = sketch.measure(&gc_sketch::DimKind::Distance { p: a, q: b }) {
                     ui.label(tr!(lang, PropLine, length(value)));
@@ -1131,7 +1131,7 @@ pub fn properties(ui: &mut Ui, session: &mut Session, lang: Lang, expression: &m
                 ui.label(tr!(lang, PropArc, length(session.radius(*c).unwrap_or(0.0))));
             }
             // No property line for an ellipse yet (frontend).
-            Some(CurveGeom::Ellipse { .. }) | None => {}
+            Some(CurveGeom::Ellipse { .. } | CurveGeom::Spline { .. }) | None => {}
         },
         [Item::Constraint(_)] => {
             ui.label(tr!(lang, PropConstraint));
@@ -1202,6 +1202,8 @@ fn prompt_text(lang: Lang, prompt: Prompt) -> &'static str {
         Prompt::EllipseCentre => Msg::PromptEllipseCentre,
         Prompt::EllipseAxis => Msg::PromptEllipseAxis,
         Prompt::EllipseMinor => Msg::PromptEllipseMinor,
+        Prompt::SplineFirst => Msg::PromptSplineFirst,
+        Prompt::SplineNext => Msg::PromptSplineNext,
         Prompt::TangentCircleLine => Msg::PromptTangentCircleLine,
         Prompt::SplitPick => Msg::PromptSplitPick,
         Prompt::ChamferFirst => Msg::PromptChamferFirst,

@@ -359,6 +359,8 @@ impl Sketch {
                 let start = angle(c, s);
                 Shape::Round(c, dist(c, s), Some((start, (angle(c, e) - start).rem_euclid(TAU))))
             }
+            // Splines are not cut yet.
+            CurveGeom::Spline { .. } => return None,
             CurveGeom::Ellipse { c, major, minor, arc } => {
                 let (c, m) = (self.xy(c)?, self.xy(major)?);
                 let a = dist(c, m);
@@ -464,10 +466,10 @@ impl Sketch {
         at: [f64; 2],
     ) -> Result<CutResult, SketchError> {
         let span = self.trim_span(curve, at).ok_or(SketchError::MissingCurve)?;
-        let geom = self.curves.get(&curve).ok_or(SketchError::MissingCurve)?.geom;
+        let geom = self.curves.get(&curve).ok_or(SketchError::MissingCurve)?.geom.clone();
         let construction = self.curves[&curve].construction;
         let mut result = CutResult::default();
-        match (span, geom) {
+        match (span, geom.clone()) {
             (Span::Whole, _) => self.delete(&[Item::Curve(curve)]),
             // A whole ellipse becomes the elliptical arc that is left, like a circle.
             (Span::Circle { from, to }, CurveGeom::Ellipse { arc: None, .. }) => {
@@ -538,7 +540,7 @@ impl Sketch {
                 );
                 id
             }
-            CurveGeom::Circle { .. } | CurveGeom::Ellipse { arc: None, .. } => {
+            CurveGeom::Circle { .. } | CurveGeom::Ellipse { arc: None, .. } | CurveGeom::Spline { .. } => {
                 return Err(SketchError::InvalidValue);
             }
         };
@@ -588,7 +590,9 @@ impl Sketch {
         match *geom {
             CurveGeom::Line { a, b } => Some((a, b)),
             CurveGeom::Arc { s, e, .. } | CurveGeom::Ellipse { arc: Some((s, e)), .. } => Some((s, e)),
-            CurveGeom::Circle { .. } | CurveGeom::Ellipse { arc: None, .. } => None,
+            CurveGeom::Circle { .. } | CurveGeom::Ellipse { arc: None, .. } | CurveGeom::Spline { .. } => {
+                None
+            }
         }
     }
 
@@ -852,7 +856,7 @@ impl Sketch {
             return Err(SketchError::WrongSpace);
         }
         let cut = self.split_cut(curve, at).ok_or(SketchError::InvalidValue)?;
-        let geom = self.curves.get(&curve).ok_or(SketchError::MissingCurve)?.geom;
+        let geom = self.curves.get(&curve).ok_or(SketchError::MissingCurve)?.geom.clone();
         let construction = self.curves[&curve].construction;
         let mut result = CutResult::default();
         self.split(alloc, curve, geom, construction, (cut, cut), &mut result)?;

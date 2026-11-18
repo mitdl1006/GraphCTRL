@@ -341,7 +341,6 @@ fn limits_round_trip_exactly_and_old_files_have_none() {
 /// A project file whose joint range has Start past End (edited by hand, damaged, or written by another
 /// version) must open and solve without crashing: refused, repaired or ignored, but not a panic.
 #[test]
-#[ignore = "BUG: a joint range with Start past End in a file makes solve_relationships panic (f64::clamp with min > max in JointRange::target) (owner: backend, gc_doc relate.rs JointRange::target and Document validation on load)"]
 fn a_damaged_joint_range_in_a_file_does_not_crash_the_solver() {
     let (mut s, _, j) = jointed(RelationKind::Cylindrical { flip: false });
     s.set_joint_limits(j, range(-1.0, 1.0, Some(0.25)), range(0.0, 0.2, None)).unwrap();

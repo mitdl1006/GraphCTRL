@@ -254,6 +254,7 @@ pub(crate) fn show(
                             &[
                                 (ToolKind::Line, Icon::Line, Msg::ToolLine),
                                 (ToolKind::MidpointLine, Icon::Text("-+-"), Msg::ToolMidpointLine),
+                                (ToolKind::Spline, Icon::Text("~"), Msg::ToolSpline),
                             ],
                         );
                         split(

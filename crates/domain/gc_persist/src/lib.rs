@@ -137,6 +137,9 @@ pub struct Loaded {
     /// Sketches whose stored coordinates violate their own constraints. They are shown as they are; the
     /// user decides whether to re-solve them.
     pub needs_repair: Vec<Id<Sketch>>,
+    /// What was dropped because it could not be used (a damaged joint range, ...), for the user to see.
+    /// The rest opened.
+    pub warnings: Vec<String>,
 }
 
 /// The document as the text of a `.gctrl` file.
@@ -239,6 +242,20 @@ pub fn from_text(text: &str) -> Result<Loaded, PersistError> {
             )
         })
         .collect();
+    // Joint ranges that make no sense (Start past End, not finite, Current outside) are dropped: the joint
+    // keeps no limit rather than the file failing to open or the solver failing on it.
+    let mut warnings = Vec::new();
+    let mut timelines = file.timelines;
+    for timeline in timelines.values_mut() {
+        for (id, condition) in &mut timeline.components.joint_conditions {
+            for (range, what) in [(&mut condition.angular, "angular"), (&mut condition.linear, "linear")] {
+                if range.is_some_and(|r| !r.is_valid()) {
+                    *range = None;
+                    warnings.push(format!("joint {}: an unusable {what} limit was dropped", id.raw()));
+                }
+            }
+        }
+    }
     let doc = Document::restore(Contents {
         next_id: file.next_id,
         params,
@@ -252,7 +269,7 @@ pub fn from_text(text: &str) -> Result<Loaded, PersistError> {
         work_features: file.work_features,
         features: file.features,
         assemblies: file.assemblies,
-        timelines: file.timelines,
+        timelines,
         relationships: file.relationships,
     })?;
     let needs_repair = doc
@@ -261,7 +278,7 @@ pub fn from_text(text: &str) -> Result<Loaded, PersistError> {
         .filter(|(_, sketch)| !sketch.violation().is_ok_and(|v| v <= 1.0))
         .map(|(id, _)| id)
         .collect();
-    Ok(Loaded { doc, needs_repair })
+    Ok(Loaded { doc, needs_repair, warnings })
 }
 
 fn io_error(path: &Path) -> impl FnOnce(std::io::Error) -> PersistError + '_ {

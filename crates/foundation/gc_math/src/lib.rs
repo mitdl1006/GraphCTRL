@@ -20,3 +20,29 @@ pub use shapes::{Aabb, Plane, Ray};
 pub mod gpu {
     pub use glamx::{Mat4, Quat, Vec2, Vec3, Vec4};
 }
+
+/// `value` kept between `a` and `b` in either order, without panicking (unlike `f64::clamp`, which panics
+/// when the bounds are out of order or NaN): with a NaN bound the value is left as it is; a NaN value
+/// comes out as the lower bound.
+pub fn clamp_between(value: f64, a: f64, b: f64) -> f64 {
+    if a.is_nan() || b.is_nan() {
+        return value;
+    }
+    let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+    value.max(lo).min(hi)
+}
+
+#[cfg(test)]
+mod clamp_tests {
+    use super::clamp_between;
+
+    #[test]
+    fn clamp_between_never_panics() {
+        assert_eq!(clamp_between(5.0, 0.0, 1.0), 1.0);
+        assert_eq!(clamp_between(5.0, 1.0, 0.0), 1.0, "bounds out of order");
+        assert_eq!(clamp_between(-5.0, 1.0, 0.0), 0.0);
+        assert_eq!(clamp_between(0.5, f64::NAN, 1.0), 0.5, "a NaN bound leaves the value");
+        assert_eq!(clamp_between(5.0, f64::NAN, 1.0), 5.0);
+        assert_eq!(clamp_between(f64::NAN, 0.0, 1.0), 0.0);
+    }
+}

@@ -27,7 +27,10 @@ fn ellipses(s: &Session) -> Vec<(f64, f64, f64)> {
                 let (c, m) = (sk.pos(c).unwrap(), sk.pos(major).unwrap());
                 Some((c[0], ((m[0] - c[0]).powi(2) + (m[1] - c[1]).powi(2)).sqrt(), minor))
             }
-            CurveGeom::Line { .. } | CurveGeom::Circle { .. } | CurveGeom::Arc { .. } => None,
+            CurveGeom::Line { .. }
+            | CurveGeom::Circle { .. }
+            | CurveGeom::Arc { .. }
+            | CurveGeom::Spline { .. } => None,
         })
         .collect()
 }

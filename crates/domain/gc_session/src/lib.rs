@@ -102,6 +102,8 @@ pub struct Session {
     spatial: spatial::SpatialState,
     /// The component being edited in place and the ones before it.
     editing: editing::EditStack,
+    /// What the last opened file had that could not be used and was dropped.
+    load_warnings: Vec<String>,
 }
 
 /// The browser's Representations folder.
@@ -156,7 +158,14 @@ impl Session {
             cell: cell::CellState::default(),
             spatial: spatial::SpatialState::default(),
             editing: editing::EditStack::default(),
+            load_warnings: Vec::new(),
         }
+    }
+
+    /// What the last opened project had that could not be used and was dropped (a damaged joint range,
+    /// ...); the rest opened. For the status bar.
+    pub fn load_warnings(&self) -> &[String] {
+        &self.load_warnings
     }
 
     /// The document.
@@ -254,6 +263,7 @@ impl Session {
         let loaded = gc_persist::load(path)?;
         let doc = project::unpacked(loaded.doc, path);
         self.replace_document(doc, Some(path.to_path_buf()));
+        self.load_warnings = loaded.warnings;
         Ok(loaded.needs_repair)
     }
 
@@ -299,7 +309,7 @@ impl Session {
         if let Some(motion) = self.tool.transform_preview() {
             let at = |p| sketch.pos(p).map(|q| motion.place(q)).map(|q| [q[0], q[1]]);
             for curve in self.selected_curves() {
-                match sketch.curves.get(&curve).map(|c| c.geom) {
+                match sketch.curves.get(&curve).map(|c| c.geom.clone()) {
                     Some(gc_sketch::CurveGeom::Line { a, b }) => {
                         if let (Some(a), Some(b)) = (at(a), at(b)) {
                             preview.lines.push((a, b));
@@ -308,6 +318,12 @@ impl Session {
                     Some(gc_sketch::CurveGeom::Circle { c, r }) => {
                         if let Some(c) = at(c) {
                             preview.circles.push((c, r));
+                        }
+                    }
+                    Some(gc_sketch::CurveGeom::Spline { points }) => {
+                        let fit: Option<Vec<[f64; 2]>> = points.iter().map(|p| at(*p)).collect();
+                        if let Some(fit) = fit {
+                            gc_tools::push_polyline(&mut preview, &gc_sketch::spline_points(&fit, 16), false);
                         }
                     }
                     Some(gc_sketch::CurveGeom::Ellipse { c, major, minor, arc }) => {
