@@ -71,6 +71,29 @@ To Work with Sketch Dimensions GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185.
 | Flip Direction 대상의 "line to an arc (the arc itself)"·"between 2 arcs" 거리 | 없음 | 선-호·호-호 거리 치수 |
 | 구동 치수 토글 | 있음(`SketchOp::SetDriving`) | — |
 
+## 2026-11-18 — 치수 도구: 원 테두리 두 개(리드 화면 점검 보고)
+
+- 보고: 원 테두리 두 개를 차례로 클릭하면 두 원 사이 거리가 아니라 지름 치수가 생긴다.
+- 확인: 지금 백엔드에서는 떨어진 두 원과 한쪽이 안에 있는 두 원 모두 도구 흐름(ToolEvent)으로 `ArcArc`가 나온다. 테스트를 추가해 확인했다.
+  - 보고된 동작은 `ArcArc` 커밋(8bbde33) 전 빌드이거나, 두 원이 겹친 경우와 맞는다. 겹치면 두 원 조합 치수가 없어 클릭이 첫 선택(지름)을 놓았다.
+- 고침: 겹치거나 맞닿은 두 원은 중심 사이 거리(`Distance`)로 잡는다. 이제 지름으로 떨어지지 않는다.
+- 테스트: `gc_session/tests/sketch_arc_distance.rs::{the_dimension_tool_on_two_circle_rims_gives_their_distance, the_dimension_tool_on_two_crossing_circles_gives_the_centre_distance}`.
+
+## 2026-11-18 — 3D 선 Auto-Bend(리드 ③ 3번)
+
+근거:
+- Sketch Tab Reference(Application Options), GUID-1898C432-CFD2-46F1-8BAE-631392DFBF1D — "3D Sketch Auto-bend with 3D line creation. Automatically places
+  tangent corner bends on 3D lines as you sketch them. Default setting is off."
+- Document Settings, GUID-58DD9A89-84C7-48F3-8E4E-0303E755B10F — "3D Sketch Auto-Bend Radius. Sets the default radius for corner bends".
+
+- `Session::set_auto_bend(Option<String>)` / `auto_bend()`: `Some("10 mm")`이면 켜짐(그 반지름), `None`이면 꺼짐(기본).
+- 켜져 있으면 3D 선 도구가 이어 그리는 선마다 앞 선과의 모서리에 Bend를 건다.
+  - `SketchOp::AddLineBent { line, previous, radius }`: 선 + Bend가 한 번의 실행 취소.
+  - 안 들어가는 모서리(짧음·일직선)에서는 Bend 없이 선만 남는다.
+- 차이: 원문은 켜고 끄는 것이 응용 옵션, 반지름이 문서 설정이다. 여기에는 아직 문서 설정 저장소가 없어서 둘 다 세션 값이다(저장되지 않음). FE가 옵션 창에 연결하면 된다.
+- 테스트: `gc_session/tests/sketch_bend.rs::auto_bend_places_a_bend_at_each_corner_as_lines_are_drawn`.
+- QA 브랜치 영향: 없음(새 `SketchOp` 변형).
+
 ## 2026-11-18 — 3D 보간 스플라인(리드 ③ 2번)
 
 근거: GUID-DB15C479-66F2-456A-9E54-40A60F83DC92 — "Interpolation splines can be created in both 2D and 3D sketches".
@@ -111,7 +134,7 @@ To Work with Sketch Dimensions GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185.
 
 | 원문 3D 도구 | 지금 | 할 일(순서) |
 |---|---|---|
-| Line(+ Auto-Bend) | 선 있음, Auto-Bend 없음 | 3. Bend가 되면 선 도구 옵션으로 |
+| Line(+ Auto-Bend) | 선 있음, Auto-Bend 없음 | ~~3. Auto-Bend~~ **완료** |
 | Arc(3점·중심) | 있음(반원 미만) | — |
 | Bend(반지름, Equal) | 없음 | ~~1. 두 선의 모서리에 접하는 3D 호~~ **완료**(Equal 없음) |
 | Interpolation Spline | 2D만(3D는 `WrongSpace`) | ~~2. 3D 맞춤점 스플라인~~ **완료** |
