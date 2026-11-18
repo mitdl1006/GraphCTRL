@@ -464,7 +464,7 @@ fn scaling_an_ellipse_scales_both_radii() {
 
 // ---- Operations that refuse ellipses ----
 
-/// Split, Offset and Fillet do not cut or offset ellipses: each is refused with no trace. Trim and Extend may
+/// Split and Fillet do not cut ellipses: each is refused with no trace. Offset makes a new ellipse. Trim and Extend may
 /// accept them (elliptical arcs); then the result is sane and one undo step. Never a crash or a half-cut curve.
 #[test]
 fn trim_split_extend_offset_and_fillet_refuse_ellipses() {
@@ -500,7 +500,8 @@ fn trim_split_extend_offset_and_fillet_refuse_ellipses() {
     assert_eq!(ellipses(&s), vec![e]);
     for distance in [0.01, -0.01] {
         for (loop_select, constrain) in [(false, false), (true, true)] {
-            refused(
+            // Offset of ellipses arrived later (a new ellipse, GUID-D489CE6D): refused or sane, one step.
+            refused_or_sane(
                 &mut s,
                 k,
                 &format!("offset {distance}"),

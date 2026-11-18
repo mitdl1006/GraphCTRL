@@ -284,6 +284,76 @@ fn point(sketch: &mut Sketch, ids: &mut IdAlloc, at: P, created: &mut Vec<Create
     p
 }
 
+/// An ellipse (or elliptical arc) or spline offset by `distance`, as new geometry with no ties to the
+/// original. An ellipse gives the ellipse on the same centre and axes with both radii `distance` longer
+/// (an arc keeps its end angles): "An offset ellipse is a nonassociative mathematical ellipse" (To Create
+/// 2D Shape Geometry, GUID-D489CE6D-7299-4211-A43A-F3580A4BA357). A spline gives the spline through its
+/// fit points moved `distance` to the left of its direction.
+fn offset_free(
+    sketch: &mut Sketch,
+    ids: &mut IdAlloc,
+    id: Id<Curve>,
+    distance: f64,
+    created: &mut Vec<Created>,
+) -> Result<(), EditError> {
+    let geom = sketch.curves.get(&id).ok_or(SketchError::MissingCurve)?.geom.clone();
+    let made: Id<Curve> = ids.alloc();
+    let geom = match geom {
+        CurveGeom::Ellipse { c, major, minor, arc } => {
+            let (o, m) = (xy(sketch, c)?, xy(sketch, major)?);
+            let a = norm(sub(m, o));
+            let u = unit(sub(m, o)).ok_or(SketchError::InvalidValue)?;
+            let (a2, b2) = (a + distance, minor + distance);
+            if !(a2 > TOL && b2 > TOL) {
+                return Err(SketchError::InvalidValue.into());
+            }
+            let at = |t: f64| {
+                let (sin, cos) = fm::sin_cos(t);
+                add(o, add(scale(u, a2 * cos), scale(left(u), b2 * sin)))
+            };
+            let arc = match arc {
+                Some((s, e)) => {
+                    let (ts, te) = (
+                        gc_sketch::ellipse_param(o, m, minor, xy(sketch, s)?),
+                        gc_sketch::ellipse_param(o, m, minor, xy(sketch, e)?),
+                    );
+                    Some((point(sketch, ids, at(ts), created), point(sketch, ids, at(te), created)))
+                }
+                None => None,
+            };
+            let c = point(sketch, ids, o, created);
+            let major = point(sketch, ids, add(o, scale(u, a2)), created);
+            CurveGeom::Ellipse { c, major, minor: b2, arc }
+        }
+        CurveGeom::Spline { points } => {
+            let fit: Vec<P> = points.iter().map(|p| xy(sketch, *p)).collect::<Result<_, _>>()?;
+            const PER: usize = 16;
+            let samples = gc_sketch::spline_points(&fit, PER);
+            let last = samples.len().saturating_sub(1);
+            let mut moved: Vec<P> = Vec::with_capacity(fit.len());
+            for (k, p) in fit.iter().enumerate() {
+                let i = (k * PER).min(last);
+                let (before, after) = (samples.get(i.saturating_sub(1)), samples.get((i + 1).min(last)));
+                let (Some(before), Some(after)) = (before, after) else {
+                    return Err(SketchError::InvalidValue.into());
+                };
+                let t = unit(sub(*after, *before)).ok_or(SketchError::InvalidValue)?;
+                moved.push(add(*p, scale(left(t), distance)));
+            }
+            if moved.windows(2).any(|w| norm(sub(w[1], w[0])) <= TOL) {
+                return Err(SketchError::InvalidValue.into());
+            }
+            CurveGeom::Spline { points: moved.into_iter().map(|q| point(sketch, ids, q, created)).collect() }
+        }
+        CurveGeom::Line { .. } | CurveGeom::Circle { .. } | CurveGeom::Arc { .. } => {
+            return Err(SketchError::InvalidValue.into());
+        }
+    };
+    sketch.curves.insert(made, Curve { geom, construction: false });
+    created.push(Created::Curve(made));
+    Ok(())
+}
+
 /// Offsets curves by `distance` (positive: outside a closed loop, or left of an open chain's direction;
 /// circles grow). Returns the label.
 pub(crate) fn offset(
@@ -299,6 +369,16 @@ pub(crate) fn offset(
         return Err(SketchError::InvalidValue.into());
     }
     let chosen = if loop_select { grow(sketch, curves)? } else { curves.to_vec() };
+    // Ellipses and splines join no loop: each is offset on its own.
+    let (free, chosen): (Vec<Id<Curve>>, Vec<Id<Curve>>) = chosen.into_iter().partition(|id| {
+        matches!(
+            sketch.curves.get(id).map(|c| &c.geom),
+            Some(CurveGeom::Ellipse { .. } | CurveGeom::Spline { .. })
+        )
+    });
+    for id in free {
+        offset_free(sketch, ids, id, distance, created)?;
+    }
     let (chains, circles) = chains(sketch, &chosen)?;
     // Gauges: construction lines whose lengths are the offset distance, to be made equal.
     let mut gauges: Vec<Id<Curve>> = Vec::new();
