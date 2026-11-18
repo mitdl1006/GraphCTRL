@@ -4526,3 +4526,34 @@ fn grip_snap_moves_a_component_along_a_picked_edge() {
     let back = harness.state().session.doc().get(id).unwrap().placement.xyz;
     assert!(back[1].abs() < 1e-9, "one undo step puts it back: {back:?}");
 }
+
+/// Shift + right click over the view lists the components under the cursor too (Select Other from the
+/// Select menu; docs/ux/inventor-parity.md S11), without opening the marking menu.
+#[test]
+fn shift_right_click_lists_what_lies_under_the_cursor() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.1, 0.1, 0.1] };
+    let app = harness.state_mut();
+    app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    app.session.add_body(solid, gc_doc::Placement::default()).unwrap();
+    app.fit_view();
+    app.viewport_mut().camera.pan([0.0, 0.0], [-250.0, 0.0], [1280.0, 700.0]);
+    harness.run();
+    let at = harness.state().viewport().screen_of(gc_math::DVec3::ZERO).unwrap();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run_steps(3);
+    harness.event(egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Secondary,
+        pressed: true,
+        modifiers: egui::Modifiers::SHIFT,
+    });
+    harness.run_steps(3);
+    let button = egui::accesskit::Role::Button;
+    harness.get_by_role_and_label(button, "Body1");
+    harness.get_by_role_and_label(button, "Body2");
+}
