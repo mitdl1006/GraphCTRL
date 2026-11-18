@@ -481,16 +481,22 @@ fn assemble_tab(
         }
     });
     ribbon_group(ui, tr!(lang, PatternTitle), |ui| {
-        if ribbon_button(ui, Icon::Select, tr!(lang, PatternTitle), false, !session.components().is_empty())
-            .clicked()
+        if ribbon_button(
+            ui,
+            Icon::RectPattern,
+            tr!(lang, PatternTitle),
+            false,
+            !session.components().is_empty(),
+        )
+        .clicked()
         {
             action = Some(RibbonAction::StartPattern);
         }
-        for (mode, label) in [
-            (crate::replicate::Mode::Mirror, tr!(lang, ReplicateMirror)),
-            (crate::replicate::Mode::Copy, tr!(lang, ReplicateCopy)),
+        for (mode, icon, label) in [
+            (crate::replicate::Mode::Mirror, Icon::Mirror, tr!(lang, ReplicateMirror)),
+            (crate::replicate::Mode::Copy, Icon::Cuboid, tr!(lang, ReplicateCopy)),
         ] {
-            if ribbon_button(ui, Icon::Select, label, false, !session.components().is_empty()).clicked() {
+            if ribbon_button(ui, icon, label, false, !session.components().is_empty()).clicked() {
                 action = Some(RibbonAction::StartReplicate(mode));
             }
         }
