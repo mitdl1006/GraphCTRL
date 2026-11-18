@@ -20,6 +20,8 @@ pub(crate) struct EditStack {
     target: Option<TreeKey>,
     back: Vec<Option<TreeKey>>,
     clipboard: Vec<TreeKey>,
+    /// The offset a paste preview shows the clipboard at.
+    paste_preview: Option<gc_doc::Placement>,
 }
 
 impl Session {
@@ -99,6 +101,35 @@ impl Session {
         };
         let keys = self.editing.clipboard.clone();
         self.edit_subassemblies(SubassemblyOp::Paste { keys, offset, into })
+    }
+
+    /// Shows what a Paste at `offset` would place, without changing the document: each copied component
+    /// as a see-through ghost moved by `offset` ([`Session::paste_ghosts`]), as the copy follows the cursor
+    /// after Ctrl+V. Replaces any earlier paste preview. Refused (no preview) when nothing copied is left
+    /// or the offset is not finite.
+    pub fn preview_paste(&mut self, offset: gc_doc::Placement) -> Result<(), EditError> {
+        let finite = offset.xyz.iter().chain(&offset.rpy).all(|v| v.is_finite());
+        if !finite || self.doc().pasted_components(&self.editing.clipboard).is_empty() {
+            self.editing.paste_preview = None;
+            return Err(EditError::BadValue);
+        }
+        self.editing.paste_preview = Some(offset);
+        Ok(())
+    }
+
+    /// Ends [`Session::preview_paste`].
+    pub fn end_paste_preview(&mut self) {
+        self.editing.paste_preview = None;
+    }
+
+    /// The paste preview's ghosts: each copied component that still exists, with the move that takes it
+    /// from where it is now to where the paste would put it (the same for all: the offset, applied in
+    /// world coordinates). Draw each component's shown geometry with this move in front of its pose.
+    /// Empty without a paste preview.
+    pub fn paste_ghosts(&self) -> Vec<(gc_core::AnyId, gc_math::DPose3)> {
+        let Some(offset) = self.editing.paste_preview else { return Vec::new() };
+        let shift = gc_math::pose_from_xyz_rpy(offset.xyz, offset.rpy);
+        self.doc().pasted_components(&self.editing.clipboard).into_iter().map(|item| (item, shift)).collect()
     }
 
     /// The component or subassembly being edited in place; `None` at the top level.

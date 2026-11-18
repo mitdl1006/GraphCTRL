@@ -295,6 +295,28 @@ impl Scene {
             let tool = robot_tool(session, ghost.robot);
             push_robot(&mut scene, loaded, &poses, tool.as_ref(), None, &shown);
         }
+        // A paste preview: the copied components as see-through ghosts where the paste would put them.
+        let ghostly = |color: [f32; 4]| {
+            let grey = (color[0] + color[1] + color[2]) / 3.0;
+            [0.5 * GHOST[0] + 0.5 * grey, 0.5 * GHOST[1] + 0.5 * grey, 0.5 * GHOST[2] + 0.5 * grey, GHOST[3]]
+        };
+        for (item, shift) in session.paste_ghosts() {
+            if item.kind == gc_core::Kind::Body {
+                let id = gc_core::Id::<gc_doc::Body>::from_raw(item.raw);
+                let Some(body) = session.shown_body(id) else { continue };
+                let Some(shape) = solid_shape(session, &body.solid) else { continue };
+                let pose = shift * pose_from_xyz_rpy(body.placement.xyz, body.placement.rpy);
+                scene.solids.push(Solid3 { shape, pose, color: ghostly(BODY), owner: None });
+            } else if item.kind == gc_core::Kind::RobotInstance {
+                let id = gc_core::Id::<gc_doc::Robot>::from_raw(item.raw);
+                let (Some(loaded), Some(poses)) = (session.robot_model(id), session.link_poses(id)) else {
+                    continue;
+                };
+                let moved: Vec<DPose3> = poses.iter().map(|p| shift * *p).collect();
+                let tool = robot_tool(session, id);
+                push_robot(&mut scene, loaded, &moved, tool.as_ref(), None, &ghostly);
+            }
+        }
         scene.tool_points = doc.robots().iter().filter_map(|(id, _)| session.tcp_pose(id)).collect();
         // Hidden, suppressed and rolled-back items are kept in the document but not drawn.
         let drawn = |item: gc_core::AnyId| doc.is_visible(item) && !doc.is_inactive(item);
