@@ -3679,3 +3679,122 @@ fn the_sketch_ribbon_has_split_buttons_and_fits_1280_px() {
     let finish = harness.get_by_label("스케치 마무리").rect();
     assert!(finish.right() <= SIZE.x, "{finish:?} outside the window in a 3D sketch");
 }
+
+/// A file dialog that always picks the same file.
+struct PickFile(std::path::PathBuf);
+
+impl gc_app::FileDialogs for PickFile {
+    fn open(&mut self) -> Option<std::path::PathBuf> {
+        None
+    }
+    fn save(&mut self, _: &str) -> Option<std::path::PathBuf> {
+        None
+    }
+    fn open_mesh(&mut self) -> Option<std::path::PathBuf> {
+        Some(self.0.clone())
+    }
+}
+
+/// Assemble tab > Place: the first component stays at the origin; a second body hangs on the cursor over the
+/// ground, a click sets it down and attaches a copy, Esc drops that copy (Inventor 2026 help, Place
+/// Components, GUID-2E0B9110-BBAE-482B-A9AF-953BC40E8F2A).
+#[test]
+fn place_hangs_a_body_on_the_cursor_and_sets_it_down_by_clicks() {
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join("plate.stl");
+    // A closed box of 40 mm as ASCII STL: twelve triangles.
+    let corners: [[f64; 3]; 8] = [
+        [0.0, 0.0, 0.0],
+        [0.04, 0.0, 0.0],
+        [0.04, 0.04, 0.0],
+        [0.0, 0.04, 0.0],
+        [0.0, 0.0, 0.04],
+        [0.04, 0.0, 0.04],
+        [0.04, 0.04, 0.04],
+        [0.0, 0.04, 0.04],
+    ];
+    let faces = [
+        [0, 2, 1],
+        [0, 3, 2],
+        [4, 5, 6],
+        [4, 6, 7],
+        [0, 1, 5],
+        [0, 5, 4],
+        [1, 2, 6],
+        [1, 6, 5],
+        [2, 3, 7],
+        [2, 7, 6],
+        [3, 0, 4],
+        [3, 4, 7],
+    ];
+    let mut stl = String::from("solid plate\n");
+    for face in faces {
+        stl.push_str("facet normal 0 0 0\nouter loop\n");
+        for index in face {
+            let [x, y, z] = corners[index];
+            stl.push_str(&format!("vertex {x} {y} {z}\n"));
+        }
+        stl.push_str("endloop\nendfacet\n");
+    }
+    stl.push_str("endsolid plate\n");
+    std::fs::write(&file, stl).unwrap();
+
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(move |cc| {
+        GraphCtrlApp::new(cc, RunOptions::default()).with_dialogs(Box::new(PickFile(file)))
+    });
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.05, 0.05, 0.05] };
+    harness.state_mut().session.add_body(solid, gc_doc::Placement::default()).unwrap();
+    harness.state_mut().fit_view();
+    harness.state_mut().viewport_mut().camera.pan([0.0, 0.0], [-250.0, 0.0], [1280.0, 700.0]);
+    harness.run();
+    harness.get_by_label("조립").click();
+    harness.run();
+    harness.get_by_label("배치").click();
+    harness.run_steps(3);
+    assert!(harness.state().viewport().is_placing(), "the second component hangs on the cursor");
+    let bodies = |harness: &egui_kittest::Harness<'_, GraphCtrlApp>| {
+        harness.state().session.doc().bodies().iter().count()
+    };
+    assert_eq!(bodies(&harness), 2);
+
+    // The cursor over the ground at (0, 0.05): the body's origin follows.
+    let target = gc_math::DVec3::new(0.0, 0.05, 0.0);
+    let at = harness.state().viewport().screen_of(target).unwrap();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run_steps(3);
+    let hanging = harness.state().session.doc().bodies().iter().last().map(|(id, _)| id).unwrap();
+    let shown = harness.state().session.shown_body(hanging).unwrap().placement.xyz;
+    assert!(shown[0].abs() < 0.01 && (shown[1] - 0.05).abs() < 0.01, "{shown:?}");
+
+    if gpu {
+        let image = harness.render().unwrap();
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        image.save(out.join("review-48-place.png")).unwrap();
+    }
+
+    // A click sets it down and a copy takes its place on the cursor.
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run_steps(3);
+    }
+    assert!(harness.state().viewport().is_placing());
+    assert_eq!(bodies(&harness), 3, "a copy hangs now");
+    let placed = harness.state().session.doc().get(hanging).unwrap().placement.xyz;
+    assert!(placed[0].abs() < 0.01 && (placed[1] - 0.05).abs() < 0.01, "{placed:?}");
+
+    // Esc ends and drops the copy that was still hanging.
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(3);
+    assert!(!harness.state().viewport().is_placing());
+    assert_eq!(bodies(&harness), 2);
+}

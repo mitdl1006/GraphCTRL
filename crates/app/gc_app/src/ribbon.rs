@@ -66,6 +66,8 @@ const CONSTRAINTS: [(ConstraintKind, &str, Msg); 12] = [
 pub(crate) enum RibbonAction {
     /// Ask for a mesh file and add it as a body.
     ImportMesh,
+    /// Place Component: ask for a file; a body then hangs on the cursor until it is set down.
+    Place,
     /// Ask for a robot description file and add the robot.
     ImportRobot,
     /// Open the measure panel.
@@ -598,7 +600,7 @@ fn assemble_tab(
     let robot = session.doc().robots().iter().next().map(|(id, _)| id);
     ribbon_group(ui, tr!(lang, GroupComponent), |ui| {
         if ribbon_button(ui, Icon::Import, tr!(lang, CmdPlace), false, true).clicked() {
-            action = Some(RibbonAction::ImportMesh);
+            action = Some(RibbonAction::Place);
         }
         if ribbon_button(
             ui,

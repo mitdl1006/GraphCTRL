@@ -449,6 +449,32 @@ impl GraphCtrlApp {
     }
 
     /// The viewport, for tests that move the view.
+    /// Place Component (Inventor 2026 help, Place Components, GUID-2E0B9110-BBAE-482B-A9AF-953BC40E8F2A):
+    /// asks for a file. The first component stays at the origin (the session grounds it); a later body hangs
+    /// on the cursor until it is set down with a click, Esc or a right click ends. An assembly file is read
+    /// by a job and arrives at the origin: it cannot hang on the cursor yet.
+    fn place_component(&mut self, lang: Lang) {
+        let Some(path) = self.dialogs.open_mesh() else { return };
+        let had_components = !self.session.components().is_empty();
+        if crate::assembly_import::is_assembly(&path) {
+            self.session.import_assembly(&path.to_string_lossy(), crate::assembly_import::importer());
+            self.importing = true;
+            self.notice = Some(tr!(lang, ImportLoading, 1));
+            return;
+        }
+        match self.session.add_mesh_body(&path) {
+            Ok(body) => {
+                self.notice = None;
+                if had_components {
+                    self.viewport.start_placing(gc_session::CellItem::Body(body), false);
+                } else {
+                    self.fit_view();
+                }
+            }
+            Err(error) => self.notice = Some(tr!(lang, FileError, error)),
+        }
+    }
+
     pub fn viewport_mut(&mut self) -> &mut Viewport {
         &mut self.viewport
     }
@@ -1103,6 +1129,9 @@ impl eframe::App for GraphCtrlApp {
             self.notice =
                 self.session.set_tool_mesh(robot, &path).err().map(|error| tr!(lang, FileError, error));
         }
+        if ribbon_action == Some(ribbon::RibbonAction::Place) {
+            self.place_component(lang);
+        }
         if ribbon_action == Some(ribbon::RibbonAction::ImportMesh)
             && let Some(path) = self.dialogs.open_mesh()
         {
@@ -1302,17 +1331,7 @@ impl eframe::App for GraphCtrlApp {
         // What the marking menu of the view asked for.
         match self.viewport.take_request() {
             Some(gc_viewport::ViewportRequest::Constrain) => self.constrain.start(),
-            Some(gc_viewport::ViewportRequest::PlaceComponent) => {
-                if let Some(path) = self.dialogs.open_mesh() {
-                    match self.session.add_mesh_body(&path) {
-                        Ok(_) => {
-                            self.notice = None;
-                            self.fit_view();
-                        }
-                        Err(error) => self.notice = Some(tr!(lang, FileError, error)),
-                    }
-                }
-            }
+            Some(gc_viewport::ViewportRequest::PlaceComponent) => self.place_component(lang),
             None => {}
         }
         // The Constrain dialog picks origin planes, axes and points in the view.
