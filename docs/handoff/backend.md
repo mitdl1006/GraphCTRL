@@ -17,7 +17,7 @@
 | 5 | ~~Chamfer·Split~~ **완료** | 65, 81 (P2) | — | 아래 작업 기록 |
 | 6 | ~~Move·Copy·Rotate~~ **완료** / Scale·Stretch | 76–78 (P2) / 83–84 (P3) | Scale·Stretch 남음 | 아래 작업 기록 |
 | 7 | Auto-project — **면 스케치의 면 윤곽 자동 투영 완료** / 그리기 중 문질러 투영 남음 | 68 (P2) | 문질러 투영(rubbing)은 뷰포트 스냅 작업 | 아래 작업 기록 |
-| 8 | Automatic Dimensions and Constraints | 126 (P2) | 없음 | 남은 자유도를 치수로 채우기 |
+| 8 | ~~Automatic Dimensions and Constraints~~ **완료** | 126 (P2) | — | 아래 작업 기록 |
 | 9 | 치수 방향 뒤집기(Flip) | 124 (P3) | 확인 필요 | |
 | 10 | 타원·스플라인(+ Smooth G2) | 60, 61, 108 (P3) | `CurveGeom`에 없음 | 새 곡선 종류 — 영향 큼 |
 | 11 | 어셈블리: 서브어셈블리 계층·활성화, 조인트 Lock/Protect, 3D 그립 스냅, 어셈블리 스케치 소유자, 원기둥 축 작업 축 | 어셈블리 43, 90, 61, 98, 157 | 없음 또는 일부(확인 필요) | 행마다 원문 확인 후 범위 결정 |
@@ -53,6 +53,24 @@
 | 모션(오래된 남은 일) | 맨 아래 "남은 일(백엔드)" 절 그대로 |
 
 # 작업 기록(최신 순)
+
+## 2026-11-18 — 자동 치수 및 구속(우선순위 표 8)
+
+- **원문**: To Apply 2D Sketch Dimensions Automatically `GUID-1DC71C6F-9F6D-4846-8E73-9CB7D3452882.htm`. Auto Dimension 대화상자: Curves(선택 없음 = 전체), Dimensions/Constraints(기본 켬), Dimensions Required, Apply/Remove/Done.
+- **gc_doc `SketchOp::AutoDimension{curves, dimensions, constraints}`**:
+  - 구속을 먼저 넣는다: 거의 수평·수직인 선, 겹친 끝점의 일치.
+  - 그다음 치수: 선 길이·원 지름·호 반지름, 그리고 각 점의 스케치 원점에서 가로·세로 거리.
+  - 값은 지금 잰 값이다. 후보를 하나씩 시도해 자유도를 줄이는 것만 남긴다(중복 검사).
+- **세션**:
+  - `auto_dimension(dimensions, constraints)`: 선택한 곡선, 없으면 전체.
+  - `remove_auto_dimensions(dimensions, constraints)`: 마지막 적용분.
+  - `dimensions_required()`: 남은 자유도. 선택과 관계없이 스케치 전체 기준이다.
+- **UI**: 리본 구속 패널 끝에 '자동 치수 및 구속' 작은 버튼, '자동 치수' 창(곡선 수, 치수/구속, 필요한 치수, 적용/제거/완료).
+- **원문과 다른 점**:
+  - 창 안 Curves 선택기가 없다. 창을 열기 전에 고르거나, 열린 뒤 선택 도구로 고른다.
+  - 필요한 치수는 선택이 아니라 스케치 전체 기준이다.
+  - 치수 배치·종류 선택은 인벤터와 다를 수 있다(원문에 규칙이 없음).
+- **테스트**: `gc_doc/tests/sketch_shapes.rs` automatic_dimensions…(자유도 0, 위치 그대로, 수평 추론, 구속만), 앱 kittest auto_dimension_applies_and_removes.
 
 ## 2026-11-18 — 면 위 스케치에서 면 모서리 자동 투영(우선순위 표 7 일부)
 

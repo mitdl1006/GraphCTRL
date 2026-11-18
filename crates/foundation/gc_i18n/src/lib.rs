@@ -1070,6 +1070,14 @@ messages! {
     TransformSelection => ("선택: 곡선 {0}개(명령 전에 고르기)", "Selection: {0} curves (pick before the command)"),
     TransformCopy => ("복사본으로", "Copy"),
     TransformRelax => ("구속 풀기(치수 다시 계산·구속 끊기)", "Relax (recompute dimensions, break constraints)"),
+    ToolAutoDimension => ("자동 치수 및 구속", "Automatic Dimensions and Constraints"),
+    AutoDimTitle => ("자동 치수", "Auto Dimension"),
+    AutoDimDimensions => ("치수", "Dimensions"),
+    AutoDimConstraints => ("구속", "Constraints"),
+    /// `{0}` the freedom left.
+    AutoDimRequired => ("필요한 치수: {0}", "Dimensions Required: {0}"),
+    AutoDimCurves => ("곡선: 선택 {0}개(없으면 스케치 전체)", "Curves: {0} selected (none: the whole sketch)"),
+    AutoDimRemove => ("제거", "Remove"),
     HudY => ("Y", "Y"),
     /// Ribbon group (Inventor: Pattern panel).
     GroupPattern => ("패턴", "Pattern"),

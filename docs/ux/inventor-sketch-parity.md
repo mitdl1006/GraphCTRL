@@ -123,7 +123,7 @@
 | 치수 표시 형식 [S14] | 상태바 아이콘: Value / Name / Expression / Tolerance / Precise Value. 수식 치수는 `fx:` 접두. 색: 호버 = 주황, 선택 = 파랑, 기본 = 검정 [S27] | | 값만 표시(`"60 mm"`). `fx` 표시 (미확인) | 표시 모드 5종 | P2 | FE |
 | 치수 방향 뒤집기 (Flip Direction) [S14,S33] | 우클릭 Flip Direction(평행선 거리·점-선 거리·점쌍 수평/수직·선-호 거리·호-호 거리·각도), 다중 선택 가능 | | 없음 | | P3 | BE+FE |
 | 삭제·표시 [S14] | 선택 후 Delete 또는 우클릭 Delete | Delete | Delete 있음 | - | - |
-| Automatic Dimensions and Constraints (자동 치수) [S15] | Constrain 패널. Auto Dimension 대화상자: Curves 선택, 체크박스 Dimensions/Constraints(기본 켜짐), "Dimensions Required"(필요 수, 제외 항목은 합계에서 뺌). 선택 없음 = 전체 스케치. Apply/Remove/Done | (미확인) | 없음 | 신규 | P2 | BE+FE |
+| Automatic Dimensions and Constraints (자동 치수) [S15] | Constrain 패널. Auto Dimension 대화상자: Curves 선택, 체크박스 Dimensions/Constraints(기본 켜짐), "Dimensions Required"(필요 수, 제외 항목은 합계에서 뺌). 선택 없음 = 전체 스케치. Apply/Remove/Done | (미확인) | **완료**(handoff "자동 치수 및 구속") | 창 안 Curves 선택기 없음 | P2 | BE+FE |
 
 ## 3. 공통 동작
 

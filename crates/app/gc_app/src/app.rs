@@ -269,6 +269,8 @@ pub struct GraphCtrlApp {
     parameters: crate::parameters::Parameters,
     /// The open sketch Mirror or Pattern dialog.
     sketch_dialog: Option<crate::sketch_dialogs::SketchDialog>,
+    /// The open Auto Dimension dialog.
+    auto_dimension: Option<crate::sketch_dialogs::AutoDimension>,
     /// An assembly import was started and its outcome not yet shown.
     importing: bool,
     /// The status bar says meshes are loading.
@@ -364,6 +366,7 @@ impl GraphCtrlApp {
             pattern: crate::pattern::Pattern::default(),
             replicate: crate::replicate::Replicate::default(),
             sketch_dialog: None,
+            auto_dimension: None,
             parameters: crate::parameters::Parameters::default(),
             importing: false,
             loading_shown: false,
@@ -1034,6 +1037,9 @@ impl eframe::App for GraphCtrlApp {
             Some(ribbon::RibbonAction::StartPattern) => self.pattern.start(Vec::new()),
             Some(ribbon::RibbonAction::StartReplicate(mode)) => self.replicate.start(mode),
             Some(ribbon::RibbonAction::StartParameters) => self.parameters.open = true,
+            Some(ribbon::RibbonAction::StartAutoDimension) => {
+                self.auto_dimension = Some(crate::sketch_dialogs::AutoDimension::new());
+            }
             Some(ribbon::RibbonAction::StartSketchMirror) => {
                 self.sketch_dialog = Some(crate::sketch_dialogs::SketchDialog::new(
                     crate::sketch_dialogs::Kind::Mirror,
@@ -1150,6 +1156,11 @@ impl eframe::App for GraphCtrlApp {
         }
         if self.parameters.open {
             self.parameters.window(&ctx, &mut self.session, lang);
+        }
+        if let Some(dialog) = &mut self.auto_dimension
+            && !dialog.window(&ctx, &mut self.session, lang)
+        {
+            self.auto_dimension = None;
         }
         if let Some(dialog) = &mut self.sketch_dialog
             && !dialog.window(&ctx, &mut self.session, lang)

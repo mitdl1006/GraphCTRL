@@ -493,3 +493,49 @@ pub(crate) fn transform_window(ctx: &egui::Context, session: &mut Session, lang:
         session.set_tool(ToolKind::Select);
     }
 }
+
+/// The Auto Dimension dialog (Inventor 2026 help, To Apply 2D Sketch Dimensions Automatically,
+/// GUID-1DC71C6F-9F6D-4846-8E73-9CB7D3452882): Dimensions and Constraints (both on), Dimensions Required,
+/// Apply, Remove, Done. The curves are the selection (none: the whole sketch). Returns false when it
+/// closes.
+pub(crate) struct AutoDimension {
+    dimensions: bool,
+    constraints: bool,
+    error: Option<String>,
+}
+
+impl AutoDimension {
+    pub(crate) fn new() -> Self {
+        Self { dimensions: true, constraints: true, error: None }
+    }
+
+    pub(crate) fn window(&mut self, ctx: &egui::Context, session: &mut Session, lang: Lang) -> bool {
+        let mut open = true;
+        let mut done = false;
+        sketch_window(tr!(lang, AutoDimTitle), ctx).open(&mut open).resizable(false).show(ctx, |ui| {
+            ui.label(tr!(lang, AutoDimCurves, session.selected_curves().len()));
+            ui.checkbox(&mut self.dimensions, tr!(lang, AutoDimDimensions));
+            ui.checkbox(&mut self.constraints, tr!(lang, AutoDimConstraints));
+            ui.label(tr!(lang, AutoDimRequired, session.dimensions_required()));
+            if let Some(error) = &self.error {
+                ui.colored_label(ui.visuals().error_fg_color, tr!(lang, DialogRefused, error));
+            }
+            ui.horizontal(|ui| {
+                if ui.button(tr!(lang, DialogApply)).clicked() {
+                    self.error = session
+                        .auto_dimension(self.dimensions, self.constraints)
+                        .err()
+                        .map(|e| e.to_string());
+                }
+                if ui.button(tr!(lang, AutoDimRemove)).clicked() {
+                    self.error = session
+                        .remove_auto_dimensions(self.dimensions, self.constraints)
+                        .err()
+                        .map(|e| e.to_string());
+                }
+                done = ui.button(tr!(lang, DialogDone)).clicked();
+            });
+        });
+        open && !done && session.active_sketch().is_some()
+    }
+}
