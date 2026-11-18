@@ -171,12 +171,12 @@ pub(crate) fn show(
                 // Work features: the axis types of an assembly (Inventor 2026 help, To Create Work Features,
                 // GUID-38A9748E-FA2D-44D3-928C-DFE1326A9385).
                 ribbon_group(ui, tr!(lang, GroupWorkFeatures), |ui| {
-                    for (category, label) in [
-                        (crate::work_feature::Category::Plane, tr!(lang, CmdWorkPlane)),
-                        (crate::work_feature::Category::Axis, tr!(lang, CmdWorkAxis)),
-                        (crate::work_feature::Category::Point, tr!(lang, CmdWorkPoint)),
+                    for (category, label, icon) in [
+                        (crate::work_feature::Category::Plane, tr!(lang, CmdWorkPlane), Icon::WorkPlane),
+                        (crate::work_feature::Category::Axis, tr!(lang, CmdWorkAxis), Icon::WorkAxis),
+                        (crate::work_feature::Category::Point, tr!(lang, CmdWorkPoint), Icon::WorkPoint),
                     ] {
-                        if ribbon_button(ui, Icon::Pan, label, false, !sketching).clicked() {
+                        if ribbon_button(ui, icon, label, false, !sketching).clicked() {
                             action = Some(RibbonAction::StartWorkFeature(category));
                         }
                     }
@@ -733,7 +733,8 @@ fn assemble_tab(
             viewport.free_tool = if viewport.free_tool == Some(tool) { None } else { Some(tool) };
         }
         // Grip Snap: an edge as the reference, then two points.
-        if ribbon_button(ui, Icon::Pan, tr!(lang, GripTitle), viewport.is_grip_snapping(), has).clicked() {
+        if ribbon_button(ui, Icon::GripSnap, tr!(lang, GripTitle), viewport.is_grip_snapping(), has).clicked()
+        {
             viewport.start_grip_snap();
         }
         // Ground: the selected body, robot or imported assembly, shown pressed when it is grounded.

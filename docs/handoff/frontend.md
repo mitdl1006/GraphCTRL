@@ -172,6 +172,11 @@
 - **Ctrl+C / Ctrl+V**: 선택한 본체를 복사하고 붙여넣으면 관계 없이(Copy Components 경로, 오프셋 0) 사본이 커서에 매달려 배치처럼 클릭마다 놓이고 Esc·우클릭으로 끝난다. 본체만(로봇·가져온 어셈블리는 복사하지 않음). 테스트 `ctrl_c_and_ctrl_v_paste_a_copy_of_the_selected_body`.
 - **F10**: 편집 중인 스케치(없으면 마지막 스케치)의 가시성을 토글. 테스트 `f10_toggles_the_visibility_of_the_latest_sketch`.
 
+### 리본 아이콘 정리
+
+- 3D 모델 탭의 작업 평면·작업 축·작업 점과 조립 탭의 그립 스냅이 모두 같은 "이동(Pan)" 아이콘이어서 구분이 안 됐다. 각각 직접 그린 아이콘(`Icon::WorkPlane` / `WorkAxis` / `WorkPoint` / `GripSnap`, 인벤터 그림 사용 안 함)으로 바꿨다. 증거 `docs/evidence/img/review-58-*.png`.
+- 큰/작은 버튼 혼합: 7개 탭을 모두 렌더해 보니 큰 버튼 탭(3D 모델·조립·로봇·검사·관리·뷰)과 큰+작은 혼합 탭(스케치: 작성·수정·구속)이 인벤터처럼 역할별로 나뉘어 있고 폭도 1280 px 안에 들어간다(`every_ribbon_tab_fits_1280_px`). 분할 버튼은 아래쪽 화살표 때문에 이름이 한 줄 위에 앉는 점이 인벤터와 같다. 따로 더 합칠 항목은 찾지 못했다.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹
