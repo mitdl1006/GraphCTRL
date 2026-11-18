@@ -5614,3 +5614,49 @@ fn the_work_plane_dialog_offers_the_newer_definitions_and_makes_a_midplane() {
         image.save(out.join("review-65-work-plane-kinds.png")).unwrap();
     }
 }
+
+/// Page Up and the navigation bar's Look At turn the view square to the sketch plane being edited
+/// (Inventor 2026 help, Navigation Bar Reference, GUID-3B926737-92BA-46CF-B722-97F68651772B).
+#[test]
+fn look_at_turns_the_view_square_to_the_sketch_plane() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.state_mut().session.create_sketch("XZ").unwrap();
+    // A new sketch is looked at once by itself; then the view is turned away.
+    harness.run_steps(3);
+    harness.state_mut().viewport_mut().look(gc_draw::StandardView::Iso);
+    harness.run_steps(3);
+    let forward = harness.state().viewport().camera.forward();
+    assert!(forward.y.abs() < 0.9, "an isometric view is not square to XZ: {forward:?}");
+    harness.key_press(egui::Key::PageUp);
+    harness.run_steps(3);
+    let forward = harness.state().viewport().camera.forward();
+    assert!(forward.y.abs() > 0.99, "square to the XZ plane (its normal is Y): {forward:?}");
+    // The button of the navigation bar does the same from another view.
+    harness.state_mut().viewport_mut().look(gc_draw::StandardView::Iso);
+    harness.run_steps(3);
+    harness.get_by_label("면 보기").click();
+    harness.run_steps(3);
+    assert!(harness.state().viewport().camera.forward().y.abs() > 0.99);
+}
+
+#[test]
+fn the_3d_draw_panel_has_a_bend_button_that_esc_ends() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    pick_variant(&mut harness, "스케치", "3D 스케치");
+    harness.run();
+    assert!(harness.state().session.sketch_is_spatial());
+    harness.get_by_label("굽힘").click();
+    harness.run();
+    assert!(harness.state().viewport().is_bending());
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert!(!harness.state().viewport().is_bending());
+}

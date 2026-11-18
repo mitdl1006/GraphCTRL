@@ -126,6 +126,8 @@ pub struct Viewport {
     /// Where the view has stood (F5 goes back, Shift + F5 forward), the one shown now, and when the
     /// camera last changed.
     views: ViewHistory,
+    /// Bend (3D sketch) is running: the lines picked so far and the radius typed.
+    bend: Option<BendState>,
     /// Insert Point is running on this spline: each click adds a fit point, Esc ends.
     insert_spline: Option<Id<gc_sketch::Curve>>,
     /// Whether Alt was held when the primary button last went down.
@@ -228,6 +230,15 @@ impl ViewHistory {
     }
 }
 
+/// The Bend command of a 3D sketch (Inventor 2026 help, To Create Lines, Arcs, and Bends,
+/// GUID-4F861674-F74C-474E-869A-4C190ED6EC4B): two lines are clicked, then the radius is typed.
+#[derive(Clone, Debug)]
+struct BendState {
+    lines: Vec<Id<gc_sketch::Curve>>,
+    radius: String,
+    fresh: bool,
+}
+
 /// What a plain click selects (Inventor 2026 help, About Component Selection Modes and Sets,
 /// GUID-E3E49BD5-3F55-4836-8CD1-2C1855CF9986: the Select command's priority).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -259,6 +270,7 @@ impl Viewport {
             free_drag: None,
             placing: None,
             placing_paste: None,
+            bend: None,
             insert_spline: None,
             alt_at_press: false,
             alt_drag: None,
@@ -483,6 +495,7 @@ impl Viewport {
 
         self.select_other_list(ui, session);
         self.select_menu(ui, session, size, lang);
+        self.bend_box(ui, session, rect, lang);
 
         // The marking menu: a right press opens it (in a sketch or among the components); a quick mark
         // toward a command picks it, otherwise the radial menu and its overflow list show.
@@ -605,6 +618,9 @@ impl Viewport {
                     radial::Effect::None => {}
                     radial::Effect::Request(request) => self.request = Some(request),
                     radial::Effect::InsertSplinePoint(curve) => self.insert_spline = Some(curve),
+                    radial::Effect::LookAt => {
+                        self.look_at(session);
+                    }
                     radial::Effect::SelectOther => {
                         if let Some(at) = ui.input(|i| i.pointer.latest_pos()) {
                             self.open_select_other(session, at, size, &to_view);
@@ -756,12 +772,12 @@ impl Viewport {
             egui::Stroke::new(1.0, colors::border()),
             egui::StrokeKind::Outside,
         );
-        let look_target = self.look_target(session);
+        let can_look = self.can_look_at(session);
         let mut act = None;
         for (index, (icon, label, tool)) in tools.iter().enumerate() {
             let cell =
                 egui::Rect::from_min_size(top_left + vec2(0.0, button * index as f32), vec2(button, button));
-            let enabled = !(index == 4 && look_target.is_none());
+            let enabled = !(index == 4 && !can_look);
             let sense = if enabled { Sense::click() } else { Sense::hover() };
             let response = ui.interact(cell, egui::Id::unique(("gc_nav_bar", index)), sense);
             let active = tool.is_some() && self.nav_tool == *tool;
@@ -784,9 +800,7 @@ impl Viewport {
             }
             Some(4) => {
                 self.nav_tool = None;
-                if let Some((normal, up)) = look_target {
-                    self.camera.look_along(-normal, up);
-                }
+                self.look_at(session);
             }
             Some(index) => {
                 let chosen = tools[index].2;
@@ -813,18 +827,54 @@ impl Viewport {
         }
     }
 
-    /// The face the Look At tool turns the view to: a selected origin plane, or the sketch plane being
-    /// edited. Returns the face's normal and the direction that is up in it.
-    fn look_target(&self, session: &Session) -> Option<(DVec3, DVec3)> {
-        if let Some((occurrence, gc_doc::OriginElement::Plane(plane))) = self.origin_selected
-            && let Some(origin) = session.component_origin(occurrence)
-        {
-            let pose = origin.plane(plane);
-            return Some((pose.rotation * DVec3::Z, pose.rotation * DVec3::Y));
+    /// What Look At is used on, from the current selection (Inventor 2026 help, Navigation Bar Reference,
+    /// GUID-3B926737-92BA-46CF-B722-97F68651772B: "zooms and rotates the model to display the selected
+    /// element planar to the screen or a selected edge or line horizontal to the screen"): a work feature, an
+    /// origin plane, a selected curve of the sketch being edited, else that sketch.
+    fn look_item(&self, session: &Session) -> Option<gc_session::LookItem> {
+        use gc_session::LookItem;
+        if let Some(id) = self.work_selected {
+            return Some(LookItem::WorkFeature(id));
         }
-        let (_, sketch) = session.active_sketch()?;
-        let plane = plane_of(session, sketch);
-        (!session.sketch_is_spatial()).then_some((plane.normal, plane.v))
+        if let Some((occurrence, gc_doc::OriginElement::Plane(plane))) = self.origin_selected {
+            return Some(LookItem::ComponentPlane(occurrence, plane));
+        }
+        let (sketch, _) = session.active_sketch()?;
+        if session.sketch_is_spatial() {
+            return None;
+        }
+        let curve = session.selection().iter().find_map(|item| match item {
+            gc_sketch::Item::Curve(id) => Some(*id),
+            _ => None,
+        });
+        Some(match curve {
+            Some(curve) => LookItem::SketchCurve { sketch, curve },
+            None => LookItem::Sketch(sketch),
+        })
+    }
+
+    /// Where Look At would turn the view now, if there is anything to look at.
+    fn look_target(&self, session: &Session) -> Option<gc_session::LookTarget> {
+        session.look_target(self.look_item(session)?, self.camera.forward())
+    }
+
+    /// Whether Look At has something to turn to.
+    pub fn can_look_at(&self, session: &Session) -> bool {
+        self.look_target(session).is_some()
+    }
+
+    /// Look At: turns the view to show the selected element square to the screen (a line level) and centres
+    /// and zooms on it. False when nothing selected can be looked at.
+    pub fn look_at(&mut self, session: &Session) -> bool {
+        let Some(target) = self.look_target(session) else { return false };
+        self.camera.look_along(-target.toward_eye, target.up);
+        self.camera.pivot = target.centre;
+        if let Some(reach) = target.reach.filter(|r| *r > 1e-6) {
+            let half = DVec3::splat(reach);
+            self.camera
+                .fit(&Aabb::from_points([target.centre - half, target.centre + half]), [1000.0, 700.0]);
+        }
+        true
     }
 
     /// The view cube in the top-right corner: shows how the view is turned; clicking a face, an edge or a
@@ -1136,7 +1186,27 @@ impl Viewport {
         let ctrl = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
         let clicked =
             response.clicked_by(PointerButton::Primary).then(|| response.interact_pointer_pos()).flatten();
-        if matches!(
+        if let Some(bend) = self.bend.as_mut() {
+            // Bend: the nearest line or arc under the click is one of the two.
+            if let Some(at) = clicked
+                && bend.lines.len() < 2
+            {
+                let screen = to_view(at);
+                let hit = lines
+                    .iter()
+                    .filter_map(|(id, a, b)| {
+                        let (a, b) = (on_screen(*a)?, on_screen(*b)?);
+                        Some((segment_distance(screen, a, b), *id))
+                    })
+                    .filter(|(d, _)| *d <= gc_tools::tolerance::CURVE_PX)
+                    .min_by(|a, b| a.0.total_cmp(&b.0));
+                if let Some((_, id)) = hit
+                    && !bend.lines.contains(&id)
+                {
+                    bend.lines.push(id);
+                }
+            }
+        } else if matches!(
             session.tool(),
             gc_tools::ToolKind::Line | gc_tools::ToolKind::Arc | gc_tools::ToolKind::Arc3
         ) {
@@ -1475,6 +1545,63 @@ impl Viewport {
         }
         self.alt_drag = Some(drag);
         true
+    }
+
+    /// Starts Bend in the 3D sketch being edited: click two lines that meet, then type the radius.
+    pub fn start_bend(&mut self) {
+        self.bend = Some(BendState { lines: Vec::new(), radius: "10 mm".to_owned(), fresh: true });
+    }
+
+    /// Whether Bend is running.
+    pub fn is_bending(&self) -> bool {
+        self.bend.is_some()
+    }
+
+    /// Bend's prompt, and the radius box once both lines are picked. Enter makes the bend, Esc ends.
+    fn bend_box(&mut self, ui: &egui::Ui, session: &mut Session, rect: egui::Rect, lang: Lang) {
+        let Some(mut bend) = self.bend.take() else { return };
+        if !session.sketch_is_spatial() || ui.input(|i| i.key_pressed(Key::Escape)) {
+            return;
+        }
+        let prompt = match bend.lines.len() {
+            0 => tr!(lang, BendPickFirst),
+            1 => tr!(lang, BendPickSecond),
+            _ => tr!(lang, BendRadius),
+        };
+        let mut make = false;
+        egui::Area::new(egui::Id::unique("gc_bend"))
+            .fixed_pos(rect.center_top() + egui::vec2(0.0, 14.0))
+            .pivot(egui::Align2::CENTER_TOP)
+            .order(egui::Order::Foreground)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.strong(tr!(lang, ToolBend));
+                    ui.label(prompt);
+                    if bend.lines.len() == 2 {
+                        let field = ui.add(egui::TextEdit::singleline(&mut bend.radius).desired_width(90.0));
+                        field.widget_info(|| {
+                            egui::WidgetInfo::labeled(egui::Role::TextInput, true, tr!(lang, BendRadius))
+                        });
+                        if std::mem::take(&mut bend.fresh) {
+                            field.request_focus();
+                        }
+                        if field.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+                            make = true;
+                        }
+                    }
+                });
+            });
+        if make && let [a, b] = bend.lines[..] {
+            // A refusal (lines that do not meet, a radius too big) is explained in the status bar; the
+            // command stays open to try again.
+            if session
+                .edit_active_sketch(gc_doc::SketchOp::Bend { lines: [a, b], radius: bend.radius.clone() })
+                .is_ok()
+            {
+                return;
+            }
+        }
+        self.bend = Some(bend);
     }
 
     /// Starts Grip Snap: pick an edge, then two points.
@@ -1934,6 +2061,10 @@ impl Viewport {
         if ctx.input(|i| i.key_pressed(Key::Escape)) {
             self.nav_tool = None;
             self.free_tool = None;
+        }
+        // Page Up turns the view to the selected element (Look At).
+        if ctx.input(|i| i.key_pressed(Key::PageUp)) {
+            self.look_at(session);
         }
         // F5 returns to the previous view, Shift + F5 goes to the next.
         let time = ctx.input(|i| i.time);
