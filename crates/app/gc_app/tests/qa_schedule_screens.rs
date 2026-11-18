@@ -205,7 +205,7 @@ fn blocked_tasks_and_endless_repeats_are_explained_on_the_panel() {
     h.run_steps(5);
 }
 
-/// BUG: the schedule panel's time slider and its value box have no accessible name (kittest's accessibility check
+/// (Was a BUG, fixed by frontend 3fddf8c.) The schedule panel's time slider and its value box have no accessible name (kittest's accessibility check
 /// fails once a schedule is shown and played), so a screen reader reads two unnamed controls.
 #[test]
 fn the_schedule_panels_slider_has_an_accessible_name() {
