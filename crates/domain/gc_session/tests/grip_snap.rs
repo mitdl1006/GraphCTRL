@@ -103,3 +103,57 @@ fn commit_and_ground_is_one_undo_step() {
     assert!(!s.doc().component_flag(Occurrence::Item(b.erase()), ComponentFlag::Grounded));
     assert!(s.grip_snap_commit(&[], false).is_err());
 }
+
+/// Point and plane references (Grip Snap Move Options Bar Reference, GUID-C030C32C-7E1E-4F37-BBDF-120412898D00).
+#[test]
+fn point_and_plane_references_move_and_turn_as_the_options_bar_says() {
+    use gc_doc::GripReference;
+    let mut s = Session::new();
+    let _first = body(&mut s, [5.0, 0.0, 0.0]);
+    let b = body(&mut s, [0.0; 3]);
+    let item = b.erase();
+    // Point: displacement by the two points.
+    let corner = GripReference::Point([0.1, 0.1, 0.1]);
+    let pose =
+        s.grip_snap_pose_on(item, GripMotion::Displace, corner, [1.0, 0.0, 0.0], [1.2, 0.3, -0.1]).unwrap();
+    assert!((pose.translation - DVec3::new(0.2, 0.3, -0.1)).length() < 1e-12);
+    // Point: a quarter turn about the axis the two points give (X then Y: about +Z through the point).
+    let pose = s
+        .grip_snap_pose_on(item, GripMotion::RotateAboutPoint, corner, [1.1, 0.1, 0.1], [0.1, 1.1, 0.1])
+        .unwrap();
+    assert!((pose.rotation * DVec3::X - DVec3::Y).length() < 1e-12);
+    assert!((pose.translation - DVec3::new(0.2, 0.0, 0.0)).length() < 1e-12, "{:?}", pose.translation);
+    // Collinear points give no axis.
+    assert!(
+        s.grip_snap_pose_on(item, GripMotion::RotateAboutPoint, corner, [1.1, 0.1, 0.1], [2.1, 0.1, 0.1])
+            .is_none()
+    );
+    // Plane: within it and along its normal.
+    let top = GripReference::Plane { point: [0.0, 0.0, 0.1], normal: [0.0, 0.0, 2.0] };
+    let d = ([0.0; 3], [0.3, 0.4, 0.5]);
+    let within = s.grip_snap_pose_on(item, GripMotion::MoveWithinPlane, top, d.0, d.1).unwrap();
+    assert!((within.translation - DVec3::new(0.3, 0.4, 0.0)).length() < 1e-12);
+    let normal = s.grip_snap_pose_on(item, GripMotion::MoveAlongNormal, top, d.0, d.1).unwrap();
+    assert!((normal.translation - DVec3::new(0.0, 0.0, 0.5)).length() < 1e-12);
+    // A motion of another reference kind gives nothing.
+    assert!(s.grip_snap_pose_on(item, GripMotion::MoveWithinPlane, corner, d.0, d.1).is_none());
+    assert!(s.grip_snap_pose_on(item, GripMotion::Displace, top, d.0, d.1).is_none());
+    // The freedom check: mated on the floor, it may slide in the floor's plane but not lift.
+    let floor = body(&mut s, [0.0, 3.0, -0.2]);
+    s.set_component(Occurrence::Item(floor.erase()), ComponentFlag::Grounded, true).unwrap();
+    let on = |item: Id<Body>, z: f64, nz: f64| Selection {
+        occurrence: Occurrence::Item(item.erase()),
+        geometry: Geometry::Plane { point: [0.0, 0.0, z], normal: [0.0, 0.0, nz] },
+    };
+    s.add_relationship(Relationship::new(
+        "Mate",
+        RelationKind::Mate { offset: 0.0, sense: AxisSense::Opposed },
+        on(b, -0.1, -1.0),
+        on(floor, 0.1, 1.0),
+    ))
+    .unwrap();
+    assert!(s.grip_snap_allowed(item, GripMotion::MoveWithinPlane, top, d.0, d.1));
+    assert!(!s.grip_snap_allowed(item, GripMotion::MoveAlongNormal, top, d.0, d.1));
+    assert!(!s.grip_snap_allowed(item, GripMotion::Displace, corner, d.0, d.1), "it has a lift in it");
+    assert!(!s.grip_snap_allowed(floor.erase(), GripMotion::MoveWithinPlane, top, d.0, d.1), "grounded");
+}
