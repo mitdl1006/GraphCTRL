@@ -124,6 +124,17 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 접촉 솔버: 관계에 묶였지만 자유도가 남은 컴포넌트는 그 자유도로 밀린다
+
+근거: About the Contact Solver and Component Collision(`GUID-0BBD4ACE-7BD1-40BF-A011-74416B229035`) — "One part moves and comes into contact with another and the second part, which has open degrees of freedom, moves in response", 예: "a trip sensor … wheel … on the end of the sensor arm … when a cam surface comes in contact".
+
+- 전: 밀리는 것은 관계가 하나도 없는 바디·어셈블리뿐이었고(병진만), 관계가 있으면 무조건 정지였다.
+- 지금: 접지가 아니고 `component_dof(b).total > 0`이면 그 컴포넌트의 열린 자유도(`dof_symbol`의 자유 병진 방향·자유 회전축)로 움직여 본다. 병진은 겹침을 법선 방향으로 덮는 만큼, 회전은 1 mrad부터 두 배씩 키워 겹침이 풀리는 각을 찾고 이분으로 "막 풀리는" 각까지 줄인다. 가장 작은 움직임을 고른 뒤 관계를 다시 풀어(움직이는 쪽은 잡아 둠) 묶인 다른 컴포넌트도 따라오게 한다. 어떤 자유 운동으로도 안 풀리면 지금처럼 정지(`contact_stop`).
+- 드래그(`preview_body`)와 Drive(`drive_relationship`) 둘 다 같은 경로다. 놓으면 밀린 것까지 한 실행 취소 단계(기존대로).
+- 같이 고친 것: 앞서 밀린 컴포넌트의 id가 움직이는 컴포넌트보다 작으면, 계속 밀 때 "밀린 것이 움직이는 것에 부딪혔다"로 보고 정지하던 순서 의존(자유 박스에도 있던 문제) — 이제 움직이는 쪽 차례에 처리한다.
+- 한계: 접촉점이 아니라 자유도 후보를 시험하는 방식이라, 회전은 0.6 rad(한 번의 접촉 처리당)까지, 병진은 1 m까지만 찾는다. 자유도 축은 문서에 저장된 자세 기준이다(움직이는 부모에 달린 축은 근사). 접촉마다 문서 사본에서 관계를 한 번 푼다.
+- 테스트: `gc_session/tests/contact.rs::a_pushed_lever_turns_about_its_pivot`.
+
 ## 2026-11-18 — 미러 패턴(연관 미러); 미러/복사의 컴포넌트별 상태 검토
 
 근거: Mirror Components: Reference(`GUID-7B19CA69-8D14-40DA-9543-115A8AFE6336`, What's New 2026) — "Create mirror pattern: Enables to mirror the geometry and position of the source components while preserving the associativity between the source and target components. This feature also creates the Mirror browser node." / "Create flat structure: Creates only mirrored geometry and has no associativity". 상태: Mirror / Reuse / Exclude / Mixed. Copy assembly components(`GUID-5AAA6CB1-7BB2-4AF0-9A3D-AB729E5160C5`) — 상태: Copy / Reuse / Exclude.
