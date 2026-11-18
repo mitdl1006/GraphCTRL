@@ -206,15 +206,46 @@ fn arms_swinging_through_the_middle_never_touch_and_the_outcome_is_the_same_ever
         if !schedule.waits.is_empty() {
             waited += 1;
         }
-        // A plan that is not the one made with the other arm standing still where it starts is a way round the
-        // moving one (backend 909d5da): count them.
+        // A way round a moving arm (backend 6188beb records it): the task did not wait, it started while the other
+        // arm was still moving, and it ends before waiting for that arm and then doing the straight motion would.
         let mut detours = 0;
-        for (x, plan) in schedule.assignments.iter().zip(&schedule.plans) {
-            let differs = s.task_plan_from(x.task, x.robot, &plan.start).is_ok_and(|plain| {
-                (plain.duration() - plan.duration()).abs() > 1e-6 || plain.end != plan.end
-            });
-            if differs {
-                detours += 1;
+        for d in &schedule.detours {
+            detours += 1;
+            let index = schedule
+                .assignments
+                .iter()
+                .position(|x| x.task == d.task)
+                .expect("a detour of a task that is not done");
+            let x = &schedule.assignments[index];
+            assert_eq!(x.robot, d.robot, "{d:?}");
+            assert!(!schedule.waits.iter().any(|w| w.task == d.task), "{d:?} both waited and went round");
+            // The arm it went round was moving when this one started.
+            let busy = schedule
+                .assignments
+                .iter()
+                .filter(|o| o.robot == d.around && o.start < x.start - 1e-9 && o.end > x.start + 1e-9)
+                .map(|o| o.end)
+                .chain(
+                    schedule
+                        .parks
+                        .iter()
+                        .filter(|p| p.robot == d.around && p.start < x.start - 1e-9 && p.end > x.start + 1e-9)
+                        .map(|p| p.end),
+                )
+                .fold(f64::NAN, f64::max);
+            assert!(
+                busy.is_finite(),
+                "{d:?}: the arm it went round was not moving when it started at {}",
+                x.start
+            );
+            // Waiting would have ended at `busy` plus the straight motion; the detour ends sooner.
+            if let Ok(straight) = s.task_plan_from(x.task, x.robot, &schedule.plans[index].start) {
+                assert!(
+                    x.end < busy + straight.duration() + 1e-6,
+                    "{d:?}: the detour ends at {} but waiting would end at {}",
+                    x.end,
+                    busy + straight.duration()
+                );
             }
         }
         total_detours += detours;
@@ -246,7 +277,9 @@ fn arms_swinging_through_the_middle_never_touch_and_the_outcome_is_the_same_ever
         "report: {sessions} scenes; waited in {waited}; ran in parallel {parallel}, one after the other {serial}; tightest gap {tightest:.4} m"
     );
     assert!(tightest > 0.0);
-    eprintln!("report: {total_detours} plans in all differ from the ones made with the other arm still");
+    eprintln!(
+        "report: {total_detours} detours in all (none of these scenes made the scheduler go round a moving arm: the detour assertions above ran on none)"
+    );
     eprintln!("report: the scheduler had to deal with the other arm in {conflicts} of {sessions} scenes");
     assert!(
         conflicts >= 1,
