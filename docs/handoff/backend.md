@@ -124,6 +124,13 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — Motion 구속의 비·거리도 모델 매개변수 (리드 요청)
+
+- `relation_params` 대상에 `Rotation.ratio`(단위 없음)와 `RotationTranslation.distance`(길이)를 넣었다. `SetRelationValue`로 편집한다(`teeth = 36 / 12`, `teeth * 8 mm`). 비율 칸에 길이를 넣으면 `EditError::Expr`(차원 불일치), 0이면 `BadValue`.
+- `RelationParam`에 `dim: ParamDim { Length, Angle, Ratio }` 추가(serde default Length). 매개변수 표에서 단위를 정할 때 쓴다. `relation_params()`의 bool은 그대로 "각도인가"다(비율은 false이므로 `param.dim == ParamDim::Ratio`를 따로 본다).
+- 식에서 쓰이던 구속이 지워지면 값이 대신 들어가는데, 비율은 단위 없이 `(4)`로 들어간다.
+- 테스트: `gc_doc/tests/relation_params.rs::motion_ratio_and_distance_are_parameters`.
+
 ## 2026-11-18 — 간섭 분석 옵션: Treat subassemblies as components
 
 근거: To Analyze Interference Among Components(`GUID-80DED0A6-AC65-4C7C-AD85-0144EE6DAB5B`) — "Select Treat subassemblies as components to treat sub-assemblies as single components and ignore the interferences within the sub-assemblies."

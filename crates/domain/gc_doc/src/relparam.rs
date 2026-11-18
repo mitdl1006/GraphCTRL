@@ -20,7 +20,7 @@ use crate::command::{
     evaluate, name_free, named_source, names_in, propagate, rename_in, rewrite_references, round_for_display,
     scope_of,
 };
-use crate::relate::{RelationKind, Relationship, value_of, with_value};
+use crate::relate::{RelationKind, Relationship};
 use crate::{Created, Document, EditError, Txn};
 
 /// The model parameter of a constraint's offset or angle.
@@ -30,20 +30,76 @@ pub struct RelationParam {
     pub name: String,
     /// The value as typed: a number, a unit, an expression.
     pub source: String,
-    /// What the text evaluated to: metres or radians.
+    /// What the text evaluated to: metres, radians, or a plain number for a ratio.
     pub value: f64,
+    /// What kind of value it is.
+    #[serde(default)]
+    pub dim: ParamDim,
+}
+
+/// What a constraint parameter measures.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ParamDim {
+    /// A length (an offset, a Rotation-Translation constraint's distance).
+    #[default]
+    Length,
+    /// An angle.
+    Angle,
+    /// A number without a unit (a Rotation constraint's ratio).
+    Ratio,
+}
+
+/// The value of a relationship that is a parameter: an offset or angle, a Motion constraint's ratio or
+/// distance; `None` for joints and Symmetry.
+fn value_of(kind: &RelationKind) -> Option<f64> {
+    match *kind {
+        RelationKind::Rotation { ratio, .. } => Some(ratio),
+        RelationKind::RotationTranslation { distance, .. } => Some(distance),
+        _ => crate::relate::value_of(kind),
+    }
+}
+
+/// The kind with another value.
+fn with_value(kind: &RelationKind, value: f64) -> RelationKind {
+    match *kind {
+        RelationKind::Rotation { reverse, .. } => RelationKind::Rotation { ratio: value, reverse },
+        RelationKind::RotationTranslation { reverse, .. } => {
+            RelationKind::RotationTranslation { distance: value, reverse }
+        }
+        _ => crate::relate::with_value(kind, value),
+    }
+}
+
+fn dim_of(kind: &RelationKind) -> ParamDim {
+    match field_of(kind) {
+        Unit::Deg => ParamDim::Angle,
+        Unit::Scalar => ParamDim::Ratio,
+        _ => ParamDim::Length,
+    }
+}
+
+/// A value written out in the document's unit for its kind, e.g. `"12.5 mm"`, `"30 deg"`, `"2"`.
+fn written_as(doc: &Document, dim: ParamDim, value: f64) -> String {
+    let settings = doc.settings();
+    let unit = match dim {
+        ParamDim::Angle => settings.angle(),
+        ParamDim::Length => settings.length(),
+        ParamDim::Ratio => return format!("{}", round_for_display(value)),
+    };
+    format!("{} {}", round_for_display(value / unit.si_factor()), unit.word())
 }
 
 /// The unit a bare number means in the constraint's value box: a length or an angle.
 pub(crate) fn field_of(kind: &RelationKind) -> Unit {
-    if matches!(kind, RelationKind::Angle { .. }) { Unit::Deg } else { Unit::Mm }
+    match kind {
+        RelationKind::Angle { .. } => Unit::Deg,
+        RelationKind::Rotation { .. } => Unit::Scalar,
+        _ => Unit::Mm,
+    }
 }
 
-/// A value written out in the document's unit, e.g. `"12.5 mm"`.
 fn written(doc: &Document, kind: &RelationKind, value: f64) -> String {
-    let settings = doc.settings();
-    let unit = if field_of(kind) == Unit::Deg { settings.angle() } else { settings.length() };
-    format!("{} {}", round_for_display(value / unit.si_factor()), unit.word())
+    written_as(doc, dim_of(kind), value)
 }
 
 fn close(a: f64, b: f64) -> bool {
@@ -107,18 +163,15 @@ pub(crate) fn sync(txn: &mut Txn<'_>) -> Result<(), EditError> {
         .zip(valued.iter().filter(|(id, ..)| !existing.contains_key(id)))
         .map(|(next, (id, kind, value))| {
             let source = written(doc, kind, *value);
-            (*id, RelationParam { name: format!("d{next}"), source, value: *value })
+            (*id, RelationParam { name: format!("d{next}"), source, value: *value, dim: dim_of(kind) })
         })
         .collect();
     if gone.is_empty() && stale.is_empty() && fresh.is_empty() {
         return Ok(());
     }
     // What named a parameter that goes keeps its size.
-    for (id, param) in &gone {
-        let angle = txn.doc().get(*id).is_some_and(|r| field_of(&r.kind) == Unit::Deg) || param.angle_text();
-        let settings = txn.doc().settings();
-        let unit = if angle { settings.angle() } else { settings.length() };
-        let text = format!("({} {})", round_for_display(param.value / unit.si_factor()), unit.word());
+    for (_, param) in &gone {
+        let text = format!("({})", written_as(txn.doc(), param.dim, param.value));
         rewrite_references(txn, &param.name, &text)?;
     }
     crate::cell::set_timeline(txn, |t| {
@@ -134,14 +187,6 @@ pub(crate) fn sync(txn: &mut Txn<'_>) -> Result<(), EditError> {
         }
         params.extend(fresh);
     })
-}
-
-impl RelationParam {
-    /// True when the text itself says it is an angle (the constraint is gone and cannot be asked).
-    fn angle_text(&self) -> bool {
-        let text = self.source.trim_end();
-        text.ends_with("deg") || text.ends_with("rad")
-    }
 }
 
 /// Changes a constraint's offset or angle to what `source` says: a number, a unit, an expression with
@@ -176,7 +221,7 @@ pub(crate) fn set_value(
         None => format!("d{}", crate::command::highest_default_name(txn.doc()).map_or(0, |h| h + 1)),
     };
     crate::cell::set_timeline(txn, |t| {
-        t.components.relation_params.insert(id, RelationParam { name, source, value });
+        t.components.relation_params.insert(id, RelationParam { name, source, value, dim: dim_of(&kind) });
     })?;
     // What names this parameter follows; a loop is refused.
     propagate(txn)?;
@@ -207,6 +252,7 @@ pub(crate) fn rename(txn: &mut Txn<'_>, id: Id<Relationship>, name: &str) -> Res
             name: String::new(),
             source,
             value,
+            dim: dim_of(&kind),
         });
         name.clone_into(&mut entry.name);
     })
