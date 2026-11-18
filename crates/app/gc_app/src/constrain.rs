@@ -59,6 +59,11 @@ impl Constrain {
     /// A pick in the view: it fills the active selection, then the other one.
     pub(crate) fn pick(&mut self, session: &Session, occurrence: Occurrence, element: OriginElement) {
         let selection = Selection { occurrence, geometry: Geometry::origin(element) };
+        self.pick_selection(session, selection);
+    }
+
+    /// A pick of any geometry: the first selection, then the second.
+    pub(crate) fn pick_selection(&mut self, session: &Session, selection: Selection) {
         if self.slot == 0 {
             self.first = Some(selection);
             self.slot = 1;
@@ -228,11 +233,16 @@ impl Constrain {
 
 /// "Body1:1 · XY plane" for a selection.
 pub(crate) fn describe(session: &Session, selection: &Selection, lang: Lang) -> String {
-    let name = session
-        .components()
-        .iter()
-        .find(|node| node.occurrence == selection.occurrence)
-        .map_or_else(|| "?".to_owned(), |node| format!("{}:1", node.name));
+    let work = session.doc().work_features().iter().find_map(|(id, feature)| {
+        (Occurrence::Item(id.erase()) == selection.occurrence).then(|| feature.name.clone())
+    });
+    let name = work.unwrap_or_else(|| {
+        session
+            .components()
+            .iter()
+            .find(|node| node.occurrence == selection.occurrence)
+            .map_or_else(|| "?".to_owned(), |node| format!("{}:1", node.name))
+    });
     let what = match selection.geometry {
         Geometry::Plane { .. } => tr!(lang, ConstrainPlane),
         Geometry::Axis { .. } => tr!(lang, ConstrainAxis),

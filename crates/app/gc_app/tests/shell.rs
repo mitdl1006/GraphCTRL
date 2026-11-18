@@ -4557,3 +4557,52 @@ fn shift_right_click_lists_what_lies_under_the_cursor() {
     harness.get_by_role_and_label(button, "Body1");
     harness.get_by_role_and_label(button, "Body2");
 }
+
+/// A work feature clicked in the view is geometry for the Assemble command (Inventor 2026 help, To Place
+/// Mate or Flush Constraints, GUID-0F500089-4F69-41C5-AFE8-B58AC9E8E15E: "Select the first point, curve,
+/// face, or work feature").
+#[test]
+fn a_work_feature_clicked_in_the_view_fills_the_assemble_selection() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let op = gc_doc::CellOp::AddWorkFeature(gc_doc::WorkFeature {
+        name: "Point1".to_owned(),
+        geometry: gc_doc::WorkGeometry::Point { at: gc_doc::PointRef::Fixed([-0.4, 0.0, 0.0]) },
+        visible: true,
+    });
+    for x in [-0.3, -0.5] {
+        harness
+            .state_mut()
+            .session
+            .add_body(
+                gc_doc::Solid::Box { size: [0.05; 3] },
+                gc_doc::Placement { xyz: [x, 0.0, 0.0], rpy: [0.0; 3] },
+            )
+            .unwrap();
+    }
+    harness.state_mut().session.execute(&gc_doc::Command::Cell(op)).unwrap();
+    harness.state_mut().fit_view();
+    harness.state_mut().viewport_mut().camera.pan([0.0, 0.0], [-250.0, 0.0], [1280.0, 700.0]);
+    harness.run();
+    harness.get_by_label("조립").click();
+    harness.run_steps(3);
+    harness.get_by_label("어셈블").click();
+    harness.run_steps(3);
+    let at = harness.state().viewport().screen_of(gc_math::DVec3::new(-0.4, 0.0, 0.0)).unwrap();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run_steps(3);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run_steps(3);
+    }
+    harness.get_by_label_contains("첫 번째 선택");
+    harness.get_by_label("첫 번째 선택: Point1 · 점");
+}

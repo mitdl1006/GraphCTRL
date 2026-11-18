@@ -49,6 +49,11 @@ impl Assemble {
     /// A pick in the view: the first selection, then the second.
     pub(crate) fn pick(&mut self, session: &Session, occurrence: Occurrence, element: OriginElement) {
         let selection = Selection { occurrence, geometry: Geometry::origin(element) };
+        self.pick_selection(session, selection);
+    }
+
+    /// A pick of any geometry: the first selection, then the second.
+    pub(crate) fn pick_selection(&mut self, session: &Session, selection: Selection) {
         if self.slot == 0 {
             self.first = Some(selection);
             self.slot = 1;

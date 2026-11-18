@@ -97,6 +97,8 @@ pub struct Viewport {
     pub constrain_mode: bool,
     /// What the last click picked for the Constrain dialog.
     constrain_pick: Option<(gc_doc::Occurrence, gc_doc::OriginElement)>,
+    /// The work feature the last click picked for a relationship dialog.
+    constrain_work: Option<gc_core::Id<gc_doc::WorkFeature>>,
     /// The navigation tool chosen on the navigation bar: it works with the left button until it ends.
     nav_tool: Option<NavTool>,
     /// The origin element (plane, axis, point) of a component that is selected in the view or the browser.
@@ -171,6 +173,7 @@ impl Viewport {
             spatial_drag: None,
             constrain_mode: false,
             constrain_pick: None,
+            constrain_work: None,
             nav_tool: None,
             origin_selected: None,
             work_selected: None,
@@ -553,6 +556,12 @@ impl Viewport {
     /// What the view asks the application to do, once.
     pub fn take_request(&mut self) -> Option<ViewportRequest> {
         self.request.take()
+    }
+
+    /// The work feature the last click picked for the Constrain or Assemble dialog, once (Inventor 2026
+    /// help, GUID-0F500089-4F69-41C5-AFE8-B58AC9E8E15E: a work feature is selectable geometry).
+    pub fn take_constrain_work(&mut self) -> Option<gc_core::Id<gc_doc::WorkFeature>> {
+        self.constrain_work.take()
     }
 
     /// The origin element the last click picked for the Constrain dialog, once.
@@ -1443,7 +1452,15 @@ impl Viewport {
         }
         if self.constrain_mode && response.clicked_by(PointerButton::Primary) {
             let at = response.interact_pointer_pos().map(to_view);
-            self.constrain_pick = at.and_then(|at| origin::pick(&self.camera, size, session, at, true));
+            // Work features that are shown come before the origin geometry.
+            let screen = |p: gc_math::DVec3| self.camera.project(p, size);
+            self.constrain_work =
+                at.and_then(|at| workfeat::pick(session, &screen, at, self.camera.distance * 0.6));
+            self.constrain_pick = if self.constrain_work.is_some() {
+                None
+            } else {
+                at.and_then(|at| origin::pick(&self.camera, size, session, at, true))
+            };
         } else if self.measure_features && response.clicked_by(PointerButton::Primary) {
             let at = response.interact_pointer_pos().map(to_view);
             self.measure_pick = Some(at.and_then(|at| self.pick_feature(session, at, size)));

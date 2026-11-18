@@ -109,6 +109,14 @@
 - 증거: `docs/evidence/img/review-55-grip-snap.png`, 테스트 `grip_snap_moves_a_component_along_a_picked_edge`.
 - 원문과 차이: 기준이 모서리뿐(점·면 기준 없음), 인벤터의 화면 내 조작 핸들·HUD 아이콘 대신 상단 패널, 시작점은 표면 클릭(스냅 점 보조 없음), 여러 구성요소 동시 조작 없음.
 
+### 작업 피처를 어셈블/구속의 뷰 선택으로
+
+- 근거: To Place Mate or Flush Constraints, GUID-0F500089-4F69-41C5-AFE8-B58AC9E8E15E ("Select the first point, curve, face, or work feature"). 백엔드 `work_feature_selection(id)`.
+- 어셈블 명령과 구속 대화상자가 뷰에서 보이는 작업 피처(축 선 / 평면 테두리 / 점 십자)를 누르면 `work_feature_selection`을 첫째·둘째 선택으로 쓴다. 작업 피처가 원점 기하보다 먼저 잡힌다. 선택 이름은 작업 피처 이름(예: `Point1 · 점`).
+- 테스트 `a_work_feature_clicked_in_the_view_fills_the_assemble_selection`.
+- 원문과 차이: 조인트·패턴·복사·미러 대화상자는 원점 기하만 받는다(작업 피처 선택 연결 없음). 곡선·면 선택은 아직 없음.
+- 같이: Shift+우클릭 = 다른 항목 선택 목록(Ctrl+A와 같은 목록).
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹
