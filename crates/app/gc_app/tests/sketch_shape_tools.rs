@@ -800,3 +800,43 @@ fn offset_highlights_its_pick_and_extend_takes_an_open_spline_to_a_boundary() {
     let last = harness.state().session.point_pos(*fit.last().unwrap()).unwrap();
     assert!((last[0] - 0.07).abs() < 1e-6, "the spline reaches the boundary at x = 70 mm: {last:?}");
 }
+
+/// The Dimension tool measures from a line to a circle itself, not to its centre (Inventor 2026 help, To Work with Sketch Dimensions, GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185).
+/// The screenshot is the evidence.
+#[test]
+fn the_dimension_tool_measures_a_line_to_a_circle_itself_on_screen() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("XY 스케치").click();
+    harness.run();
+    let app = harness.state_mut();
+    line(app, mm(-60.0, 0.0), mm(60.0, 0.0));
+    app.session.set_tool(ToolKind::Circle);
+    for p in [mm(-20.0, 40.0), mm(-20.0, 50.0), mm(30.0, 40.0), mm(30.0, 48.0)] {
+        click(app, p, false);
+    }
+    app.session.set_tool(ToolKind::Dimension);
+    let dimensions = |app: &GraphCtrlApp| app.session.active_sketch().unwrap().1.dimensions.len();
+    let before = dimensions(app);
+    // Line (on its length), the first circle (on its rim), then where the text goes.
+    for p in [mm(-40.0, 0.0), mm(-30.0, 40.0), mm(-45.0, 20.0)] {
+        click(app, p, false);
+    }
+    app.session.submit_value("25 mm");
+    let kinds: Vec<_> = app.session.active_sketch().unwrap().1.dimensions.values().map(|d| d.kind).collect();
+    assert!(dimensions(app) > before, "a dimension was made: {kinds:?}");
+    assert!(
+        kinds.iter().any(|k| matches!(k, gc_sketch::DimKind::LineArc { .. })),
+        "line to circle itself: {kinds:?}"
+    );
+    harness.run_steps(3);
+    if gpu {
+        let image = harness.render().unwrap();
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        image.save(out.join("review-68-arc-distance.png")).unwrap();
+    }
+}

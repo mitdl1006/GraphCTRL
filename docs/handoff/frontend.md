@@ -226,6 +226,11 @@
 - 간격띄우기 등 도구가 고른 곡선(`Preview.picks`의 `Item::Curve`)을 이제 굵은 미리보기 색으로 그린다(전에는 점만 그렸다) — 타원·스플라인의 선택이 보인다(`review-66-offset-pick.png`). 열린 스플라인 연장: 끝쪽에 커서를 대면 경계까지의 선이 미리보기되고 클릭하면 새 끝 맞춤점이 경계에 묶여 이어진다(`review-67-extend-spline.png`). 테스트 `offset_highlights_its_pick_and_extend_takes_an_open_spline_to_a_boundary`.
 - 원문과 차이: 점 삽입 중 커서 옆에 삽입 위치 미리보기는 없다, 곡선 닫기/점 삽입/분할의 핸들 재설정 메뉴(Reset Handle)는 없다.
 
+### 선-호 / 호-호 치수 화면 점검
+
+- 원문 GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185(선과 호 자체 사이 거리, 두 호 사이 거리). 치수 도구로 선 → 원 테두리 → 글자 위치를 클릭하면 `DimKind::LineArc`가 만들어진다(테스트 `the_dimension_tool_measures_a_line_to_a_circle_itself_on_screen`, 증거 `docs/evidence/img/review-68-arc-distance.png`).
+- 발견: 원 테두리를 차례로 두 번 클릭해 두 원 사이 거리(`ArcArc`)를 만들려 하면 도구는 두 번째 원의 지름 치수를 만든다 — 도구가 호-호 두 선택을 아직 받지 않는 것으로 보인다(`gc_tools`). 백엔드 확인 요청.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹
