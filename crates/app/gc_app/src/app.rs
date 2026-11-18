@@ -54,6 +54,10 @@ pub trait FileDialogs {
     fn open_urdf(&mut self) -> Option<PathBuf> {
         None
     }
+    /// Where to save a CSV file, or `None` when the user cancelled.
+    fn save_csv(&mut self, _suggested_name: &str) -> Option<PathBuf> {
+        None
+    }
 }
 
 struct NativeDialogs;
@@ -81,6 +85,10 @@ impl FileDialogs for NativeDialogs {
 
     fn open_urdf(&mut self) -> Option<PathBuf> {
         rfd::FileDialog::new().add_filter("URDF", &["urdf", "URDF", "xml"]).pick_file()
+    }
+
+    fn save_csv(&mut self, suggested_name: &str) -> Option<PathBuf> {
+        rfd::FileDialog::new().add_filter("CSV", &["csv"]).set_file_name(suggested_name).save_file()
     }
 }
 
@@ -269,6 +277,8 @@ pub struct GraphCtrlApp {
     replicate: crate::replicate::Replicate,
     /// The Parameters dialog.
     parameters: crate::parameters::Parameters,
+    /// The Bill of Materials dialog.
+    bom: crate::bom::BomDialog,
     /// The iProperties dialog.
     iproperties: crate::iproperties::IPropertiesDialog,
     /// Tools > Document Settings.
@@ -360,6 +370,7 @@ impl GraphCtrlApp {
         if let Some(settings) = options.settings_dir.as_deref().map(gc_persist::places::load_settings) {
             session.set_autoproject_face_edges(!settings.autoproject_edges_off);
             session.set_auto_bend(settings.auto_bend);
+            session.set_snap_to_grid(settings.snap_to_grid);
         }
         let saved =
             options.settings_dir.as_deref().map(gc_persist::places::load_settings).unwrap_or_default();
@@ -392,6 +403,7 @@ impl GraphCtrlApp {
             sketch_dialog: None,
             auto_dimension: None,
             parameters: crate::parameters::Parameters::default(),
+            bom: crate::bom::BomDialog::default(),
             iproperties: crate::iproperties::IPropertiesDialog::default(),
             doc_settings: crate::doc_settings::DocSettingsDialog::default(),
             importing: false,
@@ -949,6 +961,10 @@ impl GraphCtrlApp {
                 }
             });
             ui.menu_button(tr!(lang, MenuTools), |ui| {
+                if ui.button(tr!(lang, BomTitle)).clicked() {
+                    self.bom.open = true;
+                    ui.close();
+                }
                 if ui.button(tr!(lang, CmdIProperties)).clicked() {
                     self.iproperties.start(&self.session, None, "", lang);
                     ui.close();
@@ -1055,6 +1071,7 @@ impl GraphCtrlApp {
             light_theme: !self.dark,
             autoproject_edges_off: !self.session.autoproject_face_edges(),
             auto_bend: self.session.auto_bend(),
+            snap_to_grid: self.session.snap_to_grid(),
             hide_view_cube: !self.viewport.show_view_cube,
             hide_nav_bar: !self.viewport.show_nav_bar,
             hide_status_bar: !self.show_status,
@@ -1107,6 +1124,12 @@ impl GraphCtrlApp {
             let mut on = self.session.autoproject_face_edges();
             if ui.checkbox(&mut on, tr!(lang, OptAutoproject)).changed() {
                 self.session.set_autoproject_face_edges(on);
+                changed = true;
+            }
+            // Snap to grid (Sketch tab; the spacing is the document's Snap Spacing): off by default.
+            let mut snap = self.session.snap_to_grid();
+            if ui.checkbox(&mut snap, tr!(lang, OptSnapToGrid)).changed() {
+                self.session.set_snap_to_grid(snap);
                 changed = true;
             }
             // Auto-bend with 3D line creation (Sketch tab, 3D Sketch; GUID-1898C432-CFD2-46F1-8BAE-631392DFBF1D):
@@ -1307,6 +1330,7 @@ impl eframe::App for GraphCtrlApp {
             Some(ribbon::RibbonAction::StartPattern) => self.pattern.start(Vec::new()),
             Some(ribbon::RibbonAction::StartReplicate(mode)) => self.replicate.start(mode),
             Some(ribbon::RibbonAction::StartParameters) => self.parameters.open = true,
+            Some(ribbon::RibbonAction::StartBom) => self.bom.open = true,
             Some(ribbon::RibbonAction::StartAutoDimension) => {
                 self.auto_dimension = Some(crate::sketch_dialogs::AutoDimension::new());
             }
@@ -1429,6 +1453,18 @@ impl eframe::App for GraphCtrlApp {
         if self.interference.open {
             self.interference.window(&ctx, &self.session, lang);
         }
+        if self.bom.open {
+            self.bom.window(&ctx, &mut self.session, lang);
+            if std::mem::take(&mut self.bom.export)
+                && let Some(path) = self.dialogs.save_csv("bom.csv")
+            {
+                let text = self.session.bom_csv(self.bom.view());
+                self.notice = Some(match std::fs::write(&path, text) {
+                    Ok(()) => tr!(lang, BomExported, path.display()),
+                    Err(error) => tr!(lang, FileError, error),
+                });
+            }
+        }
         if self.iproperties.open {
             self.iproperties.window(&ctx, &mut self.session, lang);
         }
@@ -1472,6 +1508,11 @@ impl eframe::App for GraphCtrlApp {
         if self.measure.open {
             self.measure.window(&ctx, &self.session, lang);
         }
+        // The browser row under the pointer is boxed in the view, from the next frame on.
+        if !self.left_open {
+            self.params.hovered = None;
+        }
+        self.viewport.browser_hover = self.params.hovered;
         let opaque = !self.translucent;
         side_panel(
             &ctx,

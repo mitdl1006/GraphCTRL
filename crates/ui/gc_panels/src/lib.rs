@@ -95,6 +95,9 @@ pub struct ParamsUi {
     pub hide_warnings: bool,
     /// Edit Values in Browser is on unless this is set.
     pub no_edit_values: bool,
+    /// The component row the pointer is over this frame: the view shows its bounding box (Inventor 2026
+    /// help, assembly parity notes: hovering a browser node shows its bounding box in the graphics).
+    pub hovered: Option<gc_core::AnyId>,
     /// The relationship selected in the browser, the value typed for it and which one that was loaded for.
     pub relationship: Option<gc_core::Id<gc_doc::Relationship>>,
     /// The text of the browser edit box.
@@ -232,6 +235,7 @@ fn row_found(rows: &[gc_doc::TreeRow], row: &gc_doc::TreeRow, find: &str) -> boo
 pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi) -> Option<BrowserAction> {
     let mut action = None;
     state.statuses = session.component_statuses();
+    state.hovered = None;
     gc_ui::panel::header(ui, tr!(lang, PanelBrowser));
     // Find (Inventor 2026 help, Working with the Assembly Browser, GUID-5F975252-BDB4-488C-A2C5-8B15C7D3C641:
     // "Find opens a search box enabling you to locate objects matching your search criteria"): only the
@@ -1270,6 +1274,9 @@ fn node_row(
     if result.toggled {
         let command = gc_doc::Command::SetVisible { item: node.any, visible };
         *action = Some(BrowserAction::Edit(Box::new(command)));
+    }
+    if result.row.hovered() && matches!(node.any.kind, gc_core::Kind::Body | gc_core::Kind::RobotInstance) {
+        state.hovered = Some(node.any);
     }
     if result.row.clicked() && node.selected && !result.row.double_clicked() && !renaming {
         // A second click on the selected node edits its name.

@@ -859,6 +859,7 @@ messages! {
     /// File menu: the Application Options window.
     MenuOptions => ("응용 프로그램 옵션", "Application Options"),
     /// Application Options, Sketch tab: project the edges of the selected face when a sketch is created.
+    OptSnapToGrid => ("격자에 스냅", "Snap to grid"),
     OptAutoBend => ("3D 선 그릴 때 자동 굽힘", "Auto-bend with 3D line creation"),
     OptAutoproject => ("스케치 작성·편집 시 모서리 자동 투영", "Autoproject edges for sketch creation and edit"),
     /// 3D Model tab: group of the work features.
@@ -1170,6 +1171,17 @@ messages! {
     DriveInterfered => ("충돌 감지: {0} ↔ {1} ({2}에서 멈춤)", "Collision detected: {0} ↔ {1} (stopped at {2})"),
     // --- Parameters (Inventor: Manage tab > Parameters panel > Parameters) ---
     /// Tools menu and the dialog title.
+    BomTitle => ("자재 명세서(BOM)", "Bill of Materials"),
+    BomStructured => ("구조화", "Structured"),
+    BomPartsOnly => ("부품 전용", "Parts Only"),
+    BomItem => ("항목", "Item"),
+    BomPartNumber => ("부품 번호", "Part Number"),
+    BomQuantity => ("수량", "Quantity"),
+    BomDescription => ("설명", "Description"),
+    BomStructureColumn => ("BOM 구조", "BOM Structure"),
+    BomExport => ("CSV로 내보내기…", "Export to CSV…"),
+    BomExported => ("{0}에 저장했습니다", "Saved to {0}"),
+    BomEmpty => ("어셈블리에 컴포넌트가 없습니다.", "The assembly has no components."),
     CmdFindInWindow => ("창에서 찾기", "Find in Window"),
     CmdIProperties => ("iProperties…", "iProperties…"),
     IpTitleDocument => ("iProperties — 문서", "iProperties — Document"),
