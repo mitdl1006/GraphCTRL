@@ -501,7 +501,7 @@ impl Sketch {
                 CurveGeom::Circle { r, .. } => {
                     binding.radii.insert(*id, binding.sys.add_radius(r));
                 }
-                CurveGeom::Ellipse { .. } | CurveGeom::Spline { .. } if spatial => {
+                CurveGeom::Ellipse { .. } if spatial => {
                     return Err(SketchError::WrongSpace);
                 }
                 // A spline follows its fit points; it adds nothing to solve.

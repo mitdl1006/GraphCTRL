@@ -430,6 +430,18 @@ impl Sketch {
         Some(spline_points(&fit, per_span))
     }
 
+    /// Points along a spline in space (a 3D sketch's, or a 2D one's with z = 0), closed or open, through
+    /// [`spline_points3`]; `None` for another curve or a missing point.
+    pub fn spline_outline3(&self, geom: &CurveGeom, per_span: usize) -> Option<Vec<[f64; 3]>> {
+        let CurveGeom::Spline { points } = geom else { return None };
+        let fit: Option<Vec<[f64; 3]>> = points.iter().map(|p| self.pos(*p)).collect();
+        let fit = fit?;
+        if spline_closed(points) {
+            return Some(closed_spline_points3(&fit[..fit.len() - 1], per_span));
+        }
+        Some(spline_points3(&fit, per_span))
+    }
+
     /// [`Sketch::ellipse_outline`] for a curve's shape (`None` when it is not an ellipse).
     pub fn ellipse_geom_outline(&self, geom: &CurveGeom, segments: usize) -> Option<(Vec<[f64; 2]>, bool)> {
         let CurveGeom::Ellipse { c, major, minor, arc } = *geom else { return None };
@@ -579,21 +591,39 @@ pub fn ellipse_points(
 /// as the open spline through the points with three more wrapped round on each side, of which the middle
 /// is kept: smooth all round, the wrapped ends' influence having died away.
 pub fn closed_spline_points(fit: &[[f64; 2]], per_span: usize) -> Vec<[f64; 2]> {
+    closed_spline_points_n(fit, per_span)
+}
+
+/// [`closed_spline_points`] in space.
+pub fn closed_spline_points3(fit: &[[f64; 3]], per_span: usize) -> Vec<[f64; 3]> {
+    closed_spline_points_n(fit, per_span)
+}
+
+fn closed_spline_points_n<const N: usize>(fit: &[[f64; N]], per_span: usize) -> Vec<[f64; N]> {
     const PAD: usize = 3;
     let n = fit.len();
     if n < 3 || per_span == 0 {
-        return spline_points(fit, per_span);
+        return spline_points_n(fit, per_span);
     }
-    let padded: Vec<[f64; 2]> = (0..n + 2 * PAD + 1).map(|j| fit[(j + n * PAD - PAD) % n]).collect();
-    let all = spline_points(&padded, per_span);
+    let padded: Vec<[f64; N]> = (0..n + 2 * PAD + 1).map(|j| fit[(j + n * PAD - PAD) % n]).collect();
+    let all = spline_points_n(&padded, per_span);
     let (from, to) = (PAD * per_span, (PAD + n) * per_span);
-    all.get(from..=to).map_or_else(|| fit.to_vec(), <[[f64; 2]]>::to_vec)
+    all.get(from..=to).map_or_else(|| fit.to_vec(), <[[f64; N]]>::to_vec)
 }
 
 /// Points along the interpolation spline through `fit` (a natural cubic through each fit point, spaced by
 /// the chord lengths between them), `per_span` steps between neighbours, the first and last fit points
 /// included. Two fit points give the straight segment; fewer give nothing.
 pub fn spline_points(fit: &[[f64; 2]], per_span: usize) -> Vec<[f64; 2]> {
+    spline_points_n(fit, per_span)
+}
+
+/// [`spline_points`] in space (a 3D sketch's spline), the chord lengths measured in space.
+pub fn spline_points3(fit: &[[f64; 3]], per_span: usize) -> Vec<[f64; 3]> {
+    spline_points_n(fit, per_span)
+}
+
+fn spline_points_n<const N: usize>(fit: &[[f64; N]], per_span: usize) -> Vec<[f64; N]> {
     let n = fit.len();
     if n < 2 || per_span == 0 {
         return fit.to_vec();
@@ -601,7 +631,7 @@ pub fn spline_points(fit: &[[f64; 2]], per_span: usize) -> Vec<[f64; 2]> {
     // Chord-length parameters.
     let mut t = vec![0.0; n];
     for i in 1..n {
-        let d = gc_math::fm::hypot(fit[i][0] - fit[i - 1][0], fit[i][1] - fit[i - 1][1]);
+        let d = (0..N).map(|k| (fit[i][k] - fit[i - 1][k]).powi(2)).sum::<f64>().sqrt();
         t[i] = t[i - 1] + d.max(1e-12);
     }
     // Second derivatives of a natural cubic spline, per coordinate (tridiagonal solve).
@@ -629,7 +659,7 @@ pub fn spline_points(fit: &[[f64; 2]], per_span: usize) -> Vec<[f64; 2]> {
         }
         m
     };
-    let (mx, my) = (second(0), second(1));
+    let m: Vec<Vec<f64>> = (0..N).map(second).collect();
     let mut out = Vec::with_capacity((n - 1) * per_span + 1);
     for i in 0..n - 1 {
         let h = t[i + 1] - t[i];
@@ -640,10 +670,7 @@ pub fn spline_points(fit: &[[f64; 2]], per_span: usize) -> Vec<[f64; 2]> {
             let value = |p0: f64, p1: f64, m0: f64, m1: f64| {
                 a * p0 + b * p1 + ((a * a * a - a) * m0 + (b * b * b - b) * m1) * h * h / 6.0
             };
-            out.push([
-                value(fit[i][0], fit[i + 1][0], mx[i], mx[i + 1]),
-                value(fit[i][1], fit[i + 1][1], my[i], my[i + 1]),
-            ]);
+            out.push(std::array::from_fn(|k| value(fit[i][k], fit[i + 1][k], m[k][i], m[k][i + 1])));
         }
     }
     out.push(fit[n - 1]);

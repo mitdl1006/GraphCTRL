@@ -71,6 +71,23 @@ To Work with Sketch Dimensions GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185.
 | Flip Direction 대상의 "line to an arc (the arc itself)"·"between 2 arcs" 거리 | 없음 | 선-호·호-호 거리 치수 |
 | 구동 치수 토글 | 있음(`SketchOp::SetDriving`) | — |
 
+## 2026-11-18 — 3D 보간 스플라인(리드 ③ 2번)
+
+근거: GUID-DB15C479-66F2-456A-9E54-40A60F83DC92 — "Interpolation splines can be created in both 2D and 3D sketches".
+
+- `SketchOp::AddSpline`이 3D 스케치에서도 된다. 맞춤점은 공간 어디든, 현 길이도 공간에서 잰다.
+  - `gc_sketch::{spline_points3, closed_spline_points3}`, `Sketch::spline_outline3`.
+  - 솔버: 스플라인은 맞춤점만 따르므로 3D에서도 더할 것이 없다(이전에는 `WrongSpace`).
+- Close Curve는 3D에서도 된다.
+- 평면에서만 뜻이 있는 것은 3D 스플라인에서 거부하거나 건너뛴다: Insert Point(거부), Extend·Trim·Split·교점(평면 곡선이 아니라 다루지 않음), Offset(3D 거부, 기존).
+- 3D 도구(`gc_session/src/spatial.rs`): `ToolKind::Spline`에서 `spatial_click`이 맞춤점을 쌓는다.
+  - 마지막 점을 다시 클릭하거나 `Session::spatial_finish()`(Enter)로 끝낸다. Esc는 기존 `drop_line`.
+  - 미리보기는 `spatial_spline_preview()`.
+- 뷰포트 `paint.rs`가 스플라인을 3D로 그린다(닫힌 스플라인 포함; 2D는 z = 0이라 같다).
+- FE: 3D Draw 패널에 Spline 버튼을 두고, Enter를 `spatial_finish`에, 미리보기를 `spatial_spline_preview`에 연결하면 된다.
+- 테스트: `gc_session/tests/spline_3d.rs`.
+- **QA 브랜치 영향**: `qa_spline.rs` 140–141행 "a spline in a 3D sketch"가 거부를 단언한다. 원문대로 이제 받으므로 `refused`를 `step`(한 단계로 받아짐)으로 바꿔야 한다.
+
 ## 2026-11-18 — 3D Bend와 3D 끝 접선(리드 ③ 1번)
 
 근거: To Create Lines, Arcs, and Bends, GUID-4F861674-F74C-474E-869A-4C190ED6EC4B — "The Bend tool lets you place tangent corner bends on lines in a 3D sketch.
@@ -96,8 +113,8 @@ To Work with Sketch Dimensions GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185.
 |---|---|---|
 | Line(+ Auto-Bend) | 선 있음, Auto-Bend 없음 | 3. Bend가 되면 선 도구 옵션으로 |
 | Arc(3점·중심) | 있음(반원 미만) | — |
-| Bend(반지름, Equal) | 없음 | **1. 두 선의 모서리에 접하는 3D 호**(3D 끝 접선 구속 포함) |
-| Interpolation Spline | 2D만(3D는 `WrongSpace`) | 2. 3D 맞춤점 스플라인 |
+| Bend(반지름, Equal) | 없음 | ~~1. 두 선의 모서리에 접하는 3D 호~~ **완료**(Equal 없음) |
+| Interpolation Spline | 2D만(3D는 `WrongSpace`) | ~~2. 3D 맞춤점 스플라인~~ **완료** |
 | Helical Curve(피치·회전·높이·나선, 테이퍼, 좌·우) | 없음 | 4. 나선(맞춤점 스플라인 근사 또는 전용 곡선) |
 | Point, 구속(평행·직각·동일·동일선상·점-선·중점·X/Y/Z 평행·평면 평행), 치수 | 있음 | — |
 | Tangent(3D) | `WrongSpace` | 1번과 함께(선-호 끝 접선) |
