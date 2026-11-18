@@ -2290,6 +2290,7 @@ impl Session {
                     tcp_speed: None,
                 },
                 aim: gc_doc::ToolAim::default(),
+                travel: gc_doc::PathTravel::default(),
             });
         }
         if follow.is_empty() && roles.is_empty() {
@@ -2371,12 +2372,7 @@ impl Session {
                         gc_doc::RoleKind::Path { motion, tcp_speed, .. } => (Some(*motion), *tcp_speed),
                         gc_doc::RoleKind::Waypoint { .. } => (None, None),
                     });
-                    format!(
-                        " {:?} {:?} {travel:?} {}",
-                        doc.role_runs(*role),
-                        doc.role_rotation(*role),
-                        doc.is_inactive(role.erase())
-                    )
+                    format!(" {:?} {travel:?} {}", doc.role_poses(*role), doc.is_inactive(role.erase()))
                 })
                 .collect::<String>(),
         )
@@ -2709,9 +2705,7 @@ fn path_steps(
         };
         let gone =
             || format!("{}: its sketch curves no longer exist or no longer join end to end", role.name);
-        let runs = doc.role_runs(*role_id).ok_or_else(gone)?;
-        let rotation = doc.role_rotation(*role_id).ok_or_else(gone)?;
-        let pose = |point: &DVec3| DPose3::from_parts(*point, rotation);
+        let runs = doc.role_poses(*role_id).ok_or_else(gone)?;
         let first = runs.first().and_then(|run| run.first()).ok_or_else(gone)?;
         let step = |name: String, goal: DPose3, travel: Travel| Step {
             name,
@@ -2720,22 +2714,42 @@ fn path_steps(
             tcp_speed: tcp_speed.or(path.tcp_speed),
             contacts: contacts_of(doc, path, index),
         };
-        steps.push(step(format!("{} (start)", role.name), pose(first), Travel::Free));
+        // Poses that differ: the tool has to move or turn to get from one to the other.
+        let apart = |a: &DPose3, b: &DPose3| {
+            (a.translation - b.translation).length() > 1e-9 || a.rotation.angle_between(b.rotation) > 1e-9
+        };
+        steps.push(step(format!("{} (start)", role.name), *first, Travel::Free));
         match motion {
             gc_doc::PathMotion::Follow => {
-                // One motion along every curve, without the points where one curve hands over to the next
-                // twice.
-                let mut along: Vec<DPose3> =
-                    runs.iter().flat_map(|run| run.iter().skip(1)).map(pose).collect();
+                // One motion along every curve. Where one curve hands over to the next the pose is there
+                // once, unless the tool turns on the spot (a corner travelled tangentially).
+                let mut along: Vec<DPose3> = Vec::new();
+                let mut at = *first;
+                for pose in runs.iter().flatten() {
+                    if apart(&at, pose) {
+                        along.push(*pose);
+                        at = *pose;
+                    }
+                }
                 let last = along.pop().ok_or_else(gone)?;
                 steps.push(step(role.name.clone(), last, Travel::Along(along)));
             }
             gc_doc::PathMotion::Linear | gc_doc::PathMotion::Joint => {
+                let mut at = *first;
                 for (number, run) in runs.iter().enumerate() {
-                    let end = run.last().ok_or_else(gone)?;
-                    let travel =
-                        if *motion == gc_doc::PathMotion::Linear { Travel::Linear } else { Travel::Free };
-                    steps.push(step(format!("{} ({})", role.name, number + 1), pose(end), travel));
+                    let (start, end) = (run.first().ok_or_else(gone)?, run.last().ok_or_else(gone)?);
+                    let linear = *motion == gc_doc::PathMotion::Linear;
+                    // Travelling tangentially, the tool turns on the spot at a corner first.
+                    if linear && apart(&at, start) {
+                        steps.push(step(
+                            format!("{} ({} turn)", role.name, number + 1),
+                            *start,
+                            Travel::Linear,
+                        ));
+                    }
+                    let travel = if linear { Travel::Linear } else { Travel::Free };
+                    steps.push(step(format!("{} ({})", role.name, number + 1), *end, travel));
+                    at = *end;
                 }
             }
         }

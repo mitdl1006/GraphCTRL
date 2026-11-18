@@ -124,6 +124,19 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 경로 역할: 닫힌 곡선, 접선 방향 툴 자세 (GraphCTRL 고유, 원문 없음)
+
+- `SketchRole.travel: PathTravel { tangent: bool, start: Option<Id<SkPoint>> }` 추가(`#[serde(default)]`, 옛 파일은 기본값). `RoleKind`·`ToolAim`은 그대로(다른 브랜치의 패턴·리터럴을 깨지 않으려고 새 필드를 `SketchRole`에 뒀다).
+- **닫힌 곡선**: 원·전체 타원·닫힌 스플라인 하나가 경로 역할이 된다(한 바퀴 돌아 제자리, 원·타원은 스케치에서 반시계, 스플라인은 그린 방향, `reverse_role`로 반대). 다른 곡선과 사슬로 묶는 것은 여전히 `BadValue`. `chain_at(닫힌 곡선)` = `[그 곡선]`(전에는 빈 목록).
+  - 시작점: `set_role_start(role, Some(스케치 점))` → 그 점에서 가장 가까운 경로 위 위치에서 시작·종료(원·타원은 정확한 위치, 닫힌 스플라인은 표본점, 선·호로 닫힌 고리는 가장 가까운 이음점). `None`이면 원은 +X 점, 타원은 장축 끝, 스플라인은 첫 맞춤점. 그 점이 지워지면 기본 시작으로 돌아간다.
+  - `role_closed(role)`: 닫힌 경로인지(시작점 UI를 낼지).
+- **접선 방향 자세**: `set_role_tangent(role, true)` → 툴 X축이 진행 방향(자세 기준 평면에 투영)을 보고, 툴 Z는 그대로 기준 Z 반대, `aim.rpy`는 그 위에. Follow는 곡선 접선, Linear는 현 방향(모서리에서 제자리 회전 동작이 따로 생김: 세그먼트 수가 늘어난다), Joint는 무시(한 자세).
+  - 닫힌 원을 접선으로 한 바퀴 돌면 툴이 축 둘레로 360° 돈다 → 손목 관절 한계에 걸리면 계획이 이유와 함께 실패할 수 있다.
+- `Document::role_poses(role)`: 곡선별 툴 자세열(계획과 `role_ends`가 쓴다). `role_polyline`은 그대로.
+- `path_from_sketch`는 닫힌 곡선을 여전히 건너뛴다(닫힌 곡선만 있는 스케치는 거부 그대로).
+- **QA 테스트 수정**: `qa_sketch_roles.rs::closed_curves_branches_and_gaps_are_refused`가 "닫힌 곡선 하나는 거부, `chain_at`은 빈 목록"을 단언하고 있어, 리드 지시(닫힌 경로)에 맞춰 "닫힌 곡선은 혼자서 경로가 된다"로 바꿨다. QA 브랜치의 `gc_app/tests/qa_role_screens.rs` 100–103행은 "원은 경로로 제안되지 않는다"를 단언한다 — 프론트 메뉴가 `chain_at`이 비어 있지 않으면 경로를 제안하므로 병합 뒤 실패할 것이다(QA가 단언을 "원도 경로로 제안된다"로 바꿔야 함). `sketch_shape_tools.rs`에는 해당 단언이 없다.
+- 남은 것: 닫힌 곡선을 `path_from_sketch`에 넣기, 구간별 속도·블렌드, 역할 편집 미리보기.
+
 ## 2026-11-18 — 브라우저 사용자 정의 폴더
 
 원문: Assembly Browser Reference GUID-CB6B1637-71AD-4753-8CC9-19559BFEE3A5("User-defined Folder groups assembly nodes for better browser

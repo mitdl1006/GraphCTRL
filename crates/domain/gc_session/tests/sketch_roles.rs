@@ -294,7 +294,7 @@ fn a_spline_in_a_3d_sketch_is_a_path_and_the_tool_can_be_aimed_from_a_work_frame
     // The frame cannot go while a role is aimed from it.
     assert_eq!(session.execute(&Command::Cell(CellOp::DeleteFrame(frame))), Err(EditError::InUse));
 
-    // A closed curve is no path.
+    // A closed curve cannot be part of a chain with others.
     let sketch2 = session.create_sketch("XY").unwrap();
     let circle = SketchOp::AddCircle {
         centre: [0.0; 3],
@@ -303,7 +303,89 @@ fn a_spline_in_a_3d_sketch_is_a_path_and_the_tool_can_be_aimed_from_a_work_frame
         rim_snap: EndSnap::default(),
     };
     let circle = curve_of(&session.execute(&Command::Sketch { sketch: sketch2, op: circle }).unwrap());
+    let other = line(&mut session, sketch2, [0.1, 0.0], [0.2, 0.0]);
     session.finish_sketch();
-    assert_eq!(session.add_path_role(sketch2, &[circle]), Err(EditError::BadValue));
-    assert!(session.chain_at(sketch2, circle).is_empty());
+    assert_eq!(session.add_path_role(sketch2, &[circle, other]), Err(EditError::BadValue));
+    assert_eq!(session.chain_at(sketch2, circle), vec![circle]);
+}
+
+/// A circle is a path once round, from the place nearest a chosen sketch point, and the tool can turn with
+/// the path so that its X axis points the way it goes.
+#[test]
+fn a_closed_curve_is_travelled_once_round_and_the_tool_can_follow_the_tangent() {
+    let mut session = Session::new();
+    let robot = session.add_robot("Robot1", &six_axis()).unwrap();
+    let placement = Placement { xyz: [0.0, -0.6, 0.0], rpy: [0.0; 3] };
+    session.execute(&Command::Cell(CellOp::PlaceRobot { id: robot, placement })).unwrap();
+    session.jog(robot, &[1.5, -0.3, 0.6, 0.0, 0.6, 0.0]);
+    session.end_jog();
+    // On the wall (XZ plane): a circle of 50 mm round (0, 0.55) and a point above it.
+    let sketch = session.create_sketch("XZ").unwrap();
+    let circle = SketchOp::AddCircle {
+        centre: [0.0, 0.55, 0.0],
+        radius: 0.05,
+        centre_snap: EndSnap::default(),
+        rim_snap: EndSnap::default(),
+    };
+    let circle = curve_of(&session.execute(&Command::Sketch { sketch, op: circle }).unwrap());
+    let top = session
+        .execute(&Command::Sketch { sketch, op: SketchOp::AddPoint { pos: [0.0, 0.7, 0.0] } })
+        .unwrap();
+    let Created::Point(top) = top[0] else { panic!("no point") };
+    session.finish_sketch();
+
+    let role = session.add_path_role(sketch, &[circle]).unwrap();
+    assert!(session.role_closed(role));
+    // Without a start point it starts at the circle's +X point; counter-clockwise in the sketch.
+    let round = session.role_polyline(role).unwrap();
+    assert!(near(round[0], [0.05, 0.0, 0.55], 1e-9) && near(*round.last().unwrap(), round[0], 1e-9));
+    assert!(round[1][2] > 0.55, "counter-clockwise seen along the sketch's normal: up first");
+    // From the point above: it starts at the top of the circle; reversed it goes the other way round.
+    let depth = session.history().undo_depth();
+    session.set_role_start(role, Some(top)).unwrap();
+    assert_eq!(session.history().undo_depth(), depth + 1);
+    let round = session.role_polyline(role).unwrap();
+    assert!(near(round[0], [0.0, 0.0, 0.6], 1e-9) && near(*round.last().unwrap(), round[0], 1e-9));
+    assert!(round[1][0] < 0.0);
+    session.reverse_role(role).unwrap();
+    assert!(session.role_polyline(role).unwrap()[1][0] > 0.0);
+    session.reverse_role(role).unwrap();
+
+    // The robot goes once round and ends where it started.
+    let path = session.follow_roles(robot, &[role]).unwrap();
+    assert_eq!(session.plan(path), PlanStatus::Ready, "{:?}", session.plan_error(path));
+    assert!(near(session.planned(path).unwrap().tip_path().last().unwrap(), [0.0, 0.0, 0.6], 1e-4));
+    assert!(closest(&session, path, [0.0, 0.0, 0.5]) < 5e-3, "through the bottom");
+
+    // Tangent: the tool still points at the wall, and its X axis is the way it travels (−X at the top,
+    // going counter-clockwise). The plan is out of date.
+    let (start, _) = session.role_ends(role).unwrap();
+    session.set_role_tangent(role, true).unwrap();
+    assert_eq!(session.plan_status(path), PlanStatus::Stale);
+    let (turned, _) = session.role_ends(role).unwrap();
+    assert!((turned.rotation * DVec3::Z - start.rotation * DVec3::Z).length() < 1e-9);
+    assert!((turned.rotation * DVec3::X + DVec3::X).length() < 1e-6, "{:?}", turned.rotation * DVec3::X);
+    // A waypoint has no travel to follow.
+    let waypoint = session.add_waypoint_role(sketch, top).unwrap();
+    assert_eq!(session.set_role_tangent(waypoint, true), Err(EditError::BadValue));
+    assert_eq!(session.set_role_start(waypoint, Some(top)), Err(EditError::BadValue));
+}
+
+#[test]
+fn a_robot_follows_a_chain_with_the_tool_turned_along_it() {
+    let (mut session, robot, sketch, curves) = wall();
+    let role = session.add_path_role(sketch, &curves).unwrap();
+    session.set_role_tangent(role, true).unwrap();
+    // Along the lower line the tool's X is +X, along the upper one −X: it turns half round on the arc.
+    let (start, end) = session.role_ends(role).unwrap();
+    assert!((start.rotation * DVec3::X - DVec3::X).length() < 1e-6);
+    assert!((end.rotation * DVec3::X + DVec3::X).length() < 1e-6);
+    let path = session.follow_roles(robot, &[role]).unwrap();
+    assert_eq!(session.plan(path), PlanStatus::Ready, "{:?}", session.plan_error(path));
+    assert!(near(session.planned(path).unwrap().tip_path().last().unwrap(), [-0.1, 0.0, 0.6], 1e-4));
+    assert!(closest(&session, path, [0.15, 0.0, 0.55]) < 5e-3);
+    // In straight lines between the ends the tool turns on the spot at each corner first.
+    session.set_role_motion(role, PathMotion::Linear).unwrap();
+    assert_eq!(session.plan(path), PlanStatus::Ready, "{:?}", session.plan_error(path));
+    assert!(session.planned(path).unwrap().segments.len() > 4, "turns are motions of their own");
 }

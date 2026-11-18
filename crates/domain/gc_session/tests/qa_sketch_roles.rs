@@ -1,6 +1,6 @@
 //! QA boundary tests for sketch elements as robot waypoints and paths (GraphCTRL's own feature, plan 9.1 and 9.4;
 //! no Inventor counterpart): roles are one undo step each, one role per point and per curve, closed curves are
-//! refused, deleting elements cleans roles up (except those a robot path follows), a followed sketch that changes
+//! paths of their own (refused in chains), deleting elements cleans roles up (except those a robot path follows), a followed sketch that changes
 //! makes the plan stale, arcs and splines plan to finite continuous results, `route_between` and
 //! `path_from_sketch` are one undo step, and the roles survive save, open and old files.
 //! Refused edits leave the document and the history untouched; accepted ones are one undo step that restores
@@ -187,8 +187,15 @@ fn closed_curves_branches_and_gaps_are_refused() {
     );
     run(&mut s, k, SketchOp::CloseSpline { curve: closed_spline }).unwrap();
     for (what, c) in [("circle", circle), ("full ellipse", ellipse), ("closed spline", closed_spline)] {
-        assert!(step(&mut s, what, |s| s.add_path_role(k, &[c])).is_none(), "{what} is no path");
-        assert!(s.chain_at(k, c).is_empty(), "{what} offers no chain");
+        // Since the closed-path follow-up (backend, 2026-11-18): a closed curve is a path on its own, travelled
+        // once round; it joins no chain with other curves.
+        assert_eq!(s.chain_at(k, c), vec![c], "{what} is a chain of its own");
+        let role =
+            step(&mut s, what, |s| s.add_path_role(k, &[c])).unwrap_or_else(|| panic!("{what} is a path"));
+        assert!(s.role_closed(role), "{what} ends where it starts");
+        let round = s.role_polyline(role).unwrap();
+        assert!(round.len() > 20 && round.iter().flatten().all(|v| v.is_finite()), "{what}");
+        assert!(s.chain_at(k, c).is_empty(), "{what} is taken now");
     }
     // A closed loop of lines: refused (no free end), or a path that starts somewhere sane.
     let (p, q, r) = ([0.0, 0.5], [0.1, 0.5], [0.05, 0.6]);
