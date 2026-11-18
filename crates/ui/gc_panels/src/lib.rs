@@ -305,27 +305,10 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
             component_rows(ui, session, lang, state, selected, &mut action, &rows, None);
         });
     egui::CollapsingHeader::new(tr!(lang, BrowserSketches)).default_open(true).show(ui, |ui| {
-        let active = session.active_sketch().map(|(id, _)| id);
         ui.spacing_mut().item_spacing.y = 1.0;
-        for (id, sketch) in session.doc().sketches().iter() {
-            let node = Node {
-                icon: Icon::Sketch,
-                name: &sketch.name,
-                text: &sketch.name,
-                any: id.erase(),
-                selected: active == Some(id),
-                delete: gc_doc::Command::DeleteSketch { id },
-                suppressible: true,
-            };
-            let result = node_row(ui, session, lang, state, &node, &mut action, |ui, action| {
-                if ui.button(tr!(lang, CmdEditSketch)).clicked() {
-                    *action = Some(BrowserAction::EditSketch(id));
-                    ui.close();
-                }
-            });
-            if result.double_clicked() {
-                action = Some(BrowserAction::EditSketch(id));
-            }
+        // The sketches of the top level; those of a component or subassembly hang below its row.
+        for id in session.sketches_of(None) {
+            sketch_row(ui, session, lang, state, &mut action, id);
         }
     });
     if let Some(command) = params(ui, session, lang, state) {
@@ -452,6 +435,37 @@ fn representations(ui: &mut Ui, session: &Session, lang: Lang, action: &mut Opti
     });
 }
 
+/// One sketch of the browser: select by clicking, double-click to edit.
+fn sketch_row(
+    ui: &mut Ui,
+    session: &Session,
+    lang: Lang,
+    state: &mut ParamsUi,
+    action: &mut Option<BrowserAction>,
+    id: Id<Sketch>,
+) {
+    let Some(sketch) = session.doc().get(id) else { return };
+    let active = session.active_sketch().map(|(active, _)| active);
+    let node = Node {
+        icon: Icon::Sketch,
+        name: &sketch.name,
+        text: &sketch.name,
+        any: id.erase(),
+        selected: active == Some(id),
+        delete: gc_doc::Command::DeleteSketch { id },
+        suppressible: true,
+    };
+    let result = node_row(ui, session, lang, state, &node, action, |ui, action| {
+        if ui.button(tr!(lang, CmdEditSketch)).clicked() {
+            *action = Some(BrowserAction::EditSketch(id));
+            ui.close();
+        }
+    });
+    if result.double_clicked() {
+        *action = Some(BrowserAction::EditSketch(id));
+    }
+}
+
 /// The components of the browser as the assembly tree: subassemblies are folders (the one being edited in
 /// place is marked), the components below them are rows of their own. Double-click edits in place; the menus
 /// demote, move, dissolve and rename. Inventor 2026 help: Create Subassemblies in Place
@@ -481,6 +495,9 @@ fn component_rows(
                     .default_open(true)
                     .show(ui, |ui| {
                         component_rows(ui, session, lang, state, selected, action, rows, Some(row.key));
+                        for sketch in session.sketches_of(Some(row.key)) {
+                            sketch_row(ui, session, lang, state, action, sketch);
+                        }
                     });
                 let header = folder.header_response;
                 if header.double_clicked() {
@@ -526,6 +543,12 @@ fn component_rows(
                         None,
                         vec![(row.name.clone(), shown, item)],
                     );
+                    // The sketches made in this component's context hang below it.
+                    ui.indent(("gc_owned_sketches", row.key), |ui| {
+                        for sketch in session.sketches_of(Some(row.key)) {
+                            sketch_row(ui, session, lang, state, action, sketch);
+                        }
+                    });
                 }
             }
             // Parts, links and tools hang below their components, which draw them.

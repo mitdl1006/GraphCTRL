@@ -4024,3 +4024,30 @@ fn subassemblies_are_made_edited_in_place_and_dissolved_from_the_browser() {
     harness.run_steps(3);
     assert!(harness.state().session.doc().subassemblies().is_empty());
 }
+
+/// A sketch made on a component's plane hangs below that component's row in the browser, not in the
+/// top-level sketch folder.
+#[test]
+fn a_component_sketch_hangs_below_its_component_in_the_browser() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.05, 0.05, 0.05] };
+    let body = harness.state_mut().session.add_body(solid, gc_doc::Placement::default()).unwrap();
+    let occurrence = gc_doc::Occurrence::Item(body.erase());
+    // A sketch made while the component is edited in place belongs to it.
+    harness.state_mut().session.edit_component(gc_doc::TreeKey::Component(occurrence)).unwrap();
+    harness.state_mut().session.create_sketch_on_component(occurrence, gc_doc::OriginPlane::Xy).unwrap();
+    harness.run();
+    let sketches = harness.state().session.doc().sketches().iter().map(|(id, _)| id).collect::<Vec<_>>();
+    assert_eq!(sketches.len(), 1);
+    let session = &harness.state().session;
+    assert_eq!(session.sketch_owner(sketches[0]), Some(gc_doc::TreeKey::Component(occurrence)));
+    assert!(session.sketches_of(None).is_empty(), "it is not a top-level sketch");
+    // Its row is under the component: below "Body1:1" on the screen.
+    let body_row = harness.get_by_label("Body1:1").rect().top();
+    let sketch_row = harness.get_by_label("Sketch1").rect().top();
+    assert!(sketch_row > body_row, "{sketch_row} below {body_row}");
+}
