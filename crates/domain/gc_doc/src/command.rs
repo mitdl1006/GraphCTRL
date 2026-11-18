@@ -520,6 +520,20 @@ pub enum SketchOp {
         /// The inner fit point to split at.
         point: Id<SkPoint>,
     },
+    /// Close Curve (GUID-DB15C479-66F2-456A-9E54-40A60F83DC92: "To close a curve, right-click the starting
+    /// point and choose Close Curve"): an open spline of three or more fit points closes smoothly.
+    CloseSpline {
+        /// The spline.
+        curve: Id<Curve>,
+    },
+    /// Insert Point ("right-click the spline and choose Insert Point. Then click the curve"): a new fit
+    /// point on the spline nearest `at`.
+    InsertSplinePoint {
+        /// The spline.
+        curve: Id<Curve>,
+        /// Where it was clicked.
+        at: [f64; 2],
+    },
     /// 2D Chamfer (To Create 2D Shape Geometry, GUID-D489CE6D-7299-4211-A43A-F3580A4BA357): bevels the
     /// corner of two lines. With `dimensions`, a construction point at the corner (held on both lines)
     /// carries the chamfer's sizes as dimensions (Inventor's Create Dimensions).
@@ -2759,6 +2773,14 @@ fn sketch_op(
         SketchOp::Split { curve, at } => {
             push_cut(&mut created, &sketch.split_at(ids, *curve, *at)?);
             "Split"
+        }
+        SketchOp::CloseSpline { curve } => {
+            sketch.close_spline(*curve)?;
+            "Close Curve"
+        }
+        SketchOp::InsertSplinePoint { curve, at } => {
+            created.push(Created::Point(sketch.insert_spline_point(ids, *curve, *at)?));
+            "Insert Point"
         }
         SketchOp::SplitSpline { curve, point } => {
             created.push(Created::Curve(sketch.split_spline(ids, *curve, *point)?));

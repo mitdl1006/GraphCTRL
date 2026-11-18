@@ -46,8 +46,9 @@ impl Sketch {
                     .zip(binding.radii.get(&curve))
                     .map(|(c, r)| Grab::Rim(gc_solver::Round { c, r: *r })),
                 // A spline moves with all its fit points.
-                Some(CurveGeom::Spline { points }) => {
-                    points.iter().map(|p| p2(*p)).collect::<Option<Vec<_>>>().map(Grab::Body)
+                Some(geom @ CurveGeom::Spline { .. }) => {
+                    let curve = Curve { geom, construction: false };
+                    curve.points().iter().map(|p| p2(*p)).collect::<Option<Vec<_>>>().map(Grab::Body)
                 }
                 None => None,
             },

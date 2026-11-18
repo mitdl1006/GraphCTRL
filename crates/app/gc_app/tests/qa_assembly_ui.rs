@@ -811,3 +811,254 @@ fn select_other_lists_visible_components_and_selects_the_chosen_one() {
     harness.run_steps(3);
     assert!(harness.query_by_role_and_label(button, "Body1").is_none(), "a hidden body was listed");
 }
+
+// ---- Paste (Ctrl+C / Ctrl+V) and the paste preview ----
+
+fn one_body(harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>) -> gc_core::Id<gc_doc::Body> {
+    let body = harness
+        .state_mut()
+        .session
+        .add_body(gc_doc::Solid::Box { size: [0.1; 3] }, gc_doc::Placement::default())
+        .unwrap();
+    harness.state_mut().fit_view();
+    harness.state_mut().viewport_mut().camera.pan([0.0, 0.0], [-250.0, 0.0], [1280.0, 700.0]);
+    harness.run();
+    body
+}
+
+/// Ctrl+C with nothing selected keeps the clipboard; Ctrl+V with an empty clipboard waits for nothing; with a
+/// copied component whose original was deleted a click pastes nothing; a right click and Esc end a paste with no
+/// trace; none of it adds an undo step.
+#[test]
+fn ctrl_c_and_ctrl_v_with_nothing_to_copy_or_paste_change_nothing() {
+    let mut harness = harness();
+    let body = one_body(&mut harness);
+    let over_view = egui::pos2(500.0, 400.0);
+    harness.event(egui::Event::PointerMoved(over_view));
+    harness.run_steps(2);
+    let depth = harness.state().session.history().undo_depth();
+    let before = harness.state().session.doc().clone();
+    // Nothing selected: Ctrl+C remembers nothing, Ctrl+V has nothing to place.
+    harness.state_mut().session.select_item(None);
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::C);
+    harness.run_steps(2);
+    assert!(harness.state().session.clipboard().is_empty());
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::V);
+    harness.run_steps(3);
+    assert!(!harness.state().viewport().is_placing(), "an empty clipboard started a paste");
+    // Copy, then delete the original: Ctrl+V and a click paste nothing and leave no step.
+    harness.state_mut().session.select_item(Some(gc_session::CellItem::Body(body)));
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::C);
+    harness.run_steps(2);
+    assert_eq!(harness.state().session.clipboard().len(), 1);
+    harness.state_mut().session.delete_item(gc_session::CellItem::Body(body)).unwrap();
+    harness.run();
+    let after_delete = harness.state().session.doc().clone();
+    let depth_after_delete = harness.state().session.history().undo_depth();
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::V);
+    harness.run_steps(3);
+    let target = egui::pos2(700.0, 500.0);
+    if harness.state().viewport().is_placing() {
+        harness.event(egui::Event::PointerMoved(target));
+        harness.run_steps(3);
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos: target,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.run_steps(3);
+        }
+    }
+    assert!(!harness.state().viewport().is_placing(), "the paste of a deleted original stayed open");
+    assert!(
+        harness.state().session.doc().same_content(&after_delete),
+        "pasting a deleted original changed the cell"
+    );
+    assert_eq!(harness.state().session.history().undo_depth(), depth_after_delete);
+    // Undo the delete: the original is back and a paste works again; right click ends a paste without pasting.
+    assert!(harness.state_mut().session.undo());
+    harness.run();
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::V);
+    harness.run_steps(3);
+    assert!(harness.state().viewport().is_placing());
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: target,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run_steps(3);
+    }
+    assert!(!harness.state().viewport().is_placing(), "a right click left the paste open");
+    assert!(harness.state().session.doc().same_content(&before));
+    assert_eq!(harness.state().session.history().undo_depth(), depth);
+}
+
+/// The paste ghost is a preview, not a component: starting it changes neither the document nor the undo
+/// stack, a click where the ghost is selects nothing, a click on the real component still selects it, and
+/// ending the preview leaves nothing.
+#[test]
+fn the_paste_ghost_is_not_pickable_and_changes_nothing() {
+    let mut harness = harness();
+    let body = one_body(&mut harness);
+    harness.state_mut().session.select_item(Some(gc_session::CellItem::Body(body)));
+    harness
+        .state_mut()
+        .session
+        .copy_to_clipboard(&[gc_doc::TreeKey::Component(gc_doc::Occurrence::Item(body.erase()))])
+        .unwrap();
+    harness.state_mut().session.select_item(None);
+    harness
+        .state_mut()
+        .session
+        .preview_paste(gc_doc::Placement { xyz: [0.12, 0.0, 0.0], rpy: [0.0; 3] })
+        .unwrap();
+    harness.run_steps(3);
+    let before = harness.state().session.doc().clone();
+    let depth = harness.state().session.history().undo_depth();
+    let click = |harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, at: egui::Pos2| {
+        harness.event(egui::Event::PointerMoved(at));
+        harness.run_steps(2);
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.run_steps(3);
+        }
+    };
+    // On the ghost (0.12 m to the side): nothing to pick.
+    let ghost = harness.state().viewport().screen_of(gc_math::DVec3::new(0.12, 0.0, 0.0)).unwrap();
+    click(&mut harness, ghost);
+    assert_eq!(harness.state().session.selected_item(), None, "the ghost was picked");
+    assert!(harness.state().session.doc().same_content(&before));
+    assert_eq!(harness.state().session.history().undo_depth(), depth);
+    // On the real component: still picked while the ghost shows.
+    let real = harness.state().viewport().screen_of(gc_math::DVec3::new(0.02, 0.02, 0.05)).unwrap();
+    click(&mut harness, real);
+    assert_eq!(harness.state().session.selected_item(), Some(gc_session::CellItem::Body(body)));
+    // The ghost is still there until it is ended, and ending it leaves the cell as it was.
+    assert_eq!(harness.state().session.paste_ghosts().len(), 1);
+    harness.state_mut().session.end_paste_preview();
+    harness.run_steps(2);
+    assert!(harness.state().session.paste_ghosts().is_empty());
+    assert!(harness.state().session.doc().same_content(&before));
+    assert_eq!(harness.state().session.history().undo_depth(), depth);
+    assert_eq!(harness.state().session.doc().bodies().iter().count(), 1);
+}
+
+// ---- Opening a project that has damaged data ----
+
+struct OpenFile(std::sync::Arc<std::sync::Mutex<std::path::PathBuf>>);
+
+impl gc_app::FileDialogs for OpenFile {
+    fn open(&mut self) -> Option<std::path::PathBuf> {
+        Some(self.0.lock().unwrap().clone())
+    }
+    fn save(&mut self, _: &str) -> Option<std::path::PathBuf> {
+        None
+    }
+}
+
+/// A cylindrical joint with an angular and a linear range, saved, then both ranges damaged in the file
+/// (Start past End); `damage` = how many of them.
+fn project_with_ranges(dir: &std::path::Path, name: &str, damage: usize) -> std::path::PathBuf {
+    let mut s = gc_session::Session::new();
+    let frame = |z: f64, nz: f64| gc_doc::Geometry::Frame {
+        origin: [0.0, 0.0, z],
+        z: [0.0, 0.0, nz],
+        x: [1.0, 0.0, 0.0],
+    };
+    let sel = |id: gc_core::AnyId, geometry| gc_doc::Selection {
+        occurrence: gc_doc::Occurrence::Item(id),
+        geometry,
+    };
+    let table = s
+        .add_body(
+            gc_doc::Solid::Box { size: [2.0, 1.0, 1.0] },
+            gc_doc::Placement { xyz: [0.0, 0.0, 0.5], rpy: [0.0; 3] },
+        )
+        .unwrap();
+    let block = s
+        .add_body(
+            gc_doc::Solid::Box { size: [0.2; 3] },
+            gc_doc::Placement { xyz: [0.3, 0.2, 1.6], rpy: [0.0; 3] },
+        )
+        .unwrap();
+    let joint = s
+        .add_relationship(gc_doc::Relationship::new(
+            "Cylinder",
+            gc_doc::RelationKind::Cylindrical { flip: false },
+            sel(block.erase(), frame(-0.1, -1.0)),
+            sel(table.erase(), frame(0.5, 1.0)),
+        ))
+        .unwrap();
+    s.set_joint_limits(
+        joint,
+        Some(gc_doc::JointRange { start: -0.123, end: 0.456, current: None }),
+        Some(gc_doc::JointRange { start: 0.0333, end: 0.4, current: None }),
+    )
+    .unwrap();
+    let path = dir.join(name);
+    s.save_as(&path).unwrap();
+    let mut text = std::fs::read_to_string(&path).unwrap();
+    for (marker, _) in [("-0.123", 0), ("0.0333", 1)].into_iter().take(damage) {
+        assert!(text.contains(marker), "{marker} is in the file");
+        text = text.replacen(marker, "9.0", 1);
+    }
+    std::fs::write(&path, text).unwrap();
+    path
+}
+
+/// The status bar names what an opened project dropped (one or two ranges), says nothing for a clean project
+/// opened next, and an unreadable file reports the error without touching what was open.
+#[test]
+fn the_status_bar_reports_dropped_data_on_open_and_clears_it_for_the_next_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let one = project_with_ranges(dir.path(), "one.gcp", 1);
+    let two = project_with_ranges(dir.path(), "two.gcp", 2);
+    let clean = project_with_ranges(dir.path(), "clean.gcp", 0);
+    let broken = dir.path().join("broken.gcp");
+    std::fs::write(&broken, "this is not a project").unwrap();
+    let chosen = std::sync::Arc::new(std::sync::Mutex::new(one.clone()));
+    let dialogs = OpenFile(std::sync::Arc::clone(&chosen));
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(move |cc| GraphCtrlApp::new(cc, RunOptions::default()).with_dialogs(Box::new(dialogs)));
+    harness.run();
+    let open = |harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, path: &std::path::Path| {
+        *chosen.lock().unwrap() = path.to_path_buf();
+        harness.get_by_label("파일").click();
+        harness.run();
+        harness.get_by_label("열기...").click();
+        harness.run_steps(5);
+    };
+    open(&mut harness, &one);
+    assert_eq!(harness.state().session.load_warnings().len(), 1);
+    harness.get_by_label_contains("열었지만 쓸 수 없는 데이터 1건을 버렸습니다");
+    open(&mut harness, &two);
+    assert_eq!(
+        harness.state().session.load_warnings().len(),
+        2,
+        "{:?}",
+        harness.state().session.load_warnings()
+    );
+    harness.get_by_label_contains("열었지만 쓸 수 없는 데이터 2건을 버렸습니다");
+    // The cell that opened works: the damaged ranges were dropped.
+    assert!(harness.state().session.doc().solve_relationships().is_ok());
+    assert_eq!(harness.state().session.relationships().len(), 1);
+    // A clean project: no warning text left over.
+    open(&mut harness, &clean);
+    assert!(harness.state().session.load_warnings().is_empty());
+    assert!(harness.query_by_label_contains("버렸습니다").is_none(), "the old warning is still on screen");
+    // A file that is not a project: an error, and the clean project is still open.
+    open(&mut harness, &broken);
+    assert_eq!(harness.state().session.relationships().len(), 1, "a failed open replaced the document");
+    assert!(harness.query_by_label_contains("버렸습니다").is_none());
+}
