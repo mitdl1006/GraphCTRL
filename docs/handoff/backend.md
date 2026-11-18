@@ -64,7 +64,7 @@
 - 섬 전체 풀이(`least_squares_on`)를 희소하게 바꿨다.
   - 야코비안: 움직인 컴포넌트에 닿는 관계만 다시 계산한다.
   - 정규 행렬: 블록 조립, 너비 우선 순서의 envelope(skyline) 저장, envelope Cholesky(`envelope_solve`)로 푼다(예전: 밀집 가우스 소거).
-  - 멈춤: 비용 감소가 1e-9 비율보다 작은 단계가 3번 이어지면 멈춘다(충돌로 0이 아닌 최소에 머문 경우).
+  - 멈춤 규칙은 예전 그대로(200회 또는 개선 없음). 정체 시 멈춤은 진단 목록을 바꿔서(QA) 뺐다.
 - 측정(QA `relationship_build_times`, 디버그): 30개 사슬 426 ms → 0.8 ms.
   새 테스트 `gc_session/tests/relationship_chain.rs`(접지된 바탕 위에 Mate·Rigid를 번갈아 건 100개 사슬, 1 s 상한, 디버그에서 통과).
   그 사슬 끝에 충돌 관계를 넣으면: 릴리스에서 거부 48 s → 54 ms, 진단 106 ms.
