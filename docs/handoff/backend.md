@@ -71,6 +71,34 @@ To Work with Sketch Dimensions GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185.
 | Flip Direction 대상의 "line to an arc (the arc itself)"·"between 2 arcs" 거리 | 없음 | 선-호·호-호 거리 치수 |
 | 구동 치수 토글 | 있음(`SketchOp::SetDriving`) | — |
 
+## 2026-11-18 — QA: 풀리지 않는 접선이 퇴화로 수락되던 것
+
+- 증상: 고정 직선이 고정 원·타원을 가로지르는 상태에서 Tangent를 걸면 수락되고 Solved, 두 구속이 degenerate로만 보고된다.
+- 원인: 솔버가 고정선의 두 끝을 교점으로 모아 길이 0인 선을 만들고, 방향이 정해지지 않은 그 선으로 접선을 "만족"시켰다.
+- 고침(`gc_solver::System::try_add`): 후보 구속이 추가 전에는 아니었는데 풀린 결과에서 퇴화(`degenerate`)로 나오면 `Conflicting`으로 거부한다. 흔적은 남지 않는다. `with`에는 함께 새로 퇴화한 구속이 들어간다.
+- 테스트: `gc_session/tests/tangent_conflict.rs`(원·타원).
+- QA 브랜치 영향: `qa_sketch_new_curves.rs` 312행 "fixed crossing line made tangent"는 `step`(수락 또는 거부 모두 허용)이라 그대로 통과. 관찰 메모를 "거부됨"으로 바꿔도 된다.
+
+## 2026-11-18 — Helical Curve(리드 ③ 4번)
+
+근거: To Draw 3D Curves, GUID-37BA1DCE-6BC4-41CD-A36D-577F31B304FC — Type(Constant/Variable), Definition(Pitch and Revolution, Revolution and Height,
+Pitch and Height, Spiral), Diameter, Taper, Left/Right hand, Helix Ends(Natural/Flat), "click to define the start point of the curve and then click to define
+the end point".
+
+- `SketchOp::AddHelix { start, end, diameter, shape: HelixShape, taper, right_hand }`(3D 스케치만):
+  - 축은 `start`에서 `end` 쪽. 오른손 = 축을 따라 오르며 반시계.
+  - `HelixShape::{PitchRevolution, RevolutionHeight, PitchHeight, Spiral}`. Spiral은 평면, 회전마다 반지름이 피치만큼 커진다.
+  - 테이퍼는 높이당 `tan(taper)`만큼 반지름 증가.
+  - 결과는 회전당 8개 맞춤점의 3D 보간 스플라인(최대 4096점). 한 번의 실행 취소.
+- 거부: 양수·유한이 아닌 값, 축 길이 0, 반지름이 0 이하로 줄어드는 테이퍼, 4096점 초과, 2D 스케치.
+- 차이:
+  - 원문은 수학적 나선이다. 여기는 맞춤점 스플라인 근사라 회전당 8점에서 반지름 오차가 반지름의 약 0.1% 이하.
+  - Variable(행 표), Helix Ends(Natural/Flat 전이), 반지름 점을 시작점 평면에 투영하는 입력은 없다.
+  - 결과가 일반 스플라인이라 피치 등을 다시 편집할 수 없다.
+- FE: 3D Draw 패널 Helical Curve 대화상자(Helical Shape 탭 값) + 두 점 클릭 → `SketchOp::AddHelix`.
+- 테스트: `gc_session/tests/helix.rs`.
+- QA 브랜치 영향: 없음.
+
 ## 2026-11-18 — 치수 도구: 원 테두리 두 개(리드 화면 점검 보고)
 
 - 보고: 원 테두리 두 개를 차례로 클릭하면 두 원 사이 거리가 아니라 지름 치수가 생긴다.
@@ -138,7 +166,7 @@ To Work with Sketch Dimensions GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185.
 | Arc(3점·중심) | 있음(반원 미만) | — |
 | Bend(반지름, Equal) | 없음 | ~~1. 두 선의 모서리에 접하는 3D 호~~ **완료**(Equal 없음) |
 | Interpolation Spline | 2D만(3D는 `WrongSpace`) | ~~2. 3D 맞춤점 스플라인~~ **완료** |
-| Helical Curve(피치·회전·높이·나선, 테이퍼, 좌·우) | 없음 | 4. 나선(맞춤점 스플라인 근사 또는 전용 곡선) |
+| Helical Curve(피치·회전·높이·나선, 테이퍼, 좌·우) | 없음 | ~~4. 나선~~ **완료**(맞춤점 스플라인 근사) |
 | Point, 구속(평행·직각·동일·동일선상·점-선·중점·X/Y/Z 평행·평면 평행), 치수 | 있음 | — |
 | Tangent(3D) | `WrongSpace` | 1번과 함께(선-호 끝 접선) |
 | Curve on Face, Project to Surface, Intersection, Silhouette, Equation Curve | 없음 | 해당 없음/보류: 솔리드 면 데이터 없음. Equation Curve는 요청 시 |
