@@ -123,6 +123,10 @@ pub enum Icon {
     Stretch,
     /// A line reaching a wall.
     Extend,
+    /// A spring: a flexible subassembly.
+    Flexible,
+    /// A pushpin: a grounded component.
+    Pin,
     /// A short text, for constraint symbols.
     Text(&'static str),
 }
@@ -702,6 +706,23 @@ impl Icon {
                 line(at(0.6, 0.5), at(0.48, 0.38));
                 line(at(0.6, 0.5), at(0.48, 0.62));
                 line(at(0.85, 0.12), at(0.85, 0.88));
+            }
+            Self::Flexible => {
+                let points: Vec<Pos2> =
+                    [(0.1, 0.5), (0.25, 0.5), (0.33, 0.2), (0.5, 0.8), (0.67, 0.2), (0.75, 0.5), (0.9, 0.5)]
+                        .iter()
+                        .map(|(x, y)| at(*x, *y))
+                        .collect();
+                painter.add(egui::Shape::line(points, stroke));
+            }
+            Self::Pin => {
+                // The head, the collar and the needle, tilted.
+                line(at(0.3, 0.3), at(0.7, 0.7));
+                line(at(0.18, 0.5), at(0.5, 0.82));
+                line(at(0.5, 0.18), at(0.82, 0.5));
+                line(at(0.5, 0.18), at(0.18, 0.5));
+                line(at(0.5, 0.82), at(0.82, 0.5));
+                line(at(0.2, 0.8), at(0.08, 0.92));
             }
             Self::Text(text) => {
                 painter.text(

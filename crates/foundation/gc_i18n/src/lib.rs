@@ -688,6 +688,9 @@ messages! {
     CmdRename => ("이름 바꾸기", "Rename"),
     /// Browser menu: suppress an item (kept, not computed).
     CmdSuppress => ("억제", "Suppress"),
+    CmdEnabled => ("활성", "Enabled"),
+    BrowserFind => ("찾기", "Find"),
+    BrowserFindHint => ("이름으로 찾기", "Find by name"),
     /// Browser menu: bring a suppressed item back.
     CmdUnsuppress => ("억제 해제", "Unsuppress"),
     /// Status bar: the name is taken by another item of the same kind.
@@ -896,6 +899,8 @@ messages! {
     CmdMoveInto => ("서브어셈블리로 이동", "Move into subassembly"),
     /// Browser, right-click a subassembly: dissolve it; its contents go up one level.
     CmdDissolve => ("해체", "Dissolve"),
+    CmdSplitSpline => ("스플라인 분할", "Split Spline"),
+    CmdFlexible => ("유연", "Flexible"),
     /// Assemble tab, Edit group: the group's title.
     GroupEdit => ("편집", "Edit"),
     /// Assemble tab: back to the previous edit target.

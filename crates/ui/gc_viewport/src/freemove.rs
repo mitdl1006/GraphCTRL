@@ -27,8 +27,8 @@ pub(crate) struct FreeDrag {
     anchor: DVec3,
     /// The pointer when the drag began, in view pixels.
     from: [f64; 2],
-    /// The subassembly the component belongs to (picked as one unit): the drag moves all of it.
-    unit: Option<gc_doc::SubassemblyId>,
+    /// The component moves with others as one rigid unit (a subassembly that is not flexible).
+    rigid: bool,
     /// The move of the world the drag has made so far (the new pose after the start pose's inverse).
     delta: DPose3,
 }
@@ -46,20 +46,21 @@ pub(crate) fn begin(
     }
     let (start, _) = gizmo::pose_of(session, item)?;
     let anchor = on_view_plane(camera, size, start.translation, at)?;
-    // A subassembly is a single unit in its parent (Inventor 2026 help, Create Subassemblies in Place,
-    // GUID-FCEE3F0E-AAE2-4619-8645-2588FEECD353): dragging one of its components moves it all. One that
-    // holds a grounded component cannot move.
+    // A rigid subassembly is a single unit in its parent (Inventor 2026 help, Create Subassemblies in Place,
+    // GUID-FCEE3F0E-AAE2-4619-8645-2588FEECD353): dragging one of its components moves all of it; a flexible
+    // one (GUID-30817F08-A5C2-44B7-B237-4791ACA3F854) is dragged component by component. A unit that holds a
+    // grounded component cannot move.
     let any = crate::grip::component_of(item)?;
-    let unit = match session.pick_unit(gc_doc::Occurrence::Item(any)) {
-        Some(gc_doc::TreeKey::Subassembly(id)) => Some(id),
-        _ => None,
-    };
-    if let Some(id) = unit
-        && session.subassembly_moved(id, DPose3::IDENTITY).is_none()
+    let unit = session.unit_moves(any, start);
+    let rigid = unit.len() > 1;
+    if rigid
+        && unit.iter().any(|(member, _)| {
+            session.doc().component_flag(gc_doc::Occurrence::Item(*member), gc_doc::ComponentFlag::Grounded)
+        })
     {
         return None;
     }
-    Some(FreeDrag { item, start, anchor, from: at, unit, delta: DPose3::IDENTITY })
+    Some(FreeDrag { item, start, anchor, from: at, rigid, delta: DPose3::IDENTITY })
 }
 
 /// Where the ray through `at` meets the plane through `point` square to the view direction.
@@ -97,9 +98,9 @@ pub(crate) fn update(
         }
     };
     drag.delta = pose * drag.start.inverse();
-    if let Some(unit) = drag.unit
-        && let Some(moves) = session.subassembly_moved(unit, drag.delta)
-        && session.preview_components(&moves).is_ok()
+    if drag.rigid
+        && let Some(any) = crate::grip::component_of(drag.item)
+        && session.preview_components(&session.unit_moves(any, pose)).is_ok()
     {
         // The whole subassembly is shown at its new place.
         return;
@@ -109,13 +110,15 @@ pub(crate) fn update(
 
 /// Ends the drag: one undo step.
 pub(crate) fn end(drag: &FreeDrag, session: &mut Session) {
-    if let Some(unit) = drag.unit {
-        // The preview goes; the whole subassembly moves in one undo step. A refusal is explained in the
-        // status bar.
+    if drag.rigid
+        && let Some(any) = crate::grip::component_of(drag.item)
+    {
+        // The preview goes; the whole unit moves in one undo step. A refusal is explained in the status bar.
         session.end_component_preview();
         gizmo::preview(session, drag.item, &drag.start);
         gizmo::commit(session, drag.item);
-        drop(session.move_subassembly(unit, drag.delta));
+        let moves = session.unit_moves(any, drag.delta * drag.start);
+        drop(session.grip_snap_commit(&moves, false));
         return;
     }
     gizmo::commit(session, drag.item);

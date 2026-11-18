@@ -195,6 +195,19 @@
 - 로봇 탭: 로봇 추가·경로 만들기·계획·재생은 큰 버튼, 가져오기 2개 / 모양 3개 / 웨이포인트 추가 3종 / 좌표계·스케치 경로는 작은 버튼 묶음. 검사 탭: 측정·간섭 분석 큰 버튼, 접촉 솔버 작은 버튼(`ribbon_stack_responses`로 메뉴 유지). 뷰 탭: 홈·전체 보기·자유도·단면 삭제 큰 버튼, 정면·평면·우측 / 직교·원근 / 단면 3종 / 패널 토글은 작은 버튼. 1280 px 단언 유지. 증거 `docs/evidence/img/review-61-ribbon-tabs.png`.
 - 접근성 이름은 그대로(버튼 이름 = 라벨).
 
+### Flexible 서브어셈블리 / 스플라인 분할 / 타원·스플라인 간격띄우기
+
+- **Flexible**: 원문 Create and edit flexible components, GUID-30817F08-A5C2-44B7-B237-4791ACA3F854("Right-click the placed subassembly in the graphics window or the browser, and then select Flexible ... An icon denoting the flexible state marks the subassembly in the browser ... clear the check mark"). 브라우저 서브어셈블리 행 우클릭 메뉴에 "유연" 체크(`SubassemblyOp::SetFlexible`, Undo 1단계), 유연한 행에는 용수철 아이콘(`Icon::Flexible`)이 오른쪽에 붙는다. 그래픽 창 우클릭 마킹 메뉴 목록에도 "유연"(현재 상태면 ✓)이 서브어셈블리 소속 구성요소에서 나온다. 자유 이동/회전과 그립 스냅은 `Session::unit_moves`로 강체 서브어셈블리만 통째로 움직이고(미리보기도 `preview_components`), 유연한 서브어셈블리는 구성요소별로 끌린다. 테스트 `flexible_subassemblies_are_dragged_component_by_component`(+ 기존 통째 이동 테스트).
+- **스플라인 분할**: 원문 GUID-DB15C479-66F2-456A-9E54-40A60F83DC92("To split a spline, right-click a point and choose Split Spline"). 스케치에서 스플라인의 안쪽 맞춤점을 우클릭(멈춤 메뉴 모드)하면 목록에 "스플라인 분할"이 나오고 `SketchOp::SplitSpline`을 실행한다. 테스트 `the_right_click_menu_of_a_spline_fit_point_splits_the_spline`. 차이: 끝점에서는 항목이 나오지 않는다(백엔드가 거부), 핸들 재설정 메뉴는 없다.
+- **간격띄우기**(GUID-D489CE6D…): 타원·스플라인도 받는다. 화면 점검 — 안쪽 타원과 스플라인 사본이 그려진다(`docs/evidence/img/review-62-offset.png`, 테스트 `offset_works_on_an_ellipse_and_a_spline_on_screen`). 이상 없음.
+
+### 브라우저 동작 점검 (구성요소 메뉴·행 아이콘·찾기)
+
+- 원문: Working with the Assembly Browser GUID-5F975252-BDB4-488C-A2C5-8B15C7D3C641(브라우저 메뉴: Find, Edit Values in Browser, Display Preferences = Hide Work Features / Hide Fully Constrained / Show Constraint State …, 우클릭 메뉴는 구성요소·관계에 대한 작업), Assembly Browser Reference GUID-CB6B1637-71AD-4753-8CC9-19559BFEE3A5(접지 = 압정 아이콘 변형, Disabled·Invisible 변형, 구속 상태 점).
+- 점검 결과 이미 있던 것: 가시성 체크, 억제(+흐린 이름), 이름 바꾸기, 삭제, 제자리 편집(더블클릭), 구속 상태 점(검은/속 빈/대시), 관계 행의 잠금 아이콘·+/-.
+- 이번에 채운 것: ① 구성요소 행 우클릭 메뉴에 **활성(Enabled)**·**접지(Grounded)** 체크 항목(`Command::SetComponent`, 항목 순서: 메뉴 고유 항목 → 이름 바꾸기 → 가시성 → 활성 → 접지 → 억제 → 삭제). ② 접지된 구성요소 아이콘 모서리에 **압정**(`Icon::Pin`), 비활성(Disabled)이나 숨긴(Invisible) 구성요소 이름은 배경 스타일(흐림). ③ 브라우저 위 **찾기** 상자(이름의 일부, 대소문자 무시): 구성요소·서브어셈블리 폴더(이름이 맞으면 안의 것 전부)·스케치·관계 행만 남긴다. 테스트 `the_browser_menu_enables_and_grounds_components_and_find_filters_the_rows`, 증거 `docs/evidence/img/review-63-browser-pin.png`.
+- 아직 없는 것(앱에 대상이 없거나 후속): Display Preferences(작업 피처 숨기기·완전 구속 숨기기·구속 상태 토글), Edit Values in Browser 토글, 적응(Adaptive)·BOM 제외 메뉴(앱에 적응성·BOM 없음), 사용자 정의 폴더, 찾기의 조건 검색(문제 있는 관계·억제된 항목 등 조합).
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

@@ -5368,3 +5368,138 @@ fn opening_a_file_with_a_damaged_joint_range_reports_the_warning() {
     assert_eq!(harness.state().session.load_warnings().len(), 1);
     harness.get_by_label_contains("열었지만 쓸 수 없는 데이터 1건을 버렸습니다");
 }
+
+/// Flexible (Inventor 2026 help, Create and edit flexible components,
+/// GUID-30817F08-A5C2-44B7-B237-4791ACA3F854): the browser menu of a subassembly has a Flexible check mark;
+/// a flexible subassembly's components are dragged one by one, a rigid one moves as a whole.
+#[test]
+fn flexible_subassemblies_are_dragged_component_by_component() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.1; 3] };
+    let app = harness.state_mut();
+    app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    let at = |x: f64, y: f64| gc_doc::Placement { xyz: [x, y, 0.0], rpy: [0.0; 3] };
+    let a = app.session.add_body(solid.clone(), at(0.3, 0.0)).unwrap();
+    let b = app.session.add_body(solid, at(0.3, 0.3)).unwrap();
+    let key =
+        |id: gc_core::Id<gc_doc::Body>| gc_doc::TreeKey::Component(gc_doc::Occurrence::Item(id.erase()));
+    app.session
+        .edit_subassemblies(gc_doc::SubassemblyOp::Demote {
+            members: vec![key(a), key(b)],
+            name: "Unit".into(),
+        })
+        .unwrap();
+    app.fit_view();
+    app.viewport_mut().camera.pan([0.0, 0.0], [-250.0, 0.0], [1280.0, 700.0]);
+    app.viewport_mut().free_tool = Some(gc_viewport::FreeTool::Move);
+    harness.run();
+    // The browser menu of the subassembly: the Flexible check mark.
+    let row = harness.get_by_label("Unit").rect().center();
+    harness.event(egui::Event::PointerMoved(row));
+    harness.run();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: row,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run();
+    }
+    harness.get_by_label("유연").click();
+    harness.run_steps(3);
+    let unit = harness.state().session.doc().subassemblies().first().map(|s| (s.id, s.flexible)).unwrap();
+    assert!(unit.1, "Flexible is on");
+    // Dragging one component now leaves the other where it is.
+    let xyz = |h: &egui_kittest::Harness<'_, GraphCtrlApp>, id: gc_core::Id<gc_doc::Body>| {
+        h.state().session.doc().get(id).unwrap().placement.xyz
+    };
+    let b0 = xyz(&harness, b);
+    let from = harness.state().viewport().screen_of(gc_math::DVec3::new(0.3, 0.0, 0.05)).unwrap();
+    harness.event(egui::Event::PointerMoved(from));
+    harness.run_steps(2);
+    harness.event(egui::Event::PointerButton {
+        pos: from,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run_steps(2);
+    for step in 1..=4 {
+        harness.event(egui::Event::PointerMoved(from + egui::vec2(15.0 * step as f32, 0.0)));
+        harness.run_steps(2);
+    }
+    harness.event(egui::Event::PointerButton {
+        pos: from + egui::vec2(60.0, 0.0),
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run_steps(3);
+    assert!(xyz(&harness, a)[0] > 0.31, "the dragged one moved: {:?}", xyz(&harness, a));
+    assert_eq!(xyz(&harness, b), b0, "the other stayed: a flexible subassembly is not one unit");
+}
+
+/// The browser's component menu has Enabled and Grounded check marks, a grounded component shows a pin, and
+/// Find lists only the rows that match (Inventor 2026 help, Working with the Assembly Browser,
+/// GUID-5F975252-BDB4-488C-A2C5-8B15C7D3C641; Assembly Browser Reference, GUID-CB6B1637-71AD-4753-8CC9-19559BFEE3A5).
+#[test]
+fn the_browser_menu_enables_and_grounds_components_and_find_filters_the_rows() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.05; 3] };
+    let app = harness.state_mut();
+    app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    let second =
+        app.session.add_body(solid, gc_doc::Placement { xyz: [0.2, 0.0, 0.0], rpy: [0.0; 3] }).unwrap();
+    harness.run();
+    let occurrence = gc_doc::Occurrence::Item(second.erase());
+    let flag = |h: &egui_kittest::Harness<'_, GraphCtrlApp>, f| {
+        h.state().session.doc().component_flag(occurrence, f)
+    };
+    let right_click = |h: &mut egui_kittest::Harness<'_, GraphCtrlApp>, label: &str| {
+        let at = h.get_by_label(label).rect().center();
+        h.event(egui::Event::PointerMoved(at));
+        h.run();
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Secondary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            h.run();
+        }
+    };
+    assert!(!flag(&harness, gc_doc::ComponentFlag::Grounded));
+    right_click(&mut harness, "Body2:1");
+    harness.get_by_label("접지").click();
+    harness.run_steps(3);
+    assert!(flag(&harness, gc_doc::ComponentFlag::Grounded), "grounded from the menu");
+    if gpu {
+        let image = harness.render().unwrap();
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        image.save(out.join("review-63-browser-pin.png")).unwrap();
+    }
+    right_click(&mut harness, "Body2:1");
+    harness.get_by_label("활성").click();
+    harness.run_steps(3);
+    assert!(!flag(&harness, gc_doc::ComponentFlag::Enabled), "disabled from the menu");
+
+    // Find: only the matching row stays.
+    let find = harness.get_by_role_and_label(egui::accesskit::Role::TextInput, "찾기");
+    find.click();
+    harness.run_steps(2);
+    harness.get_by_role_and_label(egui::accesskit::Role::TextInput, "찾기").type_text("body2");
+    harness.run_steps(3);
+    harness.get_by_label("Body2:1");
+    assert!(harness.query_all_by_label("Body1:1").next().is_none(), "Body1 is filtered out");
+}

@@ -494,8 +494,24 @@ impl Viewport {
             && !self.marking.is_open()
         {
             let at = ui.input(|i| i.pointer.press_origin().or(i.pointer.interact_pos()));
-            self.marking_set = if active.is_some() {
-                radial::Set::sketch(session.sketch_is_spatial())
+            self.marking_set = if let Some((_, plane)) = active.as_ref() {
+                // On an inner fit point of a spline the menu offers Split Spline.
+                let split = at.and_then(|at| {
+                    let at = to_view(at);
+                    let (_, sketch) = session.active_sketch()?;
+                    sketch.curves.iter().find_map(|(curve, c)| {
+                        let gc_sketch::CurveGeom::Spline { points } = &c.geom else { return None };
+                        let inner = points.get(1..points.len().saturating_sub(1))?;
+                        inner.iter().find_map(|point| {
+                            let local = session.point_pos(*point)?;
+                            let screen = self.camera.project(plane.world(local), size)?;
+                            let near = gc_math::fm::hypot(screen[0] - at[0], screen[1] - at[1])
+                                <= gc_tools::tolerance::POINT_PX;
+                            near.then_some((*curve, *point))
+                        })
+                    })
+                });
+                radial::Set::sketch(session.sketch_is_spatial(), split)
             } else {
                 // What is under the cursor is selected, and decides the short menu.
                 let view = at.map(to_view);
@@ -504,7 +520,20 @@ impl Viewport {
                     if origin.is_some() { None } else { view.and_then(|p| self.pick_item(session, p, size)) };
                 self.origin_selected = origin;
                 session.select_item(item);
-                radial::Set::assembly(item, origin)
+                // The rigid or flexible subassembly the item sits in, for the Flexible command.
+                let unit = item
+                    .and_then(grip::component_of)
+                    .and_then(|any| session.pick_unit(gc_doc::Occurrence::Item(any)))
+                    .and_then(|key| match key {
+                        gc_doc::TreeKey::Subassembly(id) => session
+                            .doc()
+                            .subassemblies()
+                            .iter()
+                            .find(|s| s.id == id)
+                            .map(|s| (id, s.flexible)),
+                        gc_doc::TreeKey::Component(_) => None,
+                    });
+                radial::Set::assembly(item, origin, unit)
             };
             if let Some(at) = at {
                 self.marking.press(at, ui.input(|i| i.time));
@@ -1465,11 +1494,7 @@ impl Viewport {
         {
             session.select_item(Some(item));
             grip.motion = grip::motions(&reference)[0];
-            let unit = match session.pick_unit(gc_doc::Occurrence::Item(any)) {
-                Some(gc_doc::TreeKey::Subassembly(id)) => Some(id),
-                _ => None,
-            };
-            grip.target = Some(grip::Target { item, any, reference, start, unit });
+            grip.target = Some(grip::Target { item, any, reference, start });
         }
         // The panel: what to pick next, move or rotate, the freedom report, and the ways to end.
         let mut end: Option<Option<bool>> = None;
@@ -1545,11 +1570,8 @@ impl Viewport {
                 if let (Some(target), Some(pose)) = (&grip.target, &grip.pose) {
                     // The preview goes first; the commit is one undo step.
                     grip::show(session, target, None);
-                    // A component of a subassembly takes the rest of it along.
-                    let moves = target
-                        .unit
-                        .and_then(|unit| session.subassembly_moved(unit, *pose * target.start.inverse()))
-                        .unwrap_or_else(|| vec![(target.any, *pose)]);
+                    // A component of a rigid subassembly takes the rest of it along.
+                    let moves = session.unit_moves(target.any, *pose);
                     session.grip_snap_commit(&moves, ground).ok();
                 }
                 self.grip = None;
