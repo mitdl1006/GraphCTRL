@@ -58,6 +58,7 @@ impl Background {
         camera: &Camera,
         scene: &Scene,
         slice: Slicing,
+        style: VisualStyle,
     ) {
         let Some(rs) = self.render_state.as_ref() else { return };
         let ppp = ui.pixels_per_point();
@@ -123,6 +124,7 @@ impl Background {
             let instances: Vec<Instance> = scene
                 .solids
                 .iter()
+                .filter(|_| style.faces())
                 .map(|solid| Instance {
                     mesh: solid.shape.key(),
                     model: narrow(
@@ -152,6 +154,8 @@ impl Background {
                 slice2: slice.planes.get(1).map(|plane| relative_plane(*plane, eye)),
                 slice_union: slice.union,
                 slice_cap: slice.cap,
+                depth_only: style.depth_only(),
+                hidden_edges: style.hidden_edges(),
             };
             let removed = |p: gc_math::DVec3| slice.removes(p);
             // Transparent where nothing is drawn, so that the grid painted underneath shows through.
@@ -174,7 +178,7 @@ impl Background {
                 .collect();
             // Edges in a darker shade of the solid's own colour, fading with it.
             let mut edges = Vec::new();
-            for solid in &scene.solids {
+            for solid in scene.solids.iter().filter(|_| style.edges()) {
                 let Some(segments) = self.edges.get(&solid.shape.key()) else { continue };
                 let c = solid.color;
                 let color = [c[0] * 0.30, c[1] * 0.30, c[2] * 0.32, c[3]];
@@ -193,6 +197,57 @@ impl Background {
             let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
             ui.painter().image(*id, rect, uv, egui::Color32::WHITE);
         }
+    }
+}
+
+/// How the 3D view draws solids (Inventor 2026 help, About Visual Styles in Models,
+/// GUID-8D59A8BF-49A8-4214-A3A7-F184DB73E68F): faces, visible edges, hidden edges.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum VisualStyle {
+    /// Shaded: faces, no edges.
+    Shaded,
+    /// Shaded with Edges: faces and their visible edges (the default).
+    #[default]
+    ShadedWithEdges,
+    /// Shaded with Hidden Edges: faces, visible edges, hidden edges dashed.
+    ShadedWithHiddenEdges,
+    /// Wireframe: no faces, every edge, nothing hides anything.
+    Wireframe,
+    /// Wireframe with Hidden Edges: no faces, visible edges, hidden edges dashed.
+    WireframeWithHiddenEdges,
+    /// Wireframe with visible Edges Only: no faces, the edges that are not hidden.
+    WireframeVisibleEdges,
+}
+
+impl VisualStyle {
+    /// Every style the renderer can draw, in the drop-down's order.
+    pub const ALL: [Self; 6] = [
+        Self::Shaded,
+        Self::ShadedWithEdges,
+        Self::ShadedWithHiddenEdges,
+        Self::Wireframe,
+        Self::WireframeWithHiddenEdges,
+        Self::WireframeVisibleEdges,
+    ];
+
+    /// Whether the solids are handed to the renderer at all (drawn with colour, or only as depth).
+    pub fn faces(self) -> bool {
+        self != Self::Wireframe
+    }
+
+    /// Whether edges are drawn.
+    pub fn edges(self) -> bool {
+        self != Self::Shaded
+    }
+
+    /// Whether the solids hide what is behind them without being seen (a wireframe that has hidden edges).
+    pub fn depth_only(self) -> bool {
+        matches!(self, Self::WireframeWithHiddenEdges | Self::WireframeVisibleEdges)
+    }
+
+    /// Whether edges behind surfaces are drawn too, dashed.
+    pub fn hidden_edges(self) -> bool {
+        matches!(self, Self::ShadedWithHiddenEdges | Self::WireframeWithHiddenEdges)
     }
 }
 

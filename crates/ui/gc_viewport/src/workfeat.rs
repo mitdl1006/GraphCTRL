@@ -11,6 +11,7 @@ const COLOR: Color32 = Color32::from_rgb(0x0E, 0x9F, 0x9A);
 
 /// Draws the visible work features. `size` is half the length of an axis, metres.
 pub(crate) fn paint(
+    vis: &crate::ObjectVisibility,
     painter: &Painter,
     screen: &impl Fn(DVec3) -> Option<Pos2>,
     session: &Session,
@@ -22,6 +23,9 @@ pub(crate) fn paint(
             continue;
         }
         let Some(shape) = session.work_shape(id) else { continue };
+        if !vis.work(&shape) {
+            continue;
+        }
         let picked = selected == Some(id);
         let stroke = Stroke::new(
             if picked { 3.0 } else { 1.6 },
@@ -63,6 +67,7 @@ pub(crate) fn paint(
 
 /// The work feature under `at` (view pixels), if one is within a few pixels of its line, outline or point.
 pub(crate) fn pick(
+    vis: &crate::ObjectVisibility,
     session: &Session,
     screen: &impl Fn(DVec3) -> Option<[f64; 2]>,
     at: [f64; 2],
@@ -77,7 +82,11 @@ pub(crate) fn pick(
         if !feature.visible {
             return None;
         }
-        let hit = match session.work_shape(id)? {
+        let shape = session.work_shape(id)?;
+        if !vis.work(&shape) {
+            return None;
+        }
+        let hit = match shape {
             WorkShape::Axis { point, direction } => {
                 near(screen(point - direction * size), screen(point + direction * size))
             }

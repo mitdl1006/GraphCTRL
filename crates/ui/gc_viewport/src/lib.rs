@@ -38,7 +38,7 @@ pub use paint::{format_angle, format_length};
 pub use radial::ViewportRequest;
 pub use repr::{camera_from_json, camera_to_json, section_from_json, section_to_json};
 pub use section::{Section, SectionKind, SectionPlane};
-pub use target::Background;
+pub use target::{Background, VisualStyle};
 
 /// The plane a sketch lies in, with its in-plane axes.
 #[derive(Clone, Copy, Debug)]
@@ -126,6 +126,12 @@ pub struct Viewport {
     /// Where the view has stood (F5 goes back, Shift + F5 forward), the one shown now, and when the
     /// camera last changed.
     views: ViewHistory,
+    /// Bend (3D sketch) is running: the lines picked so far and the radius typed.
+    bend: Option<BendState>,
+    /// Helical Curve (3D sketch): the dialog, then the start and end clicks.
+    helix: Option<HelixState>,
+    /// Insert Point is running on this spline: each click adds a fit point, Esc ends.
+    insert_spline: Option<Id<gc_sketch::Curve>>,
     /// Whether Alt was held when the primary button last went down.
     alt_at_press: bool,
     /// An Alt + drag that places a Mate constraint.
@@ -146,6 +152,17 @@ pub struct Viewport {
     pub slice: bool,
     /// Whether the constraint glyphs are drawn (F8 shows them, F9 hides them).
     pub show_constraints: bool,
+    /// The visual style of the 3D view (View tab, Appearance panel).
+    pub style: VisualStyle,
+    /// The ground plane (the floor grid) is shown; a sketch's own grid stays (View tab, Appearance panel;
+    /// on and off are session-based).
+    pub show_ground: bool,
+    /// The ViewCube is shown (View tab, Windows panel, User Interface); the navigation bar keeps its own.
+    pub show_view_cube: bool,
+    /// The navigation bar is shown.
+    pub show_nav_bar: bool,
+    /// Object Visibility (View tab, Visibility panel).
+    pub visibility: ObjectVisibility,
     /// A selection box being dragged in a sketch: where the mouse went down.
     box_select: Option<egui::Pos2>,
     /// A point of a 3D sketch being dragged: the working plane's normal axis and the level it keeps.
@@ -226,6 +243,138 @@ impl ViewHistory {
     }
 }
 
+/// Object Visibility (Inventor 2026 help, To set visibility of work features, annotations, and other display
+/// elements, GUID-BA193171-FAFC-4150-9222-CC43D8D4AA54): one switch for all instances of a kind. The origin
+/// kinds start off (as Inventor's origin folders do): on, every origin element of that kind shows, on top of
+/// the ones shown one by one. The others start on and only hide: what was hidden one by one stays hidden.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ObjectVisibility {
+    /// Origin planes of every component.
+    pub origin_planes: bool,
+    /// Origin axes.
+    pub origin_axes: bool,
+    /// Origin centre points.
+    pub origin_points: bool,
+    /// Work planes.
+    pub work_planes: bool,
+    /// Work axes.
+    pub work_axes: bool,
+    /// Work points.
+    pub work_points: bool,
+    /// Inactive 2D sketches.
+    pub sketches: bool,
+    /// Inactive 3D sketches.
+    pub sketches_3d: bool,
+}
+
+impl Default for ObjectVisibility {
+    fn default() -> Self {
+        Self {
+            origin_planes: false,
+            origin_axes: false,
+            origin_points: false,
+            work_planes: true,
+            work_axes: true,
+            work_points: true,
+            sketches: true,
+            sketches_3d: true,
+        }
+    }
+}
+
+impl ObjectVisibility {
+    /// Whether the origin element's kind is switched on.
+    pub(crate) fn origin(&self, element: gc_doc::OriginElement) -> bool {
+        match element {
+            gc_doc::OriginElement::Plane(_) => self.origin_planes,
+            gc_doc::OriginElement::Axis(_) => self.origin_axes,
+            gc_doc::OriginElement::Point => self.origin_points,
+        }
+    }
+
+    /// Whether the work feature's kind is switched on.
+    pub(crate) fn work(&self, shape: &gc_session::WorkShape) -> bool {
+        match shape {
+            gc_session::WorkShape::Plane(_) => self.work_planes,
+            gc_session::WorkShape::Axis { .. } => self.work_axes,
+            gc_session::WorkShape::Point(_) => self.work_points,
+        }
+    }
+}
+
+/// The Bend command of a 3D sketch (Inventor 2026 help, To Create Lines, Arcs, and Bends,
+/// GUID-4F861674-F74C-474E-869A-4C190ED6EC4B): two lines are clicked, then the radius is typed.
+#[derive(Clone, Debug)]
+struct BendState {
+    lines: Vec<Id<gc_sketch::Curve>>,
+    radius: String,
+    fresh: bool,
+}
+
+/// The Helical Curve command of a 3D sketch (Inventor 2026 help, To Draw 3D Curves,
+/// GUID-37BA1DCE-6BC4-41CD-A36D-577F31B304FC): the dialog's values as typed, then the start and end
+/// points clicked.
+#[derive(Clone, Debug)]
+struct HelixState {
+    /// 0 Pitch and Revolution, 1 Revolution and Height, 2 Pitch and Height, 3 Spiral.
+    definition: usize,
+    pitch: String,
+    revolutions: String,
+    height: String,
+    diameter: String,
+    taper: String,
+    right_hand: bool,
+    /// The dialog is done; the start and end are being clicked.
+    placing: bool,
+    start: Option<[f64; 3]>,
+    hover: Option<[f64; 3]>,
+}
+
+impl HelixState {
+    fn new() -> Self {
+        Self {
+            definition: 0,
+            pitch: "10 mm".to_owned(),
+            revolutions: "5".to_owned(),
+            height: "50 mm".to_owned(),
+            diameter: "20 mm".to_owned(),
+            taper: "0 deg".to_owned(),
+            right_hand: true,
+            placing: false,
+            start: None,
+            hover: None,
+        }
+    }
+
+    /// The operation for an axis from `start` to `end`; `None` while a value does not evaluate.
+    fn op(&self, doc: &gc_doc::Document, start: [f64; 3], end: [f64; 3]) -> Option<gc_doc::SketchOp> {
+        use gc_doc::{HelixShape, Unit, evaluate_value};
+        let length = |text: &str| evaluate_value(doc, text, Unit::Mm);
+        let number = |text: &str| evaluate_value(doc, text, Unit::Scalar);
+        let shape = match self.definition {
+            0 => HelixShape::PitchRevolution {
+                pitch: length(&self.pitch)?,
+                revolutions: number(&self.revolutions)?,
+            },
+            1 => HelixShape::RevolutionHeight {
+                revolutions: number(&self.revolutions)?,
+                height: length(&self.height)?,
+            },
+            2 => HelixShape::PitchHeight { pitch: length(&self.pitch)?, height: length(&self.height)? },
+            _ => HelixShape::Spiral { pitch: length(&self.pitch)?, revolutions: number(&self.revolutions)? },
+        };
+        let taper = if self.definition == 3 { 0.0 } else { evaluate_value(doc, &self.taper, Unit::Deg)? };
+        Some(gc_doc::SketchOp::AddHelix {
+            start,
+            end,
+            diameter: length(&self.diameter)?,
+            shape,
+            taper,
+            right_hand: self.right_hand,
+        })
+    }
+}
+
 /// What a plain click selects (Inventor 2026 help, About Component Selection Modes and Sets,
 /// GUID-E3E49BD5-3F55-4836-8CD1-2C1855CF9986: the Select command's priority).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -257,6 +406,9 @@ impl Viewport {
             free_drag: None,
             placing: None,
             placing_paste: None,
+            bend: None,
+            helix: None,
+            insert_spline: None,
             alt_at_press: false,
             alt_drag: None,
             quick_constrain: None,
@@ -270,6 +422,11 @@ impl Viewport {
             section: None,
             slice: false,
             show_constraints: true,
+            style: VisualStyle::default(),
+            show_ground: true,
+            show_view_cube: true,
+            show_nav_bar: true,
+            visibility: ObjectVisibility::default(),
             box_select: None,
             frame_time: 0.0,
             background: Background::new(render_state),
@@ -427,7 +584,35 @@ impl Viewport {
                 if response.drag_stopped_by(PointerButton::Primary) {
                     session.tool_event(ToolEvent::DragEnd);
                 }
-                if response.clicked_by(PointerButton::Primary)
+                if let Some(curve) = self.insert_spline {
+                    // Insert Point: every click on the spline adds a fit point; Esc ends.
+                    if ui.input(|i| i.key_pressed(Key::Escape)) {
+                        self.insert_spline = None;
+                    } else if response.clicked_by(PointerButton::Primary)
+                        && let Some(pos) = response.interact_pointer_pos().and_then(on_sketch)
+                        && near_spline(session, curve, pos, gc_tools::tolerance::CURVE_PX * px)
+                    {
+                        // Only a click on the spline (within the pick distance) inserts a point; a refusal
+                        // is explained in the status bar.
+                        drop(session.edit_active_sketch(gc_doc::SketchOp::InsertSplinePoint {
+                            curve,
+                            at: [pos[0], pos[1]],
+                        }));
+                    }
+                    // The hint is a label (it has an accessibility node), not painted text.
+                    egui::Area::new(egui::Id::unique("gc_insert_spline_hint"))
+                        .fixed_pos(self.rect.center_top() + egui::vec2(0.0, 14.0))
+                        .pivot(egui::Align2::CENTER_TOP)
+                        .order(egui::Order::Foreground)
+                        .interactable(false)
+                        .show(ui.ctx(), |ui| {
+                            ui.label(
+                                egui::RichText::new(tr!(lang, SplineInsertHint))
+                                    .size(13.0)
+                                    .color(colors::ACCENT),
+                            );
+                        });
+                } else if response.clicked_by(PointerButton::Primary)
                     && let Some(pos) = response.interact_pointer_pos().and_then(on_sketch)
                 {
                     session.tool_event(ToolEvent::Click { pos, px, modifier: ctrl });
@@ -460,6 +645,8 @@ impl Viewport {
 
         self.select_other_list(ui, session);
         self.select_menu(ui, session, size, lang);
+        self.bend_box(ui, session, rect, lang);
+        self.helix_dialog(ui, session, lang);
 
         // The marking menu: a right press opens it (in a sketch or among the components); a quick mark
         // toward a command picks it, otherwise the radial menu and its overflow list show.
@@ -495,27 +682,54 @@ impl Viewport {
         {
             let at = ui.input(|i| i.pointer.press_origin().or(i.pointer.interact_pos()));
             self.marking_set = if let Some((_, plane)) = active.as_ref() {
-                // On an inner fit point of a spline the menu offers Split Spline.
-                let split = at.and_then(|at| {
+                // What the spline under the cursor offers: Split Spline at an inner fit point, Close Curve at
+                // the start of an open one, Insert Point on the curve.
+                let mut menu = radial::SplineMenu::default();
+                if let Some(at) = at {
                     let at = to_view(at);
-                    let (_, sketch) = session.active_sketch()?;
-                    sketch.curves.iter().find_map(|(curve, c)| {
-                        let gc_sketch::CurveGeom::Spline { points } = &c.geom else { return None };
-                        let inner = points.get(1..points.len().saturating_sub(1))?;
-                        inner.iter().find_map(|point| {
-                            let local = session.point_pos(*point)?;
-                            let screen = self.camera.project(plane.world(local), size)?;
-                            let near = gc_math::fm::hypot(screen[0] - at[0], screen[1] - at[1])
-                                <= gc_tools::tolerance::POINT_PX;
-                            near.then_some((*curve, *point))
-                        })
-                    })
-                });
-                radial::Set::sketch(session.sketch_is_spatial(), split)
+                    let near_point = |point: Id<gc_sketch::SkPoint>| -> bool {
+                        session
+                            .point_pos(point)
+                            .and_then(|local| self.camera.project(plane.world(local), size))
+                            .is_some_and(|s| {
+                                gc_math::fm::hypot(s[0] - at[0], s[1] - at[1])
+                                    <= gc_tools::tolerance::POINT_PX
+                            })
+                    };
+                    if let Some((_, sketch)) = session.active_sketch() {
+                        for (curve, c) in &sketch.curves {
+                            let gc_sketch::CurveGeom::Spline { points } = &c.geom else { continue };
+                            let closed = points.len() > 1 && points.first() == points.last();
+                            if let Some(inner) = points.get(1..points.len().saturating_sub(1))
+                                && let Some(point) = inner.iter().find(|p| near_point(**p))
+                            {
+                                menu.split = Some((*curve, *point));
+                            }
+                            if !closed && points.len() >= 3 && points.first().is_some_and(|p| near_point(*p))
+                            {
+                                menu.close = Some(*curve);
+                            }
+                            // On the curve itself: the outline in pixels.
+                            if let Some(outline) = sketch.spline_outline(&c.geom, 16) {
+                                let on_screen: Vec<[f64; 2]> = outline
+                                    .iter()
+                                    .filter_map(|p| self.camera.project(plane.world([p[0], p[1], 0.0]), size))
+                                    .collect();
+                                let near =
+                                    on_screen.windows(2).any(|w| segment_distance(at, w[0], w[1]) <= 6.0);
+                                if near {
+                                    menu.insert = Some(*curve);
+                                }
+                            }
+                        }
+                    }
+                }
+                radial::Set::sketch(session.sketch_is_spatial(), menu)
             } else {
                 // What is under the cursor is selected, and decides the short menu.
                 let view = at.map(to_view);
-                let origin = view.and_then(|p| origin::pick(&self.camera, size, session, p, false));
+                let origin =
+                    view.and_then(|p| origin::pick(&self.visibility, &self.camera, size, session, p, false));
                 let item =
                     if origin.is_some() { None } else { view.and_then(|p| self.pick_item(session, p, size)) };
                 self.origin_selected = origin;
@@ -555,6 +769,10 @@ impl Viewport {
                 match radial::run(cmd, session) {
                     radial::Effect::None => {}
                     radial::Effect::Request(request) => self.request = Some(request),
+                    radial::Effect::InsertSplinePoint(curve) => self.insert_spline = Some(curve),
+                    radial::Effect::LookAt => {
+                        self.look_at(session);
+                    }
                     radial::Effect::SelectOther => {
                         if let Some(at) = ui.input(|i| i.pointer.latest_pos()) {
                             self.open_select_other(session, at, size, &to_view);
@@ -568,7 +786,7 @@ impl Viewport {
         }
 
         let scene = Scene::of(session);
-        paint::under(ui, rect, &self.camera, session);
+        paint::under(ui, rect, &self.camera, session, self.show_ground);
         // Finishing the sketch restores the sliced graphics.
         if active.is_none() || session.sketch_is_spatial() {
             self.slice = false;
@@ -584,7 +802,7 @@ impl Viewport {
             });
             target::Slicing { planes: one.into_iter().collect(), union: false, cap: false }
         };
-        self.background.paint(ui, rect, &self.camera, &scene, slice);
+        self.background.paint(ui, rect, &self.camera, &scene, slice, self.style);
         paint::over(
             ui,
             rect,
@@ -593,6 +811,7 @@ impl Viewport {
             &scene,
             self.background.has_gpu(),
             self.show_constraints,
+            &self.visibility,
         );
         {
             let camera = self.camera;
@@ -601,9 +820,17 @@ impl Viewport {
                 #[allow(clippy::cast_possible_truncation, reason = "screen coordinates fit f32")]
                 Some(egui::pos2(rect.left() + p[0] as f32, rect.top() + p[1] as f32))
             };
-            origin::paint(&ui.painter_at(rect), &screen, session, self.origin_selected, self.constrain_mode);
+            origin::paint(
+                &self.visibility,
+                &ui.painter_at(rect),
+                &screen,
+                session,
+                self.origin_selected,
+                self.constrain_mode,
+            );
             dof::paint(&ui.painter_at(rect), &screen, session, camera.distance * 0.12);
             workfeat::paint(
+                &self.visibility,
                 &ui.painter_at(rect),
                 &screen,
                 session,
@@ -631,8 +858,14 @@ impl Viewport {
         } else {
             self.hud.cancel();
         }
-        self.view_cube(ui, rect, lang);
-        self.nav_bar(ui, rect, session, lang);
+        if self.show_view_cube {
+            self.view_cube(ui, rect, lang);
+        } else {
+            self.cube_centre = None;
+        }
+        if self.show_nav_bar {
+            self.nav_bar(ui, rect, session, lang);
+        }
         if self.perf_overlay {
             self.perf(ui, rect, lang);
         }
@@ -706,12 +939,12 @@ impl Viewport {
             egui::Stroke::new(1.0, colors::border()),
             egui::StrokeKind::Outside,
         );
-        let look_target = self.look_target(session);
+        let can_look = self.can_look_at(session);
         let mut act = None;
         for (index, (icon, label, tool)) in tools.iter().enumerate() {
             let cell =
                 egui::Rect::from_min_size(top_left + vec2(0.0, button * index as f32), vec2(button, button));
-            let enabled = !(index == 4 && look_target.is_none());
+            let enabled = !(index == 4 && !can_look);
             let sense = if enabled { Sense::click() } else { Sense::hover() };
             let response = ui.interact(cell, egui::Id::unique(("gc_nav_bar", index)), sense);
             let active = tool.is_some() && self.nav_tool == *tool;
@@ -734,9 +967,7 @@ impl Viewport {
             }
             Some(4) => {
                 self.nav_tool = None;
-                if let Some((normal, up)) = look_target {
-                    self.camera.look_along(-normal, up);
-                }
+                self.look_at(session);
             }
             Some(index) => {
                 let chosen = tools[index].2;
@@ -763,18 +994,54 @@ impl Viewport {
         }
     }
 
-    /// The face the Look At tool turns the view to: a selected origin plane, or the sketch plane being
-    /// edited. Returns the face's normal and the direction that is up in it.
-    fn look_target(&self, session: &Session) -> Option<(DVec3, DVec3)> {
-        if let Some((occurrence, gc_doc::OriginElement::Plane(plane))) = self.origin_selected
-            && let Some(origin) = session.component_origin(occurrence)
-        {
-            let pose = origin.plane(plane);
-            return Some((pose.rotation * DVec3::Z, pose.rotation * DVec3::Y));
+    /// What Look At is used on, from the current selection (Inventor 2026 help, Navigation Bar Reference,
+    /// GUID-3B926737-92BA-46CF-B722-97F68651772B: "zooms and rotates the model to display the selected
+    /// element planar to the screen or a selected edge or line horizontal to the screen"): a work feature, an
+    /// origin plane, a selected curve of the sketch being edited, else that sketch.
+    fn look_item(&self, session: &Session) -> Option<gc_session::LookItem> {
+        use gc_session::LookItem;
+        if let Some(id) = self.work_selected {
+            return Some(LookItem::WorkFeature(id));
         }
-        let (_, sketch) = session.active_sketch()?;
-        let plane = plane_of(session, sketch);
-        (!session.sketch_is_spatial()).then_some((plane.normal, plane.v))
+        if let Some((occurrence, gc_doc::OriginElement::Plane(plane))) = self.origin_selected {
+            return Some(LookItem::ComponentPlane(occurrence, plane));
+        }
+        let (sketch, _) = session.active_sketch()?;
+        if session.sketch_is_spatial() {
+            return None;
+        }
+        let curve = session.selection().iter().find_map(|item| match item {
+            gc_sketch::Item::Curve(id) => Some(*id),
+            _ => None,
+        });
+        Some(match curve {
+            Some(curve) => LookItem::SketchCurve { sketch, curve },
+            None => LookItem::Sketch(sketch),
+        })
+    }
+
+    /// Where Look At would turn the view now, if there is anything to look at.
+    fn look_target(&self, session: &Session) -> Option<gc_session::LookTarget> {
+        session.look_target(self.look_item(session)?, self.camera.forward())
+    }
+
+    /// Whether Look At has something to turn to.
+    pub fn can_look_at(&self, session: &Session) -> bool {
+        self.look_target(session).is_some()
+    }
+
+    /// Look At: turns the view to show the selected element square to the screen (a line level) and centres
+    /// and zooms on it. False when nothing selected can be looked at.
+    pub fn look_at(&mut self, session: &Session) -> bool {
+        let Some(target) = self.look_target(session) else { return false };
+        self.camera.look_along(-target.toward_eye, target.up);
+        self.camera.pivot = target.centre;
+        if let Some(reach) = target.reach.filter(|r| *r > 1e-6) {
+            let half = DVec3::splat(reach);
+            self.camera
+                .fit(&Aabb::from_points([target.centre - half, target.centre + half]), [1000.0, 700.0]);
+        }
+        true
     }
 
     /// The view cube in the top-right corner: shows how the view is turned; clicking a face, an edge or a
@@ -1086,9 +1353,69 @@ impl Viewport {
         let ctrl = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
         let clicked =
             response.clicked_by(PointerButton::Primary).then(|| response.interact_pointer_pos()).flatten();
-        if matches!(
+        if let Some(bend) = self.bend.as_mut() {
+            // Bend: the nearest line or arc under the click is one of the two.
+            if let Some(at) = clicked
+                && bend.lines.len() < 2
+            {
+                let screen = to_view(at);
+                let hit = lines
+                    .iter()
+                    .filter_map(|(id, a, b)| {
+                        let (a, b) = (on_screen(*a)?, on_screen(*b)?);
+                        Some((segment_distance(screen, a, b), *id))
+                    })
+                    .filter(|(d, _)| *d <= gc_tools::tolerance::CURVE_PX)
+                    .min_by(|a, b| a.0.total_cmp(&b.0));
+                if let Some((_, id)) = hit
+                    && !bend.lines.contains(&id)
+                {
+                    bend.lines.push(id);
+                }
+            }
+        } else if self.helix.as_ref().is_some_and(|h| h.placing) {
+            // Helical Curve: the start point, then the end point that gives the axis direction.
+            let anchor = self.helix.as_ref().and_then(|h| h.start).map(DVec3::from_array);
+            let plane_axis = session.spatial_plane();
+            let place = |at: egui::Pos2| {
+                let ray = camera.ray(to_view(at), size);
+                let ray = gc_math::Ray { origin: local(ray.origin), dir: turned(ray.dir) };
+                gc_tools::spatial::place(&ray, anchor, plane_axis, &points, &away(to_view(at)))
+            };
+            if let Some(helix) = self.helix.as_mut() {
+                helix.hover = cursor.and_then(place).map(|placed| placed.pos.to_array());
+                if let Some(placed) = clicked.and_then(place) {
+                    let at = placed.pos.to_array();
+                    match helix.start {
+                        None => helix.start = Some(at),
+                        Some(start) => {
+                            // A refusal (a value that does not evaluate, a zero-length axis) shows in the
+                            // status bar and the command stays open.
+                            let op = helix.op(session.doc(), start, at);
+                            if let Some(op) = op
+                                && session.edit_active_sketch(op).is_ok()
+                            {
+                                self.helix = None;
+                            }
+                        }
+                    }
+                }
+            }
+            if let Some(helix) = &self.helix
+                && let (Some(from), Some(to)) = (helix.start, helix.hover)
+                && let (Some(a), Some(b)) =
+                    (on_screen(DVec3::from_array(from)), on_screen(DVec3::from_array(to)))
+            {
+                #[allow(clippy::cast_possible_truncation, reason = "screen coordinates fit f32")]
+                let pt = |p: [f64; 2]| egui::pos2(rect.left() + p[0] as f32, rect.top() + p[1] as f32);
+                ui.painter().line_segment([pt(a), pt(b)], egui::Stroke::new(1.6, colors::PREVIEW));
+            }
+        } else if matches!(
             session.tool(),
-            gc_tools::ToolKind::Line | gc_tools::ToolKind::Arc | gc_tools::ToolKind::Arc3
+            gc_tools::ToolKind::Line
+                | gc_tools::ToolKind::Arc
+                | gc_tools::ToolKind::Arc3
+                | gc_tools::ToolKind::Spline
         ) {
             let anchor = session.spatial_anchor().map(DVec3::from_array);
             let plane_axis = session.spatial_plane();
@@ -1427,6 +1754,145 @@ impl Viewport {
         true
     }
 
+    /// Starts Bend in the 3D sketch being edited: click two lines that meet, then type the radius.
+    pub fn start_bend(&mut self) {
+        self.bend = Some(BendState { lines: Vec::new(), radius: "10 mm".to_owned(), fresh: true });
+    }
+
+    /// Whether Bend is running.
+    pub fn is_bending(&self) -> bool {
+        self.bend.is_some()
+    }
+
+    /// Bend's prompt, and the radius box once both lines are picked. Enter makes the bend, Esc ends.
+    fn bend_box(&mut self, ui: &egui::Ui, session: &mut Session, rect: egui::Rect, lang: Lang) {
+        let Some(mut bend) = self.bend.take() else { return };
+        if !session.sketch_is_spatial() || ui.input(|i| i.key_pressed(Key::Escape)) {
+            return;
+        }
+        let prompt = match bend.lines.len() {
+            0 => tr!(lang, BendPickFirst),
+            1 => tr!(lang, BendPickSecond),
+            _ => tr!(lang, BendRadius),
+        };
+        let mut make = false;
+        egui::Area::new(egui::Id::unique("gc_bend"))
+            .fixed_pos(rect.center_top() + egui::vec2(0.0, 14.0))
+            .pivot(egui::Align2::CENTER_TOP)
+            .order(egui::Order::Foreground)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.strong(tr!(lang, ToolBend));
+                    ui.label(prompt);
+                    if bend.lines.len() == 2 {
+                        let field = ui.add(egui::TextEdit::singleline(&mut bend.radius).desired_width(90.0));
+                        field.widget_info(|| {
+                            egui::WidgetInfo::labeled(egui::Role::TextInput, true, tr!(lang, BendRadius))
+                        });
+                        if std::mem::take(&mut bend.fresh) {
+                            field.request_focus();
+                        }
+                        if field.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+                            make = true;
+                        }
+                    }
+                });
+            });
+        if make && let [a, b] = bend.lines[..] {
+            // A refusal (lines that do not meet, a radius too big) is explained in the status bar; the
+            // command stays open to try again.
+            if session
+                .edit_active_sketch(gc_doc::SketchOp::Bend { lines: [a, b], radius: bend.radius.clone() })
+                .is_ok()
+            {
+                return;
+            }
+        }
+        self.bend = Some(bend);
+    }
+
+    /// Starts Helical Curve in the 3D sketch being edited: the dialog first.
+    pub fn start_helix(&mut self) {
+        self.helix = Some(HelixState::new());
+    }
+
+    /// Whether Helical Curve is running.
+    pub fn is_helixing(&self) -> bool {
+        self.helix.is_some()
+    }
+
+    /// The Helical Curve dialog (Helical Shape tab: Constant, a Definition, values, Rotation) while it is
+    /// open; once OK is pressed, the prompt for the two clicks. Esc ends.
+    fn helix_dialog(&mut self, ui: &egui::Ui, session: &Session, lang: Lang) {
+        let Some(mut helix) = self.helix.take() else { return };
+        if !session.sketch_is_spatial() || ui.input(|i| i.key_pressed(Key::Escape)) {
+            return;
+        }
+        let mut cancel = false;
+        if helix.placing {
+            let prompt =
+                if helix.start.is_none() { tr!(lang, HelixPickStart) } else { tr!(lang, HelixPickEnd) };
+            egui::Area::new(egui::Id::unique("gc_helix_prompt"))
+                .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 80.0))
+                .order(egui::Order::Foreground)
+                .show(ui.ctx(), |ui| {
+                    egui::Frame::popup(ui.style()).show(ui, |ui| ui.label(prompt));
+                });
+        } else {
+            let mut ok = false;
+            egui::Window::new(tr!(lang, ToolHelix))
+                .id(egui::Id::unique("gc_helix_dialog"))
+                .collapsible(false)
+                .resizable(false)
+                .default_width(300.0)
+                .show(ui.ctx(), |ui| {
+                    for (index, name) in [
+                        tr!(lang, HelixPitchRevolution),
+                        tr!(lang, HelixRevolutionHeight),
+                        tr!(lang, HelixPitchHeight),
+                        tr!(lang, HelixSpiral),
+                    ]
+                    .into_iter()
+                    .enumerate()
+                    {
+                        ui.radio_value(&mut helix.definition, index, name);
+                    }
+                    ui.separator();
+                    let d = helix.definition;
+                    let field = |ui: &mut egui::Ui, name: &str, text: &mut String, on: bool| {
+                        if on {
+                            ui.horizontal(|ui| {
+                                ui.label(name);
+                                let edit = ui.add(egui::TextEdit::singleline(text).desired_width(90.0));
+                                edit.widget_info(|| {
+                                    egui::WidgetInfo::labeled(egui::Role::TextInput, true, name)
+                                });
+                            });
+                        }
+                    };
+                    field(ui, tr!(lang, HelixDiameter), &mut helix.diameter, true);
+                    field(ui, tr!(lang, HelixPitch), &mut helix.pitch, d != 1);
+                    field(ui, tr!(lang, HelixRevolutions), &mut helix.revolutions, d != 2);
+                    field(ui, tr!(lang, HelixHeight), &mut helix.height, d == 1 || d == 2);
+                    field(ui, tr!(lang, HelixTaper), &mut helix.taper, d != 3);
+                    ui.horizontal(|ui| {
+                        ui.radio_value(&mut helix.right_hand, false, tr!(lang, HelixLeftHand));
+                        ui.radio_value(&mut helix.right_hand, true, tr!(lang, HelixRightHand));
+                    });
+                    ui.horizontal(|ui| {
+                        ok = ui.button(tr!(lang, Ok)).clicked();
+                        cancel = ui.button(tr!(lang, Cancel)).clicked();
+                    });
+                });
+            if ok {
+                helix.placing = true;
+            }
+        }
+        if !cancel {
+            self.helix = Some(helix);
+        }
+    }
+
     /// Starts Grip Snap: pick an edge, then two points.
     pub fn start_grip_snap(&mut self) {
         self.grip = Some(grip::Grip::new());
@@ -1680,16 +2146,19 @@ impl Viewport {
         if self.grip_step(ui, response, session, size, &to_view, lang) {
             return;
         }
-        // Paste: a ring follows the cursor; a click pastes there (one undo step), Esc does nothing.
+        // Paste: a see-through ghost of the copy follows the cursor (nothing is made yet); a click pastes
+        // there (one undo step), Esc or a right click does nothing.
         if let Some(paste) = self.placing_paste {
             if ui.input(|i| i.key_pressed(egui::Key::Escape)) || response.secondary_clicked() {
+                session.end_paste_preview();
                 self.placing_paste = None;
                 return;
             }
-            if let Some(at) = response.hover_pos() {
-                let painter = ui.painter_at(self.rect);
-                painter.circle_stroke(at, 9.0, egui::Stroke::new(1.8, colors::ACCENT));
-                painter.circle_filled(at, 2.5, colors::ACCENT);
+            if let Some(at) = response.hover_pos()
+                && let Some(point) = place::ground_hit(&self.camera, size, to_view(at), paste.anchor)
+            {
+                let by = point - paste.anchor;
+                drop(session.preview_paste(gc_doc::Placement { xyz: by.to_array(), rpy: [0.0; 3] }));
                 ui.ctx().request_repaint();
             }
             if response.clicked_by(PointerButton::Primary)
@@ -1699,6 +2168,7 @@ impl Viewport {
                 let by = point - paste.anchor;
                 // A refusal is explained in the status bar.
                 drop(session.paste(gc_doc::Placement { xyz: by.to_array(), rpy: [0.0; 3] }));
+                session.end_paste_preview();
                 self.placing_paste = None;
             }
             return;
@@ -1730,7 +2200,9 @@ impl Viewport {
             && let Some(at) = response.interact_pointer_pos().map(to_view)
         {
             let screen = |p: gc_math::DVec3| self.camera.project(p, size);
-            if let Some(id) = workfeat::pick(session, &screen, at, self.camera.distance * 0.6) {
+            if let Some(id) =
+                workfeat::pick(&self.visibility, session, &screen, at, self.camera.distance * 0.6)
+            {
                 self.request = Some(ViewportRequest::EditWorkFeature(id));
                 return;
             }
@@ -1753,12 +2225,13 @@ impl Viewport {
             let at = response.interact_pointer_pos().map(to_view);
             // Work features that are shown come before the origin geometry.
             let screen = |p: gc_math::DVec3| self.camera.project(p, size);
-            self.constrain_work =
-                at.and_then(|at| workfeat::pick(session, &screen, at, self.camera.distance * 0.6));
+            self.constrain_work = at.and_then(|at| {
+                workfeat::pick(&self.visibility, session, &screen, at, self.camera.distance * 0.6)
+            });
             self.constrain_pick = if self.constrain_work.is_some() {
                 None
             } else {
-                at.and_then(|at| origin::pick(&self.camera, size, session, at, true))
+                at.and_then(|at| origin::pick(&self.visibility, &self.camera, size, session, at, true))
             };
         } else if self.measure_features && response.clicked_by(PointerButton::Primary) {
             let at = response.interact_pointer_pos().map(to_view);
@@ -1768,12 +2241,13 @@ impl Viewport {
             let at = response.interact_pointer_pos().map(to_view);
             // Work features that are shown come first, as the origin geometry does.
             let screen = |p: gc_math::DVec3| self.camera.project(p, size);
-            self.work_selected =
-                at.and_then(|at| workfeat::pick(session, &screen, at, self.camera.distance * 0.6));
+            self.work_selected = at.and_then(|at| {
+                workfeat::pick(&self.visibility, session, &screen, at, self.camera.distance * 0.6)
+            });
             self.origin_selected = if self.work_selected.is_some() {
                 None
             } else {
-                at.and_then(|at| origin::pick(&self.camera, size, session, at, false))
+                at.and_then(|at| origin::pick(&self.visibility, &self.camera, size, session, at, false))
             };
             let picked = if self.origin_selected.is_some()
                 || self.work_selected.is_some()
@@ -1881,6 +2355,10 @@ impl Viewport {
             self.nav_tool = None;
             self.free_tool = None;
         }
+        // Page Up turns the view to the selected element (Look At).
+        if ctx.input(|i| i.key_pressed(Key::PageUp)) {
+            self.look_at(session);
+        }
         // F5 returns to the previous view, Shift + F5 goes to the next.
         let time = ctx.input(|i| i.time);
         self.views.follow(&self.camera, time);
@@ -1924,10 +2402,36 @@ impl Viewport {
             self.hud.cancel();
             session.tool_event(ToolEvent::Key(ToolKey::Escape));
         }
+        // Enter finishes a 3D spline through the fit points clicked.
+        if session.sketch_is_spatial()
+            && session.tool() == gc_tools::ToolKind::Spline
+            && ctx.input(|i| i.key_pressed(Key::Enter))
+        {
+            session.spatial_finish();
+        }
         if delete {
             session.tool_event(ToolEvent::Key(ToolKey::Delete));
         }
     }
+}
+
+/// Whether `pos` (sketch coordinates) is within `reach` of the spline `curve`.
+fn near_spline(session: &Session, curve: Id<gc_sketch::Curve>, pos: [f64; 2], reach: f64) -> bool {
+    let Some((_, sketch)) = session.active_sketch() else { return false };
+    let Some(line) = sketch.curves.get(&curve).and_then(|c| sketch.spline_outline(&c.geom, 16)) else {
+        return false;
+    };
+    line.windows(2).any(|w| {
+        let (dx, dy) = (w[1][0] - w[0][0], w[1][1] - w[0][1]);
+        let length = dx * dx + dy * dy;
+        let t = if length > 0.0 {
+            (((pos[0] - w[0][0]) * dx + (pos[1] - w[0][1]) * dy) / length).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let (x, y) = (w[0][0] + dx * t - pos[0], w[0][1] + dy * t - pos[1]);
+        x * x + y * y <= reach * reach
+    })
 }
 
 /// The context menu of an item of the cell: its name, show or hide, plan (a path), delete.

@@ -169,7 +169,7 @@
 - 근거: 단축키 원문 GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E ("Tab Demote", "Shift + Tab Promote", "Alt + drag mouse: In assemblies, applies a mate constraint", "F10 Sketch visibility", Windows 키 Ctrl+C/V), Alt+드래그 본문 GUID-0F500089-4F69-41C5-AFE8-B58AC9E8E15E ("To drag a component into position and place a Mate constraint").
 - **Tab**: 선택한 구성요소의 Demote(브라우저 메뉴와 같이 새 서브어셈블리 이름 입력 줄), **Shift+Tab**: 한 단계 위로 Promote(소속 서브어셈블리의 부모로 이동, 최상위면 최상위로). 테스트 `tab_demotes_and_shift_tab_promotes_the_selected_component`.
 - **Alt+드래그**: Alt를 누른 채 구성요소의 면·원통을 눌러 다른 구성요소의 면·원통으로 끌어 놓으면 미리보기 선(초록=가능, 회색=불가)이 보이고, 놓으면 `possible_relations`의 첫 해(평면끼리 Mate, 원통끼리 축 Mate)를 오프셋 0으로 만든다(풀 수 없으면 구속 오류 대화상자). 테스트 `alt_drag_places_a_mate_between_two_faces`. 원문과 차이: 끄는 동안 구성요소 자체는 움직이지 않고 놓을 때 해에 따라 이동하며(원문은 접근하는 위치를 미리 보여 준다), 평면·원통 외 형상(모서리·점)과 평면의 Flush 자동 선택은 없다.
-- **Ctrl+C / Ctrl+V**: Ctrl+C는 선택한 구성요소(본체·로봇과 툴·가져온 어셈블리)를 `copy_to_clipboard`로 기억한다. Ctrl+V는 아직 아무것도 만들지 않고 커서를 따라다니는 고리만 보인다(`start_paste`); 클릭하면 클릭한 점과 복사본 첫 구성요소 위치의 차이를 offset으로 `paste(offset)`을 한 번만 호출해(관계 없이, 같은 방향) **Undo 한 단계**로 붙여넣는다. Esc·우클릭은 아무것도 하지 않는다. 원문 GUID-249C50F9-5A8C-48BD-8341-D1BDB7A16B19("Use Copy and Paste to place new instances using the same orientation"). 테스트 `ctrl_c_and_ctrl_v_paste_a_copy_of_the_selected_body`. 원문과 차이: 끄는 동안 붙여넣을 모양의 미리보기는 고리 표시뿐(복사본이 아직 없다 — 원본을 움직여 보이면 오해를 주어 쓰지 않았다), 서브어셈블리 행 자체를 복사하는 키 경로는 없다(API는 지원), 한 번 붙이면 한 번만 놓인다.
+- **Ctrl+C / Ctrl+V**: Ctrl+C는 선택한 구성요소(본체·로봇과 툴·가져온 어셈블리)를 `copy_to_clipboard`로 기억한다. Ctrl+V는 아직 아무것도 만들지 않고 복사본의 반투명 고스트가 커서를 따라다닌다(`start_paste`, 매 프레임 `preview_paste(offset)`, 증거 `docs/evidence/img/review-64-paste-ghost.png`); 클릭하면 클릭한 점과 복사본 첫 구성요소 위치의 차이를 offset으로 `paste(offset)`을 한 번만 호출해(관계 없이, 같은 방향) **Undo 한 단계**로 붙여넣는다. Esc·우클릭은 `end_paste_preview`만 부른다. 원문 GUID-249C50F9-5A8C-48BD-8341-D1BDB7A16B19("Use Copy and Paste to place new instances using the same orientation"). 테스트 `ctrl_c_and_ctrl_v_paste_a_copy_of_the_selected_body`. 원문과 차이: 서브어셈블리 행 자체를 복사하는 키 경로는 없다(API는 지원), 한 번 붙이면 한 번만 놓인다.
 - **F10**: 편집 중인 스케치(없으면 마지막 스케치)의 가시성을 토글. 테스트 `f10_toggles_the_visibility_of_the_latest_sketch`.
 
 ### 리본 아이콘 정리
@@ -213,6 +213,96 @@
 - 원문: Working with the Assembly Browser GUID-5F975252-BDB4-488C-A2C5-8B15C7D3C641("Hide Work Features turns the display of all work features and the Origin folder off or on", "Hide Fully Constrained only displays components that have constraint issues", "Show Constraint State displays all constraint status", "Edit Values in Browser turns the display of the browser edit box off or on ... used for changing or measuring constraint geometry").
 - 찾기 상자 옆 "…"(접근성 이름 "브라우저 메뉴") 메뉴에 네 개 체크: **작업 피처 숨기기**(문서·구성요소 원점 폴더와 작업 피처 목록을 감춤), **완전 구속 숨기기**(완전 구속 구성요소·관계 행을 감춤), **구속 상태 표시**(점 표시, 기본 켬), **브라우저에서 값 편집**(기본 켬). 값 편집: 구속 행을 클릭하면 그 아래 값 상자("관계 값", 오프셋 mm / 각도 °)가 나타나고 Enter로 `SetRelationship` 적용(Undo 1단계). 조인트·강체 같은 값 없는 관계는 상자가 없다. 테스트 `the_browser_menu_hides_work_features_and_edits_a_constraint_value_in_place`.
 - 원문과 차이: 값을 바꾸면 인벤터처럼 상자가 닫히지 않고 선택이 유지된다, 측정 전용 동작(값 읽기)은 없다. 설정은 세션 동안만 유지(파일에 저장하지 않음).
+
+### 작업 평면·점 종류 확장
+
+- 원문: To Create Work Features, GUID-38A9748E-FA2D-44D3-928C-DFE1326A9385. 작업 평면 대화상자: 평면에서 간격띄우기 / 세 점 / **평면에 평행·점 통과 / 두 평면의 중간면 / 평면에 대한 각도(선 기준) / 선과 점 / 선에 수직·점 통과 / 곡선에 수직·점 통과**. 작업 점 대화상자: 점 / **두 선의 교차 / 평면과 선의 교차 / 세 평면의 교차 / 곡선의 중심**. 작업 축의 "원 중심 통과"는 타원도 받는다. 선은 스케치 선·작업 축·조립 원점 축·구성요소 원점 축(`LineRef`) 목록에서 고른다. 편집 시 정의를 대화상자로 되읽고(`_ => return` 정리), 풀 수 없는 정의는 문서가 거부해 상태 표시줄에 이유가 나온다.
+- 테스트: `midplanes_and_intersection_points_are_made_and_read_back`(대화상자 단위), `the_work_plane_dialog_offers_the_newer_definitions_and_makes_a_midplane`, 증거 `docs/evidence/img/review-65-work-plane-kinds.png`.
+- 원문과 차이: 대상은 뷰에서 클릭하지 않고 목록에서 고른다(앞 항목과 같음). 어셈블리에서 인벤터가 허용하는 종류 제한은 두지 않았다.
+
+### 스플라인: 점 삽입 / 곡선 닫기, 간격띄우기 선택 강조, 열린 스플라인 연장
+
+- 원문 GUID-DB15C479-66F2-456A-9E54-40A60F83DC92("To close a curve, right-click the starting point and choose Close Curve", "right-click the spline and choose Insert Point. Then click the curve"). 스케치에서 스플라인 위를 멈춤 우클릭(누르고 떼기)하면 목록에: 안쪽 맞춤점 위 = "스플라인 분할", **시작 맞춤점 위(열린 스플라인, 맞춤점 3개 이상) = "곡선 닫기"**(`SketchOp::CloseSpline`), **곡선 위 = "점 삽입"**: 고르면 곡선을 클릭할 때마다 가장 가까운 자리에 맞춤점을 넣고(`InsertSplinePoint`, 클릭마다 Undo 한 단계) 위쪽에 안내가 보이며 Esc로 끝낸다. 테스트 `the_spline_menu_inserts_points_and_closes_the_curve`.
+- 간격띄우기 등 도구가 고른 곡선(`Preview.picks`의 `Item::Curve`)을 이제 굵은 미리보기 색으로 그린다(전에는 점만 그렸다) — 타원·스플라인의 선택이 보인다(`review-66-offset-pick.png`). 열린 스플라인 연장: 끝쪽에 커서를 대면 경계까지의 선이 미리보기되고 클릭하면 새 끝 맞춤점이 경계에 묶여 이어진다(`review-67-extend-spline.png`). 테스트 `offset_highlights_its_pick_and_extend_takes_an_open_spline_to_a_boundary`.
+- 원문과 차이: 점 삽입 중 커서 옆에 삽입 위치 미리보기는 없다, 곡선 닫기/점 삽입/분할의 핸들 재설정 메뉴(Reset Handle)는 없다.
+
+### 선-호 / 호-호 치수 화면 점검
+
+- 원문 GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185(선과 호 자체 사이 거리, 두 호 사이 거리). 치수 도구로 선 → 원 테두리 → 글자 위치를 클릭하면 `DimKind::LineArc`가 만들어진다(테스트 `the_dimension_tool_measures_a_line_to_a_circle_itself_on_screen`, 증거 `docs/evidence/img/review-68-arc-distance.png`).
+- 발견: 원 테두리를 차례로 두 번 클릭해 두 원 사이 거리(`ArcArc`)를 만들려 하면 도구는 두 번째 원의 지름 치수를 만든다 — 도구가 호-호 두 선택을 아직 받지 않는 것으로 보인다(`gc_tools`). 백엔드 확인 요청.
+
+### Look At 연결, 3D Bend 버튼
+
+- 근거: Inventor 2026 도움말 GUID-3B926737-92BA-46CF-B722-97F68651772B (Look At), GUID-4F861674-F74C-474E-869A-4C190ED6EC4B (Bend).
+- Look At: 뷰 탭 "면 보기" 큰 버튼, 마킹 메뉴, 탐색 막대, PageUp 모두 `Viewport::look_at`로 연결(작업 피처·원점 평면·활성 스케치/선택 곡선). 마킹 메뉴 항목은 항상 활성(알려진 차이).
+- Bend: 3D 스케치 그리기 패널의 작은 버튼. 선 두 개를 클릭 → 반지름 입력(기본 10 mm) → Enter로 `SketchOp::Bend`. 실패하면 상태 표시줄에 사유, 명령 유지. Esc로 종료. 호 미리보기는 없음(알려진 차이).
+- 테스트: `look_at_turns_the_view_square_to_the_sketch_plane`, `the_3d_draw_panel_has_a_bend_button_that_esc_ends`.
+
+### 3D 스플라인 버튼
+
+- 근거: Inventor 2026 도움말 GUID-DB15C479-66F2-456A-9E54-40A60F83DC92 (보간 스플라인은 3D 스케치에서도 만들 수 있음).
+- 3D 스케치 그리기 패널의 선 분할 버튼에 "스플라인(보간)" 추가. 뷰포트 클릭마다 `spatial_click`로 맞춤점, Enter로 `spatial_finish`, 진행 중 곡선은 `spatial_spline_preview`로 미리보기. Esc는 기존 도구 취소.
+- 테스트: `a_3d_spline_is_placed_with_fit_points_and_finished_with_enter`.
+
+### Auto-Bend 옵션, 두 원 치수 재확인
+
+- 근거: Inventor 2026 도움말 GUID-1898C432-CFD2-46F1-8BAE-631392DFBF1D (Sketch 탭, 3D Sketch "Auto-bend with 3D line creation": 기본 꺼짐, 3D 선을 그릴 때 접하는 모서리 굽힘을 자동 배치), GUID-58DD9A89.
+- 응용 프로그램 옵션 스케치 탭에 "3D 선 그릴 때 자동 굽힘" 체크 + 굽힘 반지름 칸(기본 10 mm). 설정 파일(`auto_bend`, `auto_bend_radius`)에 저장되고 다음 실행에서 `Session::set_auto_bend`로 복원.
+- 원문과 차이: 원문 옵션은 체크 상자뿐이다. 반지름 칸은 리드 요청으로 추가.
+- 겹친 두 원: 백엔드 테스트(`sketch_arc_distance`, 5개)가 리드 브랜치에서 통과 — 치수 도구 경로는 UI도 동일.
+- 테스트: `the_auto_bend_option_is_off_by_default_saved_and_read_back`.
+
+### 3D 스케치 Helical Curve 대화상자
+
+- 근거: Inventor 2026 도움말 GUID-37BA1DCE-6BC4-41CD-A36D-577F31B304FC (To Draw 3D Curves, Draw a Helical Curve).
+- 3D 스케치 그리기 패널의 "나선 곡선" 버튼 → 대화상자(정의: 피치 및 회전 / 회전 및 높이 / 피치 및 높이 / 나선형, 지름, 피치·회전·높이, 테이퍼(나선형 제외), 왼손·오른손) → 확인 → 뷰포트에서 시작점, 끝점(축 방향) 클릭 → `SketchOp::AddHelix`. 값은 `evaluate_value`로 해석(단위·매개변수 가능). 시작~끝 점 사이 고무줄 선을 보여 준다. 실패하면 명령 유지, Esc 종료.
+- 원문과 차이: Variable helical curve(표), Helix Ends 탭(Natural/Flat 전이), 지름 생략(자동 계산)은 없음 — 지름은 필수(기본 20 mm). 끝점은 축 방향만 정한다(높이는 값에서).
+- 테스트: `the_helical_curve_dialog_then_two_clicks_make_a_helix`.
+
+### 스플라인 점 삽입 보정 (QA 관찰 2건)
+
+- 점 삽입 모드는 곡선에서 픽 허용 거리(`CURVE_PX`) 안을 클릭할 때만 점을 넣는다(원문 "곡선을 클릭"). 멀리 누르면 무시.
+- 안내 글자는 그려진 텍스트 대신 레이블(Area)이라 접근성 노드가 있다 → 화면 테스트에서 모드 확인 가능.
+- 테스트: `the_spline_menu_inserts_points_and_closes_the_curve`에 안내 레이블·먼 클릭 무시 단언 추가.
+
+### 뷰 탭: 시각 스타일(Visual Style) 분할 버튼
+
+- 근거: Inventor 2026 도움말 GUID-8D59A8BF-49A8-4214-A3A7-F184DB73E68F (About Visual Styles in Models: View 탭 Appearance 패널에서 스타일 선택), 그림자·바닥 GUID-3395B47F-7D8B-47B4-ACDD-0A9489948DB4 / GUID-AC7970C5-72DB-409E-AED4-96B9C5E6C4A0.
+- 외형 패널의 분할 버튼: 음영 처리(모서리 없음) / 모서리가 있는 음영 처리(기본, 현재 렌더) / 와이어프레임(면 없이 모서리 전체). 면·모서리 그리기 여부만으로 되는 것이라 렌더러 변경 없이 `VisualStyle`(gc_viewport)로 처리.
+- 렌더러 지원이 필요한 나머지: 숨은 모서리 표시(음영/와이어프레임 + 숨은 모서리 점선·옅은 색: 깊이 반전 패스), 가시 모서리만 있는 와이어프레임(색 쓰기 없는 깊이 전용 패스), 사실적(재질), 흑백·수채화·스케치 일러스트.
+- 테스트: `the_visual_style_drop_down_switches_shaded_edges_and_wireframe`.
+
+### 뷰 탭: 개체 가시성(Object Visibility) 드롭리스트
+
+- 근거: Inventor 2026 도움말 GUID-BA193171-FAFC-4150-9222-CC43D8D4AA54 (View 탭 Visibility 패널 Object Visibility: 드롭리스트에서 체크 해제=끄기, 선택=켜기, 같은 종류 전체에 적용. 컨텍스트 메뉴 가시성과 충돌하면 개별 설정이 우선이라는 주의 문구).
+- 구현: `ribbon_drop_button`(gc_ui, 체크 클릭에는 열린 채, 바깥 클릭에 닫힘) + `ObjectVisibility`(gc_viewport). 종류: 원점 평면·축·점, 작업 평면·축·점, 스케치(비활성 2D), 3D 스케치, 구속조건 기호. 그리기와 선택(pick) 둘 다 같은 필터를 따른다.
+- 의미: 작업 피처·스케치는 기본 켜짐이고 끄면 전부 숨김(개별로 숨긴 것은 그대로 숨김). 원점 종류는 기본 꺼짐(Inventor 원점 폴더처럼)이고 켜면 모든 컴포넌트의 해당 원점 요소가 개별 표시에 더해 보인다.
+- 원문과 차이: 이 설정은 실행 중에만 유지(문서 저장 안 됨). UCS·스케치 치수·와이어 등 우리에게 없는 종류는 없음. 스케치 치수 일괄 표시/숨김(GUID-026FE8D3)은 구속 기호와 별개이므로 아직 없음.
+- 테스트: `the_object_visibility_drop_list_switches_kinds_on_and_off`; 기존 `qa_assembly_ui` 15개 통과.
+
+### 뷰 탭: 바닥 평면, 패널 순서(Visibility · Appearance · Windows · Navigate)
+
+- 근거: Inventor 2026 도움말 GUID-AC7970C5-72DB-409E-AED4-96B9C5E6C4A0 (바닥 평면의 켜기/끄기는 View 탭 Appearance 패널, 세션 단위), GUID-3395B47F-7D8B-47B4-ACDD-0A9489948DB4 (그림자 목록도 Appearance 패널).
+- 바닥 평면 버튼 = 바닥 격자(`Viewport::show_ground`). 스케치를 편집하는 동안에는 스케치 자체의 격자가 남는다. 바닥 평면 설정(위치·불투명도·색·반사)과 문서 저장은 없음.
+- 그림자(전체/바닥/물체/주변)는 렌더러에 그림자 맵이 없어 없음 — 렌더러 작업이 필요하다(리드에 보고).
+- 패널 순서: 가시성(개체 가시성, 자유도) · 외형(시각 스타일, 바닥 평면, 투영, 단면) · 창(패널 반투명, 어두운 테마) · 탐색(홈, 표준 뷰, 전체 보기, 면 보기). 투영 패널은 외형으로 합쳤고, "표준 뷰"는 "탐색", "패널"은 "창"으로 이름을 바꿨다. 단면(Section)을 외형에 둔 것은 이전 배치를 유지한 것(원문 위치 미확인).
+- 테스트: `the_ground_plane_button_switches_the_floor_grid`, `the_view_tab_panels_run_visibility_appearance_windows_navigate`; shell 106개 통과.
+
+### 렌더러: 숨은 모서리 패스와 깊이 전용 솔리드 패스
+
+- 근거: Inventor 2026 도움말 GUID-8D59A8BF-49A8-4214-A3A7-F184DB73E68F (Shaded with Hidden Edges, Wireframe with Hidden Edges, Wireframe with visible Edges Only의 면·가시/숨은 모서리 표).
+- `gc_render::View`에 `depth_only`(불투명 솔리드를 색 없이 깊이만 기록, 반투명은 건너뜀), `hidden_edges`(시각 깊이 반대 비교 `Less`로 면 뒤의 모서리를 점선·옅게 먼저 그림) 추가. 파이프라인은 시작 때 한 번 만들고, 두 플래그가 꺼져 있으면 기본 스타일의 드로 호출·정점 처리는 그대로다(GPU 테스트가 기본 = 메시 1 + 모서리 1 = 2회, 숨은 모서리 = 3회를 확인).
+- 시각 스타일 6종: 음영 / 모서리가 있는 음영(기본) / 숨은 모서리가 있는 음영 / 와이어프레임(모든 모서리, 가림 없음) / 숨은 모서리가 있는 와이어프레임 / 보이는 모서리만 있는 와이어프레임. 사실적·흑백·수채화·스케치 일러스트는 보류(리드 지시).
+- 점선은 화면 대각선 4 px 켜짐/4 px 꺼짐(fs_edge_hidden의 discard), 투명도 0.55. 원문에는 점선 규격이 없다.
+- 테스트: `gc_render` GPU `hidden_edges_and_depth_only_solids`(큐브 뒤 모서리: 기본 안 보임, 숨은 모서리 점선, 깊이 전용에서 큐브 색 없음·모서리는 여전히 가려짐), 셸 `the_visual_style_drop_down_…`에 새 스타일 선택 추가.
+
+### 뷰 탭 창(Windows) 패널: 사용자 인터페이스 드롭다운, Clean Screen
+
+- 근거: Inventor 2026 도움말 GUID-285B9036-0E97-4F18-A6D2-EF78B8B8FAA9 (ViewCube Menu Reference: "View tab > Windows pane > User Interface > ViewCube", 끄면 탐색 막대에서 계속 사용), GUID-84B053B0-E83B-4D9C-8436-1BE9AD5E9EBE (To Work with Graphics Windows: Clean Screen은 View 탭 Windows 패널, 브라우저와 리본을 숨김). Ctrl+0은 구판 GUID-5ED57F9B-6FA8-440B-94F3-0B92CACBE295(Increase Screen Space)에서 확인한 것이라 2026 쪽 문서로는 못 찾음.
+- 사용자 인터페이스 드롭리스트: 뷰큐브·탐색 막대·브라우저·속성·상태 표시줄 체크(`ribbon_drop_button`). 켜고 끄는 즉시 설정 파일(`hide_view_cube`, `hide_nav_bar`, `hide_status_bar`, `browser_closed`, `properties_closed`)에 저장되고 다음 실행에서 복원.
+- Clean Screen: 외형 아래 스택의 한 줄(1280 px 안에 들어가게). 리본을 없애고 브라우저를 접으며, 다시 누르거나 Ctrl+0이면 이전 상태로 복원. 저장되지 않는다(세션 단위). 원문의 "Inventor 창 최대화"·"패널 최소화 상태 복원"은 해당 없음.
+- 원문에서 확인 못 한 것: 2026 드롭다운의 전체 항목 목록(확인한 것은 ViewCube, 탐색 막대). 브라우저·속성·상태 표시줄은 앱에 있는 요소를 기준으로 붙였다.
+- 테스트: `the_user_interface_list_hides_elements_and_clean_screen_toggles_with_ctrl_0`; shell 108개 통과(1280 px 폭 검사 포함).
 
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate

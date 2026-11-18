@@ -23,7 +23,7 @@ mod meshes {
     use gc_draw::{Camera, StandardView};
     use gc_math::DVec3;
     use gc_mesh::primitives;
-    use gc_render::{Instance, Line, MeshRenderer, View, ViewTarget, read_rgba};
+    use gc_render::{EdgeVertex, Instance, Line, MeshRenderer, View, ViewTarget, read_rgba};
 
     const SIZE: (u32, u32) = (64, 48);
 
@@ -50,6 +50,8 @@ mod meshes {
                 slice2: None,
                 slice_union: false,
                 slice_cap: false,
+                depth_only: false,
+                hidden_edges: false,
             },
         )
     }
@@ -198,5 +200,70 @@ mod meshes {
             let centre = pixel(&read_rgba(&gpu.device, &gpu.queue, &target).unwrap(), SIZE.0 / 2, SIZE.1 / 2);
             assert!(centre[0] > 55 && centre[0] < 100 && centre[1] < 60 && centre[2] > 150, "{centre:?}");
         }
+    }
+
+    /// Visual styles: an edge behind a cube is not drawn by default, drawn dashed with `hidden_edges`; with
+    /// `depth_only` the cube is invisible but still hides the edge; the extra passes cost a draw call only
+    /// when asked for.
+    #[test]
+    fn hidden_edges_and_depth_only_solids() {
+        let Some(gpu) = gc_test_support::gpu_or_skip("hidden_edges_and_depth_only_solids") else {
+            return;
+        };
+        let target = ViewTarget::new(&gpu.device, SIZE.0, SIZE.1);
+        let mut renderer = MeshRenderer::new(&gpu.device);
+        renderer.upload(&gpu.device, &gpu.queue, 1, &primitives::cuboid([0.8, 0.4, 0.8]).unwrap());
+        let (camera, mut view) = view(true);
+        let cube = at(&camera, 1, DVec3::ZERO, [1.0, 0.0, 0.0, 1.0]);
+        // A line behind the cube, across its middle, and one beside it that nothing hides.
+        let edge = |from: DVec3, to: DVec3| {
+            [from, to].map(|p| {
+                let r = p - camera.eye();
+                EdgeVertex { position: [r.x as f32, r.y as f32, r.z as f32], color: [0.0, 1.0, 0.0, 1.0] }
+            })
+        };
+        let behind = edge(DVec3::new(-0.3, 1.0, 0.0), DVec3::new(0.3, 1.0, 0.0));
+        let free = edge(DVec3::new(0.9, 1.0, 0.7), DVec3::new(1.4, 1.0, 0.7));
+        let edges: Vec<EdgeVertex> = behind.into_iter().chain(free).collect();
+        let mut run = |view: &View, instances: &[Instance]| {
+            let stats = renderer.draw(
+                &gpu.device,
+                &gpu.queue,
+                &target,
+                [0.0, 0.0, 1.0, 1.0],
+                view,
+                instances,
+                &[],
+                &edges,
+            );
+            (stats, read_rgba(&gpu.device, &gpu.queue, &target).unwrap())
+        };
+        // Pixels on the row of the hidden line, inside the cube's outline, that are not the cube's red.
+        let greenish = |pixels: &[u8]| {
+            (16..48)
+                .filter(|x| {
+                    let p = pixel(pixels, *x, SIZE.1 / 2);
+                    p[1] > 60 && p[0] < 200
+                })
+                .count()
+        };
+        let (plain, pixels) = run(&view, &[cube]);
+        assert_eq!(plain.draw_calls, 2, "the default costs the mesh and the edges only");
+        assert_eq!(greenish(&pixels), 0, "the line behind the cube is hidden");
+        view.hidden_edges = true;
+        let (hidden, pixels) = run(&view, &[cube]);
+        assert_eq!(hidden.draw_calls, 3);
+        let dashes = greenish(&pixels);
+        assert!(dashes > 3 && dashes < 20, "dashed through the cube: {dashes}");
+        // Depth only: the cube is not seen, the line behind it is still hidden by it.
+        view.hidden_edges = false;
+        view.depth_only = true;
+        let (_, pixels) = run(&view, &[cube]);
+        let centre = pixel(&pixels, SIZE.0 / 2, SIZE.1 / 2);
+        assert!(centre[2] > 200 && centre[0] < 60, "no colour from the cube: {centre:?}");
+        assert_eq!(greenish(&pixels), 0, "the invisible cube still hides the line");
+        view.hidden_edges = true;
+        let (_, pixels) = run(&view, &[cube]);
+        assert!(greenish(&pixels) > 3, "its hidden edge shows dashed");
     }
 }

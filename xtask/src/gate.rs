@@ -38,7 +38,7 @@ fn windows_target_installed() -> bool {
 }
 
 /// Everything a commit must pass, in the order the project rules prescribe.
-pub fn gate(root: &Path) -> Result<()> {
+pub fn gate(root: &Path, skip_gpu: bool) -> Result<()> {
     cargo_step(root, "fmt", ["fmt", "--all", "--check"])?;
     cargo_step(root, "check", ["check", "--workspace", "--all-targets", "--locked"])?;
     let clippy = ["clippy", "--workspace", "--all-targets", "--locked"];
@@ -52,7 +52,11 @@ pub fn gate(root: &Path) -> Result<()> {
         bail!("the {WINDOWS_TARGET} target is not installed; run `rustup target add {WINDOWS_TARGET}`");
     }
     cargo_step(root, "test", ["test", "--workspace", "--locked"])?;
-    test_gpu(root)?;
+    if skip_gpu {
+        println!("\n== test-gpu: skipped (--skip-gpu); run `cargo xtask test-gpu` before updating main");
+    } else {
+        test_gpu(root)?;
+    }
     println!("\n== check-layers");
     layers::check(root)?;
     println!("\n== check-licences");
@@ -67,13 +71,24 @@ pub fn gate(root: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Runs the tests with `GC_REQUIRE_GPU=1`, so a GPU test that finds no adapter fails instead of skipping.
+/// The test binaries that draw with a GPU (they call `gc_test_support::gpu()` or build a wgpu harness).
+/// Only these run a second time with a required adapter; every other test already ran in the `test` step.
+/// A new GPU test file must be added here (`gpu_test_files_are_listed` checks it).
+const GPU_TESTS: &[(&str, &str)] =
+    &[("gc_render", "gpu"), ("gc_app", "shell"), ("gc_app", "sketch_shape_tools")];
+
+/// Runs the GPU test binaries with `GC_REQUIRE_GPU=1`, so a GPU test that finds no adapter fails instead
+/// of skipping.
 ///
 /// Where the SwiftShader software renderer is installed (the sandbox and CI) it is selected for the child
 /// process only. On a developer PC nothing is overridden and the real GPU is used.
 pub fn test_gpu(root: &Path) -> Result<()> {
     let mut command = meta::cargo();
-    command.args(["test", "--workspace", "--locked", "--", "--test-threads=1"]).env("GC_REQUIRE_GPU", "1");
+    command.args(["test", "--locked"]);
+    for (package, test) in GPU_TESTS {
+        command.args(["-p", package, "--test", test]);
+    }
+    command.args(["--", "--test-threads=1"]).env("GC_REQUIRE_GPU", "1");
     let mut label = "test-gpu (system adapter)".to_owned();
     if std::env::var_os("VK_ICD_FILENAMES").is_none()
         && let Some(icd) = swiftshader_icd()
@@ -115,4 +130,37 @@ fn dir_size(dir: &Path) -> u64 {
             _ => 0,
         })
         .sum()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GPU_TESTS;
+    use std::path::Path;
+
+    /// Every integration test file that asks for a GPU is in `GPU_TESTS`, so `test-gpu` never skips one.
+    #[test]
+    fn gpu_test_files_are_listed() {
+        let crates = Path::new(env!("CARGO_MANIFEST_DIR")).join("../crates");
+        let mut missing = Vec::new();
+        for layer in std::fs::read_dir(&crates).unwrap().flatten() {
+            for package in std::fs::read_dir(layer.path()).into_iter().flatten().flatten() {
+                let name = package.file_name().to_string_lossy().into_owned();
+                for file in std::fs::read_dir(package.path().join("tests")).into_iter().flatten().flatten() {
+                    let path = file.path();
+                    if path.extension().is_none_or(|e| e != "rs") {
+                        continue;
+                    }
+                    let text = std::fs::read_to_string(&path).unwrap_or_default();
+                    if !(text.contains("gc_test_support::gpu") || text.contains(".wgpu()")) {
+                        continue;
+                    }
+                    let stem = path.file_stem().unwrap().to_string_lossy().into_owned();
+                    if !GPU_TESTS.iter().any(|(p, t)| *p == name && *t == stem) {
+                        missing.push(format!("{name} --test {stem}"));
+                    }
+                }
+            }
+        }
+        assert!(missing.is_empty(), "GPU tests not in GPU_TESTS: {missing:?}");
+    }
 }
