@@ -138,7 +138,6 @@ fn a_spline_needs_two_distinct_finite_fit_points() {
         refused(&mut s, k, what, spline_op(points));
     }
     let spatial = s.create_sketch_3d().unwrap();
-    // 3D sketches take splines too (GUID-DB15C479 "both 2D and 3D sketches"): refused or one sane step.
     step(&mut s, spatial, "a spline in a 3D sketch", spline_op(vec![mm(0.0, 0.0), mm(10.0, 5.0)]));
 }
 
