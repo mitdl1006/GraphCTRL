@@ -96,6 +96,12 @@
   없는 소유자면 `BadValue`.
 - 소유자가 사라지면(해체·삭제) 그 스케치는 최상위로 간다. 정리는 `set_timeline`에서 하고, 질의는 존재하는 소유자만 돌려준다.
 - 질의: `Document::sketch_owner(id) -> Option<TreeKey>`(`None` = 최상위), `sketches_of(owner)`.
+- 리드 결정(QA 관찰): 컴포넌트를 지우면 그 컴포넌트와 부품이 소유한 스케치를 같은 트랜잭션에서 함께 지운다(`delete_owned_sketches`).
+  `DeleteBody`, `DeleteRobot`, `DeleteAssembly`가 이 규칙을 따르고, 실행 취소 한 단계로 모두 돌아온다.
+  다른 것(피처, 작업 피처 등)이 그 스케치를 쓰면 `InUse`로 거부한다. 전에는 `Doc(Dangling)` 오류가 났다.
+  QA 테스트 `qa_sketch_owner.rs`의 삭제 거부 단언은 새 동작(`deleting_a_component_deletes_the_sketches_it_owns`)으로 바꿨다.
+- `CreateSketch`·`CreateSketchOn`의 이름은 앞뒤 공백을 뗀다. 비면 첫 빈 `SketchN`을 붙인다(`sketch_name`).
+  중복 이름은 아직 막지 않는다. 세션은 지금도 `Sketch{개수+1}`을 넘긴다.
 
 **세션**
 - `create_sketch`, `create_sketch_on_*`, `create_sketch_3d`는 편집 대상이 있으면 그것을 소유자로 붙인다(`execute_owned`).

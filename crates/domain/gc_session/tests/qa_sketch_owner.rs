@@ -159,30 +159,30 @@ fn a_dissolved_owner_hands_its_sketches_to_the_top_and_undo_gives_them_back() {
     assert_eq!(t.sketches_of(Some(sub(one))), vec![owned]);
 }
 
-/// A component that owns a sketch on its own plane cannot be deleted while the sketch is there (the sketch's
-/// frame refers to it): refused whole, no trace. Delete the sketch first and the component goes; undo of both
-/// restores the owner, the sketch and the ownership exactly.
+/// Deleting a component deletes the sketches it owns in the same step, as Inventor deletes a part's
+/// sketches with the part (lead decision, 2026-11-18); one undo restores the owner, the sketch and the
+/// ownership exactly. (Before: the delete was refused because the sketch's frame refers to the owner.)
 #[test]
-fn a_component_that_owns_a_sketch_is_not_deleted_from_under_it() {
+fn deleting_a_component_deletes_the_sketches_it_owns() {
     let mut s = Session::new();
     let (a, b) = (body(&mut s, 0.0), body(&mut s, 0.5));
     let owned = make_sketch(&mut s, Some(key(a)), "XY");
     let before = s.doc().clone();
     let depth = s.history().undo_depth();
-    let error = s.delete_item(CellItem::Body(a)).unwrap_err();
-    println!("deleting an owner: {error:?}");
-    assert!(s.doc().same_content(&before), "the refused delete changed the document");
-    assert_eq!(s.history().undo_depth(), depth);
-    assert_eq!(s.sketch_owner(owned), Some(key(a)));
-    // The other component can be deleted freely.
-    s.delete_item(CellItem::Body(b)).unwrap();
+    s.delete_item(CellItem::Body(a)).unwrap();
+    assert_eq!(s.history().undo_depth(), depth + 1, "one undo step");
+    assert!(s.doc().get(owned).is_none(), "the owned sketch stayed");
+    assert!(s.sketches_of(Some(key(a))).is_empty());
+    // The other component's delete does not touch it.
     assert!(s.undo());
     assert!(s.doc().same_content(&before));
-    // Sketch first, then the component: both go, the owner entry goes with the sketch.
+    assert_eq!(s.sketch_owner(owned), Some(key(a)));
+    s.delete_item(CellItem::Body(b)).unwrap();
+    assert!(s.doc().get(owned).is_some());
+    assert!(s.undo());
+    // Sketch first, then the component: both go; undo of both restores everything.
     s.execute(&Command::DeleteSketch { id: owned }).unwrap();
-    assert!(s.sketches_of(Some(key(a))).is_empty());
     s.delete_item(CellItem::Body(a)).unwrap();
-    assert!(s.sketches_of(Some(key(a))).is_empty());
     assert!(s.undo() && s.undo());
     assert!(s.doc().same_content(&before));
     assert_eq!(s.sketch_owner(owned), Some(key(a)));
