@@ -68,7 +68,7 @@ fn auto_bend_uses_the_documents_radius() {
     let mut s = Session::new();
     s.set_doc_settings(DocSettings { auto_bend_radius: 0.005, ..DocSettings::default() }).unwrap();
     let _k = s.create_sketch_3d().unwrap();
-    s.set_auto_bend(true);
+    s.set_auto_bend(Some(s.doc_settings().auto_bend_text()));
     s.set_tool(ToolKind::Line);
     for p in [[0.0, 0.0, 0.0], [0.1, 0.0, 0.0], [0.1, 0.1, 0.0]] {
         s.spatial_click(p, None, None);
