@@ -124,6 +124,51 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 조인트 원점: Align 1/2 · Invert alignment · Offset Origin · Between Two Faces (대조 목록 4+7 중 원문에 있는 부분)
+
+근거: To Define and Manage Joint Relationships(`GUID-21DC3336-5C51-42C1-90FB-4299CD66E0C6`) — "select Align 1 and pick … A planar face, point, or edge on the moving component. A work plane/work axis/work point …", "If Align 1 is point selection …, Align 2 must also be point selection", "To change the alignment direction, select Invert alignment", "Between Two Faces … virtual midpoint between two faces, by selecting two faces and one point", "Offset Origin".
+
+- 모델 변경 없음: 조인트 원점은 이미 `Geometry::Frame { origin, z, x }`이고 Rigid·Slider가 X축을 맞춘다. 아래는 그 프레임을 만드는 함수다(추가만).
+
+| 무엇 | 호출 |
+|---|---|
+| Align 1 / Align 2 (+ Invert) | `doc.joint_origin_aligned(&origin, &align, invert) -> Option<Selection>` — 면=법선, 모서리·축=방향, 점=원점에서 그 점으로. 어셈블리 작업 평면·축·점(`work_feature_selection`)도 됨. 방향이 원점 Z와 나란하면 `None`. 결과를 `Relationship.first/second`로 쓴다 |
+| 방향을 직접 줄 때 | `Geometry::aligned_to(direction, invert) -> Option<Geometry>` |
+| Offset Origin | `geometry.offset_origin([x, y, z])` — 원점 자신의 X·Y·Z 방향 |
+| Between Two Faces | `Geometry::between_faces(&face1, &face2, point) -> Option<Geometry>` — 평행한 두 평면의 가운데 평면 위, 찍은 점의 수선 발. Z는 첫 면의 법선 |
+
+- "Align 1이 점이면 Align 2도 점" 규칙은 UI에서 지키면 된다(백엔드는 각 원점을 따로 만든다).
+- **원문에서 찾지 못해 하지 않은 것**: Planar 조인트, Gap 값, Ball 조인트의 한계. 2026 도움말의 조인트 페이지(위 GUID)와 상위·이웃 페이지 약 330개를 내려받아 찾았지만 서술이 없다(대조 문서에도 "(미확인)"). 추측으로 만들지 않았다 — 원문 링크를 받으면 진행한다.
+- 테스트: `gc_doc/tests/relate.rs::joint_origins_take_alignment_an_offset_and_the_middle_of_two_faces`.
+
+## 2026-11-18 — 구속 값 = 모델 매개변수(어셈블리 대조 목록 3)
+
+근거: About Parameters in Models(`GUID-8E5C63EA-0540-4EBE-9B17-B8159C7FE40C`) — "Model parameters are created automatically when you define a sketch dimension …, add an assembly constraint …. default names, such as d0, d1, d2 … You can enter expressions in edit boxes that define the parameter names and values." To Work with Parameters in Models(`GUID-595F9D8E-9EEA-4446-91AB-830E5BAE548E`) — "If you entered a dimension or other value in an edit box, the value is listed here." Edit assembly constraints(`GUID-36315745-5FE6-4277-9F00-E410B962D83F`) — 브라우저 아래 편집 상자에서 오프셋·각도만 고침.
+
+- 모델(`gc_doc/src/relparam.rs`): `Components.relation_params: BTreeMap<Id<Relationship>, RelationParam { name, source, value }>`(serde default; `Relationship`·`RelationKind`는 그대로). 값이 있는 구속(Mate/Flush/Tangent/Insert 오프셋, Angle 각도)만 가진다. 조인트·Symmetry는 없음.
+- 자동: 명령이 끝날 때 값 있는 구속에 다음 빈 `dN`(스케치 치수·사용자 매개변수와 같은 번호 공간, 이름 충돌 검사도 공통)과 소스 텍스트(`"12.5 mm"`, 문서 단위)를 준다. `SetRelationship`으로 숫자를 직접 바꾸면 소스가 그 숫자로 다시 써진다. 구속이 지워지면 매개변수도 지워지고, 그 이름을 쓰던 식에는 마지막 값이 `(10 mm)`처럼 들어간다(거부하지 않음).
+- 프런트용 API(추가만):
+
+| 무엇 | 호출 |
+|---|---|
+| 값 상자에 입력(숫자·단위·식·`이름 = 식`) | `Command::Cell(CellOp::SetRelationValue { id, source })` — 실패: `EditError::Expr{start,end}`(식 오류), `Cycle`, `BadValue`(값 없는 종류), `Unsolvable`, `Protected` |
+| 매개변수 이름 바꾸기 | `CellOp::RenameRelationParam { id, name }` — `BadName`(형식·중복) |
+| 한 구속의 매개변수 | `doc.relation_param(id) -> Option<&RelationParam>` |
+| 매개변수 표 행 | `doc.relation_params() -> Vec<(Id<Relationship>, &RelationParam, bool /*각도*/)>` — 값은 SI(m, rad) |
+
+- 따라가기: 구속 식이 매개변수·치수·다른 구속 이름을 쓰면 `SetParam`/치수 변경 때 구속 값이 바뀌고 어셈블리를 다시 푼다(한 실행 취소 단계; 안 풀리거나 Protect를 어기면 명령 전체 거부). 매개변수·치수 식에서 구속 이름을 쓸 수 있다. `RenameParam`·치수 이름 변경은 구속 식도 고친다. 구속이 쓰는 매개변수의 `DeleteParam`은 `InUse`.
+- 단위 변경(`SetDocSettings`): 단위 없는 숫자 소스는 옛 단위를 붙여 크기를 유지한다(치수와 같은 규칙).
+- 한계: Limits(최대·최소·Resting)는 매개변수가 아니다. Drive는 문서를 바꾸지 않으므로 매개변수와 무관. 위치 표현의 구속 값 오버라이드는 항목 9에서.
+- 파일: 구속이 있는 문서는 첫 명령 때 타임라인에 `relation_params`가 생긴다(옛 파일은 그대로 열림).
+- 테스트: `gc_doc/tests/relation_params.rs`.
+
+## 2026-11-18 — 스케줄 우회 기록과 결정적 장면
+
+- `Schedule.detours: Vec<Detour { task, robot, around }>` — 움직이는 로봇을 기다리지 않고 돌아간 작업.
+- 우회 계획의 장애물 표본을 바꿨다: 상대 로봇을 "이 동작이 걸리는 동안의 9개 시점 자세 + 끝 자세"로 넣는다(전에는 상대의 남은 시간 전체를 5등분해서, 상대가 오래 서 있으면 움직이는 구간이 표본에서 빠졌다 → 우회가 한 번도 채택되지 않았다).
+- 막는 로봇 식별을 넓혔다: 실패 이유에 그 로봇 이름이 백틱으로 나오면 막는 로봇이다("collides with `Left`"뿐 아니라 "is 0.0025 m from `Left`, closer than the padding"도).
+- 결정적 장면 테스트 `task_schedule.rs::a_robot_goes_round_a_moving_one_when_that_is_sooner_than_waiting`: 왼쪽이 낮은 점으로 가서 30초 서 있고, 오른쪽이 그 위의 점으로 간다 → 오른쪽이 돌아가고(`detours` 1건, 대기 0건), 재생 자세를 20 ms마다 측정해 두 로봇이 닿지 않음을 확인.
+
 ## 2026-11-18 — 작업 내부 타임라인: 단계별 시각, 단계 끝의 신호·상태 변화, 작업 도중 대기
 
 앞 절("IO 신호 모델")의 "작업 단위" 단순화를 단계 단위로 바꿨다.

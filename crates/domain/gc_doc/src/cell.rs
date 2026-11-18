@@ -611,6 +611,23 @@ pub enum CellOp {
     },
     /// Subassemblies made in the cell: Demote, move between levels, dissolve, rename.
     Subassembly(crate::subassembly::SubassemblyOp),
+    /// The offset or angle of a constraint as typed: a number, a unit, an expression naming parameters
+    /// and dimensions, or `NAME = expression` (Inventor 2026 help, About Parameters in Models,
+    /// GUID-8E5C63EA-0540-4EBE-9B17-B8159C7FE40C). Refused for relationships without a value, text that
+    /// does not evaluate, a loop, or when the assembly cannot then be satisfied.
+    SetRelationValue {
+        /// The constraint.
+        id: Id<crate::relate::Relationship>,
+        /// The text.
+        source: String,
+    },
+    /// Renames the model parameter of a constraint's value; expressions that name it follow.
+    RenameRelationParam {
+        /// The constraint.
+        id: Id<crate::relate::Relationship>,
+        /// The new name.
+        name: String,
+    },
     /// A joint's Limits (Inventor 2026 help, To Define and Manage Joint Relationships,
     /// GUID-21DC3336-5C51-42C1-90FB-4299CD66E0C6): angular for Rotational and Cylindrical, linear for
     /// Slider and Cylindrical; `None` clears one. Refused for other kinds, bad ranges, or when the
@@ -858,7 +875,10 @@ fn finite(values: &[f64]) -> bool {
 
 /// Changes the model tree's order, creating it on first use (with the current order written out).
 /// Protect: a relationship that takes freedom away from a protected joint's component is refused.
-fn check_protected(txn: &Txn<'_>, before: &[(Id<crate::relate::Relationship>, u8)]) -> Result<(), EditError> {
+pub(crate) fn check_protected(
+    txn: &Txn<'_>,
+    before: &[(Id<crate::relate::Relationship>, u8)],
+) -> Result<(), EditError> {
     let after = txn.doc().protected_freedom();
     for (id, was) in before {
         if after.iter().any(|(other, now)| other == id && now < was) {
@@ -1109,6 +1129,11 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
         | CellOp::AddFollowPath { .. }
         | CellOp::AddPathThrough { .. } => crate::role::run(txn, op),
         CellOp::Work(op) => crate::work::run(txn, op),
+        CellOp::SetRelationValue { id, source } => crate::relparam::set_value(txn, *id, source),
+        CellOp::RenameRelationParam { id, name } => {
+            crate::relparam::rename(txn, *id, name)?;
+            Ok((Vec::new(), "Rename parameter"))
+        }
         CellOp::Folder(op) => crate::folder::run(txn, op),
         CellOp::Isolate { keep } => crate::tree::isolate(txn, keep),
         CellOp::UndoIsolate => crate::tree::undo_isolate(txn),

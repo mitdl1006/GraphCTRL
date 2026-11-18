@@ -44,6 +44,8 @@ pub struct Schedule {
     pub plans: Vec<crate::TaskPlan>,
     /// Tasks that had to wait for a moving robot to be out of the way before they could start.
     pub waits: Vec<Wait>,
+    /// Tasks whose robot went round a moving robot instead of waiting for it.
+    pub detours: Vec<Detour>,
     /// The signals the cell drives as they are set: when, which and to what, in the order the tasks that
     /// set them were started.
     pub signals: Vec<(f64, String, bool)>,
@@ -52,6 +54,17 @@ pub struct Schedule {
     pub parks: Vec<ParkMove>,
     /// True when the schedule was cut off at [`MAX_ASSIGNMENTS`] (tasks that repeat without end).
     pub cut_short: bool,
+}
+
+/// A task done by a way round a robot that was moving, because that ended sooner than waiting.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Detour {
+    /// The task.
+    pub task: Id<Task>,
+    /// The robot that did it.
+    pub robot: Id<Robot>,
+    /// The moving robot it went round.
+    pub around: Id<Robot>,
 }
 
 /// A robot moving out of the way.
@@ -168,7 +181,7 @@ fn crosses(
 type ToolOutcome = (Option<String>, Vec<(usize, String, String)>);
 
 /// A task laid out in time for a robot: the plan, the state its tool ends in, and what it changes when.
-type Fitted = (crate::TaskPlan, Option<String>, Vec<(f64, Change)>);
+type Fitted = (crate::TaskPlan, Option<String>, Vec<(f64, Change)>, Option<Id<Robot>>);
 
 /// Something that changes at a moment of the schedule.
 #[derive(Clone, Debug, PartialEq)]
@@ -371,8 +384,9 @@ impl Planning<'_> {
                             // A robot standing in the way of this task is one to send away if nothing
                             // else helps.
                             blockers.extend(parked.iter().map(|(other, _)| *other).filter(|other| {
-                                doc.get(*other)
-                                    .is_some_and(|r| why.contains(&format!("collides with `{}`", r.name)))
+                                // The reason names what is in the way ("collides with `Left`", "is 2 mm
+                                // from `Left`").
+                                doc.get(*other).is_some_and(|r| why.contains(&format!("`{}`", r.name)))
                             }));
                             reasons.insert(id, why);
                             continue;
@@ -408,14 +422,18 @@ impl Planning<'_> {
                             crosses(scenes.get(&robot), plan, now, scenes.get(other), &at)
                         })
                     };
+                    // The moving robot this motion goes round, when it does.
+                    let mut around = None;
                     if let Some((other, free)) = crossing(&plan) {
                         // Waiting for it would end about when it is done plus this motion. A way round it,
-                        // planned with it standing at moments of the rest of its motion, is taken when
+                        // planned with it standing where it is at moments of this motion and at its end, is taken when
                         // that is clear of every moving robot and ends sooner.
                         let mut swept = standing.clone();
                         let name = doc.get(other).map(|r| r.name.clone()).unwrap_or_default();
-                        for k in 0..=4 {
-                            let at = now + (free - now) * f64::from(k) / 4.0;
+                        // Where it is while this motion would run (nine moments) and where it ends up.
+                        let span = plan.duration().min(free - now);
+                        let moments = (0..=8).map(|k| now + span * f64::from(k) / 8.0).chain([free]);
+                        for at in moments {
                             if let (Some(q), Some(scene)) = (out.joints_at(other, at), scenes.get(&other)) {
                                 swept.extend(scene.as_obstacles(&q, &name));
                             }
@@ -428,7 +446,10 @@ impl Planning<'_> {
                                 crossing(round).is_none() && now + round.duration() < free + plan.duration()
                             });
                         match round {
-                            Some((round, round_events)) => (plan, events) = (round, round_events),
+                            Some((round, round_events)) => {
+                                (plan, events) = (round, round_events);
+                                around = Some(other);
+                            }
                             None => {
                                 reasons.insert(id, format!("it waits for {name} to be out of the way"));
                                 waiting.entry(id).or_insert((now, other));
@@ -437,12 +458,13 @@ impl Planning<'_> {
                         }
                     }
                     if best.as_ref().is_none_or(|(b, ..)| plan.duration() < b.duration()) {
-                        best = Some((plan, tool, events));
+                        best = Some((plan, tool, events, around));
                     }
                 }
                 match best {
-                    Some((plan, tool, events)) => {
+                    Some((plan, tool, events, around)) => {
                         let robot = plan.robot;
+                        out.detours.extend(around.map(|around| Detour { task: id, robot, around }));
                         let assignment =
                             Assignment { task: id, robot, start: now, end: now + plan.duration() };
                         robots.insert(robot, (plan.end.clone(), assignment.end));

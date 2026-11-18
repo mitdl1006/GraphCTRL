@@ -23,6 +23,7 @@ mod pattern;
 mod placement;
 mod project;
 mod relate;
+mod relparam;
 mod replicate;
 mod representation;
 mod role;
@@ -64,6 +65,7 @@ pub use relate::{
     JointCondition, JointRange, Limits, LockedPose, RelationKind, RelationStatus, Relationship, Selection,
     Unsolved, is_joint_kind, possible_relations, takes_limits,
 };
+pub use relparam::RelationParam;
 pub use replicate::Replacement;
 pub use representation::{PositionalRepresentation, Representations, ViewRepresentation};
 pub use role::{AimReference, PathMotion, PathTravel, RoleKind, SketchRole, ToolAim};

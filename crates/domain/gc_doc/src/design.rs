@@ -699,6 +699,10 @@ pub struct Components {
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub joint_conditions:
         std::collections::BTreeMap<Id<crate::relate::Relationship>, crate::relate::JointCondition>,
+    /// The model parameters of constraint offsets and angles.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub relation_params:
+        std::collections::BTreeMap<Id<crate::relate::Relationship>, crate::relparam::RelationParam>,
     /// Subassemblies made in the cell (Component Demote).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub subassemblies: Vec<crate::subassembly::Subassembly>,
@@ -787,6 +791,7 @@ impl Components {
             && self.dof_shown.is_empty()
             && !self.dof_all
             && self.joint_conditions.is_empty()
+            && self.relation_params.is_empty()
             && self.subassemblies.is_empty()
             && self.placed_in.is_empty()
             && self.sketch_owners.is_empty()
