@@ -1219,6 +1219,28 @@ impl eframe::App for GraphCtrlApp {
                         Some(BrowserAction::DriveRelationship(id)) => {
                             self.drive.start_relationship(&mut self.session, id)
                         }
+                        Some(BrowserAction::NewView(name)) => {
+                            let camera = Some(gc_viewport::camera_to_json(&self.viewport.camera));
+                            let section = self.viewport.section.as_ref().map(gc_viewport::section_to_json);
+                            let op = gc_doc::CellOp::AddViewRepresentation { name, camera, section };
+                            drop(self.session.execute(&gc_doc::Command::Cell(op)));
+                        }
+                        Some(BrowserAction::ActivateView(index)) => {
+                            let op = gc_doc::CellOp::ActivateViewRepresentation(index);
+                            if self.session.execute(&gc_doc::Command::Cell(op)).is_ok()
+                                && let Some(view) = self.session.representations().views.get(index)
+                            {
+                                // What the viewport stored comes back; text that does not parse leaves the
+                                // current view as it is.
+                                if let Some(camera) =
+                                    view.camera.as_deref().and_then(gc_viewport::camera_from_json)
+                                {
+                                    self.viewport.camera = camera;
+                                    self.viewport.section =
+                                        view.section.as_deref().and_then(gc_viewport::section_from_json);
+                                }
+                            }
+                        }
                         Some(BrowserAction::ContactSet(item, on)) => {
                             drop(self.session.set_contact_set(&[item], on));
                         }

@@ -3574,3 +3574,59 @@ fn the_representations_folder_creates_activates_and_deletes() {
         image.save(out.join("review-45-representations.png")).unwrap();
     }
 }
+
+/// A new view representation stores the camera and the section view; activating it brings them back.
+#[test]
+fn a_view_representation_restores_the_camera_and_the_section() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.state_mut().viewport_mut().camera.distance = 3.0;
+    harness.state_mut().viewport_mut().section = Some(gc_viewport::Section {
+        kind: gc_viewport::SectionKind::Half,
+        planes: vec![gc_viewport::SectionPlane { axis: 1, offset: 0.1, flipped: false }],
+        editing: None,
+    });
+    harness.run();
+    harness.get_by_label("표현").click();
+    harness.run();
+    harness.get_by_label("새 뷰 표현").click();
+    harness.run();
+    let stored = harness.state().session.representations().views[0].clone();
+    assert!(stored.camera.is_some() && stored.section.is_some());
+
+    // Move away: another camera and no section.
+    harness.state_mut().viewport_mut().camera.distance = 7.0;
+    harness.state_mut().viewport_mut().section = None;
+    harness.run();
+    harness.get_by_label("View:1").click();
+    harness.run();
+    let viewport = harness.state().viewport();
+    assert!((viewport.camera.distance - 3.0).abs() < 1e-9, "{}", viewport.camera.distance);
+    assert_eq!(viewport.section.as_ref().map(|s| s.planes.len()), Some(1));
+}
+
+/// At 1280 px the ribbon of a 3D sketch (13 constraints in two rows) still shows "스케치 마무리" inside
+/// the window.
+#[test]
+fn the_3d_sketch_ribbon_keeps_finish_sketch_on_screen() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("3D 스케치").click();
+    harness.run_steps(3);
+    let finish = harness.get_by_label("스케치 마무리").rect();
+    assert!(finish.right() <= SIZE.x && finish.left() >= 0.0, "{finish:?} outside the {SIZE:?} window");
+    if gpu {
+        let image = harness.render().unwrap();
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        image.save(out.join("review-46-3d-sketch-ribbon.png")).unwrap();
+    }
+    harness.get_by_label("스케치 마무리").click();
+    harness.run_steps(3);
+}
