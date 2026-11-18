@@ -400,3 +400,76 @@ fn the_first_component_is_grounded_and_component_states_switch_in_one_undo_step(
     history.undo(&mut doc).unwrap();
     assert!(doc.timeline().is_none_or(|(_, t)| t.components.grounded.is_empty()));
 }
+
+/// Work axes (Inventor 2026 help, To Create Work Features, GUID-38A9748E-FA2D-44D3-928C-DFE1326A9385): On
+/// Line or Edge, Parallel to Line Through Point, Intersection of Two Planes, Through Center of Circular
+/// Shape — here on sketch lines and circles.
+#[test]
+fn work_axes_on_a_line_parallel_through_a_point_between_planes_and_through_a_circle() {
+    use gc_doc::{CurveRef, WorkShape};
+    use gc_math::DVec3;
+    let mut doc = Document::new();
+    let mut history = History::default();
+    let (sketch, curves) = sketch_with_rectangle(&mut doc, &mut history);
+    let circle = run(
+        &mut doc,
+        &mut history,
+        Command::Sketch {
+            sketch,
+            op: SketchOp::AddCircle {
+                centre: [0.6, 0.1, 0.0],
+                radius: 0.05,
+                centre_snap: Default::default(),
+                rim_snap: Default::default(),
+            },
+        },
+    )
+    .unwrap()
+    .into_iter()
+    .find_map(|c| if let Created::Curve(id) = c { Some(id) } else { None })
+    .unwrap();
+    let bottom = CurveRef { sketch, curve: curves[0] };
+    let add = |doc: &mut Document, history: &mut History, geometry| {
+        let Created::WorkFeature(id) =
+            cell(doc, history, CellOp::AddWorkFeature(work("Axis", geometry))).unwrap()[0]
+        else {
+            panic!()
+        };
+        doc.work_shape(id).unwrap()
+    };
+    let axis = |shape: WorkShape| match shape {
+        WorkShape::Axis { point, direction } => (point, direction),
+        other => panic!("{other:?}"),
+    };
+    let near = |a: DVec3, b: DVec3| (a - b).length() < 1e-9;
+
+    let (p, d) = axis(add(&mut doc, &mut history, WorkGeometry::AxisOnLine { line: bottom }));
+    assert!(near(d.abs(), DVec3::X) && p.y.abs() < 1e-9 && p.z.abs() < 1e-9);
+    let through =
+        WorkGeometry::AxisParallelThrough { line: bottom, through: PointRef::Fixed([0.0, 1.0, 2.0]) };
+    let (p, d) = axis(add(&mut doc, &mut history, through));
+    assert!(near(p, DVec3::new(0.0, 1.0, 2.0)) && near(d.abs(), DVec3::X));
+    let planes = WorkGeometry::AxisPlanesIntersection {
+        planes: [PlaneRef::Origin(OriginPlane::Xy), PlaneRef::Origin(OriginPlane::Xz)],
+    };
+    let (p, d) = axis(add(&mut doc, &mut history, planes));
+    assert!(near(d.abs(), DVec3::X) && p.y.abs() < 1e-9 && p.z.abs() < 1e-9, "the X axis: {p:?} {d:?}");
+    let (p, d) = axis(add(
+        &mut doc,
+        &mut history,
+        WorkGeometry::AxisThroughCircle { curve: CurveRef { sketch, curve: circle } },
+    ));
+    assert!(near(p, DVec3::new(0.6, 0.1, 0.0)) && near(d.abs(), DVec3::Z));
+
+    // A line where a circle is wanted (and the other way), the same plane twice: refused.
+    let bad = [
+        WorkGeometry::AxisOnLine { line: CurveRef { sketch, curve: circle } },
+        WorkGeometry::AxisThroughCircle { curve: bottom },
+        WorkGeometry::AxisPlanesIntersection { planes: [PlaneRef::Origin(OriginPlane::Xy); 2] },
+    ];
+    for geometry in bad {
+        assert!(cell(&mut doc, &mut history, CellOp::AddWorkFeature(work("Bad", geometry))).is_err());
+    }
+    // The sketch has dependents now.
+    assert!(run(&mut doc, &mut history, Command::DeleteSketch { id: sketch }).is_err());
+}

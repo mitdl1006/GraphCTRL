@@ -77,11 +77,43 @@ pub enum WorkGeometry {
         /// The point it passes through.
         through: PointRef,
     },
+    /// On Line or Edge: along a sketch line (Inventor 2026 help, To Create Work Features,
+    /// GUID-38A9748E-FA2D-44D3-928C-DFE1326A9385). It follows the sketch.
+    AxisOnLine {
+        /// The line.
+        line: CurveRef,
+    },
+    /// Parallel to Line Through Point.
+    AxisParallelThrough {
+        /// The line it is parallel to.
+        line: CurveRef,
+        /// The point it passes through.
+        through: PointRef,
+    },
+    /// Intersection of Two Planes (not parallel).
+    AxisPlanesIntersection {
+        /// The planes.
+        planes: [PlaneRef; 2],
+    },
+    /// Through Center of Circular Shape: the axis of a sketch circle or arc.
+    AxisThroughCircle {
+        /// The circle or arc.
+        curve: CurveRef,
+    },
     /// A point.
     Point {
         /// Where.
         at: PointRef,
     },
+}
+
+/// A curve of a sketch, as a work feature's reference.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CurveRef {
+    /// The sketch.
+    pub sketch: Id<Sketch>,
+    /// The curve in it.
+    pub curve: Id<Curve>,
 }
 
 impl WorkGeometry {
@@ -99,6 +131,16 @@ impl WorkGeometry {
         match self {
             Self::PlaneOffset { base, .. } => vec![*base],
             Self::AxisNormalToPlane { plane, .. } => vec![*plane],
+            Self::AxisPlanesIntersection { planes } => planes.to_vec(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// The sketch curves it is built on.
+    pub fn curves(&self) -> Vec<CurveRef> {
+        match self {
+            Self::AxisOnLine { line } | Self::AxisParallelThrough { line, .. } => vec![*line],
+            Self::AxisThroughCircle { curve } => vec![*curve],
             _ => Vec::new(),
         }
     }
@@ -107,9 +149,14 @@ impl WorkGeometry {
         match self {
             Self::PlaneThroughPoints { points } => points.to_vec(),
             Self::AxisThroughPoints { points } => points.to_vec(),
-            Self::AxisNormalToPlane { through, .. } => vec![*through],
+            Self::AxisNormalToPlane { through, .. } | Self::AxisParallelThrough { through, .. } => {
+                vec![*through]
+            }
             Self::Point { at } => vec![*at],
-            Self::PlaneOffset { .. } => Vec::new(),
+            Self::PlaneOffset { .. }
+            | Self::AxisOnLine { .. }
+            | Self::AxisPlanesIntersection { .. }
+            | Self::AxisThroughCircle { .. } => Vec::new(),
         }
     }
 
@@ -149,6 +196,9 @@ impl Entity for WorkFeature {
                 PlaneRef::Component(occurrence, _) => out.push(occurrence.owner()),
                 PlaneRef::Origin(_) => {}
             }
+        }
+        for curve in self.geometry.curves() {
+            out.push(curve.sketch.erase());
         }
         for point in self.geometry.points() {
             match point {

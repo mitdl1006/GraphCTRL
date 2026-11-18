@@ -877,11 +877,27 @@ fn work_feature_ok(
         PointRef::Work(id) => Some(*id) != itself && doc.get(*id).is_some_and(|w| w.geometry.is_point()),
         PointRef::Component(occurrence) => doc.component_origin(*occurrence).is_some(),
     };
+    // A sketch line, or a circle or arc.
+    let curve_ok = |r: &crate::design::CurveRef, line: bool| {
+        doc.get(r.sketch).is_some_and(|s| {
+            if line {
+                s.line(r.curve).is_some()
+            } else {
+                s.line(r.curve).is_none() && s.curves.contains_key(&r.curve)
+            }
+        })
+    };
     let ok = match &feature.geometry {
         WorkGeometry::PlaneOffset { base, .. } => plane_ok(base),
         WorkGeometry::PlaneThroughPoints { points } => points.iter().all(point_ok),
         WorkGeometry::AxisThroughPoints { points } => points.iter().all(point_ok) && points[0] != points[1],
         WorkGeometry::AxisNormalToPlane { plane, through } => plane_ok(plane) && point_ok(through),
+        WorkGeometry::AxisOnLine { line } => curve_ok(line, true),
+        WorkGeometry::AxisParallelThrough { line, through } => curve_ok(line, true) && point_ok(through),
+        WorkGeometry::AxisPlanesIntersection { planes } => {
+            planes.iter().all(plane_ok) && planes[0] != planes[1]
+        }
+        WorkGeometry::AxisThroughCircle { curve } => curve_ok(curve, false),
         WorkGeometry::Point { at } => point_ok(at),
     };
     if ok { Ok(()) } else { Err(EditError::BadValue) }

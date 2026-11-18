@@ -36,9 +36,9 @@ pub use command::{
     SketchPatternDirection, SlotKind, TangentArc, apply, flipped, preview_sketch_op, tangent_arc,
 };
 pub use design::{
-    Assembly, AssemblyMesh, AssemblyPart, ComponentFlag, Components, ContactSolver, Extent, Extrude, Feature,
-    FeatureKind, Occurrence, OriginElement, OriginPlane, PlaneRef, PlaneSource, PointRef, Timeline,
-    WorkFeature, WorkGeometry,
+    Assembly, AssemblyMesh, AssemblyPart, ComponentFlag, Components, ContactSolver, CurveRef, Extent,
+    Extrude, Feature, FeatureKind, Occurrence, OriginElement, OriginPlane, PlaneRef, PlaneSource, PointRef,
+    Timeline, WorkFeature, WorkGeometry,
 };
 pub use document::{ChangeSet, Contents, DocDelta, Document, Frame, FrameKind, Param, Store, Table};
 pub use gc_sketch::Sketch;
