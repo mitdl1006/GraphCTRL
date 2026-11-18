@@ -204,3 +204,102 @@ fn the_offset_tool_offsets_an_ellipse_through_the_cursor() {
     assert_eq!(minors.len(), 2, "{minors:?}");
     assert!(minors.iter().any(|m| (m - 0.03).abs() < 1e-6), "{minors:?}");
 }
+
+fn vertical(s: &mut Session, k: K, x: f64) -> Id<Curve> {
+    let op = SketchOp::AddLine {
+        a: [x, -0.02, 0.0],
+        b: [x, 0.02, 0.0],
+        snap_a: EndSnap::default(),
+        snap_b: EndSnap::default(),
+        horizontal: Some(false),
+    };
+    curves(&run(s, k, op).unwrap())[0]
+}
+
+fn splines(s: &Session) -> Vec<Vec<[f64; 2]>> {
+    let sk = s.active_sketch().unwrap().1;
+    sk.curves
+        .values()
+        .filter_map(|c| if let CurveGeom::Spline { points } = &c.geom { Some(points.clone()) } else { None })
+        .map(|points| points.iter().map(|p| xy(s, *p)).collect())
+        .collect()
+}
+
+/// Splines cross other curves (To Split, Trim, or Extend Curves, GUID-DD00037F-6BBA-4B95-AA90-4F99DCEB667D:
+/// trim "to the nearest intersecting curve"): a line trims at a spline, a spline trims and splits at
+/// lines, and the crossings are snap points.
+#[test]
+fn splines_cut_and_are_cut_where_they_cross() {
+    let (mut s, k) = setup();
+    let sp = spline(&mut s, k);
+    let line = vertical(&mut s, k, 0.015);
+    let sk = s.active_sketch().unwrap().1;
+    let crossings = sk.curve_crossings(line, sp);
+    assert_eq!(crossings.len(), 1, "{crossings:?}");
+    let x = crossings[0];
+    assert!((x[0] - 0.015).abs() < 1e-9 && x[1] > 0.0);
+    assert_eq!(sk.curve_crossings(sp, line).len(), 1);
+
+    // The line's lower part goes, up to the spline.
+    run(&mut s, k, SketchOp::Trim { curve: line, at: [0.015, -0.015] }).unwrap();
+    let CurveGeom::Line { a, b } = geom(&s, line) else { panic!() };
+    let low = if xy(&s, a)[1] < xy(&s, b)[1] { xy(&s, a) } else { xy(&s, b) };
+    assert!((low[1] - x[1]).abs() < 1e-6, "{low:?} vs {x:?}");
+    s.undo();
+
+    // Split the spline at the line: two splines meeting there.
+    let steps = s.history().undo_depth();
+    run(&mut s, k, SketchOp::Split { curve: sp, at: [0.012, 0.009] }).unwrap();
+    assert_eq!(s.history().undo_depth(), steps + 1);
+    let parts = splines(&s);
+    assert_eq!(parts.len(), 2, "{parts:?}");
+    for part in &parts {
+        assert!(part.iter().any(|p| (p[0] - x[0]).abs() < 1e-9 && (p[1] - x[1]).abs() < 1e-9), "{part:?}");
+    }
+    s.undo();
+
+    // Trim the middle between two lines: two splines are left, ending at the lines.
+    let _left = vertical(&mut s, k, 0.008);
+    let _right = vertical(&mut s, k, 0.022);
+    run(&mut s, k, SketchOp::Delete(vec![gc_sketch::Item::Curve(line)])).unwrap();
+    run(&mut s, k, SketchOp::Trim { curve: sp, at: [0.015, 0.007] }).unwrap();
+    let parts = splines(&s);
+    assert_eq!(parts.len(), 2, "{parts:?}");
+    let ends: Vec<f64> = parts.iter().flat_map(|p| [p[0][0], p[p.len() - 1][0]]).collect();
+    assert!(
+        ends.iter().any(|x| (x - 0.008).abs() < 1e-9) && ends.iter().any(|x| (x - 0.022).abs() < 1e-9),
+        "{ends:?}"
+    );
+    assert!(
+        parts.iter().flatten().all(|p| p[0] < 0.008 + 1e-9 || p[0] > 0.022 - 1e-9),
+        "the middle fit point went"
+    );
+    s.undo();
+    s.undo();
+
+    // Trim the end past the right line: the spline now ends there.
+    run(&mut s, k, SketchOp::Trim { curve: sp, at: [0.028, -0.008] }).unwrap();
+    let parts = splines(&s);
+    assert_eq!(parts.len(), 1);
+    let last = parts[0][parts[0].len() - 1];
+    assert!((last[0] - 0.022).abs() < 1e-9, "{last:?}");
+    assert!(s.active_sketch().unwrap().1.points.values().all(|p| p.pos.iter().all(|v| v.is_finite())));
+}
+
+/// Two splines cross each other; a spline with nothing crossing it trims away whole; a split with no
+/// crossing is refused.
+#[test]
+fn spline_against_spline_and_lone_splines() {
+    let (mut s, k) = setup();
+    let a = spline(&mut s, k);
+    let points = vec![[0.0, 0.02, 0.0], [0.015, -0.01, 0.0], [0.03, 0.02, 0.0]];
+    let b = curves(&run(&mut s, k, SketchOp::AddSpline { points, snaps: Vec::new() }).unwrap())[0];
+    let crossings = s.active_sketch().unwrap().1.curve_crossings(a, b);
+    assert!(!crossings.is_empty(), "the two splines cross");
+    run(&mut s, k, SketchOp::Delete(vec![gc_sketch::Item::Curve(b)])).unwrap();
+    let before = s.doc().clone();
+    assert!(run(&mut s, k, SketchOp::Split { curve: a, at: [0.01, 0.01] }).is_err());
+    assert!(s.doc().same_content(&before));
+    run(&mut s, k, SketchOp::Trim { curve: a, at: [0.01, 0.01] }).unwrap();
+    assert!(splines(&s).is_empty());
+}

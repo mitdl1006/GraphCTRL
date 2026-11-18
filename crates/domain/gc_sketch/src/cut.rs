@@ -18,8 +18,10 @@ use crate::model::{Curve, CurveGeom, DimKind, GeoConstraint, SkPoint, Sketch};
 const EPS: f64 = 1e-9;
 
 /// A piece of a curve, for drawing what a trim removes or an extend adds.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Piece {
+    /// A piece of a spline, as points along it.
+    Polyline(Vec<[f64; 2]>),
     /// A segment between two points.
     Segment([f64; 2], [f64; 2]),
     /// An arc: centre, radius, start angle and counter-clockwise sweep.
@@ -65,6 +67,7 @@ impl Piece {
             (0..=steps).map(|k| f(f64::from(k) / f64::from(steps))).collect()
         };
         match *self {
+            Piece::Polyline(ref points) => points.clone(),
             Piece::Segment(a, b) => vec![a, b],
             Piece::Arc { centre, radius, start, sweep } => {
                 along(&|k| on_circle(centre, radius, start + sweep * k))
@@ -250,6 +253,163 @@ impl Shape {
     }
 }
 
+/// Steps drawn between neighbouring fit points of a spline when it is cut: fit point `k` sits at
+/// parameter `k * SPLINE_STEPS`.
+const SPLINE_STEPS: usize = 32;
+
+/// A spline as the polyline drawn for it; its parameter is the segment index plus the fraction along it.
+#[derive(Clone, Debug)]
+struct Poly(Vec<[f64; 2]>);
+
+impl Poly {
+    fn segment(&self, i: usize) -> Option<Shape> {
+        Some(Shape::Segment(*self.0.get(i)?, *self.0.get(i + 1)?))
+    }
+
+    fn segments(&self) -> impl Iterator<Item = (usize, Shape)> + '_ {
+        self.0.windows(2).enumerate().map(|(i, w)| (i, Shape::Segment(w[0], w[1])))
+    }
+
+    #[allow(clippy::cast_precision_loss, reason = "a few thousand points")]
+    fn span(&self) -> f64 {
+        self.0.len().saturating_sub(1) as f64
+    }
+
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "clamped to the points")]
+    fn at(&self, t: f64) -> [f64; 2] {
+        let last = self.0.len().saturating_sub(2);
+        let i = (t.max(0.0).floor() as usize).min(last);
+        #[allow(clippy::cast_precision_loss, reason = "a few thousand points")]
+        let f = t - i as f64;
+        self.segment(i).map_or_else(|| self.0.first().copied().unwrap_or_default(), |seg| seg.at(f))
+    }
+
+    /// The parameter of the nearest point on the polyline.
+    #[allow(clippy::cast_precision_loss, reason = "a few thousand points")]
+    fn param(&self, p: [f64; 2]) -> f64 {
+        let mut best = (f64::INFINITY, 0.0);
+        for (i, seg) in self.segments() {
+            let f = seg.param(p).clamp(0.0, 1.0);
+            let d = dist(seg.at(f), p);
+            if d < best.0 {
+                best = (d, i as f64 + f);
+            }
+        }
+        best.1
+    }
+
+    fn piece(&self, from: f64, to: f64) -> Piece {
+        let mut points = vec![self.at(from)];
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "clamped to the points")]
+        let (first, last) = ((from.max(0.0).floor() as usize) + 1, to.max(0.0).ceil() as usize);
+        for i in first..last {
+            if let Some(q) = self.0.get(i) {
+                points.push(*q);
+            }
+        }
+        points.push(self.at(to));
+        Piece::Polyline(points)
+    }
+}
+
+/// A curve as cut: a line, circle or ellipse ([`Shape`]) or a spline ([`Poly`]).
+#[derive(Clone, Debug)]
+enum Track {
+    Shape(Shape),
+    Poly(Poly),
+}
+
+impl Track {
+    fn param(&self, p: [f64; 2]) -> f64 {
+        match self {
+            Track::Shape(s) => s.param(p),
+            Track::Poly(l) => l.param(p),
+        }
+    }
+
+    fn span(&self) -> f64 {
+        match self {
+            Track::Shape(s) => s.span(),
+            Track::Poly(l) => l.span(),
+        }
+    }
+
+    fn at(&self, t: f64) -> [f64; 2] {
+        match self {
+            Track::Shape(s) => s.at(t),
+            Track::Poly(l) => l.at(t),
+        }
+    }
+
+    fn closed(&self) -> bool {
+        match self {
+            Track::Shape(s) => s.closed(),
+            Track::Poly(_) => false,
+        }
+    }
+
+    fn piece(&self, from: f64, to: f64) -> Piece {
+        match self {
+            Track::Shape(s) => s.piece(from, to),
+            Track::Poly(l) => l.piece(from, to),
+        }
+    }
+
+    fn whole(&self) -> Piece {
+        match self {
+            Track::Shape(s) => s.whole(),
+            Track::Poly(l) => Piece::Polyline(l.0.clone()),
+        }
+    }
+
+    /// Where `other` crosses this curve, with the parameter along this curve: within both curves, or
+    /// with `extended` anywhere on this curve's full line, circle or ellipse (a spline has no more).
+    fn crossings(&self, other: &Track, extended: bool) -> Vec<(f64, [f64; 2])> {
+        let mut out = Vec::new();
+        match (self, other) {
+            (Track::Shape(own), Track::Shape(theirs)) => {
+                for pos in meet(own, theirs) {
+                    if theirs.holds(pos) && (extended || own.holds(pos)) {
+                        out.push((own.param(pos), pos));
+                    }
+                }
+            }
+            (Track::Shape(own), Track::Poly(theirs)) => {
+                for (_, seg) in theirs.segments() {
+                    for pos in meet(own, &seg) {
+                        if seg.holds(pos) && (extended || own.holds(pos)) {
+                            out.push((own.param(pos), pos));
+                        }
+                    }
+                }
+            }
+            (Track::Poly(own), Track::Shape(theirs)) => {
+                for (i, seg) in own.segments() {
+                    for pos in meet(&seg, theirs) {
+                        if seg.holds(pos) && theirs.holds(pos) {
+                            #[allow(clippy::cast_precision_loss, reason = "a few thousand points")]
+                            out.push((i as f64 + seg.param(pos).clamp(0.0, 1.0), pos));
+                        }
+                    }
+                }
+            }
+            (Track::Poly(own), Track::Poly(theirs)) => {
+                for (i, seg) in own.segments() {
+                    for (_, other) in theirs.segments() {
+                        for pos in meet(&seg, &other) {
+                            if seg.holds(pos) && other.holds(pos) {
+                                #[allow(clippy::cast_precision_loss, reason = "a few thousand points")]
+                                out.push((i as f64 + seg.param(pos).clamp(0.0, 1.0), pos));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
+}
+
 /// Where the full lines, circles or ellipses of two shapes meet.
 fn meet(first: &Shape, second: &Shape) -> Vec<[f64; 2]> {
     match (*first, *second) {
@@ -381,17 +541,26 @@ impl Sketch {
         })
     }
 
+    /// A curve as cut: its [`Shape`], or a spline's polyline.
+    fn track(&self, curve: Id<Curve>) -> Option<Track> {
+        if let Some(shape) = self.shape(curve) {
+            return Some(Track::Shape(shape));
+        }
+        let geom = &self.curves.get(&curve)?.geom;
+        let CurveGeom::Spline { .. } = geom else { return None };
+        let points = self.spline_outline(geom, SPLINE_STEPS)?;
+        (points.len() >= 2).then_some(Track::Poly(Poly(points)))
+    }
+
     /// Where the other curves cross `curve` (on both curves' extents, or with `extended` on the full line
     /// or circle of `curve`), sorted along it, without repeats.
     fn cuts(&self, curve: Id<Curve>, extended: bool) -> Vec<Cut> {
-        let Some(shape) = self.shape(curve) else { return Vec::new() };
+        let Some(track) = self.track(curve) else { return Vec::new() };
         let mut cuts: Vec<Cut> = Vec::new();
         for (id, _) in self.curves.iter().filter(|(id, _)| **id != curve) {
-            let Some(other) = self.shape(*id) else { continue };
-            for pos in meet(&shape, &other) {
-                if other.holds(pos) && (extended || shape.holds(pos)) {
-                    cuts.push(Cut { t: shape.param(pos), pos, by: *id });
-                }
+            let Some(other) = self.track(*id) else { continue };
+            for (t, pos) in track.crossings(&other, extended) {
+                cuts.push(Cut { t, pos, by: *id });
             }
         }
         cuts.sort_by(|a, b| a.t.total_cmp(&b.t));
@@ -401,8 +570,14 @@ impl Sketch {
 
     /// Where two curves cross, within both (lines, circles, arcs, ellipses and elliptical arcs).
     pub fn curve_crossings(&self, a: Id<Curve>, b: Id<Curve>) -> Vec<[f64; 2]> {
-        let (Some(first), Some(second)) = (self.shape(a), self.shape(b)) else { return Vec::new() };
-        meet(&first, &second).into_iter().filter(|p| first.holds(*p) && second.holds(*p)).collect()
+        let (Some(first), Some(second)) = (self.track(a), self.track(b)) else { return Vec::new() };
+        let mut out: Vec<[f64; 2]> = Vec::new();
+        for (_, p) in first.crossings(&second, false) {
+            if !out.iter().any(|q| dist(*q, p) <= 1e-12) {
+                out.push(p);
+            }
+        }
+        out
     }
 
     /// An ellipse's quadrant points (the ends of its two axes) that lie on it (all four for a whole
@@ -417,7 +592,7 @@ impl Sketch {
 
     /// The piece of `curve` that a trim at `at` would remove, between the cuts on either side of `at`.
     pub fn trim_preview(&self, curve: Id<Curve>, at: [f64; 2]) -> Option<Piece> {
-        let shape = self.shape(curve)?;
+        let shape = self.track(curve)?;
         Some(match self.trim_span(curve, at)? {
             Span::Whole => shape.whole(),
             Span::Part { from, to, .. } => shape.piece(from.t, to.t),
@@ -429,7 +604,7 @@ impl Sketch {
     }
 
     fn trim_span(&self, curve: Id<Curve>, at: [f64; 2]) -> Option<Span> {
-        let shape = self.shape(curve)?;
+        let shape = self.track(curve)?;
         let t = shape.param(at);
         let end = shape.span();
         let inner: Vec<Cut> = self.cuts(curve, false);
@@ -492,6 +667,11 @@ impl Sketch {
                 }
                 self.attach(alloc, s, to.pos, to.by, &mut result);
                 self.attach(alloc, e, from.pos, from.by, &mut result);
+            }
+            (Span::Part { from, to, at_start, at_end }, CurveGeom::Spline { points }) => {
+                let head = (!at_start).then_some(from);
+                let tail = (!at_end).then_some(to);
+                self.cut_spline(alloc, curve, &points, construction, (head, tail), false, &mut result)?;
             }
             (Span::Part { from, to, at_start, at_end }, _) => {
                 let (first, last) = Self::ends(&geom).ok_or(SketchError::InvalidValue)?;
@@ -831,8 +1011,8 @@ impl Sketch {
     }
 
     fn split_cut(&self, curve: Id<Curve>, at: [f64; 2]) -> Option<Cut> {
-        let shape = self.shape(curve)?;
-        if let Shape::Round(_, _, None) = shape {
+        let shape = self.track(curve)?;
+        if let Track::Shape(Shape::Round(_, _, None)) = shape {
             return None;
         }
         let t = shape.param(at);
@@ -859,6 +1039,10 @@ impl Sketch {
         let geom = self.curves.get(&curve).ok_or(SketchError::MissingCurve)?.geom.clone();
         let construction = self.curves[&curve].construction;
         let mut result = CutResult::default();
+        if let CurveGeom::Spline { points } = geom {
+            self.cut_spline(alloc, curve, &points, construction, (Some(cut), Some(cut)), true, &mut result)?;
+            return Ok(result);
+        }
         self.split(alloc, curve, geom, construction, (cut, cut), &mut result)?;
         // Nothing was taken out: the two pieces meet.
         let (_, end) = Self::ends(&self.curves[&curve].geom).ok_or(SketchError::InvalidValue)?;
@@ -866,6 +1050,87 @@ impl Sketch {
         let (start, _) = Self::ends(&self.curves[&piece].geom).ok_or(SketchError::InvalidValue)?;
         self.add_quietly(alloc, GeoConstraint::Coincident(end, start), &mut result);
         Ok(result)
+    }
+
+    /// Cuts a spline (fit points `points`) at crossings: with `head` it keeps the fit points before that
+    /// cut and ends at a new fit point there; with `tail` a piece starts at a new fit point at that cut and
+    /// runs through the fit points after it. With both, the spline is the head and the tail is a new
+    /// spline (sharing the end point when `shared`, for a split); with one, the spline becomes that piece.
+    /// Fit points left on neither piece are deleted; the new ends are tied to the curves that cut there.
+    /// The pieces are fitted again through their own fit points.
+    #[allow(clippy::too_many_arguments, reason = "a private step of trim and split")]
+    fn cut_spline(
+        &mut self,
+        alloc: &mut IdAlloc,
+        curve: Id<Curve>,
+        points: &[Id<SkPoint>],
+        construction: bool,
+        (head, tail): (Option<Cut>, Option<Cut>),
+        shared: bool,
+        result: &mut CutResult,
+    ) -> Result<(), SketchError> {
+        #[allow(clippy::cast_precision_loss, reason = "a few hundred fit points")]
+        let at = |k: usize| (k * SPLINE_STEPS) as f64;
+        let near = |p: Id<SkPoint>, q: [f64; 2]| self.xy(p).is_none_or(|r| dist(r, q) <= 1e-9);
+        let head_points: Option<Vec<Id<SkPoint>>> = head.map(|cut| {
+            points
+                .iter()
+                .enumerate()
+                .filter(|(k, p)| at(*k) < cut.t - 1e-6 && !near(**p, cut.pos))
+                .map(|(_, p)| *p)
+                .collect()
+        });
+        let tail_points: Option<Vec<Id<SkPoint>>> = tail.map(|cut| {
+            points
+                .iter()
+                .enumerate()
+                .filter(|(k, p)| at(*k) > cut.t + 1e-6 && !near(**p, cut.pos))
+                .map(|(_, p)| *p)
+                .collect()
+        });
+        if head_points.as_ref().is_some_and(Vec::is_empty) || tail_points.as_ref().is_some_and(Vec::is_empty)
+        {
+            return Err(SketchError::InvalidValue);
+        }
+        let mut pieces: Vec<Vec<Id<SkPoint>>> = Vec::new();
+        let mut ends: Vec<(Id<SkPoint>, Cut)> = Vec::new();
+        let mut head_end = None;
+        if let (Some(mut kept), Some(cut)) = (head_points, head) {
+            let end = self.add_point(alloc, [cut.pos[0], cut.pos[1], 0.0]);
+            kept.push(end);
+            ends.push((end, cut));
+            head_end = Some(end);
+            pieces.push(kept);
+        }
+        if let (Some(kept), Some(cut)) = (tail_points, tail) {
+            let start = match head_end {
+                Some(end) if shared => end,
+                Some(_) | None => {
+                    let start = self.add_point(alloc, [cut.pos[0], cut.pos[1], 0.0]);
+                    ends.push((start, cut));
+                    start
+                }
+            };
+            let mut piece = vec![start];
+            piece.extend(kept);
+            pieces.push(piece);
+        }
+        let mut pieces = pieces.into_iter();
+        let Some(first) = pieces.next() else { return Err(SketchError::InvalidValue) };
+        if let Some(c) = self.curves.get_mut(&curve) {
+            c.geom = CurveGeom::Spline { points: first };
+        }
+        for piece in pieces {
+            let id = alloc.alloc();
+            self.curves.insert(id, Curve { geom: CurveGeom::Spline { points: piece }, construction });
+            result.curves.push(id);
+        }
+        let dropped: Vec<Item> = points.iter().map(|p| Item::Point(*p)).collect();
+        self.delete(&dropped);
+        for (end, cut) in ends {
+            self.attach(alloc, end, cut.pos, cut.by, result);
+        }
+        Ok(())
     }
 
     /// Splits a spline at one of its inner fit points: the spline ends there and a new spline (returned)
