@@ -627,6 +627,14 @@
 - 하지 않은 것: 상태 "Exclude"(체크 해제)·"Mixed" 표시, 저장 위치 안내(백엔드가 문서 assets 폴더로 바꾸면 API는 같다).
 - 테스트: `replicate.rs`의 `a_flat_mirror_runs_with_mirror_and_reuse_states`.
 
+## 원뿔 면 픽 (백엔드 c798662)
+
+근거: Place Tangent constraints in assemblies GUID-FF270566-CA9E-420A-A00A-F52DD0FDFD8E.
+
+- `gc_scene::SurfaceHit.cone`(apex, 축, 반각): 원통이 아닌 곡면에서 `conical_region_in`이 맞으면 채운다(굽힘 20°, 허용 1 %, 평면보다 넓을 때만). `gc_session::Feature::Cone`을 더했다(백엔드 파일 — 새 변형 하나, 측정은 원뿔을 측정하지 않음).
+- 뷰포트 `pick_feature_with(.., cones)`: Alt 끌기 맞춤(altdrag)은 원뿔을 `Geometry::Cone`으로 선택하고(Tangent 대상), Measure·Grip은 기존처럼 원뿔을 고르지 않는다.
+- 하지 않은 것: 호버 하이라이트에 원뿔 윤곽 표시, Constrain 대화상자의 뷰 선택(지금 대화상자는 원점 요소·작업 피처만 받는다 — 메시 면 선택 자체가 아직 없다). 원뿔 메시로 만든 끝단 테스트도 없다(컴파일·기존 테스트만 통과).
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

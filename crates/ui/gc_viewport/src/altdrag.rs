@@ -26,6 +26,9 @@ pub(crate) fn geometry_of(feature: &Feature) -> Option<Geometry> {
         Feature::Cylinder { centre, axis, radius, .. } => {
             Some(Geometry::Cylinder { point: centre, direction: axis, radius })
         }
+        Feature::Cone { apex, axis, half_angle } => {
+            Some(Geometry::Cone { apex, direction: axis, half_angle })
+        }
         Feature::Point(_) | Feature::Edge(..) => None,
     }
 }
