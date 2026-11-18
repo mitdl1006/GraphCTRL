@@ -450,3 +450,19 @@ fn candidates_asked_for_in_the_background_are_kept_per_task() {
     assert!(s.poll_jobs());
     assert!(!s.task_candidates_result(first).unwrap().1 && s.task_candidates_result(second).unwrap().1);
 }
+
+#[test]
+fn only_a_robot_that_stands_in_the_way_is_sent_to_its_park_pose() {
+    let Cell { mut s, left, right, sketch, points, roles } = cell();
+    // Left is not at its park pose, but it is not in anyone's way: right's task is simply out of reach.
+    s.edit_work(WorkOp::SetRobotPark { robot: left, joints: Some(vec![1.2, -0.3, 0.6, 0.0, 0.6, 0.0]) })
+        .unwrap();
+    let far = SketchOp::SetCoords { points: vec![(points[1], [5.0, 0.5, 0.0])], radii: Vec::new() };
+    s.execute(&Command::Sketch { sketch, op: far }).unwrap();
+    let reach =
+        add(&mut s, Task { robots: RobotChoice::Only(vec![right]), ..task("Out of reach", roles[1]) });
+    let schedule = s.schedule();
+    assert!(schedule.parks.is_empty(), "nobody is moved for nothing");
+    assert_eq!(schedule.blocked.len(), 1);
+    assert_eq!(schedule.blocked[0].0, reach);
+}
