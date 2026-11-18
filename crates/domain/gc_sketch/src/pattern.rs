@@ -1,12 +1,20 @@
 //! Sketch patterns kept as objects (Inventor 2026 help, To Create and Edit Sketch Patterns,
 //! GUID-AAD3A699-FED8-4614-A31D-0A2316328CEE, Edit Rectangular and Circular Patterns): a pattern remembers
 //! what it was made from and what it added, so it can be edited, deleted as a whole or have elements
-//! suppressed. The document builds and rebuilds the geometry; the sketch only keeps the record.
+//! suppressed. The document builds and rebuilds the geometry; the sketch keeps the record and the copies'
+//! positions.
+//!
+//! Only one construction step per direction (a rectangular pattern: from the first original point, parallel
+//! to the direction, carrying the spacing dimension) or one spoke (a circular pattern: as long as the first
+//! original's, carrying the angle dimension) takes part in solving. The copies are held still in the solver
+//! and placed after each solve by moving the originals along the steps or turning them about the axis, so
+//! a pattern of thousands of elements costs no more to solve than one element (a pattern of 100 × 100 was
+//! minutes when every copy was constrained to its neighbour).
 
 use gc_core::Id;
 use serde::{Deserialize, Serialize};
 
-use crate::{Curve, Item, SkPoint, Sketch};
+use crate::{Curve, CurveGeom, Item, SkPoint, Sketch};
 
 /// One direction of a sketch rectangular pattern.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -63,6 +71,40 @@ impl PatternDefinition {
     }
 }
 
+/// How a pattern's copies follow its originals.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum PatternStep {
+    /// Rectangular: element (i, j) is the originals moved by i × (first − from) + j × (second − from).
+    Translate {
+        /// The first original point, where the steps start.
+        from: Id<SkPoint>,
+        /// End of the step along direction 1.
+        first: Id<SkPoint>,
+        /// End of the step along direction 2.
+        second: Option<Id<SkPoint>>,
+    },
+    /// Circular: element (k, 0) is the originals turned about `axis` k times the angle from `from` to `to`.
+    Rotate {
+        /// The axis point.
+        axis: Id<SkPoint>,
+        /// An original point off the axis.
+        from: Id<SkPoint>,
+        /// Where the first turn takes it.
+        to: Id<SkPoint>,
+    },
+}
+
+/// One copied point.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PatternCopy {
+    /// Its element (index into `elements`).
+    pub element: usize,
+    /// The original point.
+    pub original: Id<SkPoint>,
+    /// The copy.
+    pub copy: Id<SkPoint>,
+}
+
 /// A sketch pattern.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SketchPattern {
@@ -74,6 +116,48 @@ pub struct SketchPattern {
     pub items: Vec<Item>,
     /// Suppressed elements (indices into `elements`): their curves are construction.
     pub suppressed: Vec<usize>,
+    /// How the copies follow.
+    pub step: PatternStep,
+    /// Where each element sits: (i, j) of a rectangular pattern, (k, 0) of a circular one.
+    pub places: Vec<[u32; 2]>,
+    /// The copied points.
+    pub copies: Vec<PatternCopy>,
+    /// Copied circles with their originals (`(original, copy)`): the copy keeps the radius.
+    pub circles: Vec<(Id<Curve>, Id<Curve>)>,
+}
+
+impl SketchPattern {
+    /// Where the original point at `p` goes in element `element`, given the step points' positions.
+    fn place(&self, sketch: &Sketch, element: usize, p: [f64; 3]) -> Option<[f64; 3]> {
+        let [i, j] = *self.places.get(element)?;
+        let pos = |id: Id<SkPoint>| sketch.pos(id);
+        match self.step {
+            PatternStep::Translate { from, first, second } => {
+                let o = pos(from)?;
+                let a = pos(first)?;
+                let b = match second {
+                    Some(second) => pos(second)?,
+                    None => o,
+                };
+                let (i, j) = (f64::from(i), f64::from(j));
+                Some([
+                    p[0] + i * (a[0] - o[0]) + j * (b[0] - o[0]),
+                    p[1] + i * (a[1] - o[1]) + j * (b[1] - o[1]),
+                    p[2] + i * (a[2] - o[2]) + j * (b[2] - o[2]),
+                ])
+            }
+            PatternStep::Rotate { axis, from, to } => {
+                let c = pos(axis)?;
+                let (f, t) = (pos(from)?, pos(to)?);
+                let turn = gc_math::fm::atan2(t[1] - c[1], t[0] - c[0])
+                    - gc_math::fm::atan2(f[1] - c[1], f[0] - c[0]);
+                let angle = turn * f64::from(i);
+                let (sin, cos) = (gc_math::fm::sin(angle), gc_math::fm::cos(angle));
+                let (x, y) = (p[0] - c[0], p[1] - c[1]);
+                Some([c[0] + cos * x - sin * y, c[1] + sin * x + cos * y, p[2]])
+            }
+        }
+    }
 }
 
 impl Sketch {
@@ -169,6 +253,51 @@ impl Sketch {
         });
     }
 
+    /// The copies the solver holds still: their points and copied circles.
+    pub(crate) fn pattern_held(&self) -> (Vec<Id<SkPoint>>, Vec<Id<Curve>>) {
+        let points = self.patterns.iter().flat_map(|p| p.copies.iter().map(|c| c.copy)).collect();
+        let circles = self.patterns.iter().flat_map(|p| p.circles.iter().map(|(_, c)| *c)).collect();
+        (points, circles)
+    }
+
+    /// Puts every copy where its pattern places it now. True when something moved.
+    pub fn refresh_patterns(&mut self) -> bool {
+        let mut moves: Vec<(Id<SkPoint>, [f64; 3])> = Vec::new();
+        let mut radii: Vec<(Id<Curve>, f64)> = Vec::new();
+        for pattern in &self.patterns {
+            for copy in &pattern.copies {
+                let (Some(original), Some(now)) = (self.pos(copy.original), self.pos(copy.copy)) else {
+                    continue;
+                };
+                if let Some(at) = pattern.place(self, copy.element, original)
+                    && at.iter().zip(now).any(|(a, b)| (a - b).abs() > 1e-13)
+                {
+                    moves.push((copy.copy, at));
+                }
+            }
+            for (original, copy) in &pattern.circles {
+                if let (Some(CurveGeom::Circle { r, .. }), Some(CurveGeom::Circle { r: now, .. })) =
+                    (self.curves.get(original).map(|c| c.geom), self.curves.get(copy).map(|c| c.geom))
+                    && (r - now).abs() > 1e-13
+                {
+                    radii.push((*copy, r));
+                }
+            }
+        }
+        let moved = !moves.is_empty() || !radii.is_empty();
+        for (id, at) in moves {
+            if let Some(point) = self.points.get_mut(&id) {
+                point.pos = at;
+            }
+        }
+        for (id, value) in radii {
+            if let Some(Curve { geom: CurveGeom::Circle { r, .. }, .. }) = self.curves.get_mut(&id) {
+                *r = value;
+            }
+        }
+        moved
+    }
+
     /// Drops what no longer exists from the patterns; a pattern whose originals are gone is forgotten (its
     /// copies stay as plain geometry).
     pub fn prune_patterns(&mut self) {
@@ -187,6 +316,8 @@ impl Sketch {
             for element in &mut p.elements {
                 element.retain(|c| curves.contains_key(c));
             }
+            p.copies.retain(|c| points.contains_key(&c.copy) && points.contains_key(&c.original));
+            p.circles.retain(|(a, b)| curves.contains_key(a) && curves.contains_key(b));
             p.definition.curves().iter().all(|c| curves.contains_key(c))
         });
     }

@@ -263,6 +263,19 @@ impl Sketch {
                 binding.sys.add(solver_id(*id), Constraint::Fix(binding.params(*id)?.to_vec()));
             }
         }
+        // Pattern copies follow their originals after the solve (`refresh_patterns`), not in it.
+        let (held_points, held_circles) = self.pattern_held();
+        for id in held_points {
+            if let Ok(params) = binding.params(id) {
+                let params = params.to_vec();
+                binding.sys.add(solver_id(id), Constraint::Fix(params));
+            }
+        }
+        for id in held_circles {
+            if let Some(param) = binding.radii.get(&id).copied() {
+                binding.sys.add(solver_id(id), Constraint::Fix(vec![param]));
+            }
+        }
         for (id, constraint) in &self.constraints {
             if Some(solver_id(*id)) != skip {
                 let lowered = binding.lower_constraint(self, constraint)?;
