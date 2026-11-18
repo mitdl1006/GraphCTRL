@@ -3065,7 +3065,21 @@ impl Planning<'_> {
         robot_id: Id<Robot>,
         start: &[f64],
     ) -> Result<TaskPlan, String> {
-        self.task_plan_among(task_id, robot_id, start, &[])
+        self.task_plan_among(task_id, robot_id, start, &self.others_standing(robot_id))
+    }
+
+    /// The other robots where the document has them, as obstacles for `robot` (suppressed ones and those
+    /// whose shapes are not known are left out).
+    pub(crate) fn others_standing(&self, robot: Id<Robot>) -> Vec<Obstacle> {
+        self.doc
+            .robots()
+            .iter()
+            .filter(|(other, _)| *other != robot && !self.doc.is_component_suppressed(other.erase()))
+            .filter_map(|(other, data)| {
+                Some(self.scene_of(other).ok()?.as_obstacles(&data.joints, &data.name))
+            })
+            .flatten()
+            .collect()
     }
 
     /// The planning scene of a robot in the cell as it stands (other robots are not in it).

@@ -1187,7 +1187,7 @@ fn name_dimensions(txn: &mut Txn<'_>) -> Result<(), EditError> {
 /// The names an expression refers to (empty when it does not parse).
 /// `source` with every reference to the parameter `old` renamed to `new`; `None` when it does not refer
 /// to `old` (or does not parse).
-fn rename_in(source: &str, old: &str, new: &str) -> Option<String> {
+pub(crate) fn rename_in(source: &str, old: &str, new: &str) -> Option<String> {
     fn spans(expr: &gc_expr::Expr, old: &str, out: &mut Vec<(usize, usize)>) {
         match expr {
             gc_expr::Expr::Name { name, span } if name == old => out.push((span.start, span.end)),

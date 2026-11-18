@@ -51,7 +51,7 @@ pub use measure::{
     Feature, FeaturePair, InterferenceRow, ItemMeasure, PairMeasure, angle_at, measure_features,
 };
 pub use physical::PhysicalProperties;
-pub use schedule::{Assignment, Schedule};
+pub use schedule::{Assignment, MAX_ASSIGNMENTS, Schedule, Wait};
 pub use sketch_pick::SketchPick;
 
 /// A dimension that is about to be placed and needs its value from the user.

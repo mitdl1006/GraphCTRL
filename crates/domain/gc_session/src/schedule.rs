@@ -42,7 +42,27 @@ pub struct Schedule {
     pub blocked: Vec<(Id<Task>, String)>,
     /// The planned motions of each assignment, in the same order.
     pub plans: Vec<crate::TaskPlan>,
+    /// Tasks that had to wait for a moving robot to be out of the way before they could start.
+    pub waits: Vec<Wait>,
+    /// True when the schedule was cut off at [`MAX_ASSIGNMENTS`] (tasks that repeat without end).
+    pub cut_short: bool,
 }
+
+/// A task that was ready but had to wait for another robot's motion.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Wait {
+    /// The task.
+    pub task: Id<Task>,
+    /// The robot that did it in the end.
+    pub robot: Id<Robot>,
+    /// How long it waited, seconds.
+    pub seconds: f64,
+    /// The robot that was in the way.
+    pub cause: Id<Robot>,
+}
+
+/// The most assignments a schedule holds: where tasks that repeat without end are cut off.
+pub const MAX_ASSIGNMENTS: usize = 1000;
 
 impl PartialEq for Schedule {
     fn eq(&self, other: &Self) -> bool {
@@ -170,7 +190,17 @@ impl Planning<'_> {
                     let text = effect.value.trim();
                     let value = match &var.value {
                         StateValue::Bool(_) => Some(CondValue::Bool(text == "true")),
-                        StateValue::Int(_) | StateValue::Real(_) => text.parse().ok().map(CondValue::Number),
+                        // A number worked out from the numeric states as they are now (`count + 1`).
+                        StateValue::Int(_) | StateValue::Real(_) => {
+                            let numbers = |name: &str| match world.variables.get(name) {
+                                Some(CondValue::Number(value)) => Some(*value),
+                                _ => None,
+                            };
+                            let whole = matches!(var.value, StateValue::Int(_));
+                            gc_doc::effect_number(text, &numbers)
+                                .ok()
+                                .map(|value| CondValue::Number(if whole { value.round() } else { value }))
+                        }
                         StateValue::Enum { .. } => Some(CondValue::Name(text.to_owned())),
                     };
                     if let Some(value) = value {
@@ -209,12 +239,15 @@ impl Planning<'_> {
             .map(|(id, _)| (id, doc.robot_tool_kit(id).and_then(|(_, state)| state)))
             .collect();
         let mut changes: BTreeMap<Id<Task>, Vec<(String, String)>> = BTreeMap::new();
+        // How often each task has been done, and since when (and for whom) a ready task has been waiting.
+        let mut done: BTreeMap<Id<Task>, u32> = BTreeMap::new();
+        let mut waiting: BTreeMap<Id<Task>, (f64, Id<Robot>)> = BTreeMap::new();
         let mut running: Vec<Assignment> = Vec::new();
         let mut out = Schedule::default();
         let mut reasons: BTreeMap<Id<Task>, String> = BTreeMap::new();
         let mut now = 0.0_f64;
         loop {
-            if self.control.cancelled() {
+            if self.control.cancelled() || out.cut_short {
                 break;
             }
             let mut index = 0;
@@ -273,6 +306,7 @@ impl Planning<'_> {
                         }) {
                             let name = doc.get(other).map(|r| r.name.clone()).unwrap_or_default();
                             reasons.insert(id, format!("it waits for {name} to be out of the way"));
+                            waiting.entry(id).or_insert((now, other));
                             continue;
                         }
                     }
@@ -304,10 +338,16 @@ impl Planning<'_> {
                         out.plans.push(plan);
                         tools.insert(robot, tool);
                         changes.insert(id, objects);
+                        if let Some((since, cause)) = waiting.remove(&id) {
+                            out.waits.push(Wait { task: id, robot, seconds: now - since, cause });
+                        }
                         running.push(assignment.clone());
                         out.assignments.push(assignment);
                         reasons.remove(&id);
                         pending.remove(index);
+                        if out.assignments.len() >= MAX_ASSIGNMENTS {
+                            out.cut_short = true;
+                        }
                     }
                     None => index += 1,
                 }
@@ -324,10 +364,26 @@ impl Planning<'_> {
                 if let Some(task) = doc.get(assignment.task) {
                     self.apply_effects(&mut world, task);
                 }
+                // A task that repeats goes back among those to do, in its place by priority.
+                let times = done.entry(assignment.task).or_insert(0);
+                *times += 1;
+                let again = match doc.task_repeat(assignment.task) {
+                    None => false,
+                    Some(0) => true,
+                    Some(most) => *times < most,
+                };
+                if again {
+                    let rank =
+                        |id: &Id<Task>| (std::cmp::Reverse(doc.get(*id).map_or(0, |t| t.priority)), *id);
+                    let at = pending.partition_point(|other| rank(other) < rank(&assignment.task));
+                    pending.insert(at, assignment.task);
+                }
             }
         }
+        // What was never done is blocked (a repeating task that was done and is not ready again is not).
         out.blocked = pending
             .into_iter()
+            .filter(|id| !done.contains_key(id) && !running.iter().any(|a| a.task == *id))
             .map(|id| (id, reasons.remove(&id).unwrap_or_else(|| "it cannot be done".to_owned())))
             .collect();
         out

@@ -124,6 +124,16 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 숫자 효과 식, 작업 반복, 대기 기록, 개별 계획에도 다른 로봇
+
+- **숫자 변수 효과는 식**: `Effect.value`가 Int·Real 변수 대상이면 수치 식이다(`count + 1`, `2 * n`; 기존 `gc_expr::parse`). 이름은 숫자 상태 변수. 틀리면 `EditError::Expr { message, start, end }`(전에는 `BadValue`). 스케줄에서는 그 시점의 상태 값으로 계산하고 Int는 반올림한다. 변수 이름을 바꾸면 식도 따라 바뀐다. 한계: 공백이 든 변수 이름은 식에서 쓸 수 없다(조건식의 따옴표 문법이 수치 식에는 없다) — 그런 이름으로 바꾸려 하면 식이 깨지므로 `InUse`로 거부된다.
+  - `gc_doc::effect_number(text, &lookup) -> Result<f64, EditError>`: 입력 칸 검증에 쓸 수 있다.
+- **작업 반복**: `WorkOp::SetTaskRepeat { task, times: Option<u32> }` — `None` 한 번(기본), `Some(0)` 전제조건이 참이 될 때마다, `Some(n)` 최대 n번. `doc().task_repeat(task)`. `Task` 구조체는 안 건드렸다(다른 브랜치에 리터럴이 많다) → `Components.task_repeats`에 저장.
+  - 스케줄: 끝난 작업이 반복 대상이면 우선순위 자리에 다시 넣는다. 전체 할당 `MAX_ASSIGNMENTS`(1000)에서 끊고 `Schedule.cut_short = true`.
+  - 한 번 이상 한 반복 작업은 더 못 해도 `blocked`에 넣지 않는다.
+- **대기 기록**: `Schedule.waits: Vec<Wait { task, robot, seconds, cause }>` — 움직이는 로봇 때문에 미뤄졌다가 시작한 작업.
+- **개별 계획에도 다른 로봇**: `task_plan`·`task_plan_from`·`task_candidates`가 다른 로봇(억제 제외)을 문서의 관절 자세로 서 있는 장애물로 넣는다 → 스케줄의 첫 라운드와 같은 기준. 다른 로봇이 목표 앞에 서 있으면 이유에 그 로봇 이름이 나온다. 기존 경로 계획(`plan`)은 그대로(다른 로봇 안 봄).
+
 ## 2026-11-18 — 스케줄에서 로봇 간 회피 (PLAN 9.3·9.5)
 
 - **쉬는 로봇 = 정지 장애물**: 입찰을 계획할 때 그 시점에 쉬고 있는 다른 로봇을 서 있는 자세 그대로 장애물로 넣는다(`RobotScene::as_obstacles(q, name)`를 `gc_motion`에 추가, `Planning::task_plan_among`). 그래서 스케줄의 입찰은 `task_candidates`(다른 로봇을 안 넣음)와 다를 수 있다.
