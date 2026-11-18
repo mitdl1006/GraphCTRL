@@ -80,7 +80,7 @@ Suppress, Visibility, Grounded, iProperties)을 기준으로 했고, 완전한 �
 | Open (별도 세션) | ⛔ | ⛔ | ⛔ | — | — | — | — | ⛔ |
 | Edit (제자리 편집) | — | ✓ 제자리 편집 | ✓ | — | ✗ 관계 편집(구속 대화상자 열기) | ✓ 스케치 편집 | ✓ | △ |
 | Find in Window | ✗ | ✓ 이번에 추가(바디·로봇) | ✗ | — | — | ✗ | ✗ | ✓ 로봇 |
-| Isolate / Undo Isolate | ✗ | ✗ | ✗ | — | — | — | — | ✗ |
+| Isolate / Undo Isolate | — | ✓ | ✓ (구성원 전체) | — | — | — | — | ✓ |
 | Visibility | — | ✓ 보이기/숨기기 | ✓ | ✓ 원점 표시/숨기기 | — | ✓ | ✓ | ✓ |
 | Enabled | — | ✓ | ✗ | — | — | — | — | ✓ |
 | Grounded | — | ✓ | ✗ | — | — | — | ✓(작업 점은 항목 없음) | ✓ |
@@ -116,7 +116,6 @@ Suppress, Visibility, Grounded, iProperties)을 기준으로 했고, 완전한 �
 채움(이번 커밋): Find in Window(바디·로봇), 빠른 실행 도구 모음(New·Open·Save·Undo·Redo·Return).
 
 다음(원문 근거가 있는 것부터):
-1. Isolate / Undo Isolate (브라우저·뷰 우클릭; 원문: "Select All Visible … to restore an Isolate Components operation")
 2. 브라우저 Display Preferences: Show Extended Names(부품 피처 전용이라 해당 없음)
 3. 사용자 정의 폴더(백엔드 저장 필요)
 5. 서브어셈블리의 Enabled·Grounded·Suppress, 컴포넌트 끌어 놓기로 폴더 이동

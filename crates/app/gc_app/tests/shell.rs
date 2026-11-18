@@ -6348,3 +6348,55 @@ fn create_path_makes_a_planned_path_between_two_clicked_sketch_points() {
     assert!(!harness.state().viewport().is_routing());
     assert_eq!(session.doc().waypoints().len(), 2, "a waypoint at each point");
 }
+
+/// Isolate and Undo Isolate (browser right-click; Inventor 2026 help, Frame Generator browser,
+/// GUID-36AE9264-912D-4D3C-BB24-7EC16FA8777E): the chosen component stays, the others are hidden, and the browser
+/// menu brings them back.
+#[test]
+fn isolate_hides_the_others_and_undo_isolate_shows_them_again() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let app = harness.state_mut();
+    let place = |xyz: [f64; 3]| gc_doc::Placement { xyz, rpy: [0.0; 3] };
+    let a = app.session.add_body(gc_doc::Solid::Box { size: [0.1; 3] }, place([0.0; 3])).unwrap();
+    let b = app.session.add_body(gc_doc::Solid::Box { size: [0.1; 3] }, place([0.5, 0.0, 0.0])).unwrap();
+    let visible = |h: &egui_kittest::Harness<'_, GraphCtrlApp>, id: gc_core::Id<gc_doc::Body>| {
+        h.state()
+            .session
+            .doc()
+            .component_flag(gc_doc::Occurrence::Item(id.erase()), gc_doc::ComponentFlag::Visible)
+    };
+    harness.run();
+    assert!(visible(&harness, a) && visible(&harness, b));
+    let name = harness.state().session.doc().get(a).unwrap().name.clone();
+    let row = harness
+        .get_all_by_label_contains(&name)
+        .find(|n| n.rect().min.x < 100.0)
+        .expect("the browser row of the first body");
+    let at = row.rect().center();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run_steps(2);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+    harness.run_steps(3);
+    harness.get_by_label("격리").click();
+    harness.run_steps(3);
+    assert!(visible(&harness, a) && !visible(&harness, b), "only the first body is left");
+    assert!(harness.state().session.is_isolated());
+    // The browser menu offers Undo Isolate while something is isolated.
+    harness.get_by_label("브라우저 메뉴").click();
+    harness.run_steps(3);
+    harness.get_by_label("격리 취소").click();
+    harness.run_steps(3);
+    assert!(visible(&harness, a) && visible(&harness, b));
+    assert!(!harness.state().session.is_isolated());
+}

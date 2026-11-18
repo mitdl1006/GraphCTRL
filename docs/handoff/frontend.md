@@ -386,6 +386,12 @@
 - 뷰에서 역할의 표시(웨이포인트 마름모 9 px, 경로 선 6 px 안)를 클릭하면 그 역할이 선택된다(브라우저 따라감). 다른 항목이 잡히면 그쪽이 우선, 빈 곳 클릭은 선택 해제. 테스트 `clicking_a_roles_mark_in_the_view_selects_it`.
 - 브라우저 "…" 메뉴: "자식만 표시"(Show Children Only, GUID-5F975252: 제자리 편집 중 편집 대상·그 안·그 위 행만), "억제된 항목만"(Find 설명의 "suppressed components"; 억제된 컴포넌트·관계만, 폴더는 유지). Show Extended Names는 부품 피처 전용이라 해당 없음(감사표). `qa_frontend_screens`의 메뉴 옵션 테스트에 두 항목 추가.
 
+### Isolate / Undo Isolate
+
+- 근거: Inventor 2026 도움말 Frame Generator browser, GUID-36AE9264-912D-4D3C-BB24-7EC16FA8777E ("Isolate turns off visibility of components … Undo Isolate restores visibility of components to the pre-isolation state"; Assembly browser 문서의 "Select All Visible … to restore an Isolate Components operation").
+- 브라우저 컴포넌트 행·서브어셈블리 폴더 우클릭 "격리"(`Session::isolate`; 서브어셈블리는 안의 컴포넌트 전체로 펼쳐 넘김), 뷰 마킹 메뉴 오버플로의 선택된 컴포넌트 "격리". 격리 중에는 브라우저 "…" 메뉴와 뷰 메뉴에 "격리 취소"(`undo_isolate`).
+- 테스트: `isolate_hides_the_others_and_undo_isolate_shows_them_again`.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

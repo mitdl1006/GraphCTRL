@@ -845,7 +845,7 @@ impl Viewport {
                             .map(|s| (id, s.flexible)),
                         gc_doc::TreeKey::Component(_) => None,
                     });
-                radial::Set::assembly(item, origin, unit)
+                radial::Set::assembly(item, origin, unit, session.is_isolated())
             };
             if let Some(at) = at {
                 self.marking.press(at, ui.input(|i| i.time));
