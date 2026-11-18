@@ -124,6 +124,14 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — Physical 탭: Include QTY Overrides
+
+근거: iProperties - Physical Tab - Reference(`GUID-877564AC-78CE-4216-9913-003A2DE8D698`) — "Mass, Volume, and Area includes contributions from … BOM Quantity overrides when the … Include QTY Overrides check [box is] selected", "If static quantities are created, the center of gravity and moments of inertia values may not be accurate".
+
+- `session.physical_properties_with(target, include_quantity_overrides)`(추가). 문서 전체(`None`)에서 켜면, Static Quantity가 있는 BOM 행(부품 전용 보기)의 컴포넌트들이 "있는 개수" 대신 그 수량만큼으로 질량·부피·면적에 들어간다(행의 수량을 그 행의 컴포넌트 수로 나눠 각자에 곱한다). 컴포넌트 하나를 물으면 그대로다. 기존 `physical_properties(target)`는 옵션 꺼짐과 같다.
+- 무게중심은 원문 말대로 정확하지 않을 수 있다(늘어난 수량이 같은 자리에 있다고 본다).
+- 테스트: `gc_session/tests/iproperties.rs::static_quantities_count_in_the_mass_when_asked`.
+
 ## 2026-11-18 — iProperties: Status, Custom
 
 근거: iProperties Reference(`GUID-8ABF17C5-B9EB-47B5-92CF-9FBD335334E3`) — Status "In the Status field, enter any status classification", Custom "Adds custom iProperties to the selected file … Custom iProperties added in the BOM dialog box are automatically saved to the Custom tab".

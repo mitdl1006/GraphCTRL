@@ -184,13 +184,58 @@ impl Session {
     /// unless overridden. `None` for a component whose shape is not known (a mesh still being read, an
     /// imported assembly).
     pub fn physical_properties(&self, target: Option<Occurrence>) -> Option<PhysicalProperties> {
+        self.physical_properties_with(target, false)
+    }
+
+    /// [`Session::physical_properties`] with the Physical tab's Include QTY Overrides (Inventor 2026
+    /// help, iProperties - Physical Tab - Reference, GUID-877564AC-78CE-4216-9913-003A2DE8D698: "Mass,
+    /// Volume, and Area includes contributions from … BOM Quantity overrides when the … Include QTY
+    /// Overrides check [box is] selected"; "If static quantities are created, the center of gravity …
+    /// may not be accurate"). For the whole document, the components of a BOM row with a Static
+    /// Quantity count as that many instead of as many as there are.
+    pub fn physical_properties_with(
+        &self,
+        target: Option<Occurrence>,
+        include_quantity_overrides: bool,
+    ) -> Option<PhysicalProperties> {
+        // How much each component counts: the row's static quantity shared over its components.
+        let mut share: std::collections::BTreeMap<gc_core::AnyId, f64> = std::collections::BTreeMap::new();
+        if include_quantity_overrides && target.is_none() {
+            for row in self.bill_of_materials(crate::BomView::PartsOnly).iter().filter(|r| r.static_quantity)
+            {
+                let items: Vec<gc_core::AnyId> = row
+                    .keys
+                    .iter()
+                    .filter_map(|key| match key {
+                        gc_doc::TreeKey::Component(Occurrence::Item(item)) => Some(*item),
+                        _ => None,
+                    })
+                    .collect();
+                #[allow(clippy::cast_precision_loss, reason = "component counts are small")]
+                let each = f64::from(row.quantity) / items.len().max(1) as f64;
+                share.extend(items.into_iter().map(|item| (item, each)));
+            }
+        }
         let of = |item: gc_core::AnyId| -> Option<(Measure, IProperties)> {
             let measure = match item.kind {
                 gc_core::Kind::Body => self.body_measure(gc_core::Id::from_raw(item.raw))?,
                 gc_core::Kind::RobotInstance => self.robot_measure(gc_core::Id::from_raw(item.raw))?,
                 _ => return None,
             };
-            Some((measure, self.properties(Some(Occurrence::Item(item)))))
+            let mut properties = self.properties(Some(Occurrence::Item(item)));
+            let measure = match share.get(&item) {
+                Some(factor) => {
+                    properties.mass_override = properties.mass_override.map(|m| m * factor);
+                    Measure {
+                        volume: measure.volume * factor,
+                        area: measure.area * factor,
+                        moment: measure.moment * *factor,
+                        ..measure
+                    }
+                }
+                None => measure,
+            };
+            Some((measure, properties))
         };
         let parts: Vec<(Measure, IProperties)> = match target {
             Some(Occurrence::Item(item)) => vec![of(item)?],

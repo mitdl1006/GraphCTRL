@@ -153,3 +153,32 @@ fn status_and_custom_iproperties_are_kept_and_saved() {
     let opened = gc_persist::from_text(&text).unwrap().doc;
     assert!(opened.same_content(s.doc()));
 }
+
+/// Include QTY Overrides (Inventor 2026 help, iProperties - Physical Tab - Reference,
+/// GUID-877564AC-78CE-4216-9913-003A2DE8D698): a Static Quantity entered in the bill of materials counts
+/// in the assembly's mass, volume and area when the option is on.
+#[test]
+fn static_quantities_count_in_the_mass_when_asked() {
+    let mut s = Session::new();
+    let bolt = body(&mut s, Solid::Box { size: [0.1, 0.1, 0.1] }, [0.0, 0.0, 0.0]);
+    let plate = body(&mut s, Solid::Box { size: [1.0, 1.0, 0.1] }, [2.0, 0.0, 0.0]);
+    let steel = |part: &str| IProperties {
+        part_number: part.into(),
+        density: Some(1000.0),
+        ..IProperties::default()
+    };
+    s.set_properties(Some(Occurrence::Item(bolt.erase())), steel("BOLT")).unwrap();
+    s.set_properties(Some(Occurrence::Item(plate.erase())), steel("PLATE")).unwrap();
+    let plain = s.physical_properties(None).unwrap();
+    assert!((plain.mass - 101.0).abs() < 1e-9);
+    // Twelve bolts are meant, one is modelled.
+    s.set_bom_quantity(gc_doc::TreeKey::Component(Occurrence::Item(bolt.erase())), Some(12)).unwrap();
+    assert!((s.physical_properties(None).unwrap().mass - 101.0).abs() < 1e-9, "off unless asked");
+    let counted = s.physical_properties_with(None, true).unwrap();
+    assert!((counted.mass - 112.0).abs() < 1e-9, "{}", counted.mass);
+    assert!((counted.volume - (0.012 + 0.1)).abs() < 1e-12);
+    assert!((counted.area - (12.0 * 0.06 + 2.4)).abs() < 1e-9);
+    // One component alone is itself.
+    let one = s.physical_properties_with(Some(Occurrence::Item(bolt.erase())), true).unwrap();
+    assert!((one.mass - 1.0).abs() < 1e-12);
+}
