@@ -1416,6 +1416,16 @@ impl eframe::App for GraphCtrlApp {
             || self.pattern.open
             || self.replicate.picking()
             || self.assemble.picking();
+        if let Some(id) = self.viewport.take_constrain_work()
+            && let Some(selection) = self.session.work_feature_selection(id)
+        {
+            // Only the Assemble command and the Constrain dialog take work features as geometry.
+            if self.assemble.picking() {
+                self.assemble.pick_selection(&self.session, selection);
+            } else if self.constrain.picking() {
+                self.constrain.pick_selection(&self.session, selection);
+            }
+        }
         if let Some((occurrence, element)) = self.viewport.take_constrain_pick() {
             if self.assemble.picking() {
                 self.assemble.pick(&self.session, occurrence, element);
