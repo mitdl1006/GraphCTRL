@@ -572,3 +572,72 @@ fn editing_in_place_scopes_viewport_clicks_and_the_return_buttons_walk_back() {
     assert_eq!(harness.state().session.edit_target(), None, "the dissolved folder is still the edit target");
     assert!(harness.state().session.doc().subassemblies().iter().all(|s| s.id != inner));
 }
+
+// ---- Work feature dialog ----
+
+/// The Work Plane dialog parses its distance with Rust's float parser, which accepts `NaN`, `inf` and `1e999`.
+/// Whatever is typed, nothing invalid reaches the document: an unusable entry creates nothing and leaves the
+/// dialog open for a correction; a good one creates exactly one plane and closes it.
+#[test]
+fn the_work_plane_dialog_creates_nothing_from_unusable_distances() {
+    let mut harness = harness();
+    two_bodies(&mut harness);
+    harness.get_by_label("3D 모델").click();
+    harness.run_steps(3);
+    // The ribbon button (a split button may share the name with other rows): the first node.
+    harness.query_all_by_label("작업 평면").next().unwrap().click();
+    harness.run_steps(3);
+    let input = egui::accesskit::Role::TextInput;
+    let count =
+        |h: &egui_kittest::Harness<'_, GraphCtrlApp>| h.state().session.doc().work_features().iter().count();
+    let before = harness.state().session.doc().clone();
+    let depth = harness.state().session.history().undo_depth();
+    for text in ["NaN", "inf", "-inf", "1e999", "abc", "", "1,5", "10 mm"] {
+        harness.get_by_role_and_label(input, "거리 (mm)").click();
+        harness.run();
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        harness.run();
+        harness.key_press(egui::Key::Backspace);
+        harness.run();
+        if !text.is_empty() {
+            harness.get_by_role_and_label(input, "거리 (mm)").type_text(text);
+        }
+        harness.run();
+        // The field holds exactly what was typed (so the cases below test what they say).
+        let shown = harness.get_by_role_and_label(input, "거리 (mm)").value();
+        assert_eq!(shown.as_deref().unwrap_or(""), text, "the field was not set to {text:?}");
+        harness.query_all_by_label("확인").last().unwrap().click();
+        harness.run_steps(3);
+        assert_eq!(count(&harness), 0, "distance {text:?} created a work plane");
+        assert!(
+            harness.state().session.doc().same_content(&before),
+            "distance {text:?} changed the document"
+        );
+        assert_eq!(harness.state().session.history().undo_depth(), depth, "distance {text:?}");
+        assert!(harness.query_all_by_label("거리 (mm)").count() > 0, "distance {text:?} closed the dialog");
+    }
+    // A good value makes one plane, one undo step, and the dialog closes.
+    harness.get_by_role_and_label(input, "거리 (mm)").click();
+    harness.run();
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.run();
+    harness.key_press(egui::Key::Backspace);
+    harness.run();
+    harness.get_by_role_and_label(input, "거리 (mm)").type_text("25");
+    harness.run();
+    let shown = harness.get_by_role_and_label(input, "거리 (mm)").value();
+    assert_eq!(shown.as_deref().unwrap_or(""), "25");
+    harness.query_all_by_label("확인").last().unwrap().click();
+    harness.run_steps(3);
+    assert_eq!(count(&harness), 1);
+    assert_eq!(harness.state().session.history().undo_depth(), depth + 1);
+    assert!(
+        harness.query_all_by_label("거리 (mm)").count() == 0,
+        "the dialog stayed open after a good value"
+    );
+    let plane = harness.state().session.doc().work_features().iter().next().map(|(id, _)| id).unwrap();
+    let Some(gc_doc::WorkShape::Plane(pose)) = harness.state().session.work_shape(plane) else {
+        panic!("no plane")
+    };
+    assert!((pose.translation.z - 0.025).abs() < 1e-9, "{:?}", pose.translation);
+}
