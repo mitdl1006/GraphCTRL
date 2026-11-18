@@ -124,6 +124,16 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 스케줄을 작업 스레드에서 (`request_schedule` / `schedule_result`)
+
+- `session.request_schedule()`: 지금 문서의 스케줄을 실행기(앱은 스레드, 기본은 그 자리에서)에서 계산하기 시작한다. 같은 리비전에 대해 이미 계산 중이거나 결과가 있으면 아무것도 하지 않는다. 더 옛 리비전의 계산은 취소한다.
+- 결과는 `session.poll_jobs()`(기존, 매 프레임 부르는 것)로 도착한다 → `session.schedule_result() -> Option<(&Schedule, bool)>`. `bool`은 "요청한 뒤 문서가 안 바뀌었다"(리비전 일치). 바뀌었으면 옛 결과를 흐리게 보여 주고 다시 `request_schedule()`.
+- `session.schedule_pending()`: 계산 중인지.
+- 계산은 문서·로봇 모델·메시·설비 장애물의 사본으로 한다(계산 중 편집해도 결과는 요청한 문서의 것). 취소는 작업 사이·계획 단계 사이에서 반영된다.
+- `session.schedule()`(동기)와 결과가 같다. `task_plan`·`task_candidates`는 여전히 동기다.
+- 내부: 작업 계획·스케줄 함수들을 `Planning<'_>`(문서·로봇·메시·장애물·취소를 빌려 보는 문맥)의 메서드로 옮겼고 `Session`의 공개 함수는 그대로 얇게 감싼다(시그니처 불변).
+- 테스트: `task_schedule.rs::a_schedule_asked_for_in_the_background_…`.
+
 ## 2026-11-18 — 툴 종류(ToolKit)·툴 동작·IO 이름표 (PLAN 9.4, GraphCTRL 고유)
 
 기존 `gc_doc::Tool { solid, placement }`(형상)과 `Robot`은 그대로다. 장치로서의 툴은 새 엔티티다.
