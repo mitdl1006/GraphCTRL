@@ -347,7 +347,6 @@ fn demoting_after_undoing_a_delete() {
 /// last was dissolved must not take the dissolved one's id, or anything that remembered the old id (the edit
 /// target, a stored selection) would silently point at the new subassembly.
 #[test]
-#[ignore = "BUG: Demote takes max(id)+1, so a subassembly made after the highest one was dissolved reuses its id, and the edit target of the dissolved one becomes the new subassembly (owner: backend, gc_doc subassembly.rs run Demote id allocation)"]
 fn a_dissolved_subassemblys_id_is_not_reused() {
     let mut s = Session::new();
     let (a, b) = (body(&mut s, 0.0), body(&mut s, 0.3));
@@ -559,7 +558,6 @@ fn editing_in_place_many_times_stays_bounded() {
 /// the session's own selection API is the other way in. Help (Edit components in place): the components
 /// outside the one being edited are not available.
 #[test]
-#[ignore = "BUG: select_occurrence accepts a component outside the edit target, so Ground/Delete/etc. on the selection reach it (owner: backend, gc_session selection should refuse out-of-scope occurrences)"]
 fn selecting_a_component_outside_the_edit_target_is_refused() {
     let mut s = Session::new();
     let (a, c) = (body(&mut s, 0.0), body(&mut s, 0.6));
