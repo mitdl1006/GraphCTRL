@@ -120,6 +120,9 @@ pub struct Viewport {
     pub select_priority: SelectPriority,
     /// Where the Select menu is open.
     select_menu: Option<egui::Pos2>,
+    /// Where the view has stood (F5 goes back, Shift + F5 forward), the one shown now, and when the
+    /// camera last changed.
+    views: ViewHistory,
     /// A Grip Snap in progress.
     grip: Option<grip::Grip>,
     /// The marking menu of the graphics window and the commands it offers.
@@ -168,6 +171,52 @@ pub struct Viewport {
     measure_pick: Option<Option<(gc_session::CellItem, gc_session::Feature)>>,
 }
 
+/// The views the camera has rested in: F5 returns to the previous one, Shift + F5 goes to the next
+/// (Inventor 2026 help, shortcut table GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E).
+#[derive(Clone, Debug, Default)]
+struct ViewHistory {
+    stack: Vec<Camera>,
+    at: usize,
+    /// The camera of the last frame and when it last differed from the one before.
+    seen: Option<(Camera, f64)>,
+}
+
+impl ViewHistory {
+    /// How long the camera rests before the view counts as one to return to, seconds.
+    const REST: f64 = 0.35;
+    const MAX: usize = 50;
+
+    /// Follows the camera: a view it has rested in is remembered.
+    fn follow(&mut self, camera: &Camera, time: f64) {
+        match &mut self.seen {
+            Some((seen, since)) if seen == camera => {
+                if time - *since >= Self::REST && self.stack.get(self.at) != Some(camera) {
+                    self.stack.truncate(self.at + 1);
+                    self.stack.push(*camera);
+                    if self.stack.len() > Self::MAX {
+                        self.stack.remove(0);
+                    }
+                    self.at = self.stack.len() - 1;
+                }
+            }
+            seen => *seen = Some((*camera, time)),
+        }
+        if self.stack.is_empty() {
+            self.stack.push(*camera);
+            self.at = 0;
+        }
+    }
+
+    /// The previous (`back`) or next view, when there is one.
+    fn step(&mut self, back: bool) -> Option<Camera> {
+        let to = if back { self.at.checked_sub(1)? } else { self.at + 1 };
+        let camera = *self.stack.get(to)?;
+        self.at = to;
+        self.seen = None;
+        Some(camera)
+    }
+}
+
 /// What a plain click selects (Inventor 2026 help, About Component Selection Modes and Sets,
 /// GUID-E3E49BD5-3F55-4836-8CD1-2C1855CF9986: the Select command's priority).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -199,6 +248,7 @@ impl Viewport {
             free_drag: None,
             placing: None,
             grip: None,
+            views: ViewHistory::default(),
             select_priority: SelectPriority::default(),
             select_menu: None,
             marking: gc_ui::marking::MarkingMenu::default(),
@@ -1674,6 +1724,23 @@ impl Viewport {
         if ctx.input(|i| i.key_pressed(Key::Escape)) {
             self.nav_tool = None;
             self.free_tool = None;
+        }
+        // F5 returns to the previous view, Shift + F5 goes to the next.
+        let time = ctx.input(|i| i.time);
+        self.views.follow(&self.camera, time);
+        let f5 = ctx.input(|i| {
+            i.events.iter().find_map(|event| match event {
+                egui::Event::Key { key: Key::F5, pressed: true, repeat: false, modifiers, .. } => {
+                    Some(modifiers.shift)
+                }
+                _ => None,
+            })
+        });
+        if let Some(shift) = f5
+            && let Some(camera) = self.views.step(!shift)
+        {
+            self.camera = camera;
+            ctx.request_repaint();
         }
         if ctx.input(|i| i.key_pressed(Key::F8)) {
             self.show_constraints = true;

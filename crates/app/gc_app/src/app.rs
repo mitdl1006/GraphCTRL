@@ -750,6 +750,21 @@ impl GraphCtrlApp {
                 // in a sketch C is the circle.
                 egui::Key::C if !command && !sketching => self.constrain.start(),
                 egui::Key::P if !command && !sketching => self.place_component(self.lang),
+                // S makes a 2D sketch on the selected plane (an origin plane of a component or a work
+                // plane), else on XY, and starts with the line tool as the ribbon does.
+                egui::Key::S if !command && !sketching => {
+                    let made = match (self.viewport.origin_selected, self.viewport.work_selected) {
+                        (_, Some(work)) => self.session.create_sketch_on_work_plane(work).is_ok(),
+                        (Some((occurrence, gc_doc::OriginElement::Plane(plane))), None) => {
+                            self.session.create_sketch_on_component(occurrence, plane).is_ok()
+                        }
+                        _ => self.session.create_sketch("XY").is_ok(),
+                    };
+                    if made {
+                        self.session.set_tool(ToolKind::Line);
+                        self.tab = Tab::Sketch;
+                    }
+                }
                 egui::Key::L | egui::Key::C | egui::Key::A | egui::Key::R | egui::Key::D if !command => {
                     let (tool, name) = match key {
                         egui::Key::L => (ToolKind::Line, "L"),

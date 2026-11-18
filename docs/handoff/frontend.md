@@ -158,6 +158,12 @@
 - `Preview.cut`(Trim이 지울 조각)을 스케치 뷰에서 빨간 점선(2.6 px)으로 그린다. `Piece::polyline`으로 선분·호·원·타원호(`EllipseArc`)를 모두 그린다.
 - 증거 `docs/evidence/img/review-57-trim-preview.png`, 테스트 `trim_highlights_the_piece_that_would_go`.
 
+### 단축키: F5 / Shift+F5, S
+
+- 근거: 단축키 원문 GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E ("F5 Returns to the previous view", "Shift + F5 Switches to the next view", "S Creates a 2D sketch on a face or plane").
+- F5 이전 뷰 / Shift+F5 다음 뷰: 카메라가 0.35초 이상 멈춘 자세를 기록(50개)해 오간다. S(스케치 밖): 선택한 원점 평면·작업 평면, 없으면 XY에 2D 스케치를 만들고 선 도구로 시작. 테스트 `f5_walks_the_views_and_s_makes_a_sketch`.
+- 아직 없는 원문 단축키: F10(스케치 가시성), Tab / Shift+Tab(Demote / Promote), Ctrl+C / Ctrl+V(항목 복사·붙여넣기), E·H 등 파트 모델링 명령, Alt+드래그(어셈블리 구속). 앱에 해당 기능이 없거나 UI가 정해지지 않았다.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹
