@@ -799,6 +799,18 @@ pub enum CellOp {
     },
     /// Deletes a path.
     DeletePath(Id<MotionPath>),
+    /// Isolate (Inventor 2026 help, Frame Generator browser, GUID-36AE9264-912D-4D3C-BB24-7EC16FA8777E:
+    /// "Isolate turns off visibility of components", all except the selected ones). Every visible
+    /// component that is not one of `keep`, not inside one and not around one is hidden, and remembered
+    /// for [`CellOp::UndoIsolate`]. Refused without components to keep or for one that does not exist.
+    Isolate {
+        /// The components that stay visible.
+        keep: Vec<crate::design::Occurrence>,
+    },
+    /// Undo Isolate: "restores visibility of components to the pre-isolation state. It also keeps intact
+    /// those operations performed in the isolated state" (same page). Shows what Isolate hid; refused
+    /// when nothing is isolated.
+    UndoIsolate,
     /// Gives sketch elements a role: a point becomes a waypoint, a chain of open curves a path. Refused
     /// (`InUse`) when the point already is a waypoint or a curve already belongs to a path role, and
     /// (`BadValue`) when the curves are closed or do not join into one chain.
@@ -1092,6 +1104,8 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
         | CellOp::SetPathFollow { .. }
         | CellOp::AddFollowPath { .. }
         | CellOp::AddPathThrough { .. } => crate::role::run(txn, op),
+        CellOp::Isolate { keep } => crate::tree::isolate(txn, keep),
+        CellOp::UndoIsolate => crate::tree::undo_isolate(txn),
         CellOp::AddBody(body) => {
             placed(&body.placement)?;
             if !body.solid.is_valid() {
