@@ -304,7 +304,7 @@ fn offset_and_transforms_of_awkward_splines_are_refused_or_sane() {
                     &mut s,
                     k,
                     &format!("{what}: offset {distance}"),
-                    SketchOp::Offset { curves: vec![sp], distance, loop_select, constrain },
+                    SketchOp::Offset { curves: vec![sp], distance, loop_select, constrain, picked: None },
                 );
             }
         }
