@@ -112,6 +112,8 @@ pub(crate) enum RibbonAction {
     StartReplicate(crate::replicate::Mode),
     /// Open the parameters dialog.
     StartParameters,
+    /// Open the Bill of Materials dialog.
+    StartBom,
     /// View tab, Windows panel, User Interface: show or hide an element of the window.
     SetInterface(InterfaceElement, bool),
     /// Clean Screen: hides the browser and the ribbon, or brings them back.
@@ -620,6 +622,12 @@ pub(crate) fn show(
                 ribbon_group(ui, tr!(lang, GroupParameters), |ui| {
                     if ribbon_button(ui, Icon::Text("fx"), tr!(lang, MenuParameters), false, true).clicked() {
                         action = Some(RibbonAction::StartParameters);
+                    }
+                });
+                // Bill of Materials (GUID-A0A95805-CBF6-4524-8314-4AC8B53C19CF).
+                ribbon_group(ui, tr!(lang, BomTitle), |ui| {
+                    if ribbon_button(ui, Icon::Text("BOM"), tr!(lang, BomTitle), false, true).clicked() {
+                        action = Some(RibbonAction::StartBom);
                     }
                 });
             }

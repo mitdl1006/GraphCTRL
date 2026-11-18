@@ -4,6 +4,7 @@ mod agent;
 mod app;
 mod assemble;
 mod assembly_import;
+mod bom;
 mod conflict;
 mod constrain;
 mod cut_edges;

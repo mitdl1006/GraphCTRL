@@ -54,6 +54,10 @@ pub trait FileDialogs {
     fn open_urdf(&mut self) -> Option<PathBuf> {
         None
     }
+    /// Where to save a CSV file, or `None` when the user cancelled.
+    fn save_csv(&mut self, _suggested_name: &str) -> Option<PathBuf> {
+        None
+    }
 }
 
 struct NativeDialogs;
@@ -81,6 +85,10 @@ impl FileDialogs for NativeDialogs {
 
     fn open_urdf(&mut self) -> Option<PathBuf> {
         rfd::FileDialog::new().add_filter("URDF", &["urdf", "URDF", "xml"]).pick_file()
+    }
+
+    fn save_csv(&mut self, suggested_name: &str) -> Option<PathBuf> {
+        rfd::FileDialog::new().add_filter("CSV", &["csv"]).set_file_name(suggested_name).save_file()
     }
 }
 
@@ -269,6 +277,8 @@ pub struct GraphCtrlApp {
     replicate: crate::replicate::Replicate,
     /// The Parameters dialog.
     parameters: crate::parameters::Parameters,
+    /// The Bill of Materials dialog.
+    bom: crate::bom::BomDialog,
     /// The iProperties dialog.
     iproperties: crate::iproperties::IPropertiesDialog,
     /// Tools > Document Settings.
@@ -392,6 +402,7 @@ impl GraphCtrlApp {
             sketch_dialog: None,
             auto_dimension: None,
             parameters: crate::parameters::Parameters::default(),
+            bom: crate::bom::BomDialog::default(),
             iproperties: crate::iproperties::IPropertiesDialog::default(),
             doc_settings: crate::doc_settings::DocSettingsDialog::default(),
             importing: false,
@@ -949,6 +960,10 @@ impl GraphCtrlApp {
                 }
             });
             ui.menu_button(tr!(lang, MenuTools), |ui| {
+                if ui.button(tr!(lang, BomTitle)).clicked() {
+                    self.bom.open = true;
+                    ui.close();
+                }
                 if ui.button(tr!(lang, CmdIProperties)).clicked() {
                     self.iproperties.start(&self.session, None, "", lang);
                     ui.close();
@@ -1307,6 +1322,7 @@ impl eframe::App for GraphCtrlApp {
             Some(ribbon::RibbonAction::StartPattern) => self.pattern.start(Vec::new()),
             Some(ribbon::RibbonAction::StartReplicate(mode)) => self.replicate.start(mode),
             Some(ribbon::RibbonAction::StartParameters) => self.parameters.open = true,
+            Some(ribbon::RibbonAction::StartBom) => self.bom.open = true,
             Some(ribbon::RibbonAction::StartAutoDimension) => {
                 self.auto_dimension = Some(crate::sketch_dialogs::AutoDimension::new());
             }
@@ -1428,6 +1444,18 @@ impl eframe::App for GraphCtrlApp {
         });
         if self.interference.open {
             self.interference.window(&ctx, &self.session, lang);
+        }
+        if self.bom.open {
+            self.bom.window(&ctx, &mut self.session, lang);
+            if std::mem::take(&mut self.bom.export)
+                && let Some(path) = self.dialogs.save_csv("bom.csv")
+            {
+                let text = self.session.bom_csv(self.bom.view());
+                self.notice = Some(match std::fs::write(&path, text) {
+                    Ok(()) => tr!(lang, BomExported, path.display()),
+                    Err(error) => tr!(lang, FileError, error),
+                });
+            }
         }
         if self.iproperties.open {
             self.iproperties.window(&ctx, &mut self.session, lang);
