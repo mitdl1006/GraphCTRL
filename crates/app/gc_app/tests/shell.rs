@@ -5003,3 +5003,33 @@ fn grip_snap_moves_the_whole_subassembly_of_the_picked_component() {
     assert!((other[1] - 0.5 - xyz[1]).abs() < 1e-9, "the rest of the unit went along: {other:?}");
     assert!(!harness.state().viewport().is_grip_snapping(), "Done ends the command");
 }
+
+/// F5 returns to the previous view, Shift + F5 goes to the next; S makes a sketch (Inventor 2026 help,
+/// Predefined Command Alias and Shortcut Reference, GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E).
+#[test]
+fn f5_walks_the_views_and_s_makes_a_sketch() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .with_step_dt(0.1)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.state_mut().viewport_mut().look(gc_draw::StandardView::Front);
+    harness.run_steps(8);
+    let front = harness.state().viewport().camera;
+    harness.state_mut().viewport_mut().look(gc_draw::StandardView::Right);
+    harness.run_steps(8);
+    let right = harness.state().viewport().camera;
+    assert_ne!(front, right);
+    harness.key_press(egui::Key::F5);
+    harness.run_steps(2);
+    assert_eq!(harness.state().viewport().camera, front, "back to the previous view");
+    harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::F5);
+    harness.run_steps(2);
+    assert_eq!(harness.state().viewport().camera, right, "and forward again");
+
+    assert!(harness.state().session.active_sketch().is_none());
+    harness.key_press(egui::Key::S);
+    harness.run_steps(3);
+    assert!(harness.state().session.active_sketch().is_some(), "S made a sketch on XY");
+}
