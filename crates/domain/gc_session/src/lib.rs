@@ -718,6 +718,30 @@ impl Session {
         self.execute(&Command::Cell(gc_doc::CellOp::DeleteRelationship(id))).map(|_| ())
     }
 
+    /// Free Move / Free Rotate: drops a component (body, robot, imported assembly) at `placement` without
+    /// solving its relationships (Inventor 2026 help, Move assembly components,
+    /// GUID-9796C22B-23C1-4D69-BC2E-54056E46F255). It stays there until [`Session::update_assembly`] or
+    /// the next command that solves the relationships. One undo step.
+    pub fn free_move(&mut self, item: gc_core::AnyId, placement: gc_doc::Placement) -> Result<(), EditError> {
+        self.execute(&Command::Cell(gc_doc::CellOp::FreeMove { item, placement })).map(|_| ())
+    }
+
+    /// Update: components snap back to where their relationships put them; grounded ones stay and what
+    /// is related to them follows. One undo step.
+    pub fn update_assembly(&mut self) -> Result<(), EditError> {
+        self.execute(&Command::Cell(gc_doc::CellOp::UpdateAssembly)).map(|_| ())
+    }
+
+    /// True when a component was dropped where its relationships do not hold (Update would move it).
+    pub fn needs_update(&self) -> bool {
+        self.doc.needs_update()
+    }
+
+    /// The relationships as elastic bands for Free Move: both ends in the world and whether each holds.
+    pub fn relationship_bands(&self) -> Vec<gc_doc::RelationBand> {
+        self.doc.relationship_bands()
+    }
+
     /// The assembly constraints, for the Relationships folder.
     pub fn relationships(&self) -> Vec<(Id<gc_doc::Relationship>, &gc_doc::Relationship)> {
         self.doc.relationships().iter().collect()

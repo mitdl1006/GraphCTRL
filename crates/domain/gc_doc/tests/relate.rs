@@ -858,3 +858,64 @@ fn joint_origins_take_alignment_an_offset_and_the_middle_of_two_faces() {
     assert!(close(DVec3::from_array(z), -DVec3::X));
     assert!(Geometry::between_faces(&side(1.0), &top(1.0), [0.0; 3]).is_none());
 }
+
+/// Free Move and Update (Inventor 2026 help, Move assembly components,
+/// GUID-9796C22B-23C1-4D69-BC2E-54056E46F255; Rotate assembly components,
+/// GUID-7EAE9DFD-899A-4FD1-B63F-92DD41D0A916): a dropped component stays until Update, then snaps back;
+/// a grounded one stays and what is related to it follows.
+#[test]
+fn free_move_drops_a_component_until_the_assembly_is_updated() {
+    let mut bench = Bench::new();
+    let (table, block) = table_and_box(&mut bench);
+    let mate = Relationship {
+        limits: None,
+        name: "Mate:1".into(),
+        kind: RelationKind::Mate { offset: 0.0, sense: AxisSense::Opposed },
+        first: on(block, bottom(0.2)),
+        second: on(table, top(1.0)),
+    };
+    let id = bench.relate(mate).unwrap();
+    assert!(!bench.doc.needs_update());
+    let rest = bench.pose(block);
+
+    // Dragged up and turned: it stays there, the band shows the relationship does not hold.
+    let depth = bench.history.undo_depth();
+    let dropped = Placement { xyz: [0.6, 0.1, 1.6], rpy: [0.5, 0.0, 0.0] };
+    bench.cell(CellOp::FreeMove { item: block.erase(), placement: dropped }).unwrap();
+    assert_eq!(bench.history.undo_depth(), depth + 1);
+    assert_eq!(bench.doc.get(block).unwrap().placement, dropped);
+    assert!(bench.doc.needs_update());
+    let bands = bench.doc.relationship_bands();
+    assert_eq!(bands.len(), 1);
+    assert!(bands[0].id == id && !bands[0].satisfied);
+    assert!(close(bands[0].ends[1], DVec3::new(0.0, 0.0, 1.0)), "{:?}", bands[0].ends);
+    assert!(bands[0].ends[0].z > 1.3);
+    // Update: back on the table, upright, and still where it was dropped across the table.
+    bench.cell(CellOp::UpdateAssembly).unwrap();
+    assert!(!bench.doc.needs_update() && bench.doc.relationship_bands()[0].satisfied);
+    let pose = bench.pose(block);
+    assert!(
+        (pose.translation.z - rest.translation.z).abs() < 1e-7 && close(pose.rotation * DVec3::Z, DVec3::Z)
+    );
+    assert!((pose.translation.x - 0.6).abs() < 0.05 && (pose.translation.y - 0.1).abs() < 0.05);
+
+    // The grounded table is dropped lower: it stays, and on Update the block follows it.
+    let lower = Placement { xyz: [0.0, 0.0, 0.3], rpy: [0.0; 3] };
+    bench.cell(CellOp::FreeMove { item: table.erase(), placement: lower }).unwrap();
+    assert!(bench.doc.needs_update());
+    bench.cell(CellOp::UpdateAssembly).unwrap();
+    assert_eq!(bench.doc.get(table).unwrap().placement, lower);
+    assert!((bench.pose(block).translation.z - 0.9).abs() < 1e-7);
+    // Undo takes the Update and the drop back one at a time.
+    bench.history.undo(&mut bench.doc).unwrap();
+    assert!(bench.doc.needs_update());
+    bench.history.undo(&mut bench.doc).unwrap();
+    assert!(!bench.doc.needs_update());
+    // Values that are not numbers and things that are not components are refused.
+    let nowhere = Placement { xyz: [f64::NAN, 0.0, 0.0], rpy: [0.0; 3] };
+    assert_eq!(
+        bench.cell(CellOp::FreeMove { item: block.erase(), placement: nowhere }),
+        Err(EditError::BadValue)
+    );
+    assert_eq!(bench.cell(CellOp::FreeMove { item: id.erase(), placement: lower }), Err(EditError::BadValue));
+}

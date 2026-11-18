@@ -301,6 +301,17 @@ pub enum RelationKind {
     },
 }
 
+/// A relationship as Free Move draws it: an elastic band between its two selections.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RelationBand {
+    /// The relationship.
+    pub id: Id<Relationship>,
+    /// Its first and second selection in the world.
+    pub ends: [DVec3; 2],
+    /// False when it does not hold where the components stand (until Update).
+    pub satisfied: bool,
+}
+
 /// How an angle constraint reads its sense (Inventor 2026 help, To Place Angle Constraints in Assemblies,
 /// GUID-AD4679FD-EE9B-47C0-9E32-04B990BDD29E).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -864,6 +875,39 @@ impl Document {
         let local = frame.rotation.inverse() * world;
         let geometry = origin.geometry.aligned_to(local.to_array(), invert)?;
         Some(Selection { occurrence: origin.occurrence, geometry })
+    }
+
+    /// Where a selection is in the world: a plane's or axis's point, a circle's or sphere's centre, a
+    /// point, a joint origin. `None` for a missing component.
+    pub fn selection_point(&self, selection: &Selection) -> Option<DVec3> {
+        let pose = self.owner_pose(selection.occurrence.owner())?;
+        let (point, _, _) = self.in_owner(selection)?.joint_frame();
+        Some(pose.translation + pose.rotation * point)
+    }
+
+    /// The relationships as Free Move shows them (Inventor 2026 help, Move assembly components,
+    /// GUID-9796C22B-23C1-4D69-BC2E-54056E46F255: "The Free Move command displays component relationships
+    /// as an elastic band"): for each relationship that is not suppressed, where its two selections are
+    /// in the world and whether it holds where the components stand now.
+    pub fn relationship_bands(&self) -> Vec<RelationBand> {
+        let Ok((owners, terms)) = self.gather() else { return Vec::new() };
+        let poses: Vec<DPose3> = owners.iter().map(|o| o.pose).collect();
+        terms
+            .iter()
+            .filter_map(|term| {
+                let relationship = self.get(term.id)?;
+                let ends =
+                    [self.selection_point(&relationship.first)?, self.selection_point(&relationship.second)?];
+                let satisfied = term_residuals(term, &poses).iter().all(|r| r.abs() <= 1e-7);
+                Some(RelationBand { id: term.id, ends, satisfied })
+            })
+            .collect()
+    }
+
+    /// True when a component stands where its relationships do not hold (dropped there by Free Move or
+    /// Free Rotate): Update would move something.
+    pub fn needs_update(&self) -> bool {
+        self.relationship_bands().iter().any(|band| !band.satisfied)
     }
 
     /// A selection as a line in the world: a point and a unit direction (a plane's normal, an axis's or

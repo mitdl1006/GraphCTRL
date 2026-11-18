@@ -611,6 +611,21 @@ pub enum CellOp {
     },
     /// Subassemblies made in the cell: Demote, move between levels, dissolve, rename.
     Subassembly(crate::subassembly::SubassemblyOp),
+    /// Free Move and Free Rotate (Inventor 2026 help, Move assembly components,
+    /// GUID-9796C22B-23C1-4D69-BC2E-54056E46F255, Rotate assembly components,
+    /// GUID-7EAE9DFD-899A-4FD1-B63F-92DD41D0A916): drops a component (body, robot or imported assembly)
+    /// where it was dragged or turned to. Its relationships are not solved: it stays there, grounded or
+    /// not, until the assembly is updated.
+    FreeMove {
+        /// The component.
+        item: AnyId,
+        /// Where it is dropped.
+        placement: Placement,
+    },
+    /// Update (same pages): "A component snaps back to the position defined by its relationships to other
+    /// components when you update the assembly"; a grounded component and one without relationships stay
+    /// where they were dropped, and what is related to a grounded component follows it.
+    UpdateAssembly,
     /// The offset or angle of a constraint as typed: a number, a unit, an expression naming parameters
     /// and dimensions, or `NAME = expression` (Inventor 2026 help, About Parameters in Models,
     /// GUID-8E5C63EA-0540-4EBE-9B17-B8159C7FE40C). Refused for relationships without a value, text that
@@ -1129,6 +1144,28 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
         | CellOp::AddFollowPath { .. }
         | CellOp::AddPathThrough { .. } => crate::role::run(txn, op),
         CellOp::Work(op) => crate::work::run(txn, op),
+        CellOp::FreeMove { item, placement } => {
+            placed(placement)?;
+            let placement = *placement;
+            match item.kind {
+                Kind::Body => {
+                    txn.modify(Id::<Body>::from_raw(item.raw), |b: &mut Body, _| b.placement = placement)?;
+                }
+                Kind::RobotInstance => {
+                    txn.modify(Id::<Robot>::from_raw(item.raw), |r: &mut Robot, _| r.placement = placement)?;
+                }
+                Kind::Assembly => txn.modify(
+                    Id::<crate::design::Assembly>::from_raw(item.raw),
+                    |a: &mut crate::design::Assembly, _| a.placement = placement,
+                )?,
+                _ => return Err(EditError::BadValue),
+            }
+            Ok((Vec::new(), "Free move"))
+        }
+        CellOp::UpdateAssembly => {
+            settle(txn)?;
+            Ok((Vec::new(), "Update"))
+        }
         CellOp::SetRelationValue { id, source } => crate::relparam::set_value(txn, *id, source),
         CellOp::RenameRelationParam { id, name } => {
             crate::relparam::rename(txn, *id, name)?;
