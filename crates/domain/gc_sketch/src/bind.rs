@@ -220,6 +220,11 @@ impl Binding {
                     (Ok(_), Ok(_)) => return Err(SketchError::WrongCurveKind),
                 }
             }
+            // Two ellipses (pieces of one cut ellipse): the same minor radius.
+            GeoConstraint::Equal(a, b) if sketch.ellipse(a).is_some() && sketch.ellipse(b).is_some() => {
+                let ((ca, _, ra), (cb, _, rb)) = (self.ellipse(sketch, a)?, self.ellipse(sketch, b)?);
+                Constraint::EqualRadius(Round { c: ca, r: ra }, Round { c: cb, r: rb })
+            }
             GeoConstraint::Equal(a, b) => match (self.line(sketch, a), self.line(sketch, b)) {
                 (Ok(l1), Ok(l2)) => Constraint::EqualLength(l1, l2),
                 (Err(_), Err(_)) => Constraint::EqualRadius(self.round(sketch, a)?, self.round(sketch, b)?),
@@ -341,8 +346,22 @@ impl Sketch {
                     binding.radii.insert(*id, binding.sys.add_radius(r));
                 }
                 CurveGeom::Ellipse { .. } if spatial => return Err(SketchError::WrongSpace),
-                CurveGeom::Ellipse { minor, .. } => {
-                    binding.radii.insert(*id, binding.sys.add_radius(minor));
+                CurveGeom::Ellipse { c, major, minor, arc } => {
+                    let r = binding.sys.add_radius(minor);
+                    binding.radii.insert(*id, r);
+                    // An elliptical arc's ends stay on its ellipse.
+                    if let Some((s, e)) = arc {
+                        for end in [s, e] {
+                            let on = Constraint::PointOnEllipse {
+                                p: binding.p2(end)?,
+                                c: binding.p2(c)?,
+                                major: binding.p2(major)?,
+                                minor: r,
+                            };
+                            // Keyed by the end point (the curve's own key holds nothing here).
+                            binding.sys.add(solver_id(end), on);
+                        }
+                    }
                 }
                 CurveGeom::Arc { s, e, .. } => {
                     let (_, radius) = self.round(*id).ok_or(SketchError::MissingPoint)?;

@@ -342,3 +342,37 @@ fn a_subassembly_moves_as_one_unit() {
     assert_eq!(s.move_subassembly(outer, delta), Err(EditError::BadValue));
     assert!(s.subassembly_moved(SubassemblyId(99), delta).is_none());
 }
+
+/// Previewing several components at once (a subassembly dragged as a unit) leaves the document alone and
+/// shows them all; ending the preview shows the document again.
+#[test]
+fn several_components_preview_together_without_touching_the_document() {
+    use gc_math::{DPose3, DQuat, DVec3};
+    let mut s = Session::new();
+    let _first = body(&mut s, 5.0);
+    let (a, b) = (body(&mut s, 0.0), body(&mut s, 0.3));
+    let sub = demote(&mut s, vec![key(a), key(b)], "Jig");
+    let delta = DPose3::from_parts(DVec3::new(0.0, 0.0, 0.4), DQuat::IDENTITY);
+    let moves = s.subassembly_moved(sub, delta).unwrap();
+    let before = s.doc().clone();
+    let revision = s.history().undo_depth();
+    s.preview_components(&moves).unwrap();
+    assert!(s.doc().same_content(&before));
+    assert_eq!(s.history().undo_depth(), revision);
+    for x in [a, b] {
+        let shown = s.shown_body(x).unwrap().placement;
+        assert!((shown.xyz[2] - 0.4).abs() < 1e-9, "{shown:?}");
+        assert!(s.driven_placement(x.erase()).is_some());
+    }
+    s.end_component_preview();
+    assert!(s.shown_body(a).unwrap().placement.xyz[2].abs() < 1e-9);
+    // Not a component, or not finite: refused, nothing shown.
+    let bad = DPose3::from_parts(DVec3::new(f64::NAN, 0.0, 0.0), DQuat::IDENTITY);
+    assert_eq!(s.preview_components(&[(a.erase(), bad)]), Err(EditError::BadValue));
+    assert_eq!(s.preview_components(&[(sub_key_item(), delta)]), Err(EditError::BadValue));
+    assert!(s.driven_placement(a.erase()).is_none());
+}
+
+fn sub_key_item() -> gc_core::AnyId {
+    gc_core::Id::<gc_doc::WorkFeature>::from_raw(std::num::NonZeroU64::new(9999).unwrap()).erase()
+}

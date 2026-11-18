@@ -16,7 +16,7 @@ pub use gc_sketch::Piece;
 pub use pick::{Inference, Snap, SnapKind, pick, snap};
 pub use tool::{
     ConstraintKind, HudField, HudSlot, Key, Preview, Prompt, Tool, ToolCommand, ToolEvent, ToolKind,
-    ToolOutput,
+    ToolOutput, push_polyline,
 };
 
 /// Pixel tolerances of picking and snapping.

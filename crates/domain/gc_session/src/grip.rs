@@ -86,6 +86,30 @@ impl Session {
         self.doc().grip_snap_allowed(item, motion, reference, from, to)
     }
 
+    /// Shows several components (bodies, robots, imported assemblies) at other poses at once, without
+    /// touching the document: a subassembly dragged as one unit, a Grip Snap session. They are shown where
+    /// Drive shows components (`driven_placement`, `shown_body`, `shown_base`). Refused (nothing shown) when
+    /// one of them is not a component or a pose is not finite. Replaces any earlier such preview.
+    pub fn preview_components(&mut self, moves: &[(AnyId, DPose3)]) -> Result<(), EditError> {
+        let valid = moves.iter().all(|(item, pose)| {
+            matches!(item.kind, gc_core::Kind::Body | gc_core::Kind::RobotInstance | gc_core::Kind::Assembly)
+                && self.doc().component_origin(gc_doc::Occurrence::Item(*item)).is_some()
+                && pose.translation.is_finite()
+                && pose.rotation.is_finite()
+        });
+        if !valid {
+            return Err(EditError::BadValue);
+        }
+        self.show_relation_drive(moves.to_vec());
+        Ok(())
+    }
+
+    /// Ends [`Session::preview_components`]: the components are shown where the document has them again
+    /// (commit with [`Session::grip_snap_commit`] or [`Session::move_subassembly`] first to keep the moves).
+    pub fn end_component_preview(&mut self) {
+        self.end_drive_relationship();
+    }
+
     /// Ends a Grip Snap: puts the components where they were snapped (what is tied to them follows), and
     /// with `ground` (Commit and Ground) grounds them too. One undo step.
     pub fn grip_snap_commit(&mut self, moves: &[(AnyId, DPose3)], ground: bool) -> Result<(), EditError> {
