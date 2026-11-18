@@ -706,6 +706,19 @@ pub(crate) fn show(
                     }
                 });
                 ribbon_group(ui, tr!(lang, GroupVisibility), |ui| {
+                    // Object Visibility (GUID-BA193171-FAFC-4150-9222-CC43D8D4AA54): one check box a kind.
+                    gc_ui::ribbon_drop_button(ui, Icon::View, tr!(lang, ObjVisTitle), |ui| {
+                        let v = &mut viewport.visibility;
+                        ui.checkbox(&mut v.origin_planes, tr!(lang, ObjVisOriginPlanes));
+                        ui.checkbox(&mut v.origin_axes, tr!(lang, ObjVisOriginAxes));
+                        ui.checkbox(&mut v.origin_points, tr!(lang, ObjVisOriginPoints));
+                        ui.checkbox(&mut v.work_planes, tr!(lang, ObjVisWorkPlanes));
+                        ui.checkbox(&mut v.work_axes, tr!(lang, ObjVisWorkAxes));
+                        ui.checkbox(&mut v.work_points, tr!(lang, ObjVisWorkPoints));
+                        ui.checkbox(&mut v.sketches, tr!(lang, ObjVisSketches));
+                        ui.checkbox(&mut v.sketches_3d, tr!(lang, ObjVisSketches3d));
+                        ui.checkbox(&mut viewport.show_constraints, tr!(lang, ObjVisConstraints));
+                    });
                     // Degrees of freedom: a symbol at every component that can still move.
                     let items: Vec<gc_core::AnyId> = session
                         .components()

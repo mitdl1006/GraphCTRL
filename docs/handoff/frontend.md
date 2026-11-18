@@ -272,6 +272,14 @@
 - 렌더러 지원이 필요한 나머지: 숨은 모서리 표시(음영/와이어프레임 + 숨은 모서리 점선·옅은 색: 깊이 반전 패스), 가시 모서리만 있는 와이어프레임(색 쓰기 없는 깊이 전용 패스), 사실적(재질), 흑백·수채화·스케치 일러스트.
 - 테스트: `the_visual_style_drop_down_switches_shaded_edges_and_wireframe`.
 
+### 뷰 탭: 개체 가시성(Object Visibility) 드롭리스트
+
+- 근거: Inventor 2026 도움말 GUID-BA193171-FAFC-4150-9222-CC43D8D4AA54 (View 탭 Visibility 패널 Object Visibility: 드롭리스트에서 체크 해제=끄기, 선택=켜기, 같은 종류 전체에 적용. 컨텍스트 메뉴 가시성과 충돌하면 개별 설정이 우선이라는 주의 문구).
+- 구현: `ribbon_drop_button`(gc_ui, 체크 클릭에는 열린 채, 바깥 클릭에 닫힘) + `ObjectVisibility`(gc_viewport). 종류: 원점 평면·축·점, 작업 평면·축·점, 스케치(비활성 2D), 3D 스케치, 구속조건 기호. 그리기와 선택(pick) 둘 다 같은 필터를 따른다.
+- 의미: 작업 피처·스케치는 기본 켜짐이고 끄면 전부 숨김(개별로 숨긴 것은 그대로 숨김). 원점 종류는 기본 꺼짐(Inventor 원점 폴더처럼)이고 켜면 모든 컴포넌트의 해당 원점 요소가 개별 표시에 더해 보인다.
+- 원문과 차이: 이 설정은 실행 중에만 유지(문서 저장 안 됨). UCS·스케치 치수·와이어 등 우리에게 없는 종류는 없음. 스케치 치수 일괄 표시/숨김(GUID-026FE8D3)은 구속 기호와 별개이므로 아직 없음.
+- 테스트: `the_object_visibility_drop_list_switches_kinds_on_and_off`; 기존 `qa_assembly_ui` 15개 통과.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

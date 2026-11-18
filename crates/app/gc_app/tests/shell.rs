@@ -5793,3 +5793,33 @@ fn the_visual_style_drop_down_switches_shaded_edges_and_wireframe() {
     pick_variant(&mut harness, "시각 스타일", "음영 처리");
     assert_eq!(harness.state().viewport().style, gc_viewport::VisualStyle::Shaded);
 }
+
+/// Object Visibility (View tab, Visibility panel; Inventor 2026 help, To set visibility of work features,
+/// annotations, and other display elements, GUID-BA193171-FAFC-4150-9222-CC43D8D4AA54): a drop-list with a check
+/// box for each kind.
+#[test]
+fn the_object_visibility_drop_list_switches_kinds_on_and_off() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("뷰").click();
+    harness.run();
+    assert!(harness.state().viewport().visibility.work_planes, "work features start visible");
+    assert!(!harness.state().viewport().visibility.origin_planes, "origin folders start hidden");
+    harness.get_by_label("개체 가시성").click();
+    harness.run_steps(3);
+    harness.get_by_label("작업 평면").click();
+    harness.run_steps(2);
+    harness.get_by_label("원점 평면").click();
+    harness.run_steps(2);
+    harness.get_by_label("구속조건 기호").click();
+    harness.run_steps(2);
+    let v = harness.state().viewport();
+    assert!(!v.visibility.work_planes && v.visibility.origin_planes && !v.show_constraints);
+    // The list stays open for the next check box.
+    harness.get_by_label("3D 스케치").click();
+    harness.run_steps(2);
+    assert!(!harness.state().viewport().visibility.sketches_3d);
+}

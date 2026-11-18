@@ -154,6 +154,8 @@ pub struct Viewport {
     pub show_constraints: bool,
     /// The visual style of the 3D view (View tab, Appearance panel).
     pub style: VisualStyle,
+    /// Object Visibility (View tab, Visibility panel).
+    pub visibility: ObjectVisibility,
     /// A selection box being dragged in a sketch: where the mouse went down.
     box_select: Option<egui::Pos2>,
     /// A point of a 3D sketch being dragged: the working plane's normal axis and the level it keeps.
@@ -231,6 +233,65 @@ impl ViewHistory {
         self.at = to;
         self.seen = None;
         Some(camera)
+    }
+}
+
+/// Object Visibility (Inventor 2026 help, To set visibility of work features, annotations, and other display
+/// elements, GUID-BA193171-FAFC-4150-9222-CC43D8D4AA54): one switch for all instances of a kind. The origin
+/// kinds start off (as Inventor's origin folders do): on, every origin element of that kind shows, on top of
+/// the ones shown one by one. The others start on and only hide: what was hidden one by one stays hidden.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ObjectVisibility {
+    /// Origin planes of every component.
+    pub origin_planes: bool,
+    /// Origin axes.
+    pub origin_axes: bool,
+    /// Origin centre points.
+    pub origin_points: bool,
+    /// Work planes.
+    pub work_planes: bool,
+    /// Work axes.
+    pub work_axes: bool,
+    /// Work points.
+    pub work_points: bool,
+    /// Inactive 2D sketches.
+    pub sketches: bool,
+    /// Inactive 3D sketches.
+    pub sketches_3d: bool,
+}
+
+impl Default for ObjectVisibility {
+    fn default() -> Self {
+        Self {
+            origin_planes: false,
+            origin_axes: false,
+            origin_points: false,
+            work_planes: true,
+            work_axes: true,
+            work_points: true,
+            sketches: true,
+            sketches_3d: true,
+        }
+    }
+}
+
+impl ObjectVisibility {
+    /// Whether the origin element's kind is switched on.
+    pub(crate) fn origin(&self, element: gc_doc::OriginElement) -> bool {
+        match element {
+            gc_doc::OriginElement::Plane(_) => self.origin_planes,
+            gc_doc::OriginElement::Axis(_) => self.origin_axes,
+            gc_doc::OriginElement::Point => self.origin_points,
+        }
+    }
+
+    /// Whether the work feature's kind is switched on.
+    pub(crate) fn work(&self, shape: &gc_session::WorkShape) -> bool {
+        match shape {
+            gc_session::WorkShape::Plane(_) => self.work_planes,
+            gc_session::WorkShape::Axis { .. } => self.work_axes,
+            gc_session::WorkShape::Point(_) => self.work_points,
+        }
     }
 }
 
@@ -355,6 +416,7 @@ impl Viewport {
             slice: false,
             show_constraints: true,
             style: VisualStyle::default(),
+            visibility: ObjectVisibility::default(),
             box_select: None,
             frame_time: 0.0,
             background: Background::new(render_state),
@@ -656,7 +718,8 @@ impl Viewport {
             } else {
                 // What is under the cursor is selected, and decides the short menu.
                 let view = at.map(to_view);
-                let origin = view.and_then(|p| origin::pick(&self.camera, size, session, p, false));
+                let origin =
+                    view.and_then(|p| origin::pick(&self.visibility, &self.camera, size, session, p, false));
                 let item =
                     if origin.is_some() { None } else { view.and_then(|p| self.pick_item(session, p, size)) };
                 self.origin_selected = origin;
@@ -738,6 +801,7 @@ impl Viewport {
             &scene,
             self.background.has_gpu(),
             self.show_constraints,
+            &self.visibility,
         );
         {
             let camera = self.camera;
@@ -746,9 +810,17 @@ impl Viewport {
                 #[allow(clippy::cast_possible_truncation, reason = "screen coordinates fit f32")]
                 Some(egui::pos2(rect.left() + p[0] as f32, rect.top() + p[1] as f32))
             };
-            origin::paint(&ui.painter_at(rect), &screen, session, self.origin_selected, self.constrain_mode);
+            origin::paint(
+                &self.visibility,
+                &ui.painter_at(rect),
+                &screen,
+                session,
+                self.origin_selected,
+                self.constrain_mode,
+            );
             dof::paint(&ui.painter_at(rect), &screen, session, camera.distance * 0.12);
             workfeat::paint(
+                &self.visibility,
                 &ui.painter_at(rect),
                 &screen,
                 session,
@@ -2112,7 +2184,9 @@ impl Viewport {
             && let Some(at) = response.interact_pointer_pos().map(to_view)
         {
             let screen = |p: gc_math::DVec3| self.camera.project(p, size);
-            if let Some(id) = workfeat::pick(session, &screen, at, self.camera.distance * 0.6) {
+            if let Some(id) =
+                workfeat::pick(&self.visibility, session, &screen, at, self.camera.distance * 0.6)
+            {
                 self.request = Some(ViewportRequest::EditWorkFeature(id));
                 return;
             }
@@ -2135,12 +2209,13 @@ impl Viewport {
             let at = response.interact_pointer_pos().map(to_view);
             // Work features that are shown come before the origin geometry.
             let screen = |p: gc_math::DVec3| self.camera.project(p, size);
-            self.constrain_work =
-                at.and_then(|at| workfeat::pick(session, &screen, at, self.camera.distance * 0.6));
+            self.constrain_work = at.and_then(|at| {
+                workfeat::pick(&self.visibility, session, &screen, at, self.camera.distance * 0.6)
+            });
             self.constrain_pick = if self.constrain_work.is_some() {
                 None
             } else {
-                at.and_then(|at| origin::pick(&self.camera, size, session, at, true))
+                at.and_then(|at| origin::pick(&self.visibility, &self.camera, size, session, at, true))
             };
         } else if self.measure_features && response.clicked_by(PointerButton::Primary) {
             let at = response.interact_pointer_pos().map(to_view);
@@ -2150,12 +2225,13 @@ impl Viewport {
             let at = response.interact_pointer_pos().map(to_view);
             // Work features that are shown come first, as the origin geometry does.
             let screen = |p: gc_math::DVec3| self.camera.project(p, size);
-            self.work_selected =
-                at.and_then(|at| workfeat::pick(session, &screen, at, self.camera.distance * 0.6));
+            self.work_selected = at.and_then(|at| {
+                workfeat::pick(&self.visibility, session, &screen, at, self.camera.distance * 0.6)
+            });
             self.origin_selected = if self.work_selected.is_some() {
                 None
             } else {
-                at.and_then(|at| origin::pick(&self.camera, size, session, at, false))
+                at.and_then(|at| origin::pick(&self.visibility, &self.camera, size, session, at, false))
             };
             let picked = if self.origin_selected.is_some()
                 || self.work_selected.is_some()

@@ -19,6 +19,7 @@ const LINE_PX: f64 = 6.0;
 
 /// The origin elements the user showed, with their component's origin in the world.
 pub(crate) fn visible(
+    vis: &crate::ObjectVisibility,
     session: &Session,
     all: bool,
 ) -> Vec<(Occurrence, ComponentOrigin, Vec<OriginElement>)> {
@@ -38,7 +39,9 @@ pub(crate) fn visible(
         let shown: Vec<OriginElement> = ALL
             .iter()
             .copied()
-            .filter(|element| all || session.origin_visible(node.occurrence, *element))
+            .filter(|element| {
+                all || vis.origin(*element) || session.origin_visible(node.occurrence, *element)
+            })
             .collect();
         if shown.is_empty() {
             continue;
@@ -71,13 +74,14 @@ fn axis_color(axis: u8) -> Color32 {
 
 /// Draws the visible origin elements. `selected` is drawn in the selection colour.
 pub(crate) fn paint(
+    vis: &crate::ObjectVisibility,
     painter: &egui::Painter,
     screen: &impl Fn(DVec3) -> Option<Pos2>,
     session: &Session,
     selected: Option<(Occurrence, OriginElement)>,
     all: bool,
 ) {
-    for (occurrence, origin, elements) in visible(session, all) {
+    for (occurrence, origin, elements) in visible(vis, session, all) {
         for element in elements {
             let chosen = selected == Some((occurrence, element));
             match element {
@@ -114,6 +118,7 @@ pub(crate) fn paint(
 
 /// The visible origin element under a screen position: the centre point first, then axes, then planes.
 pub(crate) fn pick(
+    vis: &crate::ObjectVisibility,
     camera: &Camera,
     size: [f64; 2],
     session: &Session,
@@ -122,7 +127,7 @@ pub(crate) fn pick(
 ) -> Option<(Occurrence, OriginElement)> {
     let near =
         |p: DVec3| camera.project(p, size).map(|s| ((s[0] - at[0]).powi(2) + (s[1] - at[1]).powi(2)).sqrt());
-    let shown = visible(session, all);
+    let shown = visible(vis, session, all);
     let mut best: Option<(f64, u8, Occurrence, OriginElement)> = None;
     let mut consider = |distance: f64, rank: u8, occurrence: Occurrence, element: OriginElement| {
         if best.is_none_or(|(d, r, _, _)| (rank, distance) < (r, d)) {

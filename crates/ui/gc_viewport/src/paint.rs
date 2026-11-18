@@ -119,6 +119,7 @@ pub(crate) fn over(
     scene: &Scene,
     gpu: bool,
     show_constraints: bool,
+    vis: &crate::ObjectVisibility,
 ) {
     let mut view = view_of(ui, rect, camera);
     view.show_constraints = show_constraints;
@@ -128,7 +129,10 @@ pub(crate) fn over(
         let plane = plane_of(session, sketch);
         if active.is_some_and(|(active_id, _)| active_id == id) {
             active_sketch(&view, &plane, sketch, session);
-        } else if session.doc().is_visible(id.erase()) && !session.doc().is_inactive(id.erase()) {
+        } else if session.doc().is_visible(id.erase())
+            && !session.doc().is_inactive(id.erase())
+            && (if sketch.is_spatial() { vis.sketches_3d } else { vis.sketches })
+        {
             let stroke = Stroke::new(1.2, colors::inactive());
             for curve in sketch.curves.values() {
                 curve_path(&view, &plane, curve, |p| sketch.pos(p), None, stroke, sketch.is_spatial());
