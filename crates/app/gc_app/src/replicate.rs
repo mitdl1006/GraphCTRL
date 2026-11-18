@@ -38,6 +38,12 @@ pub(crate) struct Replicate {
     /// Mirror: "Create mirror pattern" (associative, a Mirror node in the browser) instead of "Create flat
     /// structure" (Inventor 2026 help, Mirror Components: Reference, GUID-7B19CA69-8D14-40DA-9543-115A8AFE6336).
     pattern: bool,
+    /// Flat structure: the components that are Reused (the same shape turned); the others are Mirrored (a mirror
+    /// image of the mesh is written to a new file).
+    reuse: Vec<AnyId>,
+    /// Components the last run could only place as the same shape turned (robots, imported assemblies, files that
+    /// could not be written).
+    not_reflected: Vec<String>,
     /// The copy's offset in millimetres.
     offset: [String; 3],
     shape: Shape,
@@ -58,6 +64,8 @@ impl Default for Replicate {
             relationships: true,
             ground: false,
             pattern: false,
+            reuse: Vec::new(),
+            not_reflected: Vec::new(),
             offset: ["100".to_owned(), "0".to_owned(), "0".to_owned()],
             shape: Shape::Box,
             size: ["100".to_owned(), "100".to_owned(), "100".to_owned()],
@@ -127,7 +135,44 @@ impl Replicate {
                         .add_pattern(&name, &self.items, gc_doc::PatternLayout::Mirror { plane })
                         .map(|()| Vec::new())
                 }
-                Some(plane) => session.mirror_components(&self.items, plane, self.relationships, self.ground),
+                Some(plane) => {
+                    // Per component: Mirror = a mirror image in a new file, Reuse = the same shape turned.
+                    let (reuse, mirror): (Vec<AnyId>, Vec<AnyId>) =
+                        self.items.iter().copied().partition(|item| self.reuse.contains(item));
+                    let mut suppressed = Vec::new();
+                    let mut failed = Vec::new();
+                    if !mirror.is_empty() {
+                        match session.mirror_components_reflected(
+                            &mirror,
+                            plane,
+                            self.relationships,
+                            self.ground,
+                        ) {
+                            Ok(outcome) => {
+                                suppressed.extend(outcome.suppressed);
+                                failed = outcome.not_reflected;
+                            }
+                            Err(_) => return false,
+                        }
+                    }
+                    if !reuse.is_empty() {
+                        match session.mirror_components(&reuse, plane, self.relationships, self.ground) {
+                            Ok(names) => suppressed.extend(names),
+                            Err(_) => return false,
+                        }
+                    }
+                    self.not_reflected = failed
+                        .iter()
+                        .map(|id| {
+                            session
+                                .components()
+                                .iter()
+                                .find(|node| node.occurrence == Occurrence::Item(*id))
+                                .map_or_else(|| "?".to_owned(), |node| node.name.clone())
+                        })
+                        .collect();
+                    Ok(suppressed)
+                }
                 None => return false,
             },
             Mode::Copy => match Self::numbers(&self.offset) {
@@ -189,7 +234,26 @@ impl Replicate {
             ui.label(egui::RichText::new(tr!(lang, ReplicateComponents)).strong());
             for (id, name) in &components {
                 let mut chosen = self.items.contains(id);
-                if ui.checkbox(&mut chosen, name).changed() {
+                let chosen_changed = ui
+                    .horizontal(|ui| {
+                        // Mirror or Reuse for each component of a flat mirror (Mirror Components: Reference).
+                        if self.mode == Mode::Mirror && !self.pattern && chosen {
+                            let mut reuse = self.reuse.contains(id);
+                            let before = reuse;
+                            ui.selectable_value(&mut reuse, false, tr!(lang, MirrorStateMirror));
+                            ui.selectable_value(&mut reuse, true, tr!(lang, MirrorStateReuse));
+                            if reuse != before {
+                                if reuse {
+                                    self.reuse.push(*id);
+                                } else {
+                                    self.reuse.retain(|other| other != id);
+                                }
+                            }
+                        }
+                        ui.checkbox(&mut chosen, name).changed()
+                    })
+                    .inner;
+                if chosen_changed {
                     if self.mode == Mode::Replace {
                         self.items.clear();
                     }
@@ -247,6 +311,9 @@ impl Replicate {
                 ui.checkbox(&mut self.relationships, tr!(lang, ReplicateRelationships));
                 ui.checkbox(&mut self.ground, tr!(lang, ReplicateGround));
             }
+            if !self.not_reflected.is_empty() {
+                ui.label(tr!(lang, MirrorNotReflected, self.not_reflected.join(", ")));
+            }
             if let Some(report) = &self.report {
                 if report.is_empty() {
                     ui.label(tr!(lang, ReplicateDone));
@@ -260,9 +327,10 @@ impl Replicate {
         });
         if ok {
             self.report = None;
+            self.not_reflected.clear();
             if self.run(session) {
                 // A clean run closes; one that suppressed relationships stays to list them.
-                if self.report.as_ref().is_some_and(Vec::is_empty) {
+                if self.report.as_ref().is_some_and(Vec::is_empty) && self.not_reflected.is_empty() {
                     open = false;
                 } else {
                     self.items.clear();
@@ -355,5 +423,22 @@ mod tests {
         assert!(dialog.run(&mut session));
         assert_eq!(session.patterns().len(), 1, "a Mirror node in the browser");
         assert!(matches!(session.patterns()[0].layout, gc_doc::PatternLayout::Mirror { .. }));
+    }
+    /// A flat mirror takes each component as Mirror (a mirror image) or Reuse (the same shape turned); either makes a
+    /// copy (GUID-7B19CA69-8D14-40DA-9543-115A8AFE6336).
+    #[test]
+    fn a_flat_mirror_runs_with_mirror_and_reuse_states() {
+        let (mut session, floor, part) = session();
+        let count = session.components().len();
+        let mut dialog = Replicate::default();
+        dialog.start(Mode::Mirror);
+        dialog.items = vec![part];
+        dialog.pick(Occurrence::Item(floor), OriginElement::Plane(gc_doc::OriginPlane::Yz));
+        assert!(dialog.run(&mut session), "Mirror");
+        assert_eq!(session.components().len(), count + 1);
+        dialog.reuse = vec![part];
+        assert!(dialog.run(&mut session), "Reuse");
+        assert_eq!(session.components().len(), count + 2);
+        assert!(dialog.not_reflected.is_empty(), "a box is its own mirror image");
     }
 }

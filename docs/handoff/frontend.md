@@ -618,6 +618,15 @@
 - 하지 않은 것: Mirror/Reuse/Exclude/Mixed 상태 열(백엔드가 Mirror=Reuse로 처리), 미러 패턴 노드 전용 아이콘.
 - 테스트: `replicate.rs`의 `a_mirror_pattern_is_made_instead_of_a_flat_copy`.
 
+## Mirror 상태 Mirror/Reuse (백엔드 767f380)
+
+근거: Mirror Components: Reference GUID-7B19CA69-8D14-40DA-9543-115A8AFE6336(Mirror = 새 파일의 거울상, Reuse = 인스턴스 추가).
+
+- "평평한 구조"에서 선택한 컴포넌트마다 미러/재사용 단추(기본 미러). 미러 = `mirror_components_reflected`(거울상 메시 파일을 원본 옆에 씀), 재사용 = 기존 `mirror_components`. 섞여 있으면 두 번 호출(실행 취소 2단계).
+- 거울상을 못 만든 것(로봇·가져온 어셈블리·파일 실패 = `not_reflected`)은 대화상자에 "같은 형상을 돌려 놓았습니다: 이름…"으로 알리고 열어 둔다. 상태 줄이 아니라 대화상자에 두었다.
+- 하지 않은 것: 상태 "Exclude"(체크 해제)·"Mixed" 표시, 저장 위치 안내(백엔드가 문서 assets 폴더로 바꾸면 API는 같다).
+- 테스트: `replicate.rs`의 `a_flat_mirror_runs_with_mirror_and_reuse_states`.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

@@ -984,6 +984,9 @@ messages! {
     /// Assemble tab: copies components; the dialog's tab.
     ReplicateCopy => ("복사", "Copy"),
     /// Assemble tab: replaces a component with another shape; the dialog's tab.
+    MirrorStateMirror => ("미러", "Mirror"),
+    MirrorStateReuse => ("재사용", "Reuse"),
+    MirrorNotReflected => ("거울상 형상을 만들지 못해 같은 형상을 돌려 놓았습니다: {0}", "Placed as the same shape turned, not mirrored: {0}"),
     MirrorFlat => ("평평한 구조 만들기 (Create flat structure)", "Create flat structure"),
     MirrorPattern => ("미러 패턴 만들기 (Create mirror pattern)", "Create mirror pattern"),
     ReplicateReplace => ("교체", "Replace"),
