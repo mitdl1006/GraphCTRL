@@ -1738,6 +1738,8 @@ impl eframe::App for GraphCtrlApp {
                             drop(self.session.edit_folders(op));
                             self.params.marked.clear();
                         }
+                        Some(BrowserAction::Copy(keys)) => drop(self.session.copy_to_clipboard(&keys)),
+                        Some(BrowserAction::Paste) => drop(self.viewport.start_paste(&self.session)),
                         Some(BrowserAction::Isolate(keep)) => drop(self.session.isolate(&keep)),
                         Some(BrowserAction::UndoIsolate) => drop(self.session.undo_isolate()),
                         Some(BrowserAction::SelectRole(role)) => self.viewport.role_selected = role,

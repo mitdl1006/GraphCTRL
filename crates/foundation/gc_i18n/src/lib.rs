@@ -576,6 +576,7 @@ messages! {
     PropSeenFrom => ("다른 좌표계에서 본 값", "Seen from other frames"),
     PropMatrix => ("변환 행렬 (이동: mm)", "Transform matrix (translation in mm)"),
     CmdCopy => ("복사", "Copy"),
+    CmdPaste => ("붙여넣기", "Paste"),
     CmdUseAsA => ("A로", "As A"),
     MenuPoseCalc => ("포즈 변환 계산기", "Pose calculator"),
     PropRotationInput => ("회전 입력", "Rotation as"),

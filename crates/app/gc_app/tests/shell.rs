@@ -6979,3 +6979,41 @@ fn candidates_are_requested_and_a_signal_wait_is_chosen_from_the_tools_signals()
     harness.run_steps(4);
     assert!(harness.state().session.task_candidates_result(task_id).is_some());
 }
+
+/// A component's row menu copies it (the Ctrl+C of the menu); Paste then waits for the click that places it.
+#[test]
+fn a_row_menu_copies_the_component() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let a = harness
+        .state_mut()
+        .session
+        .add_body(gc_doc::Solid::Box { size: [0.1; 3] }, gc_doc::Placement { xyz: [0.0; 3], rpy: [0.0; 3] })
+        .unwrap();
+    harness.run();
+    let name = harness.state().session.doc().get(a).unwrap().name.clone();
+    let at = harness
+        .get_all_by_label_contains(&name)
+        .find(|n| n.rect().min.x < 100.0)
+        .expect("the browser row")
+        .rect()
+        .center();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run_steps(2);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+    harness.run_steps(3);
+    assert!(harness.state().session.clipboard().is_empty());
+    harness.get_by_label("복사").click();
+    harness.run_steps(3);
+    assert_eq!(harness.state().session.clipboard().len(), 1);
+}
