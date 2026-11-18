@@ -1103,6 +1103,9 @@ messages! {
     /// Assemble tab > Position: ground or free the selected component (Inventor's Grounded).
     CmdGround => ("접지", "Grounded"),
     GripTitle => ("그립 스냅", "Grip Snap"),
+    SelPriorityComponent => ("구성요소 우선", "Component priority"),
+    SelPriorityFeature => ("작업 피처 우선", "Work feature priority"),
+    SelOther => ("다른 항목 선택", "Select Other"),
     GripMove => ("축을 따라 이동", "Move along ray"),
     GripRotate => ("선 기준 회전", "Rotate about line"),
     GripPickEdge => ("기준이 될 구성요소의 모서리를 선택하세요", "Select an edge of the component as the reference"),

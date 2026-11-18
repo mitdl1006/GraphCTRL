@@ -4532,10 +4532,11 @@ fn grip_snap_moves_a_component_along_a_picked_edge() {
     assert!(back[1].abs() < 1e-9, "one undo step puts it back: {back:?}");
 }
 
-/// Shift + right click over the view lists the components under the cursor too (Select Other from the
-/// Select menu; docs/ux/inventor-parity.md S11), without opening the marking menu.
+/// Shift + right click over the view opens the Select command's menu (Inventor 2026 help, shortcut table
+/// GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E: "Activates the Select command menu"): the selection priority
+/// and Select Other. With the work feature priority a click on a body selects nothing.
 #[test]
-fn shift_right_click_lists_what_lies_under_the_cursor() {
+fn shift_right_click_opens_the_select_menu() {
     let mut harness = egui_kittest::Harness::builder()
         .with_size(SIZE)
         .with_pixels_per_point(1.0)
@@ -4558,9 +4559,61 @@ fn shift_right_click_lists_what_lies_under_the_cursor() {
         modifiers: egui::Modifiers::SHIFT,
     });
     harness.run_steps(3);
+    harness.event(egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Secondary,
+        pressed: false,
+        modifiers: egui::Modifiers::SHIFT,
+    });
+    harness.run_steps(3);
+    harness.get_by_label("구성요소 우선");
+    harness.get_by_label("작업 피처 우선");
+    // Select Other from the menu lists the two bodies.
+    harness.get_by_label("다른 항목 선택").click();
+    harness.run_steps(3);
     let button = egui::accesskit::Role::Button;
     harness.get_by_role_and_label(button, "Body1");
     harness.get_by_role_and_label(button, "Body2");
+}
+
+/// With the work feature priority a click on a body selects nothing.
+#[test]
+fn the_work_feature_priority_leaves_bodies_unselected() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let app = harness.state_mut();
+    app.session.add_body(gc_doc::Solid::Box { size: [0.1; 3] }, gc_doc::Placement::default()).unwrap();
+    app.fit_view();
+    app.viewport_mut().camera.pan([0.0, 0.0], [-250.0, 0.0], [1280.0, 700.0]);
+    app.viewport_mut().select_priority = gc_viewport::SelectPriority::Feature;
+    harness.run();
+    let at = harness.state().viewport().screen_of(gc_math::DVec3::ZERO).unwrap();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run_steps(3);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run_steps(3);
+    }
+    assert_eq!(harness.state().session.selected_item(), None);
+    harness.state_mut().viewport_mut().select_priority = gc_viewport::SelectPriority::Component;
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run_steps(3);
+    }
+    assert!(harness.state().session.selected_item().is_some());
 }
 
 /// A work feature clicked in the view is geometry for the Assemble command (Inventor 2026 help, To Place

@@ -116,6 +116,10 @@ pub struct Viewport {
     /// A component being dragged with it.
     free_drag: Option<freemove::FreeDrag>,
     placing: Option<place::Placing>,
+    /// What a plain click selects (the Select command's priority menu, opened with Shift + right click).
+    pub select_priority: SelectPriority,
+    /// Where the Select menu is open.
+    select_menu: Option<egui::Pos2>,
     /// A Grip Snap in progress.
     grip: Option<grip::Grip>,
     /// The marking menu of the graphics window and the commands it offers.
@@ -164,6 +168,17 @@ pub struct Viewport {
     measure_pick: Option<Option<(gc_session::CellItem, gc_session::Feature)>>,
 }
 
+/// What a plain click selects (Inventor 2026 help, About Component Selection Modes and Sets,
+/// GUID-E3E49BD5-3F55-4836-8CD1-2C1855CF9986: the Select command's priority).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SelectPriority {
+    /// Components: bodies, robots, waypoints and the rest (the default).
+    #[default]
+    Component,
+    /// Work features and origin geometry only.
+    Feature,
+}
+
 impl Viewport {
     /// A viewport that renders its background with `render_state` when there is one.
     pub fn new(render_state: Option<egui_wgpu::RenderState>) -> Self {
@@ -184,6 +199,8 @@ impl Viewport {
             free_drag: None,
             placing: None,
             grip: None,
+            select_priority: SelectPriority::default(),
+            select_menu: None,
             marking: gc_ui::marking::MarkingMenu::default(),
             marking_set: radial::Set::default(),
             request: None,
@@ -379,6 +396,7 @@ impl Viewport {
         }
 
         self.select_other_list(ui, session);
+        self.select_menu(ui, session, size, lang);
 
         // The marking menu: a right press opens it (in a sketch or among the components); a quick mark
         // toward a command picks it, otherwise the radial menu and its overflow list show.
@@ -404,11 +422,7 @@ impl Viewport {
             && active.is_none()
             && let Some(at) = response.hover_pos()
         {
-            let scene = Scene::of(session);
-            let ray = self.camera.ray(to_view(at), size);
-            let found: Vec<gc_session::CellItem> =
-                self.picker.pick_all(&scene, &ray).into_iter().map(|(_, item)| item).collect();
-            self.select_other = (found.len() > 1).then_some((at, found));
+            self.select_menu = Some(at);
         }
         if secondary_pressed
             && !shift_menu
@@ -449,6 +463,11 @@ impl Viewport {
                 match radial::run(cmd, session) {
                     radial::Effect::None => {}
                     radial::Effect::Request(request) => self.request = Some(request),
+                    radial::Effect::SelectOther => {
+                        if let Some(at) = ui.input(|i| i.pointer.latest_pos()) {
+                            self.open_select_other(session, at, size, &to_view);
+                        }
+                    }
                     radial::Effect::Home => self.camera.look(StandardView::Iso),
                     radial::Effect::Fit => self.fit(session, [1000.0, 700.0]),
                     radial::Effect::Free(tool) => self.free_tool = Some(tool),
@@ -1137,6 +1156,58 @@ impl Viewport {
         self.picker.pick(&scene, &self.camera.ray(at, size)).map(|(_, item)| item)
     }
 
+    /// Opens the Select Other list at `at` (window pixels) when more than one component lies under it.
+    fn open_select_other(
+        &mut self,
+        session: &Session,
+        at: egui::Pos2,
+        size: [f64; 2],
+        to_view: &impl Fn(egui::Pos2) -> [f64; 2],
+    ) {
+        let scene = Scene::of(session);
+        let ray = self.camera.ray(to_view(at), size);
+        let found: Vec<gc_session::CellItem> =
+            self.picker.pick_all(&scene, &ray).into_iter().map(|(_, item)| item).collect();
+        self.select_other = (found.len() > 1).then_some((at, found));
+    }
+
+    /// The Select command's menu (Shift + right click; Inventor 2026 help, shortcut table
+    /// GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E: "Activates the Select command menu"): the selection
+    /// priority, and Select Other. Esc or a click elsewhere closes it.
+    fn select_menu(&mut self, ui: &egui::Ui, session: &Session, size: [f64; 2], lang: Lang) {
+        let Some(at) = self.select_menu.take() else { return };
+        let mut open_other = false;
+        let mut picked = false;
+        let area = egui::Area::new(egui::Id::unique("gc_select_menu"))
+            .fixed_pos(at)
+            .order(egui::Order::Foreground)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    for (priority, label) in [
+                        (SelectPriority::Component, tr!(lang, SelPriorityComponent)),
+                        (SelectPriority::Feature, tr!(lang, SelPriorityFeature)),
+                    ] {
+                        if ui.selectable_label(self.select_priority == priority, label).clicked() {
+                            self.select_priority = priority;
+                            picked = true;
+                        }
+                    }
+                    ui.separator();
+                    open_other = ui.button(tr!(lang, SelOther)).clicked();
+                });
+            });
+        let rect = self.rect;
+        let to_view = |p: egui::Pos2| [f64::from(p.x - rect.left()), f64::from(p.y - rect.top())];
+        if open_other {
+            self.open_select_other(session, at, size, &to_view);
+            return;
+        }
+        let outside = ui.input(|i| i.pointer.any_pressed()) && !area.response.contains_pointer();
+        if !(outside || picked || ui.input(|i| i.key_pressed(Key::Escape))) {
+            self.select_menu = Some(at);
+        }
+    }
+
     /// The Select Other list: what lies under the cursor, nearest first. Passing over a row highlights that
     /// component in the view; a click selects it; Esc or a click elsewhere closes the list.
     fn select_other_list(&mut self, ui: &egui::Ui, session: &mut Session) {
@@ -1395,11 +1466,7 @@ impl Viewport {
             })
         });
         if select_other_key && let Some(at) = response.hover_pos() {
-            let scene = Scene::of(session);
-            let ray = self.camera.ray(to_view(at), size);
-            let found: Vec<gc_session::CellItem> =
-                self.picker.pick_all(&scene, &ray).into_iter().map(|(_, item)| item).collect();
-            self.select_other = (found.len() > 1).then_some((at, found));
+            self.open_select_other(session, at, size, &to_view);
         }
         if self.grip_step(ui, response, session, size, &to_view, lang) {
             return;
@@ -1476,7 +1543,10 @@ impl Viewport {
             } else {
                 at.and_then(|at| origin::pick(&self.camera, size, session, at, false))
             };
-            let picked = if self.origin_selected.is_some() || self.work_selected.is_some() {
+            let picked = if self.origin_selected.is_some()
+                || self.work_selected.is_some()
+                || self.select_priority == SelectPriority::Feature
+            {
                 None
             } else {
                 response.interact_pointer_pos().and_then(|p| self.pick_item(session, to_view(p), size))
