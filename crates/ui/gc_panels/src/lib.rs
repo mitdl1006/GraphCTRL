@@ -78,6 +78,8 @@ pub struct ParamsUi {
     pub statuses: std::collections::BTreeMap<gc_core::AnyId, gc_doc::ComponentStatus>,
     /// A name being asked for: the new subassembly of Demote, or the new name of a subassembly.
     pub group_name: Option<GroupName>,
+    /// The Find box: only rows whose name contains this (case does not matter) are listed.
+    pub find: String,
 }
 
 /// What a name typed in the browser is for.
@@ -152,11 +154,34 @@ fn params(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi) -> O
     command
 }
 
+/// Whether `name` is listed with the Find text `find` (case does not matter; an empty text lists everything).
+fn found(find: &str, name: &str) -> bool {
+    find.trim().is_empty() || name.to_lowercase().contains(&find.trim().to_lowercase())
+}
+
+/// Whether a row of the component tree is listed: its name matches, or something below it does.
+fn row_found(rows: &[gc_doc::TreeRow], row: &gc_doc::TreeRow, find: &str) -> bool {
+    found(find, &row.name)
+        || rows.iter().filter(|r| r.parent == Some(row.key)).any(|child| row_found(rows, child, find))
+}
+
 /// The model browser: origin geometry and sketches. Double-click a sketch to edit it.
 pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi) -> Option<BrowserAction> {
     let mut action = None;
     state.statuses = session.component_statuses();
     gc_ui::panel::header(ui, tr!(lang, PanelBrowser));
+    // Find (Inventor 2026 help, Working with the Assembly Browser, GUID-5F975252-BDB4-488C-A2C5-8B15C7D3C641:
+    // "Find opens a search box enabling you to locate objects matching your search criteria"): only the
+    // components, sketches and relationships whose name contains the text are listed.
+    ui.horizontal(|ui| {
+        let label = ui.label(tr!(lang, BrowserFind));
+        ui.add(
+            egui::TextEdit::singleline(&mut state.find)
+                .hint_text(tr!(lang, BrowserFindHint))
+                .desired_width(ui.available_width() - 4.0),
+        )
+        .labelled_by(label.id);
+    });
     group_name_row(ui, lang, state, &mut action);
     // F2 renames the selected node when the mouse is over the browser (over the 3D view, F2 pans).
     let hovering = ui.rect_contains_pointer(ui.max_rect());
@@ -188,6 +213,9 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
             ui.spacing_mut().item_spacing.y = 1.0;
             egui::CollapsingHeader::new(tr!(lang, BrowserRelationships)).default_open(true).show(ui, |ui| {
                 for (id, relationship) in session.relationships() {
+                    if !found(&state.find, &relationship.name) {
+                        continue;
+                    }
                     let suppressed = session.doc().is_inactive(id.erase());
                     let is_joint = gc_doc::is_joint_kind(&relationship.kind);
                     let condition = session.joint_condition(id);
@@ -529,6 +557,9 @@ fn sketch_row(
     id: Id<Sketch>,
 ) {
     let Some(sketch) = session.doc().get(id) else { return };
+    if !found(&state.find, &sketch.name) {
+        return;
+    }
     let active = session.active_sketch().map(|(active, _)| active);
     let node = Node {
         icon: Icon::Sketch,
@@ -570,6 +601,9 @@ fn component_rows(
     use gc_session::CellItem;
     let editing = session.edit_target();
     for row in rows.iter().filter(|row| row.parent == parent) {
+        if !row_found(rows, row, &state.find) {
+            continue;
+        }
         match row.key {
             TreeKey::Subassembly(id) => {
                 let mark = if editing == Some(row.key) { "● " } else { "" };
@@ -578,9 +612,15 @@ fn component_rows(
                     .id_salt(("gc_subassembly", id))
                     .default_open(true)
                     .show(ui, |ui| {
+                        // A folder that matches the Find text lists everything in it.
+                        let saved = (!state.find.trim().is_empty() && found(&state.find, &row.name))
+                            .then(|| std::mem::take(&mut state.find));
                         component_rows(ui, session, lang, state, selected, action, rows, Some(row.key));
                         for sketch in session.sketches_of(Some(row.key)) {
                             sketch_row(ui, session, lang, state, action, sketch);
+                        }
+                        if let Some(find) = saved {
+                            state.find = find;
                         }
                     });
                 let header = folder.header_response;
@@ -1044,7 +1084,16 @@ fn node_row(
     // What lies outside the component being edited in place is faded.
     let out_of_scope = matches!(node.any.kind, gc_core::Kind::Body | gc_core::Kind::RobotInstance)
         && !session.in_edit_scope(gc_doc::Occurrence::Item(node.any));
-    let inactive = doc.is_inactive(node.any) || out_of_scope;
+    // Grounded, disabled and invisible components look different (Inventor 2026 help, Assembly Browser
+    // Reference, GUID-CB6B1637-71AD-4753-8CC9-19559BFEE3A5): a pushpin on the icon, the name in the
+    // background style.
+    let groundable =
+        matches!(node.any.kind, gc_core::Kind::Body | gc_core::Kind::RobotInstance | gc_core::Kind::Assembly);
+    let occurrence = gc_doc::Occurrence::Item(node.any);
+    let grounded = groundable && doc.component_flag(occurrence, gc_doc::ComponentFlag::Grounded);
+    let enabled = !groundable || doc.component_flag(occurrence, gc_doc::ComponentFlag::Enabled);
+    let suppressed_now = doc.is_inactive(node.any);
+    let inactive = suppressed_now || out_of_scope || !enabled || (groundable && !visible);
     let show_label = tr!(lang, ShowItem, node.name);
     let delete_label = tr!(lang, CmdDeleteItem, node.name);
     let renaming = state.rename.as_ref().is_some_and(|(id, _)| *id == node.any);
@@ -1060,6 +1109,12 @@ fn node_row(
         dim: inactive,
     };
     let result = gc_ui::panel::tree_row(ui, row);
+    if grounded {
+        // The pin sits on the corner of the kind icon (after the check box and its gap).
+        let icon_centre = egui::pos2(result.row.rect.left() + 4.0 + 24.0 + 8.0, result.row.rect.center().y);
+        let at = egui::Rect::from_center_size(icon_centre + egui::vec2(6.0, -5.0), egui::vec2(10.0, 10.0));
+        Icon::Pin.paint(ui.painter(), at, gc_ui::colors::text());
+    }
     if let Some(&status) = state.statuses.get(&node.any) {
         use gc_doc::ComponentStatus;
         status_dot(
@@ -1102,10 +1157,32 @@ fn node_row(
             *action = Some(BrowserAction::Edit(Box::new(command)));
             ui.close();
         }
+        // Enabled and Grounded, as check marks (a disabled component is drawn in the background style; a
+        // grounded one has all its freedom removed).
+        if groundable {
+            if ui.checkbox(&mut { enabled }, tr!(lang, CmdEnabled)).clicked() {
+                let command = gc_doc::Command::SetComponent {
+                    occurrence,
+                    flag: gc_doc::ComponentFlag::Enabled,
+                    on: !enabled,
+                };
+                *action = Some(BrowserAction::Edit(Box::new(command)));
+                ui.close();
+            }
+            if ui.checkbox(&mut { grounded }, tr!(lang, CmdGround)).clicked() {
+                let command = gc_doc::Command::SetComponent {
+                    occurrence,
+                    flag: gc_doc::ComponentFlag::Grounded,
+                    on: !grounded,
+                };
+                *action = Some(BrowserAction::Edit(Box::new(command)));
+                ui.close();
+            }
+        }
         if node.suppressible {
-            let text = if inactive { tr!(lang, CmdUnsuppress) } else { tr!(lang, CmdSuppress) };
+            let text = if suppressed_now { tr!(lang, CmdUnsuppress) } else { tr!(lang, CmdSuppress) };
             if ui.button(text).clicked() {
-                let op = gc_doc::CellOp::SetSuppressed { item: node.any, suppressed: !inactive };
+                let op = gc_doc::CellOp::SetSuppressed { item: node.any, suppressed: !suppressed_now };
                 *action = Some(BrowserAction::Edit(Box::new(gc_doc::Command::Cell(op))));
                 ui.close();
             }

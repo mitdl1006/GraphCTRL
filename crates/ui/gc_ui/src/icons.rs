@@ -125,6 +125,8 @@ pub enum Icon {
     Extend,
     /// A spring: a flexible subassembly.
     Flexible,
+    /// A pushpin: a grounded component.
+    Pin,
     /// A short text, for constraint symbols.
     Text(&'static str),
 }
@@ -712,6 +714,15 @@ impl Icon {
                         .map(|(x, y)| at(*x, *y))
                         .collect();
                 painter.add(egui::Shape::line(points, stroke));
+            }
+            Self::Pin => {
+                // The head, the collar and the needle, tilted.
+                line(at(0.3, 0.3), at(0.7, 0.7));
+                line(at(0.18, 0.5), at(0.5, 0.82));
+                line(at(0.5, 0.18), at(0.82, 0.5));
+                line(at(0.5, 0.18), at(0.18, 0.5));
+                line(at(0.5, 0.82), at(0.82, 0.5));
+                line(at(0.2, 0.8), at(0.08, 0.92));
             }
             Self::Text(text) => {
                 painter.text(
