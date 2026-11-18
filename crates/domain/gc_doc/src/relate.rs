@@ -110,6 +110,56 @@ impl Geometry {
         Geometry::Frame { origin: [0.0; 3], z: [0.0, 0.0, 1.0], x: [1.0, 0.0, 0.0] }
     }
 
+    /// Offset Origin (Inventor 2026 help, To Define and Manage Joint Relationships,
+    /// GUID-21DC3336-5C51-42C1-90FB-4299CD66E0C6: "To create a joint origin and position it an offset
+    /// distance from the origin, select Offset Origin"): this joint origin moved by `offset` along its own
+    /// X, Y and Z axes, as a frame.
+    pub fn offset_origin(&self, offset: [f64; 3]) -> Self {
+        let (origin, z, x) = self.joint_frame();
+        let moved = origin + x * offset[0] + z.cross(x) * offset[1] + z * offset[2];
+        Geometry::Frame { origin: moved.to_array(), z: z.to_array(), x: x.to_array() }
+    }
+
+    /// Between Two Faces (same help page: "specify a virtual midpoint between two faces, by selecting two
+    /// faces and one point"): a joint origin half way between two planes of one component, at the foot
+    /// of `point` on that middle plane, its Z along the first face's normal. `None` unless both are
+    /// planes that are parallel.
+    pub fn between_faces(first: &Geometry, second: &Geometry, point: [f64; 3]) -> Option<Self> {
+        let (Geometry::Plane { point: p1, normal: n1 }, Geometry::Plane { point: p2, normal: n2 }) =
+            (*first, *second)
+        else {
+            return None;
+        };
+        let v = DVec3::from_array;
+        let (n1, n2) = (v(n1).normalize_or_zero(), v(n2).normalize_or_zero());
+        if n1.cross(n2).length() > 1e-9 || n1.length() < 0.5 || n2.length() < 0.5 {
+            return None;
+        }
+        let middle = (v(p1) + v(p2)) * 0.5;
+        let foot = v(point) - n1 * (v(point) - middle).dot(n1);
+        let (_, z, x) = Geometry::Plane { point: foot.to_array(), normal: n1.to_array() }.joint_frame();
+        foot.is_finite().then(|| Geometry::Frame {
+            origin: foot.to_array(),
+            z: z.to_array(),
+            x: x.to_array(),
+        })
+    }
+
+    /// Align (same help page: "select Align 1 and pick … to specify the alignment direction", "To change
+    /// the alignment direction, select Invert alignment"): this joint origin with its X axis along
+    /// `direction` (made perpendicular to Z), the other way with `invert`. `None` when the direction runs
+    /// along Z or has no length.
+    pub fn aligned_to(&self, direction: [f64; 3], invert: bool) -> Option<Self> {
+        let (origin, z, _) = self.joint_frame();
+        let direction = DVec3::from_array(direction);
+        let across = direction - z * direction.dot(z);
+        if !across.is_finite() || across.length() <= 1e-9 * direction.length().max(1e-300) {
+            return None;
+        }
+        let x = across.normalize() * if invert { -1.0 } else { 1.0 };
+        Some(Geometry::Frame { origin: origin.to_array(), z: z.to_array(), x: x.to_array() })
+    }
+
     /// The geometry as a joint origin in the component's frame: point, unit Z, unit X. A plane or circle
     /// takes Z along its normal, an axis along its direction, a point the component's Z; X is then the
     /// component's X (or Y) made perpendicular.
@@ -787,6 +837,33 @@ impl Document {
             }
             Geometry::Sphere { centre, radius } => Geometry::Sphere { centre: p(centre), radius },
         })
+    }
+
+    /// A joint origin with its alignment direction taken from another selection (Align 1 on the moving
+    /// component, Align 2 on the stationary one): a planar face gives its normal, an edge or axis its
+    /// direction, a point the direction from the origin to it; a work plane, axis or point of the
+    /// assembly may be picked as well. `None` when the direction runs along the origin's Z axis or a
+    /// component is missing. Use the result as the relationship's selection.
+    pub fn joint_origin_aligned(
+        &self,
+        origin: &Selection,
+        align: &Selection,
+        invert: bool,
+    ) -> Option<Selection> {
+        let frame = self.component_origin(origin.occurrence)?.pose;
+        let pose = self.owner_pose(align.occurrence.owner())?;
+        let geometry = self.in_owner(align)?;
+        let world = match geometry {
+            Geometry::Point(point) | Geometry::Sphere { centre: point, .. } => {
+                let (at, _, _) = origin.geometry.joint_frame();
+                pose.translation + pose.rotation * DVec3::from_array(point)
+                    - (frame.translation + frame.rotation * at)
+            }
+            other => pose.rotation * DVec3::from_array(direction_of(&other)?),
+        };
+        let local = frame.rotation.inverse() * world;
+        let geometry = origin.geometry.aligned_to(local.to_array(), invert)?;
+        Some(Selection { occurrence: origin.occurrence, geometry })
     }
 
     /// A selection as a line in the world: a point and a unit direction (a plane's normal, an axis's or

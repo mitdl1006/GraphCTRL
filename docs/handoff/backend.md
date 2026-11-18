@@ -124,6 +124,23 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 조인트 원점: Align 1/2 · Invert alignment · Offset Origin · Between Two Faces (대조 목록 4+7 중 원문에 있는 부분)
+
+근거: To Define and Manage Joint Relationships(`GUID-21DC3336-5C51-42C1-90FB-4299CD66E0C6`) — "select Align 1 and pick … A planar face, point, or edge on the moving component. A work plane/work axis/work point …", "If Align 1 is point selection …, Align 2 must also be point selection", "To change the alignment direction, select Invert alignment", "Between Two Faces … virtual midpoint between two faces, by selecting two faces and one point", "Offset Origin".
+
+- 모델 변경 없음: 조인트 원점은 이미 `Geometry::Frame { origin, z, x }`이고 Rigid·Slider가 X축을 맞춘다. 아래는 그 프레임을 만드는 함수다(추가만).
+
+| 무엇 | 호출 |
+|---|---|
+| Align 1 / Align 2 (+ Invert) | `doc.joint_origin_aligned(&origin, &align, invert) -> Option<Selection>` — 면=법선, 모서리·축=방향, 점=원점에서 그 점으로. 어셈블리 작업 평면·축·점(`work_feature_selection`)도 됨. 방향이 원점 Z와 나란하면 `None`. 결과를 `Relationship.first/second`로 쓴다 |
+| 방향을 직접 줄 때 | `Geometry::aligned_to(direction, invert) -> Option<Geometry>` |
+| Offset Origin | `geometry.offset_origin([x, y, z])` — 원점 자신의 X·Y·Z 방향 |
+| Between Two Faces | `Geometry::between_faces(&face1, &face2, point) -> Option<Geometry>` — 평행한 두 평면의 가운데 평면 위, 찍은 점의 수선 발. Z는 첫 면의 법선 |
+
+- "Align 1이 점이면 Align 2도 점" 규칙은 UI에서 지키면 된다(백엔드는 각 원점을 따로 만든다).
+- **원문에서 찾지 못해 하지 않은 것**: Planar 조인트, Gap 값, Ball 조인트의 한계. 2026 도움말의 조인트 페이지(위 GUID)와 상위·이웃 페이지 약 330개를 내려받아 찾았지만 서술이 없다(대조 문서에도 "(미확인)"). 추측으로 만들지 않았다 — 원문 링크를 받으면 진행한다.
+- 테스트: `gc_doc/tests/relate.rs::joint_origins_take_alignment_an_offset_and_the_middle_of_two_faces`.
+
 ## 2026-11-18 — 구속 값 = 모델 매개변수(어셈블리 대조 목록 3)
 
 근거: About Parameters in Models(`GUID-8E5C63EA-0540-4EBE-9B17-B8159C7FE40C`) — "Model parameters are created automatically when you define a sketch dimension …, add an assembly constraint …. default names, such as d0, d1, d2 … You can enter expressions in edit boxes that define the parameter names and values." To Work with Parameters in Models(`GUID-595F9D8E-9EEA-4446-91AB-830E5BAE548E`) — "If you entered a dimension or other value in an edit box, the value is listed here." Edit assembly constraints(`GUID-36315745-5FE6-4277-9F00-E410B962D83F`) — 브라우저 아래 편집 상자에서 오프셋·각도만 고침.

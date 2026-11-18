@@ -795,3 +795,66 @@ fn assemble_offers_only_the_solutions_the_picked_geometry_allows() {
         .relate(Relationship::new("Mate:1", S::MateMate.kind(0.0), on(block, top(0.2)), on(table, top(1.0))))
         .unwrap();
 }
+
+/// Joint origins (Inventor 2026 help, To Define and Manage Joint Relationships,
+/// GUID-21DC3336-5C51-42C1-90FB-4299CD66E0C6): Align 1 and Align 2 give the alignment directions, Invert
+/// alignment turns it round, Offset Origin and Between Two Faces place the origin.
+#[test]
+fn joint_origins_take_alignment_an_offset_and_the_middle_of_two_faces() {
+    let mut bench = Bench::new();
+    let (table, block) = table_and_box(&mut bench);
+    let axis = |direction: [f64; 3]| Geometry::Axis { point: [0.0; 3], direction };
+    // The block's bottom, its X edge as Align 1; the table top, its Y edge as Align 2.
+    let moving = |doc: &Document, invert: bool| {
+        doc.joint_origin_aligned(&on(block, bottom(0.2)), &on(block, axis([1.0, 0.0, 0.0])), invert).unwrap()
+    };
+    let fixed = bench
+        .doc
+        .joint_origin_aligned(&on(table, top(1.0)), &on(table, axis([0.0, 1.0, 0.0])), false)
+        .unwrap();
+    let joint = Relationship {
+        limits: None,
+        name: "Rigid:1".into(),
+        kind: RelationKind::Rigid { flip: false },
+        first: moving(&bench.doc, false),
+        second: fixed,
+    };
+    let id = bench.relate(joint.clone()).unwrap();
+    let pose = bench.pose(block);
+    assert!(close(pose.rotation * DVec3::X, DVec3::Y), "{:?}", pose.rotation * DVec3::X);
+    assert!(close(pose.translation, DVec3::new(0.0, 0.0, 1.1)), "{:?}", pose.translation);
+    // Invert alignment: the same edge, the other way.
+    let inverted = Relationship { first: moving(&bench.doc, true), ..joint.clone() };
+    bench.cell(CellOp::SetRelationship { id, relationship: inverted }).unwrap();
+    assert!(close(bench.pose(block).rotation * DVec3::X, -DVec3::Y));
+    // A point as the alignment: the direction from the origin to it.
+    let towards = on(table, Geometry::Point([-3.0, 0.0, 0.5]));
+    let by_point = bench.doc.joint_origin_aligned(&on(table, top(1.0)), &towards, false).unwrap();
+    let Geometry::Frame { x, .. } = by_point.geometry else { panic!() };
+    assert!(close(DVec3::from_array(x), -DVec3::X));
+    // A direction along the origin's axis aligns nothing.
+    let along = on(table, axis([0.0, 0.0, 2.0]));
+    assert!(bench.doc.joint_origin_aligned(&on(table, top(1.0)), &along, false).is_none());
+
+    // Offset Origin: 0.3 m along the origin's X (the table's Y), 0.05 m up.
+    let Geometry::Frame { origin, z, x } = fixed.geometry.offset_origin([0.3, 0.0, 0.05]) else { panic!() };
+    assert!(close(DVec3::from_array(origin), DVec3::new(0.0, 0.3, 0.55)));
+    assert!(close(DVec3::from_array(z), DVec3::Z) && close(DVec3::from_array(x), DVec3::Y));
+    let offset = Relationship {
+        second: Selection { geometry: fixed.geometry.offset_origin([0.3, 0.0, 0.05]), ..fixed },
+        ..joint
+    };
+    bench.cell(CellOp::SetRelationship { id, relationship: offset }).unwrap();
+    assert!(close(bench.pose(block).translation, DVec3::new(0.0, 0.3, 1.15)));
+
+    // Between Two Faces: half way between the table's left and right sides, below the picked point.
+    let side = |x: f64| Geometry::Plane { point: [x, 0.0, 0.0], normal: [x.signum(), 0.0, 0.0] };
+    let Some(Geometry::Frame { origin, z, .. }) =
+        Geometry::between_faces(&side(-1.0), &side(1.0), [0.7, 0.2, 0.4])
+    else {
+        panic!()
+    };
+    assert!(close(DVec3::from_array(origin), DVec3::new(0.0, 0.2, 0.4)));
+    assert!(close(DVec3::from_array(z), -DVec3::X));
+    assert!(Geometry::between_faces(&side(1.0), &top(1.0), [0.0; 3]).is_none());
+}
