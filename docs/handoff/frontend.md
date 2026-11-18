@@ -96,7 +96,7 @@
 - 근거: 인벤터 도움말 Select Other (선택 항목 겹침 목록). 원문 GUID는 커밋 메시지 참고.
 - 뷰 위에서 Ctrl+A를 누르면 커서 아래에 겹친 구성요소를 거리순으로 나열한다(`Picker::pick_all`, 중복 제거). 항목에 마우스를 올리면 강조, 클릭하면 선택하고 목록이 닫힌다.
 - 증거: `docs/evidence/img/review-54-select-other.png`, 테스트 `select_other_lists_what_lies_under_the_cursor`.
-- Ctrl+A 근거: 단축키 원문 GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E에 "Ctrl + A Activates Select Other." (재확인). Shift+우클릭도 같은 목록을 연다(docs/ux/inventor-parity.md의 Select 메뉴 근거; 테스트 `shift_right_click_lists_what_lies_under_the_cursor`).
+- Ctrl+A 근거: 단축키 원문 GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E에 "Ctrl + A Activates Select Other." (재확인). Shift+우클릭도 같은 목록을 연다. 근거: 같은 단축키 원문 GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E의 "Shift+ right-click Activates the Select command menu." — 원문은 Select 명령 메뉴(선택 우선순위 메뉴)를 여는 것이라 우리 목록은 그 일부(겹친 후보)만 구현한 것이다( 테스트 `shift_right_click_lists_what_lies_under_the_cursor`).
 - 원문과 차이: 보통 우클릭 메뉴(마킹 메뉴)에는 "다른 항목 선택" 없음, 멈춤 지연 설정 없음, 화살표 키 순환 없음, 구성요소만 대상.
 
 ### 그립 스냅 (Grip Snap)
