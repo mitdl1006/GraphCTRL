@@ -251,3 +251,52 @@ fn sketches_belong_to_the_assembly_or_to_the_component_being_edited() {
     s.undo();
     assert_eq!(s.sketch_owner(in_sub), Some(TreeKey::Subassembly(sub)));
 }
+
+/// A sketch created with an empty name takes the next free "SketchN" (names are trimmed, as Rename does).
+#[test]
+fn an_empty_sketch_name_is_numbered() {
+    let mut s = Session::new();
+    let frame = s.doc().origin_plane("XY").unwrap();
+    let make = |s: &mut Session, name: &str| match s
+        .execute(&gc_doc::Command::CreateSketch { name: name.into(), frame, spatial: false })
+        .unwrap()[..]
+    {
+        [Created::Sketch(id)] => s.doc().get(id).unwrap().name.clone(),
+        ref other => panic!("{other:?}"),
+    };
+    assert_eq!(make(&mut s, ""), "Sketch1");
+    assert_eq!(make(&mut s, "   "), "Sketch2");
+    assert_eq!(make(&mut s, "  Base  "), "Base");
+}
+
+/// A sketch an owner's delete would take is refused when something else uses it (a work axis on its line).
+#[test]
+fn an_owned_sketch_in_use_keeps_its_owner() {
+    let mut s = Session::new();
+    let _first = body(&mut s, 1.0);
+    let a = body(&mut s, 0.0);
+    s.edit_component(key(a)).unwrap();
+    let k = s.create_sketch("XY").unwrap();
+    let op = gc_doc::SketchOp::AddLine {
+        a: [0.0, 0.0, 0.0],
+        b: [0.05, 0.0, 0.0],
+        snap_a: gc_doc::EndSnap::default(),
+        snap_b: gc_doc::EndSnap::default(),
+        horizontal: None,
+    };
+    let line = match s.execute(&gc_doc::Command::Sketch { sketch: k, op }).unwrap()[..] {
+        [Created::Curve(c), ..] => c,
+        ref other => panic!("{other:?}"),
+    };
+    s.finish_sketch();
+    s.return_to_top();
+    let axis = gc_doc::WorkFeature {
+        name: "Axis".into(),
+        geometry: gc_doc::WorkGeometry::AxisOnLine { line: gc_doc::CurveRef { sketch: k, curve: line } },
+        visible: true,
+    };
+    s.execute(&gc_doc::Command::Cell(gc_doc::CellOp::AddWorkFeature(axis))).unwrap();
+    let before = s.doc().clone();
+    assert_eq!(s.delete_item(gc_session::CellItem::Body(a)), Err(EditError::InUse));
+    assert!(s.doc().same_content(&before));
+}

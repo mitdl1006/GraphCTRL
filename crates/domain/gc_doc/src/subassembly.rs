@@ -263,6 +263,36 @@ impl Document {
 
 type Outcome = Result<(Vec<Created>, &'static str), EditError>;
 
+/// Deletes the sketches a component placed in the cell owns (made while editing it or one of its parts in
+/// place), in the transaction that deletes the component: Inventor deletes a part's sketches with the part.
+/// Refused (`InUse`) when anything else uses one of them (a feature, a work feature, a path).
+pub(crate) fn delete_owned_sketches(txn: &mut Txn<'_>, item: gc_core::AnyId) -> Result<(), EditError> {
+    let doc = txn.doc();
+    let owned: Vec<gc_core::Id<gc_sketch::Sketch>> = doc
+        .timeline()
+        .map(|(_, t)| {
+            t.components
+                .sketch_owners
+                .iter()
+                .filter(|(s, o)| {
+                    doc.get(*s).is_some()
+                        && matches!(o, TreeKey::Component(occurrence) if occurrence.owner() == item)
+                })
+                .map(|(s, _)| *s)
+                .collect()
+        })
+        .unwrap_or_default();
+    for sketch in &owned {
+        if doc.dependents_of(sketch.erase()).iter().any(|d| !owned.iter().any(|s| s.erase() == *d)) {
+            return Err(EditError::InUse);
+        }
+    }
+    for sketch in owned {
+        crate::command::run(txn, &crate::Command::DeleteSketch { id: sketch })?;
+    }
+    Ok(())
+}
+
 pub(crate) fn run(txn: &mut Txn<'_>, op: &SubassemblyOp) -> Outcome {
     let doc = txn.doc();
     let all = doc.subassemblies();

@@ -869,6 +869,19 @@ pub fn evaluate_value(doc: &Document, source: &str, unit: Unit) -> Option<f64> {
     evaluate(&source, &scope_of(doc), unit).ok().filter(|v| v.is_finite())
 }
 
+/// The name a new sketch takes: as given (without leading and trailing spaces), or when that is empty the
+/// first free "SketchN" (as the browser numbers them).
+fn sketch_name(doc: &Document, name: &str) -> String {
+    let name = name.trim();
+    if !name.is_empty() {
+        return name.to_owned();
+    }
+    (1..)
+        .map(|n| format!("Sketch{n}"))
+        .find(|n| doc.sketches().iter().all(|(_, s)| s.name != *n))
+        .unwrap_or_default()
+}
+
 /// Parameter values by name.
 fn scope_of(doc: &Document) -> BTreeMap<String, Quantity> {
     let mut scope: BTreeMap<String, Quantity> = doc
@@ -2872,9 +2885,10 @@ pub(crate) fn run(txn: &mut Txn<'_>, command: &Command) -> Result<(Vec<Created>,
             Ok((Vec::new(), "Delete parameter"))
         }
         Command::CreateSketch { name, frame, spatial } => {
+            let name = sketch_name(txn.doc(), name);
             let frame = frame.erase();
             let mut sketch = Sketch::new(if *spatial { Space::Spatial(frame) } else { Space::Planar(frame) });
-            sketch.name.clone_from(name);
+            sketch.name = name;
             let id = txn.insert(sketch);
             txn.modify(id, |s: &mut Sketch, ids| {
                 s.add_external(ids, ExternalRef::FrameOrigin(frame), [0.0; 3]);
@@ -2882,6 +2896,7 @@ pub(crate) fn run(txn: &mut Txn<'_>, command: &Command) -> Result<(Vec<Created>,
             Ok((vec![Created::Sketch(id)], "New sketch"))
         }
         Command::CreateSketchOn { name, source } => {
+            let name = &sketch_name(txn.doc(), name);
             let doc = txn.doc();
             let pose = doc.plane_source_pose(source).ok_or(EditError::BadValue)?;
             let world = doc.world().ok_or(EditError::BadValue)?;
