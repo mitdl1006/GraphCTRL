@@ -347,3 +347,139 @@ fn an_idle_arm_in_the_way_is_parked_only_when_it_is_in_the_way_and_the_schedule_
     eprintln!("report: parked {} robots, least gap {least:.4} m at {at:.2} s", shown.parks.len());
     assert!(least > 0.0, "the arms overlap at {at:.2} s");
 }
+
+// ---- The backend's scene where a robot goes round a moving one (task_schedule.rs, 6188beb) ----
+
+use gc_doc::{Created, EndSnap, Sketch, SketchOp, SketchRole};
+use gc_sketch::SkPoint;
+
+/// Two robots side by side 0.6 m in front of the XZ wall, 0.7 m apart, with a waypoint role in front of each.
+/// A session, its two robots, the sketch with its two points and the role at each.
+type WallCell = (Session, Id<Robot>, Id<Robot>, Id<Sketch>, [Id<SkPoint>; 2], [Id<SketchRole>; 2]);
+
+fn wall_cell() -> WallCell {
+    let mut s = Session::new();
+    let robot = |s: &mut Session, name: &str, x: f64| {
+        let id = s.add_robot(name, &six_axis()).unwrap();
+        let placement = Placement { xyz: [x, -0.6, 0.0], rpy: [0.0; 3] };
+        s.execute(&Command::Cell(CellOp::PlaceRobot { id, placement })).unwrap();
+        s.jog(id, &[1.5, -0.3, 0.6, 0.0, 0.6, 0.0]);
+        s.end_jog();
+        id
+    };
+    let (left, right) = (robot(&mut s, "Left", 0.0), robot(&mut s, "Right", 0.7));
+    let sketch = s.create_sketch("XZ").unwrap();
+    let point = |s: &mut Session, x: f64| {
+        let created =
+            s.execute(&Command::Sketch { sketch, op: SketchOp::AddPoint { pos: [x, 0.5, 0.0] } }).unwrap();
+        let Created::Point(point) = created[0] else { panic!() };
+        point
+    };
+    let points = [point(&mut s, 0.1), point(&mut s, 0.8)];
+    s.finish_sketch();
+    let roles = points.map(|p| s.add_waypoint_role(sketch, p).unwrap());
+    (s, left, right, sketch, points, roles)
+}
+
+fn touch(name: &str, at: Id<SketchRole>, robot: Id<Robot>, priority: i32, stand: f64) -> Task {
+    let mut steps = vec![Step::MoveJ(MoveTarget::Role(at))];
+    if stand > 0.0 {
+        steps.push(Step::Wait { seconds: stand });
+    }
+    Task {
+        name: name.into(),
+        location: Location::None,
+        precondition: String::new(),
+        steps,
+        effects: Vec::new(),
+        robots: RobotChoice::Only(vec![robot]),
+        priority,
+    }
+}
+
+fn _unused(_: EndSnap) {}
+
+/// Left goes to a low point and stands there for half a minute; right goes to a point above it, which would cross
+/// left's motion. Going round is sooner than waiting. A small grid of points around the backend's scene: wherever the
+/// scheduler goes round, the detour is recorded once, the task did not wait, it ends before waiting would, the plan is
+/// the same every time, and the two arms are apart at every 10 ms of the played-back schedule.
+#[test]
+fn a_detour_keeps_the_arms_apart_and_beats_waiting() {
+    let mut detoured = 0;
+    let mut scenes = 0;
+    for low in [[0.5, 0.35], [0.45, 0.35], [0.55, 0.35], [0.5, 0.3], [0.5, 0.4]] {
+        for high in [[0.4, 0.65], [0.35, 0.65], [0.45, 0.65], [0.4, 0.6], [0.4, 0.7]] {
+            let (mut s, left, right, sketch, points, roles) = wall_cell();
+            let op = SketchOp::SetCoords {
+                points: vec![(points[0], [low[0], low[1], 0.0]), (points[1], [high[0], high[1], 0.0])],
+                radii: Vec::new(),
+            };
+            s.execute(&Command::Sketch { sketch, op }).unwrap();
+            let low_task = s
+                .edit_work(WorkOp::AddTask(touch("Left low", roles[0], left, 5, 30.0)))
+                .unwrap()
+                .unwrap()
+                .downcast::<Task>()
+                .unwrap();
+            let high_task = s
+                .edit_work(WorkOp::AddTask(touch("Right high", roles[1], right, 0, 0.0)))
+                .unwrap()
+                .unwrap()
+                .downcast::<Task>()
+                .unwrap();
+            scenes += 1;
+            let schedule = s.schedule();
+            assert!(same(&schedule, &s.schedule()), "the schedule changed between runs ({low:?}, {high:?})");
+            if schedule.detours.is_empty() {
+                continue;
+            }
+            detoured += 1;
+            // Recorded once, for the right task and robot, and the task did not wait.
+            assert_eq!(schedule.detours.len(), 1, "{:?}", schedule.detours);
+            let d = &schedule.detours[0];
+            assert_eq!((d.task, d.robot, d.around), (high_task, right, left), "{low:?} {high:?}");
+            assert!(
+                schedule.waits.iter().all(|w| w.task != high_task),
+                "went round and waited too: {:?}",
+                schedule.waits
+            );
+            let of = |task: Id<Task>| schedule.assignments.iter().find(|x| x.task == task).unwrap();
+            let (l, r) = (of(low_task), of(high_task));
+            assert!(
+                l.start < r.end && r.start < l.end,
+                "the detour runs while left is still moving: {l:?} {r:?}"
+            );
+            // It ends sooner than waiting for left to stand still and then going straight.
+            let index = schedule.assignments.iter().position(|x| x.task == high_task).unwrap();
+            let straight = s.task_plan_from(high_task, right, &schedule.plans[index].start).unwrap();
+            assert!(
+                r.end < l.end + straight.duration() + 1e-6,
+                "{low:?} {high:?}: ends {} but waiting ends {}",
+                r.end,
+                l.end + straight.duration()
+            );
+            // Apart at every 10 ms, finer than the 50 ms the scheduler checks.
+            s.request_schedule();
+            let (shown, _) = s.schedule_result().map(|(x, c)| (x.clone(), c)).unwrap();
+            assert!(same(&shown, &schedule));
+            let end_of_detour = Schedule { assignments: vec![r.clone()], ..Schedule::default() };
+            let _ = end_of_detour;
+            let mut t = 0.0;
+            let mut least = f64::INFINITY;
+            while t <= r.end {
+                let g = gap(&mut s, left, right, t).unwrap_or_else(|| panic!("no geometry at {t}"));
+                least = least.min(g);
+                t += 0.01;
+            }
+            s.set_schedule_playback(None);
+            eprintln!(
+                "report: detour {low:?}/{high:?}: least gap {least:.4} m, right done at {:.2} s, left at {:.2} s",
+                r.end, l.end
+            );
+            assert!(least > 0.0, "the arms overlap in the detour {low:?}/{high:?} (gap {least})");
+            assert!(least >= gc_session::PADDING * 0.25, "closer than a quarter of the padding: {least}");
+        }
+    }
+    eprintln!("report: {detoured} of {scenes} scenes went round a moving arm");
+    assert!(detoured >= 1, "the backend's scene (low 0.5/0.35, high 0.4/0.65) did not go round any more");
+}
