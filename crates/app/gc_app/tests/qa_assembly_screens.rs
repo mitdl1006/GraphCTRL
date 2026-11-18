@@ -169,7 +169,7 @@ fn the_value_boxes_say_when_their_text_is_not_a_value() {
         type_into(&mut h, "각도 값", text);
         assert_eq!(!has(&h, message), ok, "angle {text:?}");
     }
-    // Motion ratio: a finite, non-zero number or expression (a model parameter since backend e0b77f5).
+    // Motion ratio: a finite number or an expression that is not zero (backend e0b77f5 made it a model parameter).
     in_dialog(&h, "모션 (Motion)").click();
     h.run_steps(3);
     for (text, ok) in [
