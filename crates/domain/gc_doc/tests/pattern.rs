@@ -125,3 +125,60 @@ fn a_circular_pattern_turns_copies_round_the_axis_rotational_or_fixed() {
         assert!(doc.get(Id::<Body>::from_raw(first.raw)).is_some());
     }
 }
+
+/// Suppress elements in assembly patterns (Inventor 2026 help, GUID-FDD20E41-93A5-479D-B547-BA9956E9966B)
+/// and restoring an independent element (About Assembly Components in Patterns,
+/// GUID-ABC5607F-6128-40C8-BF28-44D918E5803C).
+#[test]
+fn pattern_elements_can_be_suppressed_and_independent_ones_restored() {
+    use gc_doc::ComponentFlag;
+    let (mut doc, mut history) = (Document::new(), History::default());
+    let floor = body(&mut doc, &mut history, [0.0; 3]);
+    let part = body(&mut doc, &mut history, [1.0, 0.0, 0.2]);
+    let columns = |count: u32| PatternLayout::Rectangular {
+        column: PatternDirection { along: axis_of(floor, 0), flip: false, count, spacing: 0.5 },
+        row: None,
+    };
+    let add = CellOp::AddPattern { name: "Row".into(), parents: vec![part.erase()], layout: columns(4) };
+    run(&mut doc, &mut history, add);
+    let copy = |doc: &Document, index: u32| {
+        doc.patterns()[0].elements.iter().find(|e| e.index == index).map(|e| e.items[0])
+    };
+    let suppressed = |doc: &Document, item: gc_core::AnyId| {
+        doc.component_flag(Occurrence::Item(item), ComponentFlag::Suppressed)
+    };
+    // Element 2 is suppressed: its component with it, in one undo step.
+    let second = copy(&doc, 2).unwrap();
+    let depth = history.undo_depth();
+    run(&mut doc, &mut history, CellOp::SuppressPatternElement { index: 0, element: 2, suppressed: true });
+    assert_eq!(history.undo_depth(), depth + 1);
+    assert!(suppressed(&doc, second) && !suppressed(&doc, copy(&doc, 1).unwrap()));
+    assert_eq!(doc.patterns()[0].suppressed, [2]);
+    // The count shrinks and grows again: the place is still suppressed.
+    run(&mut doc, &mut history, CellOp::SetPattern { index: 0, layout: columns(2) });
+    assert!(copy(&doc, 2).is_none());
+    run(&mut doc, &mut history, CellOp::SetPattern { index: 0, layout: columns(4) });
+    let again = copy(&doc, 2).unwrap();
+    assert!(suppressed(&doc, again) && !suppressed(&doc, copy(&doc, 3).unwrap()));
+    run(&mut doc, &mut history, CellOp::SuppressPatternElement { index: 0, element: 2, suppressed: false });
+    assert!(!suppressed(&doc, again) && doc.patterns()[0].suppressed.is_empty());
+    // The source and places that are not there cannot be suppressed.
+    for element in [0, 9] {
+        let op = CellOp::SuppressPatternElement { index: 0, element, suppressed: true };
+        assert!(apply(&mut doc, &Command::Cell(op)).is_err(), "{element}");
+    }
+
+    // Independent, then restored: the pattern fills the place again and the component that left stays.
+    let third = copy(&doc, 3).unwrap();
+    run(&mut doc, &mut history, CellOp::MakePatternElementIndependent { index: 0, element: 3 });
+    let bodies = doc.bodies().iter().count();
+    let created = run(&mut doc, &mut history, CellOp::RestorePatternElement { index: 0, element: 3 });
+    assert_eq!(created.len(), 1);
+    assert_eq!(doc.bodies().iter().count(), bodies + 1);
+    let restored = copy(&doc, 3).unwrap();
+    assert_ne!(restored, third);
+    assert!(close(at(&doc, restored), at(&doc, third)), "two parts in one place, as the help warns");
+    assert!(doc.patterns()[0].independent.is_empty());
+    let twice = CellOp::RestorePatternElement { index: 0, element: 3 };
+    assert!(apply(&mut doc, &Command::Cell(twice)).is_err());
+}

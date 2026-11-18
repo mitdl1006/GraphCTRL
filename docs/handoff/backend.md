@@ -124,6 +124,22 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 패턴 요소 억제·독립 요소 복원, BOM에서 억제 컴포넌트 제외 (대조 목록 10); 재구성(12)은 이미 있음
+
+근거: Suppress elements in assembly patterns(`GUID-FDD20E41-93A5-479D-B547-BA9956E9966B`) — "Suppressed pattern elements are not shown in the graphics window and are not calculated when the assembly is updated … also excluded from a bill of materials", "The suppression of elements is persistent". About Assembly Components in Patterns(`GUID-ABC5607F-6128-40C8-BF28-44D918E5803C`) — "You can restore an independent element to the pattern, but the copied components created when the element was made independent are not automatically deleted".
+
+| 무엇 | 호출 |
+|---|---|
+| 요소 억제/해제 | `CellOp::SuppressPatternElement { index, element, suppressed }` — 소스(0)·독립 요소·없는 자리는 `BadValue`. 요소의 컴포넌트에 Suppressed 플래그가 같이 걸린다(안 그려지고 장애물·계획에서 빠짐) |
+| 억제된 자리 | `doc.patterns()[i].suppressed: Vec<u32>` — 개수를 줄였다 늘려도 유지 |
+| 독립 요소 복원 | `CellOp::RestorePatternElement { index, element }` — 패턴이 그 자리를 다시 채운다. 독립시킬 때 떨어져 나온 컴포넌트는 남는다(원문: 겹치지 않게 사용자가 옮기거나 지움) |
+
+- `ComponentPattern`에 `suppressed` 필드 추가(serde default; 다른 브랜치에 구조체 리터럴 없음).
+- **동작 변화**: BOM(`bill_of_materials`, `bom_csv`)이 억제된 컴포넌트와 그 아래 행을 뺀다. 전에는 억제돼도 세었다. 기존 BOM 테스트(리드·QA)에는 억제를 쓰는 것이 없다.
+- 하지 않은 것: 부품 피처 패턴에 연관된 패턴(우리 부품에는 피처가 없다), 패턴의 패턴, Replace all instances.
+- **재구성(12)**: 원문(Create Subassemblies in Place, `GUID-FCEE3F0E-AAE2-4619-8645-2588FEECD353`)은 "Component Demote … You can then move components between assembly levels by dragging components in the browser"뿐이고 둘 다 이미 있다(`SubassemblyOp::{Demote, Move}`; 위 레벨로 `Move`가 곧 Promote). 2026 페이지에서 Promote 전용 서술은 찾지 못했다. 추가 작업 없음.
+- 테스트: `gc_doc/tests/pattern.rs::pattern_elements_can_be_suppressed_and_independent_ones_restored`, `gc_session/tests/bom.rs::suppressed_components_are_left_out`.
+
 ## 2026-11-18 — Motion 구속(Rotation, Rotation-Translation) (대조 목록 1); Transitional은 보류 (2)
 
 근거: Place Motion constraints between assembly components(`GUID-493DEAF8-D124-47BE-AFF2-B0535E9005C5`), Place Constraint Reference - Motion Tab(`GUID-0293C151-565F-4980-AA95-DD76C54AB538`) — "Because they operate only on open degrees of freedom, they do not conflict with positional constraints, resize adaptive parts, or move grounded components", "The Drive Constraint command is not available for motion constraints", "a value of 4.0 (4:1) rotates the second selection four units for every unit the first selection rotates", "the distance specifies how much the second selection moves relative to one rotation of the first selection", "the constraint is bidirectional", 기본값(원통 둘 → 반지름 비, 첫째가 원통 → 둘레).
