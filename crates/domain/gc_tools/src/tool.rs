@@ -1688,6 +1688,17 @@ impl Tool {
                     return Vec::new();
                 };
                 self.picks.push(item);
+                // Two lines or curves and the line of symmetry: their points in symmetric pairs.
+                if let (
+                    ConstraintKind::Symmetric,
+                    [Item::Curve(first), Item::Curve(second), Item::Curve(axis)],
+                ) = (kind, self.picks.as_slice())
+                    && sketch.symmetric_pairs(*first, *second, *axis).is_some()
+                {
+                    let op = SketchOp::SymmetricCurves { first: *first, second: *second, axis: *axis };
+                    self.picks.clear();
+                    return vec![ToolOutput::Edit(op)];
+                }
                 if let Some(constraint) = constraint_for(sketch, kind, &self.picks) {
                     self.picks.clear();
                     return vec![ToolOutput::Edit(SketchOp::AddConstraint(constraint))];

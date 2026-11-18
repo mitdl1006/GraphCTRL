@@ -1145,6 +1145,50 @@ impl Sketch {
         Ok(())
     }
 
+    /// The point constraints that make two lines, circles or arcs symmetric about a line (To Apply
+    /// Geometric Constraints, GUID-A85A7A30-7D81-4C75-8769-CAD034EEA930: "Selected lines and arcs are
+    /// constrained about a line to create a symmetrical shape"): a line's ends paired with the other's
+    /// nearer mirrored ends; circles' centres and equal radii; arcs' centres, and each one's start with the
+    /// other's end (a mirror turns the sweep round). `None` for other curves or a symmetry line that is not
+    /// a line or is one of them.
+    pub fn symmetric_pairs(
+        &self,
+        first: Id<Curve>,
+        second: Id<Curve>,
+        axis: Id<Curve>,
+    ) -> Option<Vec<GeoConstraint>> {
+        if self.is_spatial() || first == second || axis == first || axis == second {
+            return None;
+        }
+        let (p, q) = self.line(axis)?;
+        let (p, q) = (self.xy(p)?, self.xy(q)?);
+        let mirror = |x: [f64; 2]| {
+            let d = [q[0] - p[0], q[1] - p[1]];
+            let l2 = d[0] * d[0] + d[1] * d[1];
+            let t = ((x[0] - p[0]) * d[0] + (x[1] - p[1]) * d[1]) / l2;
+            let foot = [p[0] + t * d[0], p[1] + t * d[1]];
+            [2.0 * foot[0] - x[0], 2.0 * foot[1] - x[1]]
+        };
+        let sym = |a: Id<SkPoint>, b: Id<SkPoint>| GeoConstraint::Symmetric { p: a, q: b, axis };
+        Some(match (&self.curves.get(&first)?.geom, &self.curves.get(&second)?.geom) {
+            (CurveGeom::Line { a, b }, CurveGeom::Line { a: c, b: d }) => {
+                let (ma, pc, pd) = (mirror(self.xy(*a)?), self.xy(*c)?, self.xy(*d)?);
+                if dist(ma, pc) <= dist(ma, pd) {
+                    vec![sym(*a, *c), sym(*b, *d)]
+                } else {
+                    vec![sym(*a, *d), sym(*b, *c)]
+                }
+            }
+            (CurveGeom::Circle { c, .. }, CurveGeom::Circle { c: d, .. }) => {
+                vec![sym(*c, *d), GeoConstraint::Equal(first, second)]
+            }
+            (CurveGeom::Arc { c, s, e }, CurveGeom::Arc { c: c2, s: s2, e: e2 }) => {
+                vec![sym(*c, *c2), sym(*s, *e2), sym(*e, *s2)]
+            }
+            _ => return None,
+        })
+    }
+
     fn closed_spline(&self, curve: Id<Curve>) -> bool {
         matches!(self.curves.get(&curve).map(|c| &c.geom), Some(CurveGeom::Spline { points }) if crate::model::spline_closed(points))
     }
