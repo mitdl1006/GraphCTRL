@@ -985,3 +985,47 @@ fn move_copy_and_rotate_selected_geometry() {
     let c = corner(&bench, &lines);
     assert!(c[0].abs() < 1e-12, "the original did not move");
 }
+
+/// Automatic Dimensions and Constraints (To Apply 2D Sketch Dimensions Automatically,
+/// GUID-1DC71C6F-9F6D-4846-8E73-9CB7D3452882): what is missing is added, until nothing can move.
+#[test]
+fn automatic_dimensions_and_constraints_fully_constrain_the_sketch() {
+    use gc_doc::EndSnap;
+    let mut bench = Bench::new();
+    bench
+        .op(SketchOp::AddRectangle { a: [0.01, 0.02], b: [0.05, 0.04], snap_a: EndSnap::default() })
+        .unwrap();
+    // A free line that is level, not yet constrained so.
+    add_line(&mut bench, [0.0, 0.06], [0.03, 0.06]);
+    bench
+        .op(SketchOp::AddCircle {
+            centre: [0.08, 0.03, 0.0],
+            radius: 0.005,
+            centre_snap: Default::default(),
+            rim_snap: Default::default(),
+        })
+        .unwrap();
+    assert!(bench.dof() > 0);
+    let before = bench.sketch().clone();
+    let created = bench
+        .op(SketchOp::AutoDimension { curves: Vec::new(), dimensions: true, constraints: true })
+        .unwrap();
+    assert_eq!(bench.dof(), 0, "fully constrained");
+    // Nothing moved: every value is what was there.
+    for (id, p) in &before.points {
+        let now = bench.sketch().pos(*id).unwrap();
+        assert!((0..2).all(|k| (now[k] - p.pos[k]).abs() < 1e-9));
+    }
+    let horizontals =
+        bench.sketch().constraints.values().filter(|c| matches!(c, GeoConstraint::Horizontal(..))).count();
+    assert!(horizontals >= 3, "the free level line became horizontal too");
+    assert!(!dimensions(&created).is_empty());
+    // Constraints only: the level line gets its horizontal, no dimensions.
+    let mut bench = Bench::new();
+    add_line(&mut bench, [0.0, 0.06], [0.03, 0.06]);
+    let created = bench
+        .op(SketchOp::AutoDimension { curves: Vec::new(), dimensions: false, constraints: true })
+        .unwrap();
+    assert!(dimensions(&created).is_empty());
+    assert_eq!(bench.dof(), 3);
+}

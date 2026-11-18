@@ -85,6 +85,8 @@ pub struct Session {
     transform_relax: bool,
     /// Autoproject edges for sketch creation (a sketch on a face takes the face's outline).
     autoproject_edges: bool,
+    /// What the last Automatic Dimensions and Constraints added (for its Remove).
+    auto_added: Vec<Item>,
     drag: Option<SketchDrag>,
     report: Option<SketchReport>,
     request: Option<ValueRequest>,
@@ -138,6 +140,7 @@ impl Session {
             transform_copy: false,
             transform_relax: false,
             autoproject_edges: true,
+            auto_added: Vec::new(),
             drag: None,
             report: None,
             request: None,
@@ -1148,6 +1151,43 @@ impl Session {
     /// Sets Loop Select and Constrain Offset.
     pub fn set_offset_options(&mut self, loop_select: bool, constrain: bool) {
         self.tool.set_offset_options(loop_select, constrain);
+    }
+
+    /// Automatic Dimensions and Constraints (Inventor 2026 help, To Apply 2D Sketch Dimensions
+    /// Automatically, GUID-1DC71C6F-9F6D-4846-8E73-9CB7D3452882) on the selected curves, or the whole
+    /// sketch when none is selected. Returns how many dimensions and constraints were added.
+    pub fn auto_dimension(&mut self, dimensions: bool, constraints: bool) -> Result<usize, EditError> {
+        let op = SketchOp::AutoDimension { curves: self.selected_curves(), dimensions, constraints };
+        let created = self.edit_active_sketch(op)?;
+        self.auto_added = created
+            .iter()
+            .filter_map(|c| match c {
+                Created::Dimension(d) => Some(Item::Dimension(*d)),
+                Created::Constraint(c) => Some(Item::Constraint(*c)),
+                _ => None,
+            })
+            .collect();
+        Ok(self.auto_added.len())
+    }
+
+    /// The Auto Dimension dialog's Remove: takes back what the last Apply added (the dimensions and/or the
+    /// constraints, as the boxes say).
+    pub fn remove_auto_dimensions(&mut self, dimensions: bool, constraints: bool) -> Result<(), EditError> {
+        let (gone, kept): (Vec<Item>, Vec<Item>) =
+            std::mem::take(&mut self.auto_added).into_iter().partition(|i| {
+                (dimensions && matches!(i, Item::Dimension(_)))
+                    || (constraints && matches!(i, Item::Constraint(_)))
+            });
+        self.auto_added = kept;
+        if gone.is_empty() {
+            return Ok(());
+        }
+        self.edit_active_sketch(SketchOp::Delete(gone)).map(|_| ())
+    }
+
+    /// The Auto Dimension dialog's Dimensions Required: the freedom left in the sketch being edited.
+    pub fn dimensions_required(&self) -> usize {
+        self.report().map_or(0, |r| r.dof)
     }
 
     /// The 2D Chamfer dialog: the type with its sizes, and Create Dimensions.

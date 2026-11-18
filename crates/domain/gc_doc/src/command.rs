@@ -431,6 +431,18 @@ pub enum SketchOp {
         /// Break and recompute what holds the curves back.
         relax: bool,
     },
+    /// Automatic Dimensions and Constraints (Inventor 2026 help, To Apply 2D Sketch Dimensions
+    /// Automatically, GUID-1DC71C6F-9F6D-4846-8E73-9CB7D3452882): adds the constraints the curves nearly
+    /// have (horizontal, vertical, ends that meet) and dimensions (lengths, radii, then positions from the
+    /// sketch origin) that still remove freedom, with the values they have now. No curves: the whole sketch.
+    AutoDimension {
+        /// The curves; empty for all.
+        curves: Vec<Id<Curve>>,
+        /// Add dimensions.
+        dimensions: bool,
+        /// Add constraints.
+        constraints: bool,
+    },
     /// Split (Inventor 2026 help, To Split, Trim, or Extend Curves, GUID-DD00037F-6BBA-4B95-AA90-4F99DCEB667D):
     /// cuts a line or arc in two at its crossing with another curve nearest `at`.
     Split {
@@ -1220,6 +1232,120 @@ fn tangent_circle(sketch: &Sketch, lines: &[Id<Curve>; 3], near: &[[f64; 2]; 3])
         }
     }
     best.map(|(_, c, r)| (c, r))
+}
+
+/// Automatic Dimensions and Constraints over `curves` (see [`SketchOp::AutoDimension`]): every candidate
+/// is tried in turn and kept only when it removes freedom.
+fn auto_dimension(
+    sketch: &mut Sketch,
+    ids: &mut IdAlloc,
+    curves: &[Id<Curve>],
+    dimensions: bool,
+    constraints: bool,
+    created: &mut Vec<Created>,
+) -> Result<(), EditError> {
+    let xy = |sketch: &Sketch, p: Id<SkPoint>| sketch.pos(p).map(|q| [q[0], q[1]]);
+    let mut points: Vec<Id<SkPoint>> = Vec::new();
+    for curve in curves {
+        for p in sketch.curves.get(curve).ok_or(SketchError::MissingCurve)?.points() {
+            if !points.contains(&p) {
+                points.push(p);
+            }
+        }
+    }
+    let size = points
+        .iter()
+        .filter_map(|p| xy(sketch, *p))
+        .fold(0.0_f64, |m, p| m.max(p[0].abs()).max(p[1].abs()))
+        .max(1e-3);
+    let close = 1e-6 * size;
+    if constraints {
+        // Lines that are level or plumb.
+        for curve in curves {
+            let Some((a, b)) = sketch.line(*curve) else { continue };
+            let (Some(pa), Some(pb)) = (xy(sketch, a), xy(sketch, b)) else { continue };
+            let level = if (pb[1] - pa[1]).abs() <= close {
+                Some(GeoConstraint::Horizontal(a, b))
+            } else if (pb[0] - pa[0]).abs() <= close {
+                Some(GeoConstraint::Vertical(a, b))
+            } else {
+                None
+            };
+            if let Some(constraint) = level {
+                try_constraint(sketch, ids, constraint, created);
+            }
+        }
+        // Ends that meet.
+        for (i, p) in points.iter().enumerate() {
+            for q in &points[i + 1..] {
+                if let (Some(a), Some(b)) = (xy(sketch, *p), xy(sketch, *q))
+                    && gc_math::fm::hypot(b[0] - a[0], b[1] - a[1]) <= close
+                {
+                    try_constraint(sketch, ids, GeoConstraint::Coincident(*p, *q), created);
+                }
+            }
+        }
+    }
+    if !dimensions {
+        return Ok(());
+    }
+    // Sizes first, then where things are: from the sketch's origin point.
+    let mut candidates: Vec<DimKind> = Vec::new();
+    for curve in curves {
+        match sketch.curves.get(curve).map(|c| c.geom) {
+            Some(gc_sketch::CurveGeom::Line { a, b }) => candidates.push(DimKind::Distance { p: a, q: b }),
+            Some(gc_sketch::CurveGeom::Circle { .. }) => candidates.push(DimKind::Diameter(*curve)),
+            Some(gc_sketch::CurveGeom::Arc { .. }) => candidates.push(DimKind::Radius(*curve)),
+            None => {}
+        }
+    }
+    let origin = sketch.points.iter().find_map(|(id, p)| {
+        matches!(p.kind, gc_sketch::PointKind::External(gc_sketch::ExternalRef::FrameOrigin(_)))
+            .then_some(*id)
+    });
+    if let Some(origin) = origin {
+        for p in &points {
+            if *p == origin {
+                continue;
+            }
+            let (Some(o), Some(at)) = (xy(sketch, origin), xy(sketch, *p)) else { continue };
+            if (at[0] - o[0]).abs() > close {
+                candidates.push(DimKind::HDistance { p: origin, q: *p, sign: (at[0] - o[0]).signum() });
+            }
+            if (at[1] - o[1]).abs() > close {
+                candidates.push(DimKind::VDistance { p: origin, q: *p, sign: (at[1] - o[1]).signum() });
+            }
+        }
+    }
+    for kind in candidates {
+        let Some(value) = sketch.measure(&kind) else { continue };
+        if !(value.is_finite() && value > close) {
+            continue;
+        }
+        let source = format!("{:.6} mm", value * 1e3);
+        let text_pos = auto_text_pos(sketch, &kind);
+        if let Ok(gc_sketch::AddResult::Added { id, .. }) =
+            sketch.try_add_dimension(ids, kind, &source, value, text_pos)
+        {
+            created.push(Created::Dimension(id));
+        }
+    }
+    Ok(())
+}
+
+/// Where an automatic dimension's text goes: by what it measures.
+fn auto_text_pos(sketch: &Sketch, kind: &DimKind) -> [f64; 2] {
+    let at = |p: Id<SkPoint>| sketch.pos(p).map_or([0.0; 2], |q| [q[0], q[1]]);
+    match *kind {
+        DimKind::Distance { p, q } | DimKind::HDistance { p, q, .. } | DimKind::VDistance { p, q, .. } => {
+            let (a, b) = (at(p), at(q));
+            [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0]
+        }
+        DimKind::Radius(c) | DimKind::Diameter(c) => {
+            sketch.round(c).map_or([0.0; 2], |(centre, _)| at(centre))
+        }
+        _ => [0.0; 2],
+    }
 }
 
 /// What a pattern added, as sketch items.
@@ -2395,6 +2521,15 @@ fn sketch_op(
                 sketch.move_placed(ids, curves, &place, turned, *relax)?;
                 if turned { "Rotate" } else { "Move" }
             }
+        }
+        SketchOp::AutoDimension { curves, dimensions, constraints } => {
+            if sketch.is_spatial() {
+                return Err(SketchError::WrongSpace.into());
+            }
+            let chosen: Vec<Id<Curve>> =
+                if curves.is_empty() { sketch.curves.keys().copied().collect() } else { curves.clone() };
+            auto_dimension(sketch, ids, &chosen, *dimensions, *constraints, &mut created)?;
+            "Automatic dimensions"
         }
         SketchOp::Split { curve, at } => {
             push_cut(&mut created, &sketch.split_at(ids, *curve, *at)?);

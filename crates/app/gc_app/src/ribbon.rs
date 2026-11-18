@@ -94,6 +94,8 @@ pub(crate) enum RibbonAction {
     StartSketchRectPattern,
     /// Open the sketch Circular Pattern dialog.
     StartSketchCircPattern,
+    /// Open the Auto Dimension dialog.
+    StartAutoDimension,
 }
 
 pub(crate) fn show(
@@ -409,6 +411,22 @@ pub(crate) fn show(
                             });
                         }
                     });
+                    // Automatic Dimensions and Constraints (To Apply 2D Sketch Dimensions Automatically,
+                    // GUID-1DC71C6F-9F6D-4846-8E73-9CB7D3452882): a 2D sketch.
+                    if !spatial {
+                        ui.vertical(|ui| {
+                            let auto = gc_ui::ribbon_small_button(
+                                ui,
+                                Icon::Text("A|"),
+                                tr!(lang, ToolAutoDimension),
+                                false,
+                                sketching,
+                            );
+                            if auto.clicked() {
+                                action = Some(RibbonAction::StartAutoDimension);
+                            }
+                        });
+                    }
                 });
                 ribbon_group(ui, tr!(lang, GroupExit), |ui| {
                     if ribbon_button(ui, Icon::Finish, tr!(lang, CmdFinishSketch), false, sketching).clicked()

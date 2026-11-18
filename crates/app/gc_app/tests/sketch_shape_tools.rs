@@ -419,3 +419,29 @@ fn move_copy_and_rotate_on_the_ribbon_open_their_dialogs() {
     harness.run();
     assert_eq!(harness.state().session.tool(), ToolKind::Select);
 }
+
+/// Automatic Dimensions and Constraints (Inventor 2026 help, GUID-1DC71C6F-9F6D-4846-8E73-9CB7D3452882):
+/// Apply fully constrains a sketch, Remove takes it back.
+#[test]
+fn auto_dimension_applies_and_removes() {
+    let mut harness = sketching();
+    harness.state_mut().session.set_tool(ToolKind::Rectangle);
+    click(harness.state_mut(), mm(10.0, 10.0), false);
+    click(harness.state_mut(), mm(40.0, 30.0), false);
+    harness.state_mut().session.set_tool(ToolKind::Select);
+    harness.run();
+    harness.get_by_label("자동 치수 및 구속").click();
+    harness.run();
+    harness.get_by_label("자동 치수");
+    assert!(harness.state().session.dimensions_required() > 0);
+    harness.get_by_label("적용").click();
+    harness.run();
+    assert_eq!(harness.state().session.dimensions_required(), 0);
+    harness.get_by_label("필요한 치수: 0");
+    harness.get_by_label("제거").click();
+    harness.run();
+    assert!(harness.state().session.dimensions_required() > 0, "taken back");
+    harness.get_by_label("완료").click();
+    harness.run();
+    assert!(harness.query_by_label("자동 치수").is_none());
+}
