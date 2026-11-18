@@ -83,6 +83,8 @@
 
 - 작업 피처 UI(리드 큐 ③ — 앱에 작업 피처 화면이 전혀 없어서 새로 만듦): 3D 모델 탭 "작업 피처" 그룹 "작업 축" → 대화상자(`gc_app/src/work_axis.rs`): 유형 선 위 / 선에 평행·점 통과 / 두 점 통과 / 두 평면의 교선 / 원의 중심 통과, 스케치 선·원(호)·점과 원점 평면을 목록(콤보)에서 고름 → 확인 = `CellOp::AddWorkFeature`(풀리지 않는 정의 — 같은 평면 두 번·길이 0인 선 — 는 백엔드가 거부하고 상태바가 설명). 브라우저 "작업 피처" 폴더(보이기 체크·삭제), 뷰는 보이는 작업 피처를 청록색으로 그림(`gc_viewport/src/workfeat.rs`: 축 = 긴 선+이름, 평면 = 윤곽 사각형, 점 = 십자). 근거: Inventor 2026 To Create Work Features(GUID-38A9748E-FA2D-44D3-928C-DFE1326A9385) 원문을 읽음 — 어셈블리의 작업 축 유형(On Line or Edge, Parallel to Line Through Point, Through Two Points, Intersection of Two Planes, Through Center of Circular Shape)과 같음, "Normal to Plane Through Point"는 원문이 파트 전용이라 뺌, Revolved Face는 모델 면이 없어 뺌. 원문과 다른 점·미구현: 형상을 뷰에서 클릭해 고르지 않고 목록에서 고름, 어셈블리 작업 피처는 원문에서 "브라우저 맨 아래" — 우리는 스케치 폴더 뒤, 원문은 어셈블리에서 투영 형상을 못 쓴다는데 백엔드는 받음, 작업 평면·작업 점 만들기 화면 없음(백엔드에 데이터는 있음), 편집(`SetWorkFeature`)·이름 바꾸기·컴포넌트 원점 평면/점 선택, 작업 피처 선택·강조. 스크린샷 `docs/evidence/img/review-52-work-axis.png`, 테스트 `work_axis::tests`, `a_work_axis_is_made_listed_hidden_and_deleted`.
 
+- 서브어셈블리 폴더 우클릭 "서브어셈블리로 묶기"(QA 관찰 3, 리드 요청): 폴더 메뉴에도 강등 항목을 넣어 폴더 중첩이 끌어 놓기 없이 됨(`Demote{members:[폴더]}`). 테스트 `a_subassembly_folder_is_nested_from_its_menu`.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

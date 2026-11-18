@@ -552,6 +552,11 @@ fn component_rows(
                         state.group_name = Some(GroupName::Rename(id, row.name.clone()));
                         ui.close();
                     }
+                    // Folders nest without dragging: demote this one into a new subassembly.
+                    if ui.button(tr!(lang, CmdDemote)).clicked() {
+                        state.group_name = Some(GroupName::Demote(vec![row.key], String::new()));
+                        ui.close();
+                    }
                     if row.parent.is_some() && ui.button(tr!(lang, CmdMoveToTop)).clicked() {
                         *action = Some(BrowserAction::Subassembly(SubassemblyOp::Move {
                             members: vec![row.key],
