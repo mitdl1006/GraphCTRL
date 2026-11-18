@@ -62,6 +62,12 @@ pub struct View {
     pub slice_union: bool,
     /// Whether the cut is drawn open as a section: back faces seen through it are a flat cap.
     pub slice_cap: bool,
+    /// Draw the opaque solids into the depth buffer only (no colour, translucent ones skipped): they hide
+    /// what lies behind them, as a wireframe with visible edges only needs. Costs nothing when false.
+    pub depth_only: bool,
+    /// Draw the edges that lie behind a surface too, dashed and faint, before the visible ones. Costs
+    /// nothing when false.
+    pub hidden_edges: bool,
 }
 
 /// What a frame cost.
@@ -109,6 +115,8 @@ struct GpuMesh {
 /// Draws meshes into a [`ViewTarget`].
 pub struct MeshRenderer {
     opaque: wgpu::RenderPipeline,
+    depth_only: wgpu::RenderPipeline,
+    hidden_edges: wgpu::RenderPipeline,
     translucent: wgpu::RenderPipeline,
     view_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
@@ -156,7 +164,7 @@ impl MeshRenderer {
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
-        let pipeline = |label, blend, depth_write| {
+        let pipeline = |label, blend, depth_write, write_mask| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label),
                 layout: Some(&pipeline_layout),
@@ -192,16 +200,13 @@ impl MeshRenderer {
                     module: &shader,
                     entry_point: Some("fs_main"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: COLOR_FORMAT,
-                        blend,
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
+                    targets: &[Some(wgpu::ColorTargetState { format: COLOR_FORMAT, blend, write_mask })],
                 }),
                 multiview_mask: None,
                 cache: None,
             })
         };
+        let all = wgpu::ColorWrites::ALL;
         let lines = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("gc_render.lines"),
             layout: Some(&pipeline_layout),
@@ -237,54 +242,63 @@ impl MeshRenderer {
             multiview_mask: None,
             cache: None,
         });
-        let edges = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("gc_render.edges"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_edge"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[Some(wgpu::VertexBufferLayout {
-                    array_stride: size_of::<EdgeVertex>() as u64,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4],
-                })],
-            },
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::LineList,
-                ..Default::default()
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: DEPTH_FORMAT,
-                depth_write_enabled: Some(false),
-                depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState { count: MSAA_SAMPLES, ..Default::default() },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_edge"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: COLOR_FORMAT,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        let edge_pipeline = |label, fragment, compare| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_edge"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    buffers: &[Some(wgpu::VertexBufferLayout {
+                        array_stride: size_of::<EdgeVertex>() as u64,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4],
+                    })],
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::LineList,
+                    ..Default::default()
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH_FORMAT,
+                    depth_write_enabled: Some(false),
+                    depth_compare: Some(compare),
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                multisample: wgpu::MultisampleState { count: MSAA_SAMPLES, ..Default::default() },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some(fragment),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: COLOR_FORMAT,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let edges = edge_pipeline("gc_render.edges", "fs_edge", wgpu::CompareFunction::GreaterEqual);
+        // Behind what is drawn: strictly farther than the depth buffer.
+        let hidden_edges =
+            edge_pipeline("gc_render.edges.hidden", "fs_edge_hidden", wgpu::CompareFunction::Less);
         Self {
             lines,
             line_buffer: None,
             edges,
+            hidden_edges,
             edge_buffer: None,
-            opaque: pipeline("gc_render.mesh.opaque", None, true),
+            opaque: pipeline("gc_render.mesh.opaque", None, true, all),
+            depth_only: pipeline("gc_render.mesh.depth_only", None, true, wgpu::ColorWrites::empty()),
             translucent: pipeline(
                 "gc_render.mesh.translucent",
                 Some(wgpu::BlendState::ALPHA_BLENDING),
                 false,
+                all,
             ),
             view_buffer,
             bind_group,
@@ -416,8 +430,12 @@ impl MeshRenderer {
                         .iter()
                         .take_while(|i| i.mesh == mesh && (i.color[3] < 0.999) == translucent)
                         .count();
-                    if let Some(gpu) = self.meshes.get(&mesh) {
-                        pass.set_pipeline(if translucent { &self.translucent } else { &self.opaque });
+                    if let Some(gpu) = self.meshes.get(&mesh).filter(|_| !(view.depth_only && translucent)) {
+                        pass.set_pipeline(match (translucent, view.depth_only) {
+                            (true, _) => &self.translucent,
+                            (false, true) => &self.depth_only,
+                            (false, false) => &self.opaque,
+                        });
                         pass.set_vertex_buffer(0, gpu.vertices.slice(..));
                         pass.set_index_buffer(gpu.indices.slice(..), wgpu::IndexFormat::Uint32);
                         let range = u32::try_from(first).unwrap_or(u32::MAX)
@@ -447,10 +465,16 @@ impl MeshRenderer {
                 && edges.len() >= 2
             {
                 queue.write_buffer(buffer, 0, edge_bytes);
-                pass.set_pipeline(&self.edges);
+                let count = u32::try_from(edges.len() / 2 * 2).unwrap_or(u32::MAX);
                 pass.set_bind_group(0, &self.bind_group, &[]);
                 pass.set_vertex_buffer(0, buffer.slice(..));
-                pass.draw(0..u32::try_from(edges.len() / 2 * 2).unwrap_or(u32::MAX), 0..1);
+                if view.hidden_edges {
+                    pass.set_pipeline(&self.hidden_edges);
+                    pass.draw(0..count, 0..1);
+                    stats.draw_calls += 1;
+                }
+                pass.set_pipeline(&self.edges);
+                pass.draw(0..count, 0..1);
                 stats.draw_calls += 1;
             }
             if let Some((buffer, _)) = self.line_buffer.as_ref()

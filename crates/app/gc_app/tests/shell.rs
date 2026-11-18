@@ -5790,6 +5790,12 @@ fn the_visual_style_drop_down_switches_shaded_edges_and_wireframe() {
     assert_eq!(harness.state().viewport().style, gc_viewport::VisualStyle::ShadedWithEdges);
     pick_variant(&mut harness, "시각 스타일", "와이어프레임");
     assert_eq!(harness.state().viewport().style, gc_viewport::VisualStyle::Wireframe);
+    pick_variant(&mut harness, "시각 스타일", "숨은 모서리가 있는 와이어프레임");
+    assert_eq!(harness.state().viewport().style, gc_viewport::VisualStyle::WireframeWithHiddenEdges);
+    pick_variant(&mut harness, "시각 스타일", "보이는 모서리만 있는 와이어프레임");
+    assert_eq!(harness.state().viewport().style, gc_viewport::VisualStyle::WireframeVisibleEdges);
+    pick_variant(&mut harness, "시각 스타일", "숨은 모서리가 있는 음영 처리");
+    assert_eq!(harness.state().viewport().style, gc_viewport::VisualStyle::ShadedWithHiddenEdges);
     pick_variant(&mut harness, "시각 스타일", "음영 처리");
     assert_eq!(harness.state().viewport().style, gc_viewport::VisualStyle::Shaded);
 }
@@ -5861,4 +5867,44 @@ fn the_view_tab_panels_run_visibility_appearance_windows_navigate() {
     let windows = x(&harness, "패널 반투명");
     let navigate = x(&harness, "홈");
     assert!(visibility < appearance && appearance < windows && windows < navigate);
+}
+
+/// User Interface and Clean Screen (View tab, Windows panel; Inventor 2026 help, ViewCube Menu Reference,
+/// GUID-285B9036-0E97-4F18-A6D2-EF78B8B8FAA9, and To Work with Graphics Windows,
+/// GUID-84B053B0-E83B-4D9C-8436-1BE9AD5E9EBE): check boxes show or hide the window's elements and are saved;
+/// Clean Screen hides the ribbon and browser, Ctrl+0 brings them back.
+#[test]
+fn the_user_interface_list_hides_elements_and_clean_screen_toggles_with_ctrl_0() {
+    let directory = tempfile::tempdir().unwrap();
+    let options =
+        || RunOptions { settings_dir: Some(directory.path().to_path_buf()), ..RunOptions::default() };
+    let mut harness =
+        egui_kittest::Harness::builder().with_size(SIZE).build_eframe(|cc| GraphCtrlApp::new(cc, options()));
+    harness.run();
+    harness.get_by_label("뷰").click();
+    harness.run();
+    assert!(harness.state().viewport().show_view_cube && harness.state().viewport().show_nav_bar);
+    harness.get_by_label("사용자 인터페이스").click();
+    harness.run_steps(3);
+    harness.get_by_label("뷰큐브").click();
+    harness.run_steps(2);
+    harness.get_by_label("탐색 막대").click();
+    harness.run_steps(2);
+    assert!(!harness.state().viewport().show_view_cube && !harness.state().viewport().show_nav_bar);
+    let saved = gc_persist::places::load_settings(directory.path());
+    assert!(saved.hide_view_cube && saved.hide_nav_bar && !saved.hide_status_bar);
+    // The next start reads it.
+    let again =
+        egui_kittest::Harness::builder().with_size(SIZE).build_eframe(|cc| GraphCtrlApp::new(cc, options()));
+    assert!(!again.state().viewport().show_view_cube);
+
+    // Clean Screen: the ribbon (and with it the tabs) go; Ctrl+0 brings them back.
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(2);
+    harness.get_by_label("전체 화면(Ctrl+0)").click();
+    harness.run_steps(3);
+    assert!(harness.query_by_label("뷰").is_none(), "the ribbon is away");
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Num0);
+    harness.run_steps(3);
+    assert!(harness.query_by_label("뷰").is_some(), "Ctrl+0 brings the ribbon back");
 }

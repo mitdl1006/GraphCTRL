@@ -139,3 +139,12 @@ fn vs_edge(@location(0) position: vec3<f32>, @location(1) color: vec4<f32>) -> E
 fn fs_edge(in: EdgeOut) -> @location(0) vec4<f32> {
     return in.color;
 }
+
+// Edges behind a surface: the same lines, dashed (4 px on, 4 px off along the screen diagonal) and faint.
+@fragment
+fn fs_edge_hidden(in: EdgeOut) -> @location(0) vec4<f32> {
+    if ((u32(in.clip.x + in.clip.y) / 4u) % 2u == 1u) {
+        discard;
+    }
+    return vec4<f32>(in.color.rgb, in.color.a * 0.55);
+}

@@ -61,6 +61,27 @@ const CONSTRAINTS: [(ConstraintKind, &str, Msg); 12] = [
     (ConstraintKind::Midpoint, "M", Msg::ConMidpoint),
 ];
 
+/// An element of the window that the User Interface drop-down shows or hides.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum InterfaceElement {
+    ViewCube,
+    NavBar,
+    Browser,
+    Properties,
+    StatusBar,
+}
+
+/// Which elements of the window are shown right now, and whether Clean Screen is on.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Interface {
+    pub view_cube: bool,
+    pub nav_bar: bool,
+    pub browser: bool,
+    pub properties: bool,
+    pub status_bar: bool,
+    pub clean_screen: bool,
+}
+
 /// Something the ribbon asks the application to do because it needs more than the session.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RibbonAction {
@@ -90,6 +111,10 @@ pub(crate) enum RibbonAction {
     StartReplicate(crate::replicate::Mode),
     /// Open the parameters dialog.
     StartParameters,
+    /// View tab, Windows panel, User Interface: show or hide an element of the window.
+    SetInterface(InterfaceElement, bool),
+    /// Clean Screen: hides the browser and the ribbon, or brings them back.
+    CleanScreen,
     /// Project the edges the sketch plane cuts into the active sketch.
     ProjectCutEdges,
     /// Ground or free the selected component.
@@ -113,6 +138,7 @@ pub(crate) fn show(
     library: &[crate::app::LibraryRobot],
     translucent: &mut bool,
     dark: &mut bool,
+    interface: Interface,
     lang: Lang,
 ) -> Option<RibbonAction> {
     let mut action = None;
@@ -630,7 +656,16 @@ pub(crate) fn show(
                     let styles = [
                         (gc_viewport::VisualStyle::Shaded, tr!(lang, VisualStyleShaded)),
                         (gc_viewport::VisualStyle::ShadedWithEdges, tr!(lang, VisualStyleShadedEdges)),
+                        (gc_viewport::VisualStyle::ShadedWithHiddenEdges, tr!(lang, VisualStyleShadedHidden)),
                         (gc_viewport::VisualStyle::Wireframe, tr!(lang, VisualStyleWireframe)),
+                        (
+                            gc_viewport::VisualStyle::WireframeWithHiddenEdges,
+                            tr!(lang, VisualStyleWireframeHidden),
+                        ),
+                        (
+                            gc_viewport::VisualStyle::WireframeVisibleEdges,
+                            tr!(lang, VisualStyleWireframeVisible),
+                        ),
                     ];
                     let items: Vec<gc_ui::SplitItem<'_>> = styles
                         .iter()
@@ -717,12 +752,35 @@ pub(crate) fn show(
                             selected: *dark,
                             enabled: true,
                         },
+                        // Clean Screen (GUID-84B053B0-E83B-4D9C-8436-1BE9AD5E9EBE): browser and ribbon away.
+                        gc_ui::StackRow {
+                            icon: Icon::Rectangle,
+                            label: tr!(lang, CleanScreen),
+                            selected: interface.clean_screen,
+                            enabled: true,
+                        },
                     ];
                     match gc_ui::ribbon_stack(ui, &rows) {
                         Some(0) => *translucent = !*translucent,
                         Some(1) => *dark = !*dark,
+                        Some(2) => action = Some(RibbonAction::CleanScreen),
                         _ => {}
                     }
+                    // User Interface (GUID-285B9036-0E97-4F18-A6D2-EF78B8B8FAA9): what the window shows.
+                    gc_ui::ribbon_drop_button(ui, Icon::View, tr!(lang, UiTitle), |ui| {
+                        for (element, label, shown) in [
+                            (InterfaceElement::ViewCube, tr!(lang, UiViewCube), interface.view_cube),
+                            (InterfaceElement::NavBar, tr!(lang, UiNavBar), interface.nav_bar),
+                            (InterfaceElement::Browser, tr!(lang, UiBrowser), interface.browser),
+                            (InterfaceElement::Properties, tr!(lang, UiProperties), interface.properties),
+                            (InterfaceElement::StatusBar, tr!(lang, UiStatusBar), interface.status_bar),
+                        ] {
+                            let mut on = shown;
+                            if ui.checkbox(&mut on, label).changed() {
+                                action = Some(RibbonAction::SetInterface(element, on));
+                            }
+                        }
+                    });
                 });
                 ribbon_group(ui, tr!(lang, GroupNavigate), |ui| {
                     // Home and Fit All are the large buttons; the three standard views are stacked.
