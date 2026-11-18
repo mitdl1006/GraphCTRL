@@ -52,7 +52,7 @@ pub use measure::{
     Feature, FeaturePair, InterferenceOptions, InterferenceRow, ItemMeasure, PairMeasure, angle_at,
     measure_features,
 };
-pub use physical::PhysicalProperties;
+pub use physical::{InertialProperties, MassMoments, PhysicalProperties};
 pub use schedule::{Assignment, Detour, MAX_ASSIGNMENTS, ParkMove, Schedule, Wait};
 pub use sketch_pick::SketchPick;
 

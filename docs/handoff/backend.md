@@ -124,6 +124,35 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — Physical 탭: 관성 특성(Global·COG·Principal); Summary·Project 나머지 필드는 원문 없음
+
+근거: iProperties - Physical Tab - Reference(`GUID-877564AC-78CE-4216-9913-003A2DE8D698`) — "Inertial Properties: Click Principal, Global, or COG …", "Principal Moments: … about the principal axes of inertia", "Rotation to principal …", "Mass Moments: Moments of inertia (Ixx, Iyy, and Izz) and products of inertia (Ixy, Ixz, and Iyz)", "Inertial Properties and Center of Gravity do not include … BOM Quantity overrides", "reported according to your selection of Negative integral or Positive integral".
+
+- `session.inertial_properties(target) -> Option<InertialProperties { global, cog, principal: [f64; 3], rotation_to_principal: [f64; 3] /*rpy*/ }>`; `MassMoments { ixx, iyy, izz, ixy, ixz, iyz }`(kg·m²). 기준 좌표계는 어셈블리 원점·축. `target`은 `physical_properties`와 같다(바디·로봇 하나, 또는 `None` = 문서 전체, Reference 제외).
+- 관성곱은 **양의 적분**(∫xy dm)으로 준다. 인벤터의 Negative integral 옵션처럼 보이려면 프런트에서 부호만 바꾸면 된다.
+- 계산: 박스·원통·구는 해석식, 메시는 원점 기준 사면체 적분(닫힌 메시 가정), 자세 이동은 평행축 정리. 컴포넌트마다 질량(밀도×부피 또는 질량 오버라이드)이 부피에 고르게 퍼져 있다고 본다. 주축은 Jacobi 회전으로 구한다(오른손 좌표계).
+- 고친 것: `Measure`의 기본값이 행렬 단위행렬을 물려받지 않게 했다(새 필드 관련, 기존 값에는 영향 없음).
+- **Summary·Project 탭의 나머지 필드(제안 3)는 하지 않았다**: 2026 도움말의 iProperties 페이지들(Reference `GUID-8ABF17C5…`, About `GUID-DB4F5723…`, To Work with iProperties `GUID-9ED64200…`)에 필드 목록이 없다. 필요한 값은 Custom iProperties로 넣을 수 있다. 필드 목록의 원문(또는 리드 지시)이 있으면 추가한다.
+- 테스트: `gc_session` `physical::tests::mesh_second_moments_match_the_solids`, `gc_session/tests/iproperties.rs::inertial_properties_of_a_box_follow_the_textbook`.
+
+## 2026-11-18 — Physical 탭: Include QTY Overrides
+
+근거: iProperties - Physical Tab - Reference(`GUID-877564AC-78CE-4216-9913-003A2DE8D698`) — "Mass, Volume, and Area includes contributions from … BOM Quantity overrides when the … Include QTY Overrides check [box is] selected", "If static quantities are created, the center of gravity and moments of inertia values may not be accurate".
+
+- `session.physical_properties_with(target, include_quantity_overrides)`(추가). 문서 전체(`None`)에서 켜면, Static Quantity가 있는 BOM 행(부품 전용 보기)의 컴포넌트들이 "있는 개수" 대신 그 수량만큼으로 질량·부피·면적에 들어간다(행의 수량을 그 행의 컴포넌트 수로 나눠 각자에 곱한다). 컴포넌트 하나를 물으면 그대로다. 기존 `physical_properties(target)`는 옵션 꺼짐과 같다.
+- 무게중심은 원문 말대로 정확하지 않을 수 있다(늘어난 수량이 같은 자리에 있다고 본다).
+- 테스트: `gc_session/tests/iproperties.rs::static_quantities_count_in_the_mass_when_asked`.
+
+## 2026-11-18 — iProperties: Status, Custom
+
+근거: iProperties Reference(`GUID-8ABF17C5-B9EB-47B5-92CF-9FBD335334E3`) — Status "In the Status field, enter any status classification", Custom "Adds custom iProperties to the selected file … Custom iProperties added in the BOM dialog box are automatically saved to the Custom tab".
+
+- `IProperties.status: String`, `IProperties.custom: Vec<CustomProperty { name, value }>`(추가, serde default). 기존 `session.set_properties(target, props)` / `properties(target)`로 읽고 쓴다. `props.custom_value(name)`.
+- 유효성: 사용자 정의 이름은 비어 있지 않고 겹치지 않아야 한다(아니면 `BadValue`). 값은 텍스트다(원문 페이지에 형식 목록이 없어 텍스트로 뒀다).
+- BOM에 사용자 정의 열을 보이려면 행의 `keys`로 `properties(..).custom_value(이름)`을 읽으면 된다(여러 컴포넌트가 합쳐진 행에서 값이 다르면 "Varies"로 보이는 것은 프런트가 Description과 같은 규칙으로).
+- 남은 것(제안): Summary·Project 탭의 나머지 필드(탭별 참조 페이지 확인 필요), Physical의 관성 모멘트·Requested Accuracy·클립보드 보고서·"Include QTY Overrides"(Static Quantity를 질량에 반영), Occurrence 탭(이미 있는 op들의 묶음 화면).
+- 테스트: `gc_session/tests/iproperties.rs::status_and_custom_iproperties_are_kept_and_saved`.
+
 ## 2026-11-18 — 원형 모서리·구 면 인식과 `Feature::{Circle, Sphere}` (프런트 요청)
 
 근거: To Place Insert Constraints(`GUID-97DD5557-FAEE-46FA-845D-11123D725BA9`, 원형 모서리), Place Tangent constraints(`GUID-FF270566-CA9E-420A-A00A-F52DD0FDFD8E`, 구).

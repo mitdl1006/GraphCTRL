@@ -4,7 +4,7 @@
 //! gravity of the selected component, relative to the assembly origin").
 
 use gc_doc::{CellOp, Command, EditError, IProperties, Occurrence, Solid};
-use gc_math::{DPose3, DVec3};
+use gc_math::{DMat3, DPose3, DVec3};
 use gc_robot::Shape;
 
 use crate::Session;
@@ -31,7 +31,7 @@ pub struct PhysicalProperties {
 }
 
 /// Volume, area and the volume's centroid of a shape in its own frame.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 struct Measure {
     volume: f64,
     area: f64,
@@ -39,12 +39,31 @@ struct Measure {
     moment: DVec3,
     /// A mesh in it is not closed.
     open: bool,
+    /// The second moment of the volume about the frame's origin, ∫ x xᵀ dV (so measures add; the
+    /// inertia tensor of a uniform solid is density × (trace · 1 − this)).
+    second: DMat3,
+}
+
+impl Default for Measure {
+    /// Nothing: no volume, no area, and a second moment of zero (a matrix's own default is the identity).
+    fn default() -> Self {
+        Self { volume: 0.0, area: 0.0, moment: DVec3::ZERO, open: false, second: DMat3::ZERO }
+    }
+}
+
+/// The outer product a bᵀ.
+fn outer(a: DVec3, b: DVec3) -> DMat3 {
+    DMat3::from_cols(a * b.x, a * b.y, a * b.z)
 }
 
 impl Measure {
     fn moved(self, pose: &DPose3) -> Measure {
         let centroid = if self.volume > 0.0 { self.moment / self.volume } else { DVec3::ZERO };
-        Measure { moment: pose.transform_point(centroid) * self.volume, ..self }
+        // x′ = R x + t: ∫ x′ x′ᵀ = R C Rᵀ + (R m) tᵀ + t (R m)ᵀ + V t tᵀ.
+        let r = DMat3::from_quat(pose.rotation);
+        let (m, t) = (r * self.moment, pose.translation);
+        let second = r * self.second * r.transpose() + outer(m, t) + outer(t, m) + outer(t, t) * self.volume;
+        Measure { moment: pose.transform_point(centroid) * self.volume, second, ..self }
     }
 
     fn plus(self, other: Measure) -> Measure {
@@ -53,28 +72,121 @@ impl Measure {
             open: self.open || other.open,
             area: self.area + other.area,
             moment: self.moment + other.moment,
+            second: self.second + other.second,
         }
     }
+}
+
+/// Moments of inertia (Ixx, Iyy, Izz) and products of inertia (Ixy, Ixz, Iyz), kg·m². The products are
+/// the positive integrals (∫ x y dm); Inventor shows them negated when its Negative integral option is on.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct MassMoments {
+    /// About the X axis.
+    pub ixx: f64,
+    /// About the Y axis.
+    pub iyy: f64,
+    /// About the Z axis.
+    pub izz: f64,
+    /// ∫ x y dm.
+    pub ixy: f64,
+    /// ∫ x z dm.
+    pub ixz: f64,
+    /// ∫ y z dm.
+    pub iyz: f64,
+}
+
+/// The Physical tab's Inertial Properties (Inventor 2026 help, iProperties - Physical Tab - Reference,
+/// GUID-877564AC-78CE-4216-9913-003A2DE8D698: Principal, Global, COG).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct InertialProperties {
+    /// Global: about the assembly origin, along its axes.
+    pub global: MassMoments,
+    /// COG: about the centre of gravity, along the assembly's axes.
+    pub cog: MassMoments,
+    /// Principal Moments: about the principal axes of inertia through the centre of gravity (I1, I2, I3).
+    pub principal: [f64; 3],
+    /// Rotation to principal: roll, pitch, yaw from the assembly's axes to the principal axes, radians.
+    pub rotation_to_principal: [f64; 3],
+}
+
+/// Moments and products of inertia from a mass-weighted second moment (∫ x xᵀ dm).
+fn mass_moments(second: &DMat3) -> MassMoments {
+    let (x, y, z) = (second.x_axis, second.y_axis, second.z_axis);
+    MassMoments { ixx: y.y + z.z, iyy: x.x + z.z, izz: x.x + y.y, ixy: x.y, ixz: x.z, iyz: y.z }
+}
+
+/// The eigenvalues and eigenvectors (as columns, a right-handed set) of a symmetric matrix, by Jacobi
+/// rotations.
+fn principal_axes(matrix: &DMat3) -> ([f64; 3], DMat3) {
+    let mut a = matrix.to_cols_array_2d();
+    let mut v = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    for _ in 0..64 {
+        // The largest off-diagonal entry is turned to zero.
+        let (p, q) = [(0, 1), (0, 2), (1, 2)]
+            .into_iter()
+            .max_by(|x, y| a[x.0][x.1].abs().total_cmp(&a[y.0][y.1].abs()))
+            .unwrap_or((0, 1));
+        let scale = a[0][0].abs().max(a[1][1].abs()).max(a[2][2].abs()).max(f64::MIN_POSITIVE);
+        if a[p][q].abs() <= 1e-15 * scale {
+            break;
+        }
+        let theta = 0.5 * gc_math::fm::atan2(2.0 * a[p][q], a[q][q] - a[p][p]);
+        let (sin, cos) = gc_math::fm::sin_cos(theta);
+        for row in &mut a {
+            let (x, y) = (row[p], row[q]);
+            row[p] = cos * x - sin * y;
+            row[q] = sin * x + cos * y;
+        }
+        let (row_p, row_q) = (a[p], a[q]);
+        for k in 0..3 {
+            a[p][k] = cos * row_p[k] - sin * row_q[k];
+            a[q][k] = sin * row_p[k] + cos * row_q[k];
+        }
+        for row in &mut v {
+            let (x, y) = (row[p], row[q]);
+            row[p] = cos * x - sin * y;
+            row[q] = sin * x + cos * y;
+        }
+    }
+    let column = |k: usize| DVec3::new(v[0][k], v[1][k], v[2][k]);
+    let (x, y) = (column(0), column(1));
+    // The third axis completes a right-handed set (an eigenvector's sign is free).
+    ([a[0][0], a[1][1], a[2][2]], DMat3::from_cols(x, y, x.cross(y)))
 }
 
 fn primitive(shape: &Shape) -> Option<Measure> {
     use std::f64::consts::PI;
     Some(match *shape {
-        Shape::Box([x, y, z]) => Measure {
-            volume: x * y * z,
-            area: 2.0 * (x * y + y * z + z * x),
-            moment: DVec3::ZERO,
-            open: false,
-        },
-        Shape::Cylinder { radius: r, length: l } => {
-            Measure { volume: PI * r * r * l, area: 2.0 * PI * r * (r + l), moment: DVec3::ZERO, open: false }
+        Shape::Box([x, y, z]) => {
+            let volume = x * y * z;
+            Measure {
+                volume,
+                area: 2.0 * (x * y + y * z + z * x),
+                moment: DVec3::ZERO,
+                open: false,
+                second: DMat3::from_diagonal(DVec3::new(x * x, y * y, z * z) * (volume / 12.0)),
+            }
         }
-        Shape::Sphere(r) => Measure {
-            volume: 4.0 / 3.0 * PI * r * r * r,
-            area: 4.0 * PI * r * r,
-            moment: DVec3::ZERO,
-            open: false,
-        },
+        Shape::Cylinder { radius: r, length: l } => {
+            let volume = PI * r * r * l;
+            Measure {
+                volume,
+                area: 2.0 * PI * r * (r + l),
+                moment: DVec3::ZERO,
+                open: false,
+                second: DMat3::from_diagonal(DVec3::new(r * r / 4.0, r * r / 4.0, l * l / 12.0) * volume),
+            }
+        }
+        Shape::Sphere(r) => {
+            let volume = 4.0 / 3.0 * PI * r * r * r;
+            Measure {
+                volume,
+                area: 4.0 * PI * r * r,
+                moment: DVec3::ZERO,
+                open: false,
+                second: DMat3::from_diagonal(DVec3::splat(r * r / 5.0 * volume)),
+            }
+        }
         Shape::Mesh { .. } => return None,
     })
 }
@@ -108,6 +220,9 @@ fn mesh(data: &gc_mesh::MeshData) -> Measure {
         let v = a.dot(b.cross(c)) / 6.0;
         m.volume += v;
         m.moment += (a + b + c) / 4.0 * v;
+        // A tetrahedron from the origin: ∫ x xᵀ dV = V/20 · (a aᵀ + b bᵀ + c cᵀ + (a+b+c)(a+b+c)ᵀ).
+        let sum = a + b + c;
+        m.second += (outer(a, a) + outer(b, b) + outer(c, c) + outer(sum, sum)) * (v / 20.0);
         m.area += (b - a).cross(c - a).length() / 2.0;
     }
     m.open = !closed(data);
@@ -115,6 +230,7 @@ fn mesh(data: &gc_mesh::MeshData) -> Measure {
     if m.volume < 0.0 {
         m.volume = -m.volume;
         m.moment = -m.moment;
+        m.second = -m.second;
     }
     m
 }
@@ -184,13 +300,91 @@ impl Session {
     /// unless overridden. `None` for a component whose shape is not known (a mesh still being read, an
     /// imported assembly).
     pub fn physical_properties(&self, target: Option<Occurrence>) -> Option<PhysicalProperties> {
+        self.physical_properties_with(target, false)
+    }
+
+    /// [`Session::physical_properties`] with the Physical tab's Include QTY Overrides (Inventor 2026
+    /// help, iProperties - Physical Tab - Reference, GUID-877564AC-78CE-4216-9913-003A2DE8D698: "Mass,
+    /// Volume, and Area includes contributions from … BOM Quantity overrides when the … Include QTY
+    /// Overrides check [box is] selected"; "If static quantities are created, the center of gravity …
+    /// may not be accurate"). For the whole document, the components of a BOM row with a Static
+    /// Quantity count as that many instead of as many as there are.
+    pub fn physical_properties_with(
+        &self,
+        target: Option<Occurrence>,
+        include_quantity_overrides: bool,
+    ) -> Option<PhysicalProperties> {
+        self.physical(target, include_quantity_overrides).map(|(properties, _)| properties)
+    }
+
+    /// The Physical tab's Inertial Properties of a component or of the whole document (`None`), with
+    /// respect to the assembly's coordinate system: Global (about its origin), COG (about the centre of
+    /// gravity) and Principal (the principal moments and the rotation to the principal axes). Each
+    /// component is taken as uniform, with its mass (density × volume, or its override) spread over its
+    /// volume. BOM Quantity overrides are not included, as in Inventor. `None` when the shape is not
+    /// known or has no mass.
+    pub fn inertial_properties(&self, target: Option<Occurrence>) -> Option<InertialProperties> {
+        let (properties, second) = self.physical(target, false)?;
+        if properties.mass.is_nan() || properties.mass <= 0.0 {
+            return None;
+        }
+        let c = properties.centre;
+        let about_cog = second - outer(c, c) * properties.mass;
+        let cog = mass_moments(&about_cog);
+        // The inertia tensor about the centre of gravity: trace · 1 − ∫ x xᵀ dm.
+        let trace = about_cog.x_axis.x + about_cog.y_axis.y + about_cog.z_axis.z;
+        let tensor = DMat3::from_diagonal(DVec3::splat(trace)) - about_cog;
+        let (principal, axes) = principal_axes(&tensor);
+        let rotation_to_principal = gc_math::rpy_from_quat(gc_math::DQuat::from_mat3(&axes).normalize());
+        Some(InertialProperties { global: mass_moments(&second), cog, principal, rotation_to_principal })
+    }
+
+    /// The physical properties with the mass-weighted second moment about the assembly origin
+    /// (∫ x xᵀ dm), from which the inertial properties come.
+    fn physical(
+        &self,
+        target: Option<Occurrence>,
+        include_quantity_overrides: bool,
+    ) -> Option<(PhysicalProperties, DMat3)> {
+        // How much each component counts: the row's static quantity shared over its components.
+        let mut share: std::collections::BTreeMap<gc_core::AnyId, f64> = std::collections::BTreeMap::new();
+        if include_quantity_overrides && target.is_none() {
+            for row in self.bill_of_materials(crate::BomView::PartsOnly).iter().filter(|r| r.static_quantity)
+            {
+                let items: Vec<gc_core::AnyId> = row
+                    .keys
+                    .iter()
+                    .filter_map(|key| match key {
+                        gc_doc::TreeKey::Component(Occurrence::Item(item)) => Some(*item),
+                        _ => None,
+                    })
+                    .collect();
+                #[allow(clippy::cast_precision_loss, reason = "component counts are small")]
+                let each = f64::from(row.quantity) / items.len().max(1) as f64;
+                share.extend(items.into_iter().map(|item| (item, each)));
+            }
+        }
         let of = |item: gc_core::AnyId| -> Option<(Measure, IProperties)> {
             let measure = match item.kind {
                 gc_core::Kind::Body => self.body_measure(gc_core::Id::from_raw(item.raw))?,
                 gc_core::Kind::RobotInstance => self.robot_measure(gc_core::Id::from_raw(item.raw))?,
                 _ => return None,
             };
-            Some((measure, self.properties(Some(Occurrence::Item(item)))))
+            let mut properties = self.properties(Some(Occurrence::Item(item)));
+            let measure = match share.get(&item) {
+                Some(factor) => {
+                    properties.mass_override = properties.mass_override.map(|m| m * factor);
+                    Measure {
+                        volume: measure.volume * factor,
+                        area: measure.area * factor,
+                        moment: measure.moment * *factor,
+                        second: measure.second * *factor,
+                        ..measure
+                    }
+                }
+                None => measure,
+            };
+            Some((measure, properties))
         };
         let parts: Vec<(Measure, IProperties)> = match target {
             Some(Occurrence::Item(item)) => vec![of(item)?],
@@ -210,6 +404,7 @@ impl Session {
         };
         let (mut mass, mut weighted, mut total, mut overridden) =
             (0.0, DVec3::ZERO, Measure::default(), false);
+        let mut second = DMat3::ZERO;
         for (measure, props) in &parts {
             let m = match props.mass_override {
                 Some(m) => {
@@ -221,6 +416,10 @@ impl Session {
             let centroid = if measure.volume > 0.0 { measure.moment / measure.volume } else { DVec3::ZERO };
             mass += m;
             weighted += centroid * m;
+            // The component's mass spread evenly over its volume.
+            if measure.volume > 0.0 {
+                second += measure.second * (m / measure.volume);
+            }
             total = total.plus(*measure);
         }
         let centre = if mass > 0.0 {
@@ -231,7 +430,7 @@ impl Session {
             DVec3::ZERO
         };
         let density = if total.volume > 0.0 { mass / total.volume } else { gc_doc::DEFAULT_DENSITY };
-        Some(PhysicalProperties {
+        let properties = PhysicalProperties {
             mass,
             volume: total.volume,
             area: total.area,
@@ -239,6 +438,44 @@ impl Session {
             density,
             overridden,
             open: total.open,
-        })
+        };
+        Some((properties, second))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A box, a cylinder and a sphere as meshes have the second moments of the solids they stand for.
+    #[test]
+    fn mesh_second_moments_match_the_solids() {
+        let close = |a: &DMat3, b: &DMat3, tolerance: f64| {
+            a.to_cols_array().iter().zip(b.to_cols_array()).all(|(x, y)| (x - y).abs() <= tolerance)
+        };
+        let cuboid = gc_mesh::primitives::cuboid([0.1, 0.2, 0.3]).unwrap();
+        let solid = primitive(&Shape::Box([0.1, 0.2, 0.3])).unwrap();
+        let meshed = mesh(&cuboid);
+        assert!((meshed.volume - solid.volume).abs() < 1e-9);
+        assert!(close(&meshed.second, &solid.second, 1e-9), "{:?} vs {:?}", meshed.second, solid.second);
+        // Round shapes are faceted: close, not equal.
+        let ball = mesh(&gc_mesh::primitives::sphere(0.1, 64).unwrap());
+        let sphere = primitive(&Shape::Sphere(0.1)).unwrap();
+        assert!(close(&ball.second, &sphere.second, 0.02 * sphere.second.x_axis.x));
+        // Moved: the parallel axis theorem.
+        let pose = DPose3::from_parts(DVec3::new(1.0, 0.0, 0.0), gc_math::DQuat::from_rotation_z(0.7));
+        let moved = solid.moved(&pose);
+        let trace = |m: &DMat3| m.x_axis.x + m.y_axis.y + m.z_axis.z;
+        assert!((trace(&moved.second) - trace(&solid.second) - solid.volume).abs() < 1e-12);
+        // Principal axes of a tensor with known axes.
+        let turn = DMat3::from_quat(gc_math::DQuat::from_rotation_z(0.4));
+        let tensor = turn * DMat3::from_diagonal(DVec3::new(3.0, 2.0, 1.0)) * turn.transpose();
+        let (values, axes) = principal_axes(&tensor);
+        let mut sorted = values;
+        sorted.sort_by(f64::total_cmp);
+        assert!(sorted.iter().zip([1.0, 2.0, 3.0]).all(|(a, b)| (a - b).abs() < 1e-12), "{values:?}");
+        let rebuilt = axes * DMat3::from_diagonal(DVec3::from_array(values)) * axes.transpose();
+        assert!(close(&rebuilt, &tensor, 1e-12));
+        assert!((axes.determinant() - 1.0).abs() < 1e-12);
     }
 }
