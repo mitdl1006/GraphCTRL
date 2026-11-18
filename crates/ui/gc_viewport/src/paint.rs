@@ -495,6 +495,9 @@ fn spatial_marks(view: &View<'_>, plane: &SketchPlane, sketch: &Sketch, session:
     if let Some(points) = session.spatial_arc_preview() {
         view.polyline(points.into_iter().map(|p| plane.world(p)), Stroke::new(1.6, colors::PREVIEW));
     }
+    if let Some(points) = session.spatial_spline_preview() {
+        view.polyline(points.into_iter().map(|p| plane.world(p)), Stroke::new(1.6, colors::PREVIEW));
+    }
     if let Some((from, to, axis)) = session.spatial_preview() {
         // Locked to an axis, the rubber band takes the axis' colour and name.
         let (color, name) = match axis {

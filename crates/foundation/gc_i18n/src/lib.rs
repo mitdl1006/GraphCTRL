@@ -923,6 +923,10 @@ messages! {
     CmdInsertSplinePoint => ("점 삽입", "Insert Point"),
     CmdCloseSpline => ("곡선 닫기", "Close Curve"),
     SplineInsertHint => ("스플라인 위를 클릭해 점을 삽입합니다 (Esc로 끝)", "Click the spline to insert points (Esc to end)"),
+    ToolBend => ("굽힘", "Bend"),
+    BendPickFirst => ("굽힘: 첫 번째 선을 클릭하십시오", "Bend: click the first line"),
+    BendPickSecond => ("굽힘: 두 번째 선을 클릭하십시오", "Bend: click the second line"),
+    BendRadius => ("반지름", "Radius"),
     CmdSplitSpline => ("스플라인 분할", "Split Spline"),
     CmdFlexible => ("유연", "Flexible"),
     /// Assemble tab, Edit group: the group's title.

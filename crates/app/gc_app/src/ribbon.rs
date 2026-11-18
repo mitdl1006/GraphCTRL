@@ -236,7 +236,15 @@ pub(crate) fn show(
                     };
                     if spatial {
                         // A 3D sketch has lines and arcs (Center Point Arc and Three Point Arc).
-                        split(ui, "line", Msg::ToolLine, &[(ToolKind::Line, Icon::Line, Msg::ToolLine)]);
+                        split(
+                            ui,
+                            "line",
+                            Msg::ToolLine,
+                            &[
+                                (ToolKind::Line, Icon::Line, Msg::ToolLine),
+                                (ToolKind::Spline, Icon::Spline, Msg::ToolSpline),
+                            ],
+                        );
                         split(
                             ui,
                             "arc",
@@ -246,6 +254,20 @@ pub(crate) fn show(
                                 (ToolKind::Arc, Icon::Arc, Msg::ToolArc),
                             ],
                         );
+                        // Bend: two lines that meet, then a radius (GUID-4F861674-F74C-474E-869A-4C190ED6EC4B).
+                        ui.vertical(|ui| {
+                            let button = gc_ui::ribbon_small_button(
+                                ui,
+                                Icon::Arc,
+                                tr!(lang, ToolBend),
+                                viewport.is_bending(),
+                                sketching,
+                            );
+                            if button.clicked() {
+                                session.set_tool(ToolKind::Select);
+                                viewport.start_bend();
+                            }
+                        });
                     } else {
                         split(
                             ui,
@@ -587,6 +609,12 @@ pub(crate) fn show(
                     }
                     if ribbon_button(ui, Icon::Rectangle, tr!(lang, ViewFit), false, true).clicked() {
                         viewport.fit(session, [1000.0, 700.0]);
+                    }
+                    // Look At turns the view to the selected plane, face or line (the navigation bar's
+                    // Look At, Page Up).
+                    let can_look = viewport.can_look_at(session);
+                    if ribbon_button(ui, Icon::LookAt, tr!(lang, NavLookAt), false, can_look).clicked() {
+                        viewport.look_at(session);
                     }
                 });
                 ribbon_group(ui, tr!(lang, GroupProjection), |ui| {
