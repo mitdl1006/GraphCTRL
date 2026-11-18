@@ -380,7 +380,39 @@ impl Viewport {
         // The marking menu: a right press opens it (in a sketch or among the components); a quick mark
         // toward a command picks it, otherwise the radial menu and its overflow list show.
         let secondary_pressed = ui.input(|i| i.pointer.button_pressed(PointerButton::Secondary));
-        if secondary_pressed && response.hovered() && self.navigating.is_none() && !self.marking.is_open() {
+        // Shift + right click lists what lies under the cursor (Select Other), as Inventor's Select menu does
+        // (docs/ux/inventor-parity.md: Shift+우클릭 Select 메뉴).
+        let shift_menu = secondary_pressed
+            && ui.input(|i| {
+                i.modifiers.shift
+                    || i.events.iter().any(|event| {
+                        matches!(
+                            event,
+                            egui::Event::PointerButton {
+                                button: PointerButton::Secondary,
+                                pressed: true,
+                                modifiers,
+                                ..
+                            } if modifiers.shift
+                        )
+                    })
+            });
+        if shift_menu
+            && active.is_none()
+            && let Some(at) = response.hover_pos()
+        {
+            let scene = Scene::of(session);
+            let ray = self.camera.ray(to_view(at), size);
+            let found: Vec<gc_session::CellItem> =
+                self.picker.pick_all(&scene, &ray).into_iter().map(|(_, item)| item).collect();
+            self.select_other = (found.len() > 1).then_some((at, found));
+        }
+        if secondary_pressed
+            && !shift_menu
+            && response.hovered()
+            && self.navigating.is_none()
+            && !self.marking.is_open()
+        {
             let at = ui.input(|i| i.pointer.press_origin().or(i.pointer.interact_pos()));
             self.marking_set = if active.is_some() {
                 radial::Set::sketch(session.sketch_is_spatial())
