@@ -856,3 +856,19 @@ fn the_dimension_tool_measures_a_line_to_a_circle_itself_on_screen() {
         image.save(out.join("review-68-arc-distance.png")).unwrap();
     }
 }
+
+/// Smooth (G2) in the Constrain panel of a 2D sketch (Inventor 2026 help, To Apply Geometric Constraints,
+/// GUID-A85A7A30-7D81-4C75-8769-CAD034EEA930): the button starts the tool.
+#[test]
+fn the_constrain_panel_has_a_smooth_g2_button() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.state_mut().session.create_sketch("XY").unwrap();
+    harness.run();
+    harness.get_by_label("부드럽게(G2)").click();
+    harness.run();
+    assert_eq!(harness.state().session.tool(), ToolKind::Constraint(gc_tools::ConstraintKind::Smooth));
+}

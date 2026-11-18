@@ -8,6 +8,7 @@ mod conflict;
 mod constrain;
 mod cut_edges;
 mod diagnostics;
+mod doc_settings;
 mod drive;
 mod example;
 mod interference;

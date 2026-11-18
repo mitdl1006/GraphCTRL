@@ -269,6 +269,8 @@ pub struct GraphCtrlApp {
     replicate: crate::replicate::Replicate,
     /// The Parameters dialog.
     parameters: crate::parameters::Parameters,
+    /// Tools > Document Settings.
+    doc_settings: crate::doc_settings::DocSettingsDialog,
     /// The open sketch Mirror or Pattern dialog.
     sketch_dialog: Option<crate::sketch_dialogs::SketchDialog>,
     /// The open Auto Dimension dialog.
@@ -285,8 +287,6 @@ pub struct GraphCtrlApp {
     log_open: bool,
     /// The Application Options window.
     options_open: bool,
-    /// The radius typed for Auto-bend (empty: 10 mm).
-    auto_bend_radius: String,
     /// Whether the side panels let the 3D scene show through.
     translucent: bool,
     /// Whether the dark colour scheme is in use.
@@ -354,11 +354,9 @@ impl GraphCtrlApp {
             let notifier = std::sync::Arc::new(Repaint(cc.egui_ctx.clone()));
             session.set_executor(gc_jobs::Executor::thread().with_notifier(notifier));
         }
-        let mut auto_bend_radius_initial = String::new();
         // The Application Options that outlive a run.
         if let Some(settings) = options.settings_dir.as_deref().map(gc_persist::places::load_settings) {
             session.set_autoproject_face_edges(!settings.autoproject_edges_off);
-            auto_bend_radius_initial = settings.auto_bend_radius.clone();
             session.set_auto_bend(settings.auto_bend);
         }
         let saved =
@@ -392,6 +390,7 @@ impl GraphCtrlApp {
             sketch_dialog: None,
             auto_dimension: None,
             parameters: crate::parameters::Parameters::default(),
+            doc_settings: crate::doc_settings::DocSettingsDialog::default(),
             importing: false,
             loading_shown: false,
             expression: String::new(),
@@ -399,7 +398,6 @@ impl GraphCtrlApp {
             notices: false,
             log_open: false,
             options_open: false,
-            auto_bend_radius: auto_bend_radius_initial,
             translucent,
             dark,
             tab_before_sketch: Tab::Model,
@@ -948,6 +946,10 @@ impl GraphCtrlApp {
                 }
             });
             ui.menu_button(tr!(lang, MenuTools), |ui| {
+                if ui.button(tr!(lang, MenuDocSettings)).clicked() {
+                    self.doc_settings.start(&self.session);
+                    ui.close();
+                }
                 if ui.button(tr!(lang, MenuPoseCalc)).clicked() {
                     self.pose_calc.get_or_insert_with(gc_panels::PoseCalc::default);
                 }
@@ -1011,7 +1013,6 @@ impl GraphCtrlApp {
             light_theme: !self.dark,
             autoproject_edges_off: !self.session.autoproject_face_edges(),
             auto_bend: self.session.auto_bend(),
-            auto_bend_radius: self.auto_bend_radius.clone(),
             hide_view_cube: !self.viewport.show_view_cube,
             hide_nav_bar: !self.viewport.show_nav_bar,
             hide_status_bar: !self.show_status,
@@ -1066,29 +1067,13 @@ impl GraphCtrlApp {
                 self.session.set_autoproject_face_edges(on);
                 changed = true;
             }
-            // Auto-bend (Sketch tab, 3D Sketch): off by default; the radius is ours (the help has only the
-            // check box).
+            // Auto-bend with 3D line creation (Sketch tab, 3D Sketch; GUID-1898C432-CFD2-46F1-8BAE-631392DFBF1D):
+            // off by default; the radius is a document setting (Tools > Document Settings, Sketch tab).
             let mut bend = self.session.auto_bend();
-            ui.horizontal(|ui| {
-                if ui.checkbox(&mut bend, tr!(lang, OptAutoBend)).changed() {
-                    self.session.set_auto_bend(bend);
-                    changed = true;
-                }
-                ui.add_enabled_ui(bend, |ui| {
-                    let label = ui.label(tr!(lang, OptAutoBendRadius));
-                    let field =
-                        ui.add(egui::TextEdit::singleline(&mut self.auto_bend_radius).desired_width(70.0));
-                    field.widget_info(|| {
-                        egui::WidgetInfo::labeled(egui::Role::TextInput, true, tr!(lang, OptAutoBendRadius))
-                    });
-                    drop(label);
-                    if field.changed() || field.lost_focus() {
-                        // The radius now lives in the document settings (GUID-58DD9A89); this field only keeps the
-                        // typed text until the Document Settings dialog replaces it.
-                        changed = true;
-                    }
-                });
-            });
+            if ui.checkbox(&mut bend, tr!(lang, OptAutoBend)).changed() {
+                self.session.set_auto_bend(bend);
+                changed = true;
+            }
         });
         if changed {
             self.save_settings();
@@ -1401,6 +1386,9 @@ impl eframe::App for GraphCtrlApp {
         });
         if self.interference.open {
             self.interference.window(&ctx, &self.session, lang);
+        }
+        if self.doc_settings.open {
+            self.doc_settings.window(&ctx, &mut self.session, lang);
         }
         if self.parameters.open {
             self.parameters.window(&ctx, &mut self.session, lang);

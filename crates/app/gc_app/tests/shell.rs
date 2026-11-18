@@ -5908,3 +5908,49 @@ fn the_user_interface_list_hides_elements_and_clean_screen_toggles_with_ctrl_0()
     harness.run_steps(3);
     assert!(harness.query_by_label("뷰").is_some(), "Ctrl+0 brings the ribbon back");
 }
+
+/// The Document Settings dialog (Tools > Document Settings; Inventor 2026 help, To Change Document Settings,
+/// GUID-FB49837F-7832-4713-928E-1CEDBDB0C3BD): the values are saved with the document, an invalid one is refused.
+#[test]
+fn the_document_settings_dialog_changes_the_units_and_the_auto_bend_radius() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("도구").click();
+    harness.run();
+    harness.get_by_label("문서 설정").click();
+    harness.run_steps(3);
+    // The Sketch tab: a bad radius is refused and the dialog stays; a good one is kept.
+    // The dialog's tab sits at the window's top, above the browser's own "스케치" entries.
+    let tab = harness
+        .get_all_by_label("스케치")
+        .find(|n| (70.0..110.0).contains(&n.rect().min.y))
+        .expect("the dialog's Sketch tab");
+    tab.click();
+    harness.run_steps(2);
+    // The row's label comes first, its text box second.
+    let radius = harness.get_all_by_label("3D 스케치 자동 굽힘 반지름").last().unwrap();
+    radius.click();
+    harness.run_steps(2);
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.run_steps(2);
+    harness.get_all_by_label("3D 스케치 자동 굽힘 반지름").last().unwrap().type_text("-3 mm");
+    harness.run_steps(2);
+    harness.get_by_label("확인").click();
+    harness.run_steps(2);
+    harness.get_by_label("값이 올바르지 않습니다(0보다 큰 길이)");
+    assert!((harness.state().session.doc_settings().auto_bend_radius - 0.01).abs() < 1e-12);
+    // A good value is kept, and OK closes the dialog.
+    harness.get_all_by_label("3D 스케치 자동 굽힘 반지름").last().unwrap().click();
+    harness.run_steps(2);
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.run_steps(2);
+    harness.get_all_by_label("3D 스케치 자동 굽힘 반지름").last().unwrap().type_text("5 mm");
+    harness.run_steps(2);
+    harness.get_by_label("확인").click();
+    harness.run_steps(3);
+    assert!((harness.state().session.doc_settings().auto_bend_radius - 0.005).abs() < 1e-12);
+    assert!(harness.query_by_label("확인").is_none(), "OK closed the dialog");
+}

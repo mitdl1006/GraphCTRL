@@ -79,8 +79,6 @@ pub struct Settings {
     /// Automatically places tangent corner bends on 3D lines as they are sketched (Sketch tab, "Auto-bend
     /// with 3D line creation"; default: off).
     pub auto_bend: bool,
-    /// The radius of those bends as typed (empty: the default, 10 mm).
-    pub auto_bend_radius: String,
     /// View tab, Windows panel, User Interface: what the user switched off (all shown by default).
     pub hide_view_cube: bool,
     /// The navigation bar is hidden.
