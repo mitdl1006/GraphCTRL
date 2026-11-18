@@ -246,23 +246,6 @@ fn relation_unit_name(kind: &gc_doc::RelationKind) -> Option<&'static str> {
     }
 }
 
-/// The constraint with the value typed in the browser edit box (millimetres or degrees), or `None` when the
-/// text is not a number or the constraint has no value.
-fn relation_with_value(relationship: &gc_doc::Relationship, text: &str) -> Option<gc_doc::Relationship> {
-    use gc_doc::RelationKind;
-    let typed = text.trim().parse::<f64>().ok().filter(|v| v.is_finite())?;
-    let mut changed = relationship.clone();
-    changed.kind = match changed.kind {
-        RelationKind::Mate { sense, .. } => RelationKind::Mate { offset: typed / 1000.0, sense },
-        RelationKind::Flush { .. } => RelationKind::Flush { offset: typed / 1000.0 },
-        RelationKind::Insert { aligned, .. } => RelationKind::Insert { offset: typed / 1000.0, aligned },
-        RelationKind::Tangent { inside, .. } => RelationKind::Tangent { offset: typed / 1000.0, inside },
-        RelationKind::Angle { solution, .. } => RelationKind::Angle { angle: typed.to_radians(), solution },
-        _ => return None,
-    };
-    Some(changed)
-}
-
 /// Whether `name` is listed with the Find text `find` (case does not matter; an empty text lists everything).
 fn found(find: &str, name: &str) -> bool {
     find.trim().is_empty() || name.to_lowercase().contains(&find.trim().to_lowercase())
@@ -384,8 +367,13 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
                     // Clicking a constraint selects it; with Edit Values in Browser its value can be typed.
                     if result.row.clicked() && state.relationship != Some(id) {
                         state.relationship = Some(id);
-                        state.relationship_value =
-                            relation_value_text(&relationship.kind).unwrap_or_default();
+                        // The text as typed (an expression keeps its names), else the number.
+                        state.relationship_value = session
+                            .doc()
+                            .relation_param(id)
+                            .map(|p| p.source.clone())
+                            .or_else(|| relation_value_text(&relationship.kind))
+                            .unwrap_or_default();
                     }
                     if let Some(status) = session
                         .relationship_status(id)
@@ -454,14 +442,23 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
                                 )
                             });
                             ui.label(unit);
-                            if field.lost_focus()
-                                && ui.input(|i| i.key_pressed(egui::Key::Enter))
-                                && let Some(changed) =
-                                    relation_with_value(relationship, &state.relationship_value)
-                            {
+                            // The same box as a sketch dimension's: numbers, units, expressions with parameter names;
+                            // what is wrong is said under the box (Inventor 2026 help, About Parameters in Models,
+                            // GUID-8E5C63EA-0540-4EBE-9B17-B8159C7FE40C).
+                            let unit_kind = if unit == "deg" { gc_doc::Unit::Deg } else { gc_doc::Unit::Mm };
+                            let valid =
+                                gc_doc::evaluate_value(session.doc(), &state.relationship_value, unit_kind)
+                                    .is_some();
+                            if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && valid {
                                 action = Some(BrowserAction::Edit(Box::new(gc_doc::Command::Cell(
-                                    gc_doc::CellOp::SetRelationship { id, relationship: changed },
+                                    gc_doc::CellOp::SetRelationValue {
+                                        id,
+                                        source: state.relationship_value.clone(),
+                                    },
                                 ))));
+                            }
+                            if !valid {
+                                ui.colored_label(gc_ui::colors::ERROR, tr!(lang, ErrExpression));
                             }
                         });
                     }

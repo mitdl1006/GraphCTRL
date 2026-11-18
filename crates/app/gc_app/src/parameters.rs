@@ -24,6 +24,9 @@ struct Row {
 enum Target {
     Dimension(Id<gc_doc::Sketch>, Id<Dimension>),
     User(Id<Param>),
+    /// The offset or angle of an assembly constraint (Inventor 2026 help, About Parameters in Models,
+    /// GUID-8E5C63EA-0540-4EBE-9B17-B8159C7FE40C).
+    Relation(Id<gc_doc::Relationship>),
 }
 
 /// The Parameters dialog's state.
@@ -36,6 +39,8 @@ pub(crate) struct Parameters {
     editing: std::collections::BTreeMap<String, String>,
     /// User parameter names being typed, by parameter.
     naming: std::collections::BTreeMap<Id<Param>, String>,
+    /// Constraint parameter names being typed.
+    relation_naming: std::collections::BTreeMap<Id<gc_doc::Relationship>, String>,
     /// Whether a new numeric parameter is an angle.
     angle: bool,
     error: Option<String>,
@@ -90,6 +95,21 @@ impl Parameters {
                     target: driving.then_some(Target::Dimension(sketch_id, *id)),
                 });
             }
+        }
+        // The assembly constraints' offsets and angles are model parameters too.
+        for (id, param, angle) in session.doc().relation_params() {
+            let (unit, value) = if angle {
+                ("deg", format!("{:.6}", param.value.to_degrees()))
+            } else {
+                ("mm", format!("{:.6}", param.value * 1000.0))
+            };
+            rows.push(Row {
+                name: param.name.clone(),
+                unit,
+                source: param.source.clone(),
+                value: trim(value),
+                target: Some(Target::Relation(id)),
+            });
         }
         rows
     }
@@ -179,6 +199,30 @@ impl Parameters {
                                 text.clone_from(&row.name);
                             }
                         }
+                        if let Some(Target::Relation(id)) = row.target {
+                            let text = self.relation_naming.entry(id).or_insert_with(|| row.name.clone());
+                            let field = ui
+                                .add(egui::TextEdit::singleline(text).desired_width(90.0))
+                                .on_hover_text(tr!(lang, ParamColName));
+                            field.widget_info(|| {
+                                egui::WidgetInfo::labeled(
+                                    egui::Role::TextInput,
+                                    true,
+                                    format!("{} name", row.name),
+                                )
+                            });
+                            if field.lost_focus()
+                                && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                && *text != row.name
+                            {
+                                command = Some(Command::Cell(gc_doc::CellOp::RenameRelationParam {
+                                    id,
+                                    name: text.clone(),
+                                }));
+                            } else if !field.has_focus() && *text != row.name {
+                                text.clone_from(&row.name);
+                            }
+                        }
                         name
                     })
                     .inner;
@@ -196,6 +240,9 @@ impl Parameters {
                                     Command::Sketch { sketch, op: SketchOp::SetDimension { id, source } }
                                 }
                                 Target::User(id) => Command::SetParam { id, source },
+                                Target::Relation(id) => {
+                                    Command::Cell(gc_doc::CellOp::SetRelationValue { id, source })
+                                }
                             });
                         } else if !field.has_focus() && *text != row.source {
                             // Not being typed: follow the document.

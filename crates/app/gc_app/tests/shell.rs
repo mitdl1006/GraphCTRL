@@ -7235,3 +7235,57 @@ fn the_view_cube_menu_sets_and_goes_to_the_home_view() {
     harness.run_steps(3);
     assert_eq!(harness.state().viewport().camera.rotation, saved);
 }
+
+/// A constraint's offset is a model parameter (Inventor 2026 help, About Parameters in Models,
+/// GUID-8E5C63EA-0540-4EBE-9B17-B8159C7FE40C): the Parameters dialog lists it, an expression typed there
+/// changes the constraint, and a wrong one is not stored.
+#[test]
+fn a_constraints_offset_is_a_model_parameter_edited_as_an_expression() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.05, 0.05, 0.05] };
+    let app = harness.state_mut();
+    let fixed = app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    let moving =
+        app.session.add_body(solid, gc_doc::Placement { xyz: [0.0, 0.0, 0.2], rpy: [0.0; 3] }).unwrap();
+    let plane = gc_doc::Geometry::origin(gc_doc::OriginElement::Plane(gc_doc::OriginPlane::Xy));
+    let select = |body: gc_core::Id<gc_doc::Body>| gc_doc::Selection {
+        occurrence: gc_doc::Occurrence::Item(body.erase()),
+        geometry: plane,
+    };
+    let id = app
+        .session
+        .add_relationship(gc_doc::Relationship::new(
+            "Mate:1",
+            gc_doc::RelationKind::Mate { offset: 0.0, sense: gc_doc::AxisSense::Opposed },
+            select(moving),
+            select(fixed),
+        ))
+        .unwrap();
+    harness.run();
+    let name =
+        harness.state().session.doc().relation_param(id).expect("the offset has a parameter").name.clone();
+    harness.get_by_label("관리").click();
+    harness.run();
+    harness.get_by_label("매개변수").click();
+    harness.run();
+    let type_into = |h: &mut egui_kittest::Harness<'_, GraphCtrlApp>, row: &str, text: &str| {
+        let field = h.get_by_role_and_label(egui::accesskit::Role::TextInput, row);
+        field.focus();
+        h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        h.get_by_role_and_label(egui::accesskit::Role::TextInput, row).type_text(text);
+        h.key_press(egui::Key::Enter);
+        h.run();
+    };
+    type_into(&mut harness, &name, "5 mm * 3");
+    let value = |h: &egui_kittest::Harness<'_, GraphCtrlApp>| {
+        h.state().session.doc().relation_param(id).unwrap().value
+    };
+    assert!((value(&harness) - 0.015).abs() < 1e-9, "{}", value(&harness));
+    // A wrong expression is refused and the value stays.
+    type_into(&mut harness, &name, "apples +");
+    assert!((value(&harness) - 0.015).abs() < 1e-9);
+}

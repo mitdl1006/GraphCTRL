@@ -117,7 +117,8 @@ impl Constrain {
     /// The constraint the dialog describes, or `None` while a selection or the offset is missing.
     fn relationship(&self, session: &Session) -> Option<Relationship> {
         let (first, second) = (self.first?, self.second?);
-        let offset = self.offset.trim().parse::<f64>().ok()? / 1000.0;
+        // A number (mm), or what an expression with units and parameter names gives (metres).
+        let offset = gc_doc::evaluate_value(session.doc(), &self.offset, gc_doc::Unit::Mm)?;
         let kind = match self.kind {
             Type::Mate => RelationKind::Mate { offset, sense: self.sense },
             Type::Flush => RelationKind::Flush { offset },
@@ -225,6 +226,9 @@ impl Constrain {
                     field.labelled_by(label.id);
                     ui.label("mm");
                 });
+                if gc_doc::evaluate_value(session.doc(), &self.offset, gc_doc::Unit::Mm).is_none() {
+                    ui.colored_label(ui.visuals().error_fg_color, tr!(lang, ErrExpression));
+                }
                 // More: the name and the limits.
                 egui::CollapsingHeader::new(tr!(lang, ConstrainMore)).id_salt("gc_constrain_more").show(
                     ui,
@@ -269,6 +273,16 @@ impl Constrain {
         {
             // A constraint that cannot be solved is refused; the status bar says why.
             if crate::conflict::try_add(session, relationship, &mut self.conflict) {
+                // An expression is kept as typed: the constraint's model parameter takes it (Inventor 2026 help,
+                // About Parameters in Models, GUID-8E5C63EA-0540-4EBE-9B17-B8159C7FE40C).
+                if self.offset.trim().parse::<f64>().is_err()
+                    && let Some(id) = session.relationships().last().map(|(id, _)| *id)
+                {
+                    drop(session.execute(&gc_doc::Command::Cell(gc_doc::CellOp::SetRelationValue {
+                        id,
+                        source: self.offset.clone(),
+                    })));
+                }
                 // Apply goes on with the next constraint, OK closes.
                 self.first = None;
                 self.second = None;

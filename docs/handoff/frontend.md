@@ -534,6 +534,15 @@
 - 구현 메모: egui의 `context_menu`는 큐브 위젯이 우클릭을 못 받아 쓰지 못했고(뷰포트 응답과 겹침) 직접 그린 Area로 열었다. 메뉴가 열린 첫 프레임엔 크기가 없어 "밖을 눌렀다"로 닫히지 않게 나이를 센다.
 - 하지 않은 것: Set Current View as Front / Reset Front(큐브 면 방향이 고정이라), 애니메이션 전환 옵션, 큐브 우클릭의 Orthographic/Perspective(2026 원문 페이지에 없음), 탐색 막대 Customize·도킹·불투명도.
 
+## 구속 값 = 모델 매개변수 (백엔드 ac86218)
+
+근거(원문, curl): About Parameters in Models GUID-8E5C63EA-0540-4EBE-9B17-B8159C7FE40C, To Work with Parameters in Models GUID-595F9D8E-9EEA-4446-91AB-830E5BAE548E, Edit assembly constraints GUID-36315745-5FE6-4277-9F00-E410B962D83F.
+
+- ② 매개변수 표 "모델 매개변수"에 구속의 오프셋·각도 행(이름 dN·식·값·단위)이 스케치 치수 뒤에 나온다. 식 칸 Enter = `SetRelationValue`(실패는 대화상자에 표시), 이름 칸 Enter = `RenameRelationParam`, 우클릭 "사용자 매개변수로 복사".
+- ① 브라우저의 구속 값 칸(Edit Values in Browser): 식을 입력할 수 있다(처음 값은 입력했던 식 그대로). 식이 틀리면 칸 아래에 "식을 읽을 수 없습니다"류 문구가 뜨고 저장하지 않는다. 구속 대화상자(Constrain)의 오프셋 칸도 같은 식 입력이다: 숫자는 mm, 식·단위·매개변수 이름 가능, 틀리면 칸 아래 문구 + 버튼 비활성, 식은 만든 뒤 `SetRelationValue`로 매개변수에 그대로 저장된다. Angle 구속 대화상자는 아직 없다(구속 대화상자가 Mate/Flush/Insert만).
+- ③ 브라우저 노드 이름 옆 값 표시 형식("Mate:1 (d3 = 10 mm)")은 원문에 형식이 없어 넣지 않았다(Edit assembly constraints는 "브라우저 아래 편집 상자에 값을 입력"만 말한다).
+- 테스트: `a_constraints_offset_is_a_model_parameter_edited_as_an_expression`.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹
