@@ -6657,3 +6657,33 @@ fn a_tool_kind_is_edited_and_fitted_to_a_robot() {
     assert!(harness.state().session.robot_tool_kit(robot).is_some());
     harness.get_by_label("툴 상태");
 }
+
+/// The schedule panel (Tools > Schedule): worked out when asked; a task no robot can do is listed as blocked.
+#[test]
+fn the_schedule_panel_works_out_the_schedule_and_lists_blocked_tasks() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let task = gc_doc::Task {
+        name: "Orphan".into(),
+        location: gc_doc::Location::None,
+        precondition: String::new(),
+        steps: vec![gc_doc::Step::Wait { seconds: 1.0 }],
+        effects: Vec::new(),
+        robots: gc_doc::RobotChoice::Any,
+        priority: 0,
+    };
+    harness.state_mut().session.edit_work(gc_doc::WorkOp::AddTask(task)).unwrap();
+    harness.get_by_label("도구").click();
+    harness.run();
+    harness.get_by_label("스케줄").click();
+    harness.run_steps(3);
+    harness.get_by_label("스케줄을 아직 계산하지 않았습니다.");
+    harness.get_by_label("스케줄 계산").click();
+    harness.run_steps(3);
+    // No robot in the cell: the task cannot be given to any.
+    harness.get_by_label("하지 못하는 작업");
+    harness.get_by_label("Orphan");
+}

@@ -804,6 +804,37 @@ fn task_properties(ui: &mut Ui, session: &mut Session, lang: Lang, id: Id<Task>)
             }
         }
     }
+    // Which robot would do it and how long it takes: planned when asked (the planning is not instant, so it
+    // is not done every frame).
+    let key = egui::Id::unique("gc_task_candidates").with(id);
+    if ui.button(tr!(lang, WorkCandidates)).clicked() {
+        let table: Vec<(String, Result<f64, String>)> = session
+            .task_candidates(id)
+            .into_iter()
+            .map(|c| {
+                (
+                    session.doc().get(c.robot).map_or_else(String::new, |r: &gc_doc::Robot| r.name.clone()),
+                    c.time,
+                )
+            })
+            .collect();
+        ui.data_mut(|d| d.insert_temp(key, table));
+    }
+    if let Some(table) = ui.data(|d| d.get_temp::<Vec<(String, Result<f64, String>)>>(key)) {
+        if table.is_empty() {
+            ui.weak(tr!(lang, WorkNoCandidates));
+        }
+        egui::Grid::new(("gc_task_candidates_grid", id)).num_columns(2).spacing([12.0, 3.0]).show(ui, |ui| {
+            for (robot, time) in &table {
+                ui.label(robot);
+                match time {
+                    Ok(seconds) => ui.label(format!("{seconds:.1} s")),
+                    Err(why) => ui.colored_label(gc_ui::colors::ERROR, why),
+                };
+                ui.end_row();
+            }
+        });
+    }
     ui.horizontal(|ui| {
         ui.label(tr!(lang, WorkPriority));
         let r = ui.add(egui::DragValue::new(&mut next.priority));

@@ -281,6 +281,9 @@ pub struct GraphCtrlApp {
     bom: crate::bom::BomDialog,
     /// The iProperties dialog.
     iproperties: crate::iproperties::IPropertiesDialog,
+    /// The schedule panel at the bottom (Tools > Schedule) and what it shows.
+    schedule_open: bool,
+    schedule: gc_panels::ScheduleUi,
     /// Tools > Document Settings.
     doc_settings: crate::doc_settings::DocSettingsDialog,
     /// The open sketch Mirror or Pattern dialog.
@@ -405,6 +408,8 @@ impl GraphCtrlApp {
             parameters: crate::parameters::Parameters::default(),
             bom: crate::bom::BomDialog::default(),
             iproperties: crate::iproperties::IPropertiesDialog::default(),
+            schedule_open: false,
+            schedule: gc_panels::ScheduleUi::default(),
             doc_settings: crate::doc_settings::DocSettingsDialog::default(),
             importing: false,
             loading_shown: false,
@@ -969,6 +974,10 @@ impl GraphCtrlApp {
                     self.iproperties.start(&self.session, None, "", lang);
                     ui.close();
                 }
+                if ui.button(tr!(lang, ScheduleTitle)).clicked() {
+                    self.schedule_open = !self.schedule_open;
+                    ui.close();
+                }
                 if ui.button(tr!(lang, MenuDocSettings)).clicked() {
                     self.doc_settings.start(&self.session);
                     ui.close();
@@ -1429,6 +1438,20 @@ impl eframe::App for GraphCtrlApp {
                     (self.session.active_sketch().is_some() && !self.session.sketch_is_spatial())
                         .then_some(&mut self.viewport.slice),
                 );
+            });
+        }
+        // The schedule: a bottom panel with the Gantt chart, above the status bar (declared after it).
+        if self.schedule_open {
+            egui::Panel::bottom("schedule").resizable(true).default_size(150.0).show(ui, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.strong(tr!(lang, ScheduleTitle));
+                        if ui.small_button("✕").clicked() {
+                            self.schedule_open = false;
+                        }
+                    });
+                    gc_panels::schedule_panel(ui, &self.session, lang, &mut self.schedule);
+                });
             });
         }
         // The 3D view fills the window; the browser and the properties float over it, see-through, and
