@@ -406,6 +406,12 @@
 - 트리 행이 끌기 원천(`Sense::click_and_drag`, 짧은 클릭은 그대로). 컴포넌트 행을 끌어 폴더 머리글에 놓으면 `FolderOp::Move`, 서브어셈블리 머리글에 놓으면 `SubassemblyOp::Move`. Ctrl+클릭으로 행을 여러 개 표시(선택 색)하고 그중 하나를 끌거나 "새 폴더(이 항목으로)"·"폴더로 이동"을 고르면 표시한 행이 한꺼번에 간다. 동작 후 표시는 지워진다.
 - 테스트: `dragging_a_browser_row_onto_a_folder_moves_it_in`. Ctrl+클릭 표시는 kittest가 수정 키를 못 넘겨 자동 테스트가 없다(코드로만).
 
+### 닫힌 경로: 접선 방향·시작점, 닫힌 곡선 "경로로 지정"
+
+- 우클릭 메뉴가 닫힌 곡선(원·전체 타원·닫힌 스플라인)도 `curve_outline`으로 집는다. 백엔드 `chain_at`이 [그 곡선]을 돌려주므로 "경로로 지정"이 뜬다.
+- 경로 역할 속성: "접선 방향" 체크(`set_role_tangent`: 툴 X축이 진행 방향), 닫힌 경로(`role_closed`)면 "시작점" 선택(`set_role_start`, 스케치의 점 목록과 "곡선의 시작"). 점은 좌표(mm)로 표시한다.
+- 테스트: `a_closed_curve_becomes_a_path_with_tangent_and_start_choices`. QA 브랜치의 `a_closed_curve_is_offered`는 병합되면 `#[ignore]`를 푼다.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

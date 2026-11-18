@@ -65,6 +65,46 @@ pub fn role_properties(ui: &mut Ui, session: &mut Session, lang: Lang, id: Id<Sk
             if ui.button(flip).clicked() {
                 drop(session.reverse_role(id));
             }
+            // The tool turns with the path, its X axis along the way it travels.
+            let mut tangent = role.travel.tangent;
+            if ui.checkbox(&mut tangent, tr!(lang, RoleTangent)).changed() {
+                drop(session.set_role_tangent(id, tangent));
+            }
+            // A closed path (a circle, a whole ellipse, a closed spline) starts where the chosen point is
+            // nearest to it.
+            if session.role_closed(id) {
+                let start = role.travel.start;
+                let name_of = |point: Option<Id<gc_sketch::SkPoint>>| match point {
+                    None => tr!(lang, RoleStartCurve).to_owned(),
+                    Some(point) => session
+                        .doc()
+                        .get(role.sketch)
+                        .and_then(|sketch| sketch.pos(point))
+                        .map_or_else(String::new, |p| {
+                            format!("({:.1}, {:.1}, {:.1}) mm", p[0] * 1000.0, p[1] * 1000.0, p[2] * 1000.0)
+                        }),
+                };
+                let mut chosen = start;
+                let points: Vec<Id<gc_sketch::SkPoint>> = session
+                    .doc()
+                    .get(role.sketch)
+                    .map(|sketch| sketch.points.keys().copied().collect())
+                    .unwrap_or_default();
+                ui.horizontal(|ui| {
+                    ui.label(tr!(lang, RoleStart));
+                    egui::ComboBox::from_id_salt(("gc_role_start", id))
+                        .selected_text(name_of(start))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut chosen, None, name_of(None));
+                            for point in &points {
+                                ui.selectable_value(&mut chosen, Some(*point), name_of(Some(*point)));
+                            }
+                        });
+                });
+                if chosen != start {
+                    drop(session.set_role_start(id, chosen));
+                }
+            }
         }
     }
     ui.separator();

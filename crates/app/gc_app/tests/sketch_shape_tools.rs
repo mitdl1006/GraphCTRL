@@ -1030,3 +1030,31 @@ fn clicking_a_roles_mark_in_the_view_selects_it() {
     click_at(&mut harness, egui::pos2(at.x + 120.0, at.y + 90.0));
     assert_eq!(harness.state().viewport().role_selected, None);
 }
+
+/// A circle can be made a path (a closed one), its properties offer the tangent direction and a start point.
+#[test]
+fn a_closed_curve_becomes_a_path_with_tangent_and_start_choices() {
+    let mut harness = sketching();
+    harness.state_mut().session.set_tool(ToolKind::Circle);
+    click(harness.state_mut(), mm(0.0, 0.0), false);
+    click(harness.state_mut(), mm(40.0, 0.0), false);
+    harness.state_mut().session.set_tool(ToolKind::Select);
+    harness.run_steps(3);
+    let sketch = harness.state().session.active_sketch().unwrap().0;
+    // The circle's rim is where the menu finds it.
+    let at = harness.state().viewport().screen_of(gc_math::DVec3::new(0.0, 0.04, 0.0)).unwrap();
+    right_click(&mut harness, at);
+    harness.get_by_label("경로로 지정").click();
+    harness.run_steps(3);
+    let roles = harness.state().session.sketch_roles(sketch);
+    assert_eq!(roles.len(), 1);
+    let role = roles[0];
+    assert!(harness.state().session.role_closed(role));
+    harness.state_mut().viewport_mut().role_selected = Some(role);
+    harness.run_steps(3);
+    harness.get_by_label("접선 방향").click();
+    harness.run_steps(2);
+    assert!(harness.state().session.doc().get(role).unwrap().travel.tangent);
+    // A closed path offers where it starts.
+    harness.get_by_label("시작점");
+}
