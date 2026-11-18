@@ -525,8 +525,13 @@ fn constraint_for(sketch: &Sketch, kind: ConstraintKind, picks: &[Item]) -> Opti
         (K::Coincident, [Item::Point(p), Item::Curve(c)] | [Item::Curve(c), Item::Point(p)]) => {
             Some(GeoConstraint::PointOnCurve(*p, *c))
         }
-        (K::Horizontal, [Item::Curve(c)]) => line(*c).map(|(a, b)| GeoConstraint::Horizontal(a, b)),
-        (K::Vertical, [Item::Curve(c)]) => line(*c).map(|(a, b)| GeoConstraint::Vertical(a, b)),
+        // A line, or an ellipse's major axis (centre to axis end).
+        (K::Horizontal, [Item::Curve(c)]) => line(*c)
+            .or_else(|| sketch.ellipse(*c).map(|(e, m, _)| (e, m)))
+            .map(|(a, b)| GeoConstraint::Horizontal(a, b)),
+        (K::Vertical, [Item::Curve(c)]) => line(*c)
+            .or_else(|| sketch.ellipse(*c).map(|(e, m, _)| (e, m)))
+            .map(|(a, b)| GeoConstraint::Vertical(a, b)),
         (K::Horizontal, [Item::Point(p), Item::Point(q)]) if p != q => {
             Some(GeoConstraint::Horizontal(*p, *q))
         }
