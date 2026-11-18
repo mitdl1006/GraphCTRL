@@ -38,6 +38,11 @@ pub enum BrowserAction {
     SketchOnComponent(gc_doc::Occurrence, gc_doc::OriginPlane),
     /// Drive an assembly relationship (the Drive dialog).
     DriveRelationship(gc_core::Id<gc_doc::Relationship>),
+    /// Make a view representation the active one; the app restores the camera and section it stored.
+    ActivateView(usize),
+    /// Create a view representation with this name from the current view (the app stores the camera
+    /// and section).
+    NewView(String),
     /// Put a component into the contact set, or take it out.
     ContactSet(gc_core::AnyId, bool),
     /// Suppress a relationship (or bring it back) and solve again.
@@ -368,9 +373,11 @@ fn representations(ui: &mut Ui, session: &Session, lang: Lang, action: &mut Opti
                         };
                         let result = gc_ui::panel::tree_row(ui, row);
                         let activate = if is_view {
-                            CellOp::ActivateViewRepresentation(index)
+                            BrowserAction::ActivateView(index)
                         } else {
-                            CellOp::ActivatePositionalRepresentation(position)
+                            BrowserAction::Edit(Box::new(Command::Cell(
+                                CellOp::ActivatePositionalRepresentation(position),
+                            )))
                         };
                         let remove = if is_view {
                             CellOp::DeleteRepresentation { view: Some(index), position: None }
@@ -378,14 +385,14 @@ fn representations(ui: &mut Ui, session: &Session, lang: Lang, action: &mut Opti
                             CellOp::DeleteRepresentation { view: None, position }
                         };
                         if result.row.clicked() && !node.active {
-                            *action = edit(activate.clone());
+                            *action = Some(activate.clone());
                         }
                         result.row.context_menu(|ui| {
                             if ui
                                 .add_enabled(!node.active, egui::Button::new(tr!(lang, CmdActivate)))
                                 .clicked()
                             {
-                                *action = edit(activate.clone());
+                                *action = Some(activate.clone());
                                 ui.close();
                             }
                             if ui.add_enabled(!primary, egui::Button::new(delete.as_str())).clicked() {
@@ -408,11 +415,11 @@ fn representations(ui: &mut Ui, session: &Session, lang: Lang, action: &mut Opti
                     let label = tr!(lang, RepNew, title);
                     if ui.small_button(label).clicked() {
                         let name = format!("{word}:{}", count + 1);
-                        *action = edit(if is_view {
-                            CellOp::AddViewRepresentation { name, camera: None, section: None }
+                        *action = if is_view {
+                            Some(BrowserAction::NewView(name))
                         } else {
-                            CellOp::AddPositionalRepresentation(name)
-                        });
+                            edit(CellOp::AddPositionalRepresentation(name))
+                        };
                     }
                 },
             );
