@@ -16,6 +16,7 @@ mod autoproject;
 mod cell;
 mod design;
 mod editing;
+mod grip;
 pub mod library;
 mod measure;
 mod project;

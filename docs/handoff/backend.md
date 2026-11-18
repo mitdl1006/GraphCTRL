@@ -20,7 +20,7 @@
 | 8 | ~~Automatic Dimensions and Constraints~~ **완료** | 126 (P2) | — | 아래 작업 기록 |
 | 9 | ~~치수 방향 뒤집기(Flip)~~ **완료** | 124 (P3) | 선-호·호-호 거리 치수 종류는 없음 | 아래 작업 기록 |
 | 10 | 타원·스플라인(+ Smooth G2) | 60, 61, 108 (P3) | `CurveGeom`에 없음 | 새 곡선 종류 — 영향 큼 |
-| 11 | 어셈블리: ~~서브어셈블리 계층·활성화~~(**완료**, 단위 드래그는 남음), ~~조인트 Lock/Protect~~(**완료**), 3D 그립 스냅, ~~어셈블리 스케치 소유자~~(**완료**), 작업 축(선·모서리 위, 원 중심, 회전 면, 두 평면 교선) | 어셈블리 43, 90, 61, 98, 157 | 작업 축은 두 점·평면 법선만 | 행마다 원문 확인 후 범위 결정 |
+| 11 | 어셈블리: ~~서브어셈블리 계층·활성화~~(**완료**, 단위 드래그는 남음), ~~조인트 Lock/Protect~~(**완료**), ~~3D 그립 스냅~~(**계산 완료**, 드래그 UI는 FE), ~~어셈블리 스케치 소유자~~(**완료**), 작업 축(선·모서리 위, 원 중심, 회전 면, 두 평면 교선) | 어셈블리 43, 90, 61, 98, 157 | 작업 축은 두 점·평면 법선만 | 행마다 원문 확인 후 범위 결정 |
 
 ## 현황 — 완료
 
@@ -53,6 +53,35 @@
 | 모션(오래된 남은 일) | 맨 아래 "남은 일(백엔드)" 절 그대로 |
 
 # 작업 기록(최신 순)
+
+## 2026-11-18 — 그립 스냅 계산(우선순위 표 11 일부, 백엔드는 계산 함수까지)
+
+근거: Grip Snap move or rotate(GUID-E1CA109A-D5A1-4131-AC3A-AE217716DD8C).
+- 모서리를 기준으로 고른 뒤 "Move along ray using reference geometry"나 "Rotate about line using reference geometry"를 고른다.
+- 점 2개로 오프셋이나 각도를 정한다. HUD가 그 선에 대해 남은 자유도를 알려 준다.
+- Done으로 끝내거나, Commit and Ground로 움직인 것을 고정한다.
+
+**gc_doc**
+- `GripLine{point, direction}`, `GripLine::through(a, b)`: 모서리 두 끝점으로 만든다. 길이가 0이면 `None`.
+- `GripMotion::{MoveAlong, RotateAbout}`.
+- `grip_pose(pose, motion, line, from, to)`, `Document::grip_snap_pose(item, …)`:
+  - 이동: `to − from`의 선 방향 성분만큼 옮긴다.
+  - 회전: 선을 따라 본 `from → to` 각도만큼 선 둘레로 돌린다.
+  - 점이 선 위에 있거나 값이 유한하지 않으면 `None`.
+- `Document::grip_allows(item, motion, line)`: 관계가 남긴 자유도로 그 움직임이 되는지 본다(HUD 보고).
+  관계 야코비안 × 움직임 속도(twist) ≈ 0인지로 판정한다. 접지면 false, 관계가 없으면 true.
+- `CellOp::MoveAndGround(Vec<(AnyId, Placement)>)`: Commit and Ground. 실행 취소 한 단계다.
+
+**세션(프론트엔드가 드래그 UI에 쓸 것)**
+- `grip_snap_pose(item, motion, line, from, to) -> Option<DPose3>`: 미리 보기.
+- `grip_allows(item, motion, line)`: HUD.
+- `grip_snap_commit(&[(item, pose)], ground)`: Done(`false`, `MoveComponents`)이나 Commit and Ground(`true`).
+  여러 컴포넌트를 한 번에 넘길 수 있다(세션 동안 움직인 것들). 묶인 컴포넌트는 따라온다.
+
+**원문과 다른 점**
+- 임시 구속을 녹색으로 보여 주는 것과 이동 옵션 바는 화면 몫이다.
+- 기준 형상은 모서리(선)만 받는다. 원문의 점·면 기준 이동은 아직 없다.
+- 테스트: `gc_session/tests/grip_snap.rs`.
 
 ## 2026-11-18 — 어셈블리 스케치 소유자(우선순위 표 11 일부)
 
