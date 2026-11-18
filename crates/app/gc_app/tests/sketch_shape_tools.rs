@@ -1058,3 +1058,55 @@ fn a_closed_curve_becomes_a_path_with_tangent_and_start_choices() {
     // A closed path offers where it starts.
     harness.get_by_label("시작점");
 }
+
+/// A role's menu in the browser makes a task from it (a move to the waypoint, a follow of the path).
+#[test]
+fn a_role_makes_a_task_from_its_browser_menu() {
+    let mut harness = sketching();
+    let sketch = harness.state().session.active_sketch().unwrap().0;
+    harness.state_mut().session.set_tool(ToolKind::Point);
+    click(harness.state_mut(), mm(10.0, 10.0), false);
+    harness.state_mut().session.set_tool(ToolKind::Select);
+    let point = *harness
+        .state()
+        .session
+        .active_sketch()
+        .unwrap()
+        .1
+        .points
+        .keys()
+        .find(|p| {
+            harness
+                .state()
+                .session
+                .point_pos(**p)
+                .is_some_and(|pos| (pos[0] - 0.01).abs() < 1e-9 && (pos[1] - 0.01).abs() < 1e-9)
+        })
+        .unwrap();
+    let role = harness.state_mut().session.add_waypoint_role(sketch, point).unwrap();
+    harness.run_steps(3);
+    let name = harness.state().session.doc().get(role).unwrap().name.clone();
+    let at = harness
+        .get_all_by_label_contains(&name)
+        .find(|n| n.rect().min.x < 300.0)
+        .expect("the role's row")
+        .rect()
+        .center();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run_steps(2);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+    harness.run_steps(3);
+    harness.get_by_label("이 역할로 작업 만들기").click();
+    harness.run_steps(3);
+    let tasks = harness.state().session.doc().tasks().iter().count();
+    assert_eq!(tasks, 1);
+    let (_, task) = harness.state().session.doc().tasks().iter().next().unwrap();
+    assert_eq!(task.steps, vec![gc_doc::Step::MoveJ(gc_doc::MoveTarget::Role(role))]);
+}

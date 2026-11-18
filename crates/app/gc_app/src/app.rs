@@ -1672,6 +1672,11 @@ impl eframe::App for GraphCtrlApp {
                         gc_panels::role_properties(ui, &mut self.session, lang, role);
                         ui.separator();
                     }
+                    // What is selected in the work node has its editor.
+                    if self.params.work.selected.is_some() {
+                        gc_panels::work_properties(ui, &mut self.session, lang, &self.params.work);
+                        ui.separator();
+                    }
                     gc_panels::properties(ui, &mut self.session, lang, &mut self.expression);
                     self.cell.hold_previews = self.viewport.is_grip_snapping();
                     gc_panels::cell(ui, &mut self.session, lang, &mut self.cell);

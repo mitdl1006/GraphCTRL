@@ -19,7 +19,7 @@ use gc_ui::panel::TreeRow;
 pub use cell::{CellUi, cell, problem_text, status_text};
 pub use pose::{PoseCalc, RotationInput, pose_calculator};
 pub use role::role_properties;
-pub use work::{WorkItem, WorkUi, work_browser};
+pub use work::{WorkItem, WorkUi, work_browser, work_properties};
 
 /// What the user asked for in the browser.
 #[derive(Clone, Debug, PartialEq)]
@@ -778,7 +778,30 @@ fn role_row(
         suppressible: true,
     };
     ui.indent(("gc_role", id), |ui| {
-        let result = node_row(ui, session, lang, state, &node, action, |_, _| {});
+        let result = node_row(ui, session, lang, state, &node, action, |ui, action| {
+            // A task that moves to this waypoint or follows this path.
+            if ui.button(tr!(lang, WorkTaskFromRole)).clicked() {
+                let step = match role.kind {
+                    gc_doc::RoleKind::Waypoint { .. } => gc_doc::Step::MoveJ(gc_doc::MoveTarget::Role(id)),
+                    gc_doc::RoleKind::Path { .. } => gc_doc::Step::FollowPath(id),
+                };
+                let taken: Vec<String> = session.doc().tasks().iter().map(|(_, t)| t.name.clone()).collect();
+                let name = (taken.len() + 1..)
+                    .map(|n| format!("{}{n}", tr!(lang, WorkTaskBase)))
+                    .find(|n| !taken.contains(n))
+                    .unwrap_or_default();
+                *action = Some(BrowserAction::Work(gc_doc::WorkOp::AddTask(gc_doc::Task {
+                    name,
+                    location: gc_doc::Location::Sketch(role.sketch),
+                    precondition: String::new(),
+                    steps: vec![step],
+                    effects: Vec::new(),
+                    robots: gc_doc::RobotChoice::Any,
+                    priority: 0,
+                })));
+                ui.close();
+            }
+        });
         if result.clicked() {
             state.role = Some(id);
             *action = Some(BrowserAction::SelectRole(Some(id)));
