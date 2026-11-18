@@ -124,6 +124,25 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 로봇 교체(Replace / Replace All)
+
+근거: Replace assembly components(`GUID-E5FAA224-7332-4AC6-A78E-793FDACFEEDD`) — "If possible, relationships are retained, unless the replacement part has a different shape. In that case, some relationships may not survive and must be reapplied", "The new component … placed in the same location as the original components. The origin of the replacement component is coincident with the origin of the replaced component", Replace All = "all occurrences of the component in the current assembly".
+
+| 무엇 | 호출 |
+|---|---|
+| 설명(URDF 텍스트)으로 교체 | `session.replace_robot(robot, name, urdf, resource_dir, all) -> Result<Vec<String> /*억제된 관계 이름*/, String>` |
+| 파일로 교체 | `session.replace_robot_file(robot, path, all)` |
+| 라이브러리 패키지로 교체 | `session.replace_library_robot(robot, &package, all)` |
+| 문서 op | `CellOp::ReplaceComponents { items, with: Replacement::Robot(Box<Robot>) }`(변형 추가) |
+
+- 그대로 남는 것: 배치, TCP, 툴, 표시(look), 웨이포인트·경로(계획은 다음에 다시), 로봇 id(관계·작업·역할의 참조가 유지된다). 관절 값은 관절 수가 같으면 유지, 다르면 0.
+- 새 설명에서 오는 것: 이름, URDF, 파일 폴더, base/tip 링크, 링크 트리, 가속 한계.
+- 관계: 로봇 자체(베이스 원점)에 건 것은 그대로. 링크에 건 것은 **같은 이름의 링크**로 옮기고, 그런 링크가 없으면 억제(이름을 돌려준다). 교체 뒤 풀리지 않는 것도 억제(기존 Replace와 같다).
+- 충돌 검사 예외(ACM)는 두 링크 이름이 새 로봇에 다 있을 때만 남는다. 링크별 표시 상태(숨김·비활성·원점 표시)는 처음 상태로 돌아간다(링크 번호가 달라지므로).
+- **거부**: 그 로봇의 웨이포인트 중 관절 값으로 준 것이 있고 새 로봇의 관절 수가 다르면 `InUse`(관절 목표는 그 팔의 것이다). UR끼리(6축)는 해당 없음.
+- `all`: 같은 URDF를 쓰는 로봇 전부(`doc.same_source`). 한 실행 취소 단계.
+- 테스트: `gc_session/tests/replace_robot.rs`.
+
 ## 2026-11-18 — 거울상 메시: 쓰는 위치와 컴포넌트별 상태(리드 수정 요청)
 
 - **쓰는 위치**(원본 옆에는 쓰지 않는다): 문서에 파일이 있으면 프로젝트의 파일 폴더 `<이름>_files/`에 바로, 아직 저장 전이면 앱 캐시(`gc_persist::places::cache_dir()/mirrored` — Windows `%LOCALAPPDATA%\GraphCTRL\cache`, 그 밖 `$XDG_CACHE_HOME/graphctrl` 또는 `~/.cache/graphctrl`; `session.set_asset_cache(Some(dir))`로 바꿀 수 있다)에 쓴다. 저장(Save As 포함)하면 기존 프로젝트 묶기(`packed_for`)가 프로젝트 밖 메시 파일을 `<이름>_files/`로 복사하고 상대 경로로 적으므로 거울상 파일도 같이 들어간다.
