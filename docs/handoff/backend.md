@@ -54,6 +54,11 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — QA: 불러오기 경고가 다음 문서로 넘어감
+
+- `new_document`·`open_recovered`가 이전 `open`의 `load_warnings`를 그대로 두던 것을 고침. 문서를 바꿀 때(`replace_document`) 비우고, `open_recovered`는 복구 파일 자체의 경고로 채운다.
+- QA `gc_session/tests/qa_paste_flexible.rs::load_warnings_belong_to_the_document_that_was_opened`의 `#[ignore]` 해제. 파일은 QA 브랜치에서 가져왔고 ignore 줄만 다르다.
+
 ## 2026-11-18 — 사분점 사이 타원 Offset → 스플라인(리드 다음 ③)
 
 근거: To Create 2D Shape Geometry, GUID-D489CE6D-7299-4211-A43A-F3580A4BA357 — "If you select an ellipse near a quadrant and an axis is visible, the offset
