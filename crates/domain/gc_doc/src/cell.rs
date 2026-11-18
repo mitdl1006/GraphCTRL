@@ -799,6 +799,8 @@ pub enum CellOp {
     },
     /// Deletes a path.
     DeletePath(Id<MotionPath>),
+    /// Changes the work model (plan 9.4): object types, objects, state variables, tasks.
+    Work(crate::work::WorkOp),
     /// Changes user-defined browser folders.
     Folder(crate::folder::FolderOp),
     /// Isolate (Inventor 2026 help, Frame Generator browser, GUID-36AE9264-912D-4D3C-BB24-7EC16FA8777E:
@@ -1106,6 +1108,7 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
         | CellOp::SetPathFollow { .. }
         | CellOp::AddFollowPath { .. }
         | CellOp::AddPathThrough { .. } => crate::role::run(txn, op),
+        CellOp::Work(op) => crate::work::run(txn, op),
         CellOp::Folder(op) => crate::folder::run(txn, op),
         CellOp::Isolate { keep } => crate::tree::isolate(txn, keep),
         CellOp::UndoIsolate => crate::tree::undo_isolate(txn),
@@ -1684,9 +1687,10 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
         }
         CellOp::SetSuppressed { item, suppressed } => {
             // Waypoints, paths and assembly relationships are not in the model order but can be suppressed.
-            let outside =
-                matches!(item.kind, Kind::Waypoint | Kind::Path | Kind::Relationship | Kind::SketchRole)
-                    && txn.doc().contains(*item);
+            let outside = matches!(
+                item.kind,
+                Kind::Waypoint | Kind::Path | Kind::Relationship | Kind::SketchRole | Kind::Task
+            ) && txn.doc().contains(*item);
             if !outside && !txn.doc().model_order().contains(item) {
                 return Err(EditError::BadValue);
             }

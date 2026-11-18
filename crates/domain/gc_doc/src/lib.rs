@@ -31,6 +31,7 @@ mod sketch_offset;
 mod subassembly;
 mod tree;
 mod txn;
+mod work;
 
 mod design;
 pub use cell::{
@@ -69,3 +70,7 @@ pub use settings::{AngleUnit, DimensionDisplay, DocSettings, LengthUnit};
 pub use subassembly::{Subassembly, SubassemblyId, SubassemblyOp, TreeKey, TreeRow};
 pub use tree::ComponentNode;
 pub use txn::{DocError, Txn};
+pub use work::{
+    Effect, EffectTarget, Location, MoveTarget, ObjectType, RobotChoice, StateValue, StateVar, Step, Task,
+    WorkObject, WorkOp,
+};
