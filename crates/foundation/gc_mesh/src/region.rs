@@ -430,6 +430,274 @@ pub fn conical_region_in(
     Some(ConeRegion { triangles, apex, axis, half_angle, span: (low, high) })
 }
 
+/// A spherical region of a mesh, in the mesh's frame.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SphereRegion {
+    /// The triangles of the region.
+    pub triangles: Vec<u32>,
+    /// The centre.
+    pub centre: DVec3,
+    /// The radius.
+    pub radius: f64,
+}
+
+/// Solves a small linear system by elimination with pivoting; `None` when it has no single solution.
+fn solve<const N: usize>(mut a: [[f64; N]; N], mut b: [f64; N]) -> Option<[f64; N]> {
+    for col in 0..N {
+        let pivot = (col..N).max_by(|x, y| a[*x][col].abs().total_cmp(&a[*y][col].abs()))?;
+        if a[pivot][col].abs() < 1e-14 {
+            return None;
+        }
+        a.swap(col, pivot);
+        b.swap(col, pivot);
+        for row in col + 1..N {
+            let factor = a[row][col] / a[col][col];
+            for k in col..N {
+                a[row][k] -= factor * a[col][k];
+            }
+            b[row] -= factor * b[col];
+        }
+    }
+    let mut x = [0.0; N];
+    for row in (0..N).rev() {
+        let rest: f64 = (row + 1..N).map(|k| a[row][k] * x[k]).sum();
+        x[row] = (b[row] - rest) / a[row][row];
+    }
+    x.iter().all(|v| v.is_finite()).then_some(x)
+}
+
+/// The spherical surface around `triangle`, when there is one: triangles reached across edges where the
+/// surface bends by less than `bend` (radians) are fitted with a sphere through their corners; the fit
+/// must hold within `tolerance` (relative to the radius) and the triangles must face straight away from
+/// (or towards) the centre. `None` for flat, cylindrical, conical or irregular surfaces.
+pub fn spherical_region(mesh: &MeshData, triangle: u32, bend: f64, tolerance: f64) -> Option<SphereRegion> {
+    spherical_region_in(mesh, &Adjacency::of(mesh), triangle, bend, tolerance)
+}
+
+/// [`spherical_region`] with the mesh's adjacency already built.
+pub fn spherical_region_in(
+    mesh: &MeshData,
+    adjacency: &Adjacency,
+    triangle: u32,
+    bend: f64,
+    tolerance: f64,
+) -> Option<SphereRegion> {
+    let positions = mesh.positions();
+    let indices = mesh.indices();
+    if triangle as usize >= indices.len() / 3 {
+        return None;
+    }
+    let corners = |t: usize| -> Option<[DVec3; 3]> {
+        let at = |k: usize| indices.get(3 * t + k).and_then(|i| positions.get(*i as usize)).copied();
+        Some([corner(at(0)?), corner(at(1)?), corner(at(2)?)])
+    };
+    let normal_of = |t: usize| corners(t).and_then(|[a, b, c]| (b - a).cross(c - a).try_normalize());
+    normal_of(triangle as usize)?;
+    let cos_bend = gc_math::fm::cos(bend);
+    let mut region = BTreeSet::from([triangle as usize]);
+    let mut todo = vec![triangle as usize];
+    while let Some(t) = todo.pop() {
+        let Some(n) = normal_of(t) else { continue };
+        for &next in adjacency.of_triangle(t) {
+            let next = next as usize;
+            if !region.contains(&next) && normal_of(next).is_some_and(|m| m.dot(n) >= cos_bend) {
+                region.insert(next);
+                todo.push(next);
+            }
+        }
+    }
+    if region.len() < 4 {
+        return None;
+    }
+    let points: Vec<DVec3> = region.iter().filter_map(|t| corners(*t)).flatten().collect();
+    // |p|² = 2 c·p + (r² − |c|²): least squares for the centre c and that last constant, about the
+    // points' mean so that the numbers stay small.
+    #[allow(clippy::cast_precision_loss, reason = "corner counts are small")]
+    let mean = points.iter().copied().sum::<DVec3>() / points.len() as f64;
+    let mut m = [[0.0_f64; 4]; 4];
+    let mut rhs = [0.0_f64; 4];
+    for p in &points {
+        let q = *p - mean;
+        let row = [2.0 * q.x, 2.0 * q.y, 2.0 * q.z, 1.0];
+        let value = q.length_squared();
+        for i in 0..4 {
+            for j in 0..4 {
+                m[i][j] += row[i] * row[j];
+            }
+            rhs[i] += row[i] * value;
+        }
+    }
+    let [cx, cy, cz, constant] = solve(m, rhs)?;
+    let offset = DVec3::new(cx, cy, cz);
+    let radius = (constant + offset.length_squared()).sqrt();
+    let centre = mean + offset;
+    let extent = points.iter().map(|p| p.distance(mean)).fold(0.0, f64::max);
+    // A nearly flat patch fits a huge sphere: not a spherical face.
+    if !(radius.is_finite() && radius > 0.0) || radius > 1e3 * extent {
+        return None;
+    }
+    if points.iter().any(|p| (p.distance(centre) - radius).abs() > tolerance * radius) {
+        return None;
+    }
+    // Every triangle looks along its radius (a cone or cylinder that happens to pass the fit does not).
+    let radial = region.iter().all(|t| {
+        let (Some(n), Some([a, b, c])) = (normal_of(*t), corners(*t)) else { return false };
+        let out = ((a + b + c) / 3.0 - centre).try_normalize().unwrap_or(DVec3::ZERO);
+        n.dot(out).abs() > 1.0 - tolerance.max(0.02)
+    });
+    if !radial {
+        return None;
+    }
+    #[allow(clippy::cast_possible_truncation, reason = "triangle indices fit u32")]
+    let triangles = region.into_iter().map(|t| t as u32).collect();
+    Some(SphereRegion { triangles, centre, radius })
+}
+
+/// A circular edge of a mesh (the rim of a hole, the end of a shaft), in the mesh's frame.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CircleEdge {
+    /// Which of the given edges make it up (indices into the list passed in).
+    pub edges: Vec<u32>,
+    /// The centre.
+    pub centre: DVec3,
+    /// The unit normal of the circle's plane: the side the flat face next to the edge looks to when
+    /// there is one (the side Insert mates against), otherwise either side.
+    pub normal: DVec3,
+    /// The radius.
+    pub radius: f64,
+    /// True for a full circle, false for an arc.
+    pub closed: bool,
+}
+
+/// The circular edge that `picked` (an index into `edges`, the mesh's feature edges as vertex pairs,
+/// see [`crate::edges::feature_edges`]) belongs to: the edges joined end to end through corners where
+/// exactly two feature edges meet, when at least five of them lie on one circle within `tolerance`
+/// (relative to the radius). `None` for straight or irregular edges.
+pub fn circular_edge(
+    mesh: &MeshData,
+    edges: &[[u32; 2]],
+    picked: usize,
+    tolerance: f64,
+) -> Option<CircleEdge> {
+    let positions = mesh.positions();
+    let at = |index: u32| positions.get(index as usize).copied().map(corner);
+    // Corners that share a position (to a micrometre) are one.
+    let key = |index: u32| -> Option<[i64; 3]> {
+        let p = positions.get(index as usize)?;
+        #[allow(clippy::cast_possible_truncation, reason = "micrometre cells of a robot cell fit i64")]
+        Some(p.map(|c| (f64::from(c) * 1e6).round() as i64))
+    };
+    let mut by_corner: BTreeMap<[i64; 3], Vec<usize>> = BTreeMap::new();
+    for (i, edge) in edges.iter().enumerate() {
+        by_corner.entry(key(edge[0])?).or_default().push(i);
+        by_corner.entry(key(edge[1])?).or_default().push(i);
+    }
+    let first = *edges.get(picked)?;
+    // Walk from one end of the picked edge until the chain ends, branches or comes back.
+    let walk = |start: u32| -> Option<(Vec<usize>, Vec<DVec3>, bool)> {
+        let mut chain = Vec::new();
+        let mut points = Vec::new();
+        let (mut edge, mut corner_key) = (picked, key(start)?);
+        loop {
+            let here = by_corner.get(&corner_key)?;
+            if here.len() != 2 {
+                return Some((chain, points, false));
+            }
+            let next = *here.iter().find(|e| **e != edge)?;
+            if next == picked {
+                return Some((chain, points, true));
+            }
+            let [a, b] = *edges.get(next)?;
+            let far = if key(a)? == corner_key { b } else { a };
+            chain.push(next);
+            points.push(at(far)?);
+            edge = next;
+            corner_key = key(far)?;
+            if chain.len() > edges.len() {
+                return None;
+            }
+        }
+    };
+    let (ahead, ahead_points, closed) = walk(first[1])?;
+    let (behind, behind_points) =
+        if closed { (Vec::new(), Vec::new()) } else { walk(first[0]).map(|w| (w.0, w.1))? };
+    let mut chain: Vec<usize> = behind.iter().rev().copied().collect();
+    chain.push(picked);
+    chain.extend(ahead);
+    let mut points: Vec<DVec3> = behind_points.iter().rev().copied().collect();
+    points.push(at(first[0])?);
+    points.push(at(first[1])?);
+    points.extend(ahead_points);
+    if closed {
+        // The walk ends on the corner it started from.
+        points.pop();
+    }
+    if points.len() < 5 {
+        return None;
+    }
+    // The plane: the normal from the turns of the polyline about its mean.
+    #[allow(clippy::cast_precision_loss, reason = "corner counts are small")]
+    let mean = points.iter().copied().sum::<DVec3>() / points.len() as f64;
+    let mut sum = DVec3::ZERO;
+    for pair in points.windows(2) {
+        let c = (pair[0] - mean).cross(pair[1] - mean);
+        sum += if c.dot(sum) < 0.0 { -c } else { c };
+    }
+    let mut normal = sum.try_normalize()?;
+    let u = normal.any_orthonormal_vector();
+    let w = normal.cross(u);
+    // A circle through the corners in that plane: x² + y² = 2a x + 2b y + c.
+    let mut m = [[0.0_f64; 3]; 3];
+    let mut rhs = [0.0_f64; 3];
+    for p in &points {
+        let q = *p - mean;
+        let (x, y) = (q.dot(u), q.dot(w));
+        let row = [2.0 * x, 2.0 * y, 1.0];
+        for i in 0..3 {
+            for j in 0..3 {
+                m[i][j] += row[i] * row[j];
+            }
+            rhs[i] += row[i] * (x * x + y * y);
+        }
+    }
+    let [a, b, c] = solve(m, rhs)?;
+    let radius = (c + a * a + b * b).sqrt();
+    let centre = mean + u * a + w * b;
+    let extent = points.iter().map(|p| p.distance(mean)).fold(0.0, f64::max);
+    if !(radius.is_finite() && radius > 0.0) || radius > 1e3 * extent {
+        return None;
+    }
+    let off = points.iter().any(|p| {
+        let q = *p - centre;
+        q.dot(normal).abs() > tolerance * radius || (q.length() - radius).abs() > tolerance * radius
+    });
+    if off {
+        return None;
+    }
+    // The side the flat face on the edge looks to: a triangle on the picked edge whose normal lies along
+    // the circle's.
+    let picked_keys = [key(first[0])?, key(first[1])?];
+    for triangle in mesh.indices().chunks_exact(3) {
+        let keys = [key(triangle[0]), key(triangle[1]), key(triangle[2])];
+        if !picked_keys.iter().all(|k| keys.contains(&Some(*k))) {
+            continue;
+        }
+        let (Some(p0), Some(p1), Some(p2)) = (at(triangle[0]), at(triangle[1]), at(triangle[2])) else {
+            continue;
+        };
+        let Some(face) = (p1 - p0).cross(p2 - p0).try_normalize() else { continue };
+        if face.dot(normal).abs() > 0.99 {
+            if face.dot(normal) < 0.0 {
+                normal = -normal;
+            }
+            break;
+        }
+    }
+    #[allow(clippy::cast_possible_truncation, reason = "edge indices fit u32")]
+    let edges = chain.into_iter().map(|e| e as u32).collect();
+    Some(CircleEdge { edges, centre, normal, radius, closed })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -503,5 +771,45 @@ mod tests {
         let cube = crate::test_util::cube([0.0; 3], 2.0);
         assert!((0..12).all(|t| conical_region(&cube, t, 0.3, 1e-3).is_none()));
         assert!(conical_region(&mesh, u32::MAX, 0.3, 1e-3).is_none());
+    }
+
+    #[test]
+    fn a_ball_is_a_sphere_and_a_cube_a_cylinder_and_a_cone_are_not() {
+        let ball = crate::primitives::sphere(0.25, 24).unwrap();
+        let sphere = spherical_region(&ball, 0, 0.6, 1e-3).unwrap();
+        assert!(sphere.centre.length() < 1e-6, "{:?}", sphere.centre);
+        assert!((sphere.radius - 0.25).abs() < 1e-6, "{}", sphere.radius);
+        assert_eq!(sphere.triangles.len(), ball.triangle_count());
+        let cube = crate::test_util::cube([0.0; 3], 2.0);
+        assert!((0..12).all(|t| spherical_region(&cube, t, 0.6, 1e-3).is_none()));
+        let rod = crate::primitives::cylinder(0.1, 0.5, 32).unwrap();
+        #[allow(clippy::cast_possible_truncation, reason = "a small test mesh")]
+        let none = (0..rod.triangle_count() as u32).all(|t| spherical_region(&rod, t, 0.6, 1e-3).is_none());
+        assert!(none);
+        assert!(spherical_region(&frustum(48), 0, 0.3, 1e-3).is_none());
+        assert!(spherical_region(&ball, u32::MAX, 0.6, 1e-3).is_none());
+    }
+
+    #[test]
+    fn the_rim_of_a_cylinder_is_a_circular_edge_and_a_cube_edge_is_not() {
+        let rod = crate::primitives::cylinder(0.1, 0.5, 32).unwrap();
+        let edges = crate::edges::feature_edges(&rod, 0.5);
+        assert!(!edges.is_empty());
+        let mut seen = 0;
+        for picked in 0..edges.len() {
+            let Some(circle) = circular_edge(&rod, &edges, picked, 1e-3) else { continue };
+            seen += 1;
+            assert!(circle.closed && circle.edges.len() == 32, "{circle:?}");
+            assert!((circle.radius - 0.1).abs() < 1e-6);
+            // A rim at either end of the axis, its normal looking out of the end face.
+            assert!(circle.centre.x.abs() < 1e-6 && circle.centre.y.abs() < 1e-6);
+            assert!((circle.centre.z.abs() - 0.25).abs() < 1e-6, "{:?}", circle.centre);
+            assert!((circle.normal.z - circle.centre.z.signum()).abs() < 1e-6, "{circle:?}");
+        }
+        assert_eq!(seen, 64, "both rims, whichever of their edges is picked");
+        let cube = crate::test_util::cube([0.0; 3], 2.0);
+        let edges = crate::edges::feature_edges(&cube, 0.5);
+        assert!((0..edges.len()).all(|picked| circular_edge(&cube, &edges, picked, 1e-3).is_none()));
+        assert!(circular_edge(&cube, &edges, usize::MAX, 1e-3).is_none());
     }
 }

@@ -35,6 +35,8 @@ fn world_geometry_of(feature: &Feature) -> Option<Geometry> {
             Some(Geometry::Axis { point: a, direction: direction.to_array() })
         }
         Feature::Point(p) => Some(Geometry::Point(p)),
+        Feature::Circle { centre, normal, .. } => Some(Geometry::Circle { centre, normal }),
+        Feature::Sphere { centre, radius } => Some(Geometry::Sphere { centre, radius }),
     }
 }
 
@@ -58,6 +60,8 @@ pub(crate) fn selection_of(session: &Session, item: CellItem, feature: &Feature)
         Geometry::Cone { apex, direction, half_angle } => {
             Geometry::Cone { apex: p(apex), direction: d(direction), half_angle }
         }
+        Geometry::Circle { centre, normal } => Geometry::Circle { centre: p(centre), normal: d(normal) },
+        Geometry::Sphere { centre, radius } => Geometry::Sphere { centre: p(centre), radius },
         other => other,
     };
     Some(Selection { occurrence, geometry })

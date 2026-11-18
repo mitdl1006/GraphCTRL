@@ -124,6 +124,21 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 원형 모서리·구 면 인식과 `Feature::{Circle, Sphere}` (프런트 요청)
+
+근거: To Place Insert Constraints(`GUID-97DD5557-FAEE-46FA-845D-11123D725BA9`, 원형 모서리), Place Tangent constraints(`GUID-FF270566-CA9E-420A-A00A-F52DD0FDFD8E`, 구).
+
+| 무엇 | 호출 |
+|---|---|
+| 구 면 | `gc_mesh::region::spherical_region_in(mesh, &adjacency, triangle, bend, tolerance) -> Option<SphereRegion { triangles, centre, radius }>`(`spherical_region`은 인접 정보를 직접 만든다). 평면·원통·원뿔·불규칙 면은 `None` |
+| 원형 모서리 | `gc_mesh::region::circular_edge(mesh, &feature_edges, picked_index, tolerance) -> Option<CircleEdge { edges, centre, normal, radius, closed }>` — `feature_edges`는 `gc_mesh::edges::feature_edges` 결과, `picked_index`는 그 목록에서 고른 모서리. 꼭짓점에서 특징 모서리가 정확히 둘 만나는 동안 이어 붙여, 5점 이상이 한 원 위에 있으면 된다(닫힌 원·호 모두). `normal`은 그 모서리에 붙은 평평한 면이 보는 쪽(Insert가 맞대는 쪽) |
+| 세션 Feature | `Feature::Circle { centre, normal, radius }`, `Feature::Sphere { centre, radius }`(열거형 끝에 추가). 측정(`measure_features`)에서는 중심점으로 잰다 |
+
+- 권장 인자: 구 `bend` 0.6 rad 안팎(면 수가 적은 구), `tolerance` 1e-3~1e-2; 원형 모서리 `tolerance` 1e-3.
+- **다른 레이어에 넣은 최소 변경**(워크스페이스가 컴파일되도록; `Feature`를 빠짐없이 match하는 곳): `gc_viewport/src/altdrag.rs::geometry_of`(Circle → `Geometry::Circle`, Sphere → `Geometry::Sphere`), `gc_viewport/src/grip.rs::reference_of`(둘 다 `None`), `gc_app/src/measure.rs` 두 곳(목록 줄은 중심 좌표, 화면 표시는 중심에 점). 프런트 브랜치는 같은 match에 `Feature::Cone`을 이미 넣었으므로 **병합 때 이 네 곳에서 충돌이 날 수 있다** — 양쪽 arm을 모두 남기면 된다.
+- `gc_scene`의 픽 연결(면 픽에서 `spherical_region_in`, 모서리 픽에서 `circular_edge` 호출해 `Feature`를 만드는 것)은 프런트 몫.
+- 테스트: `gc_mesh` `region::tests::{a_ball_is_a_sphere…, the_rim_of_a_cylinder_is_a_circular_edge…}`, `gc_session` `measure::tests::features_measure_like_inventor`(끝부분).
+
 ## 2026-11-18 — BOM 추가분: BOM 설정(행 병합·억제 숨기기), Varies, Static Quantity
 
 근거: To Work with Bill of Materials(`GUID-7A1FC6F1-8833-4A76-9E2B-AA6FE5FDF223`) — "different components with the same part number … quantities are summed together and properties that do not match are reported as Varies", "A suppressed component does not participate in the Bill of Materials and appears as a 0 QTY … To remove 0 QTY items from the BOM display, click BOM Settings and enable Hide Suppressed components in BOM". Part Number Row Merge Settings(`GUID-EBBCAEA4-B876-4B39-8D33-F3DC9E18E620`) — Merge Rows on Part Number Match, Excluded Part Numbers. About BOM Quantity(`GUID-37BA8DB6-E39C-4C96-AAF1-E7B342F20D0E`) — "You can override the calculated quantity value and enter a Static Quantity value. An override value is displayed in dark blue."

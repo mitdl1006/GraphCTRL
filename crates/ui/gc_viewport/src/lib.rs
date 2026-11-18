@@ -1892,6 +1892,17 @@ impl Viewport {
                 Feature::Cylinder { centre: centre.to_array(), axis: axis.to_array(), radius, length };
             return Some((hit.owner, feature));
         }
+        // A circular edge close to the pointer (Insert mates circles), before the faces around it.
+        if cones
+            && let Some((centre, normal, radius, distance)) = hit.circle
+            && distance <= self.camera.distance * 0.012
+        {
+            let feature = Feature::Circle { centre: centre.to_array(), normal: normal.to_array(), radius };
+            return Some((hit.owner, feature));
+        }
+        if let Some((centre, radius)) = hit.sphere.filter(|_| cones) {
+            return Some((hit.owner, Feature::Sphere { centre: centre.to_array(), radius }));
+        }
         if let Some((apex, axis, half_angle)) = hit.cone.filter(|_| cones) {
             let feature = Feature::Cone { apex: apex.to_array(), axis: axis.to_array(), half_angle };
             return Some((hit.owner, feature));
@@ -3215,6 +3226,26 @@ fn paint_pick(
             line(v(centre) - v(axis) * l / 2.0, v(centre) + v(axis) * l / 2.0);
         }
         Feature::Cone { apex, axis, .. } => line(v(apex), v(apex) + v(axis) * length * 3.0),
+        Feature::Circle { centre, normal, radius } => {
+            // The circle as a polygon in its plane.
+            let n = v(normal).try_normalize().unwrap_or(DVec3::Z);
+            let helper = if n.x.abs() < 0.9 { DVec3::X } else { DVec3::Y };
+            let (u, w) = (helper.cross(n).normalize(), n.cross(helper.cross(n).normalize()));
+            let points: Vec<DVec3> = (0..=48)
+                .map(|k| {
+                    let angle = f64::from(k) / 48.0 * std::f64::consts::TAU;
+                    v(centre) + (u * gc_math::fm::cos(angle) + w * gc_math::fm::sin(angle)) * radius
+                })
+                .collect();
+            for pair in points.windows(2) {
+                line(pair[0], pair[1]);
+            }
+        }
+        Feature::Sphere { centre, .. } => {
+            if let Some(at) = screen(v(centre)) {
+                painter.circle(at, 6.0, egui::Color32::TRANSPARENT, stroke);
+            }
+        }
         Feature::Face { point, normal, .. } => {
             if let (Some(a), Some(b)) = (screen(v(point)), screen(v(point) + v(normal) * length)) {
                 painter.arrow(a, b - a, stroke);

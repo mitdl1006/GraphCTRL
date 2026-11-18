@@ -402,6 +402,8 @@ pub struct Picker {
     trees: std::collections::BTreeMap<u64, Arc<gc_mesh::MeshBvh>>,
     /// Triangle adjacency per mesh, for finding the face around a hit (built on the first pick of it).
     adjacency: std::collections::BTreeMap<u64, Arc<gc_mesh::region::Adjacency>>,
+    /// Feature edges per mesh, for finding a circular edge near a hit (built on the first pick of it).
+    edges: std::collections::BTreeMap<u64, Arc<Vec<[u32; 2]>>>,
 }
 
 /// Where a ray meets the surface of a solid, for measuring edges and faces.
@@ -418,6 +420,11 @@ pub struct SurfaceHit {
     pub cylinder: Option<(DVec3, DVec3, f64, f64)>,
     /// A conical surface: the apex, the unit axis away from it and the angle between axis and surface.
     pub cone: Option<(DVec3, DVec3, f64)>,
+    /// A spherical surface: the centre and radius.
+    pub sphere: Option<(DVec3, f64)>,
+    /// The circular edge nearest the hit: centre, unit normal (the side the flat face beside it looks to), radius,
+    /// and how far the hit is from it (metres).
+    pub circle: Option<(DVec3, DVec3, f64, f64)>,
 }
 
 impl Picker {
@@ -460,7 +467,7 @@ impl Picker {
                     .or_insert_with(|| Arc::new(gc_mesh::region::Adjacency::of(mesh))),
             )
         });
-        let (face, cylinder, cone) = match (mesh.as_ref(), adjacency.as_ref()) {
+        let (face, cylinder, cone, sphere, circle) = match (mesh.as_ref(), adjacency.as_ref()) {
             (Some(mesh), Some(adjacency)) => {
                 let face = gc_mesh::region::planar_region_in(
                     mesh,
@@ -491,9 +498,44 @@ impl Picker {
                     )
                     .filter(|c| c.triangles.len() > face.as_ref().map_or(0, |f| f.triangles.len()))
                 };
-                (face, cylinder, cone)
+                // A sphere when it is neither a cylinder nor a cone (Tangent and Mate take its centre).
+                let sphere = if cylinder.is_some() || cone.is_some() {
+                    None
+                } else {
+                    gc_mesh::region::spherical_region_in(mesh, adjacency, hit.triangle, 0.6, 0.01)
+                        .filter(|c| c.triangles.len() > face.as_ref().map_or(0, |f| f.triangles.len()))
+                };
+                // The circular edge nearest the hit (Insert mates circles).
+                let feature_edges =
+                    Arc::clone(self.edges.entry(solid.shape.key()).or_insert_with(|| {
+                        Arc::new(gc_mesh::edges::feature_edges(mesh, 20_f64.to_radians()))
+                    }));
+                let positions = mesh.positions();
+                let at = |i: u32| {
+                    positions
+                        .get(i as usize)
+                        .map(|p| DVec3::new(f64::from(p[0]), f64::from(p[1]), f64::from(p[2])))
+                };
+                let nearest = feature_edges
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, [a, b])| {
+                        let (a, b) = (at(*a)?, at(*b)?);
+                        let along = (b - a).length_squared();
+                        let t = if along > 0.0 {
+                            ((hit.point - a).dot(b - a) / along).clamp(0.0, 1.0)
+                        } else {
+                            0.0
+                        };
+                        Some((hit.point.distance(a + (b - a) * t), index))
+                    })
+                    .min_by(|x, y| x.0.total_cmp(&y.0));
+                let circle = nearest.and_then(|(distance, index)| {
+                    gc_mesh::region::circular_edge(mesh, &feature_edges, index, 1e-3).map(|c| (c, distance))
+                });
+                (face, cylinder, cone, sphere, circle)
             }
-            _ => (None, None, None),
+            _ => (None, None, None, None, None),
         };
         Some(SurfaceHit {
             owner: solid.owner?,
@@ -504,6 +546,9 @@ impl Picker {
             }),
             cylinder: cylinder.map(|c| (pose * c.centre, pose.rotation * c.axis, c.radius, c.length)),
             cone: cone.map(|c| (pose * c.apex, pose.rotation * c.axis, c.half_angle)),
+            sphere: sphere.map(|c| (pose * c.centre, c.radius)),
+            circle: circle
+                .map(|(c, distance)| (pose * c.centre, pose.rotation * c.normal, c.radius, distance)),
         })
     }
 

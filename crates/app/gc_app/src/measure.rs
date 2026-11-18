@@ -205,6 +205,11 @@ impl Measure {
                     Group::Area,
                     *area,
                 ),
+                // A circular edge or a sphere is listed by its centre (the frontend may refine this).
+                Feature::Circle { centre, .. } | Feature::Sphere { centre, .. } => {
+                    let [x, y, z] = centre.map(mm);
+                    line(colour, format!("{title}: {}", tr!(lang, MeasurePoint, x, y, z)))
+                }
             });
         }
         let text = egui::Color32::PLACEHOLDER;
@@ -485,6 +490,11 @@ impl Measure {
                     }
                     Some(Feature::Cone { apex, .. }) => {
                         if let Some(at) = screen(*apex) {
+                            painter.circle(at, 5.0, colour, egui::Stroke::new(1.5, egui::Color32::WHITE));
+                        }
+                    }
+                    Some(Feature::Circle { centre, .. } | Feature::Sphere { centre, .. }) => {
+                        if let Some(at) = screen(*centre) {
                             painter.circle(at, 5.0, colour, egui::Stroke::new(1.5, egui::Color32::WHITE));
                         }
                     }
