@@ -41,12 +41,18 @@ pub struct BomRow {
     pub structure: BomStructure,
     /// The tree rows it stands for (several when merged).
     pub keys: Vec<TreeKey>,
+    /// True when `quantity` is a Static Quantity entered by hand (Inventor shows it in dark blue).
+    pub static_quantity: bool,
 }
 
 /// The assembly tree as the BOM sees it.
 struct Tree {
     rows: Vec<TreeRow>,
     children: HashMap<Option<TreeKey>, Vec<usize>>,
+    /// Suppressed rows that are still listed: they add nothing to a quantity.
+    idle: Vec<TreeKey>,
+    /// Row merge on part number, with the part numbers that are never merged.
+    settings: gc_doc::BomSettings,
 }
 
 impl Tree {
@@ -56,6 +62,19 @@ impl Tree {
 
     fn has_kids(&self, key: TreeKey) -> bool {
         !self.kids(Some(key)).is_empty()
+    }
+
+    /// Adds a row to the line with its part number (when rows merge on it), or as a new line.
+    fn add(&self, lines: &mut Vec<Line>, key: TreeKey, part_number: String) {
+        let counts = u32::from(!self.idle.contains(&key));
+        let merges = self.settings.merge_part_numbers && !self.settings.merge_excluded.contains(&part_number);
+        match lines.iter_mut().find(|l| merges && l.part_number == part_number) {
+            Some(line) => {
+                line.quantity = line.quantity.saturating_add(counts);
+                line.keys.push(key);
+            }
+            None => lines.push(Line { key, part_number, keys: vec![key], quantity: counts }),
+        }
     }
 }
 
@@ -78,29 +97,53 @@ impl Session {
         self.execute(&Command::Cell(CellOp::SetBomStructure { key, structure })).map(|_| ())
     }
 
+    /// The Bill of Materials settings (row merge on part number, hiding suppressed components).
+    pub fn bom_settings(&self) -> gc_doc::BomSettings {
+        self.doc().bom_settings()
+    }
+
+    /// Changes the Bill of Materials settings. One undo step; saved.
+    pub fn set_bom_settings(&mut self, settings: gc_doc::BomSettings) -> Result<(), EditError> {
+        self.execute(&Command::Cell(CellOp::SetBomSettings(settings))).map(|_| ())
+    }
+
+    /// Sets a Static Quantity for the BOM row a component stands in (`None`: counted again). One undo
+    /// step; saved.
+    pub fn set_bom_quantity(&mut self, key: TreeKey, quantity: Option<u32>) -> Result<(), EditError> {
+        self.execute(&Command::Cell(CellOp::SetBomQuantity { key, quantity })).map(|_| ())
+    }
+
     /// The lines of a BOM view, in tree order.
     pub fn bill_of_materials(&self, view: BomView) -> Vec<BomRow> {
-        // Suppressed components take no part (Inventor 2026 help, Suppress elements in assembly patterns,
-        // GUID-FDD20E41-93A5-479D-B547-BA9956E9966B: "Suppressed pattern elements are also excluded from
-        // a bill of materials"), nor does what hangs under them. Rows come parents first.
+        // "A suppressed component does not participate in the Bill of Materials and appears as a 0 QTY
+        // … To remove 0 QTY items from the BOM display, click BOM Settings and enable Hide Suppressed
+        // components in BOM" (To Work with Bill of Materials, GUID-7A1FC6F1-8833-4A76-9E2B-AA6FE5FDF223).
+        // What hangs under a suppressed row is left out either way. Rows come parents first.
+        let settings = self.doc().bom_settings();
+        let mut idle: Vec<TreeKey> = Vec::new();
         let mut left_out: Vec<TreeKey> = Vec::new();
         let rows: Vec<TreeRow> = self
             .component_tree()
             .into_iter()
             .filter(|row| {
-                let out = row.component.as_ref().is_some_and(|c| c.suppressed)
-                    || row.parent.is_some_and(|parent| left_out.contains(&parent));
-                if out {
+                let under =
+                    row.parent.is_some_and(|parent| left_out.contains(&parent) || idle.contains(&parent));
+                let suppressed = row.component.as_ref().is_some_and(|c| c.suppressed);
+                if under || (suppressed && settings.hide_suppressed) {
                     left_out.push(row.key);
+                    return false;
                 }
-                !out
+                if suppressed {
+                    idle.push(row.key);
+                }
+                true
             })
             .collect();
         let mut children: HashMap<Option<TreeKey>, Vec<usize>> = HashMap::new();
         for (i, row) in rows.iter().enumerate() {
             children.entry(row.parent).or_default().push(i);
         }
-        let tree = Tree { rows, children };
+        let tree = Tree { rows, children, idle, settings };
         let mut out = Vec::new();
         match view {
             BomView::Structured => self.structured(&tree, None, "", 0, &mut out),
@@ -165,7 +208,7 @@ impl Session {
                 BomStructure::Reference => {}
                 BomStructure::Phantom => self.level_lines(tree, Some(row.key), lines, depth + 1),
                 BomStructure::Normal | BomStructure::Purchased | BomStructure::Inseparable => {
-                    add_line(lines, row.key, self.bom_part_number(row));
+                    tree.add(lines, row.key, self.bom_part_number(row));
                 }
             }
         }
@@ -178,9 +221,9 @@ impl Session {
             let key = row.key;
             match self.bom_structure(key) {
                 BomStructure::Reference => {}
-                BomStructure::Purchased => add_line(lines, key, self.bom_part_number(row)),
+                BomStructure::Purchased => tree.add(lines, key, self.bom_part_number(row)),
                 BomStructure::Inseparable if !inseparable => {
-                    add_line(lines, key, self.bom_part_number(row));
+                    tree.add(lines, key, self.bom_part_number(row));
                     self.parts_only(tree, Some(key), true, lines);
                 }
                 BomStructure::Inseparable | BomStructure::Phantom => {
@@ -189,7 +232,7 @@ impl Session {
                 BomStructure::Normal if tree.has_kids(key) => {
                     self.parts_only(tree, Some(key), inseparable, lines)
                 }
-                BomStructure::Normal if !inseparable => add_line(lines, key, self.bom_part_number(row)),
+                BomStructure::Normal if !inseparable => tree.add(lines, key, self.bom_part_number(row)),
                 BomStructure::Normal => {}
             }
         }
@@ -206,18 +249,26 @@ impl Session {
     }
 
     fn bom_row(&self, line: Line, item: String, level: u32) -> BomRow {
-        let description = match line.key {
-            TreeKey::Component(occurrence) => self.properties(Some(occurrence)).description,
+        let description_of = |key: &TreeKey| match key {
+            TreeKey::Component(occurrence) => self.properties(Some(*occurrence)).description,
             TreeKey::Subassembly(_) => String::new(),
         };
+        // "Quantities are summed together and properties that do not match are reported as Varies."
+        let mut description = description_of(&line.key);
+        if line.keys.iter().any(|key| description_of(key) != description) {
+            "Varies".clone_into(&mut description);
+        }
+        // A Static Quantity entered for any component of the row stands for the counted one.
+        let fixed = line.keys.iter().find_map(|key| self.doc().bom_static_quantity(*key));
         BomRow {
             item,
             level,
             part_number: line.part_number,
             description,
-            quantity: line.quantity,
+            quantity: fixed.unwrap_or(line.quantity),
             structure: self.bom_structure(line.key),
             keys: line.keys,
+            static_quantity: fixed.is_some(),
         }
     }
 
@@ -234,16 +285,6 @@ impl Session {
             at = doc.tree_parent(key);
         }
         false
-    }
-}
-
-/// Adds one to the line with this part number, or a new line.
-fn add_line(lines: &mut Vec<Line>, key: TreeKey, part_number: String) {
-    if let Some(line) = lines.iter_mut().find(|l| l.part_number == part_number) {
-        line.quantity = line.quantity.saturating_add(1);
-        line.keys.push(key);
-    } else {
-        lines.push(Line { key, part_number, keys: vec![key], quantity: 1 });
     }
 }
 
