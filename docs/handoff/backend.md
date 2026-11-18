@@ -54,6 +54,23 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 스플라인 Close Curve·Insert Point·Extend(리드 다음 ②)
+
+근거: To Create, Lock Spline Length, and Edit Splines, GUID-DB15C479-66F2-456A-9E54-40A60F83DC92 — "To add a point, right-click the spline and choose
+Insert Point. Then click the curve to add one or more points." / "To close a curve, right-click the starting point and choose Close Curve."
+To Split, Trim, or Extend Curves, GUID-DD00037F-6BBA-4B95-AA90-4F99DCEB667D — "the Extend command extends a curve to the nearest intersecting curve".
+
+- `SketchOp::CloseSpline { curve }`: 맞춤점 3개 이상인 열린 스플라인을 닫는다.
+  - 닫힌 스플라인은 첫 점 id를 끝에 한 번 더 둔다(`gc_sketch::spline_closed`). 저장 형식은 그대로.
+  - 곡선은 주기적으로 매끄럽다(`closed_spline_points`: 앞뒤로 세 점씩 감아 붙여 맞춘 뒤 가운데를 씀).
+  - `Curve::points()`는 중복 없이 돌려준다.
+- `SketchOp::InsertSplinePoint { curve, at }`: 클릭에 가장 가까운 곡선 위 점에 맞춤점을 끼운다(결과 `Created::Point`). 기존 맞춤점 위면 거부. 닫는 구간에도 된다.
+- `SketchOp::Extend`가 열린 스플라인을 받는다. 클릭에 가까운 끝에서 그 방향으로 곧게 나아가 처음 만나는 곡선까지 새 끝 맞춤점을 두고 묶는다. 미리보기는 그 직선(`extend_preview` → `Piece::Segment`). 끝이 다른 형상에 일치되어 있으면 거부(선·호와 같은 규칙).
+- 닫힌 스플라인: Trim·Split·Split Spline·Extend는 거부. 다른 곡선의 경계로는 쓰인다. Offset하면 닫힌 스플라인이 된다.
+- FE: 스플라인 우클릭 "Insert Point"(클릭마다 `InsertSplinePoint`, Esc로 끝), 시작점 우클릭 "Close Curve". 그리기 중 Close Curve는 `AddSpline` 다음 `CloseSpline`(지금은 실행 취소 두 단계).
+- 차이: 원문 Extend가 스플라인을 곡률을 따라 늘리는지는 원문에 없음 — 여기서는 끝 방향 직선. 끼운 점·닫기 뒤에는 다시 맞춰서 모양이 조금 바뀐다(원문은 핸들로 유지).
+- 테스트: `gc_session/tests/ellipse_spline_edit.rs`(`close_curve_and_insert_point`, `a_spline_extends_to_the_nearest_curve`).
+
 ## 2026-11-18 — 작업 피처 종류 확장(리드 다음 ①)
 
 근거: To Create Work Features, GUID-38A9748E-FA2D-44D3-928C-DFE1326A9385(작업 평면·축·점 유형 목록). 인용 예: "Midplane Between Two Planes. … Select two

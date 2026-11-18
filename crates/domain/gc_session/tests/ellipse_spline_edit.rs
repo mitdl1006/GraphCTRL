@@ -303,3 +303,121 @@ fn spline_against_spline_and_lone_splines() {
     run(&mut s, k, SketchOp::Trim { curve: a, at: [0.01, 0.01] }).unwrap();
     assert!(splines(&s).is_empty());
 }
+
+/// Close Curve and Insert Point (To Create, Lock Spline Length, and Edit Splines,
+/// GUID-DB15C479-66F2-456A-9E54-40A60F83DC92): a closed spline runs smoothly back to its first point and is
+/// not trimmed or split open; a point inserted on a spline becomes a fit point there.
+#[test]
+fn close_curve_and_insert_point() {
+    let (mut s, k) = setup();
+    let sp = spline(&mut s, k);
+    let CurveGeom::Spline { points } = geom(&s, sp) else { panic!() };
+    // Insert a point on the second span.
+    let steps = s.history().undo_depth();
+    let created = run(&mut s, k, SketchOp::InsertSplinePoint { curve: sp, at: [0.015, 0.006] }).unwrap();
+    assert_eq!(s.history().undo_depth(), steps + 1);
+    let [Created::Point(new)] = created[..] else { panic!("{created:?}") };
+    let CurveGeom::Spline { points: more } = geom(&s, sp) else { panic!() };
+    assert_eq!(more.len(), 5);
+    assert_eq!(more[2], new);
+    assert_eq!([more[0], more[1], more[3], more[4]], [points[0], points[1], points[2], points[3]]);
+    let p = xy(&s, new);
+    assert!(p[0] > 0.01 && p[0] < 0.02, "{p:?}");
+    // On top of a fit point: refused.
+    let on_point = xy(&s, points[1]);
+    assert!(run(&mut s, k, SketchOp::InsertSplinePoint { curve: sp, at: on_point }).is_err());
+    s.undo();
+
+    // Close Curve: the first point again at the end; the outline ends where it began, smoothly.
+    run(&mut s, k, SketchOp::CloseSpline { curve: sp }).unwrap();
+    let CurveGeom::Spline { points: closed } = geom(&s, sp) else { panic!() };
+    assert_eq!(closed.len(), 5);
+    assert_eq!(closed[0], closed[4]);
+    let sk = s.active_sketch().unwrap().1;
+    let outline = sk.spline_outline(&sk.curves[&sp].geom, 16).unwrap();
+    assert_eq!(outline.len(), 4 * 16 + 1);
+    let (first, last) = (outline[0], outline[outline.len() - 1]);
+    assert!(gc_math::fm::hypot(first[0] - last[0], first[1] - last[1]) < 1e-12);
+    // Smooth through the first point: the steps either side of it point the same way.
+    let (a, b, c) = (outline[outline.len() - 2], outline[0], outline[1]);
+    let (u, v) = ([b[0] - a[0], b[1] - a[1]], [c[0] - b[0], c[1] - b[1]]);
+    let cos = (u[0] * v[0] + u[1] * v[1]) / (gc_math::fm::hypot(u[0], u[1]) * gc_math::fm::hypot(v[0], v[1]));
+    assert!(cos > 0.9, "{cos}");
+    // Closing again, splitting at a point, and trimming or splitting at a crossing are refused.
+    let before = s.doc().clone();
+    assert!(run(&mut s, k, SketchOp::CloseSpline { curve: sp }).is_err());
+    assert!(run(&mut s, k, SketchOp::SplitSpline { curve: sp, point: closed[2] }).is_err());
+    let _line = vertical(&mut s, k, 0.015);
+    let with_line = s.doc().clone();
+    assert!(run(&mut s, k, SketchOp::Split { curve: sp, at: [0.012, 0.009] }).is_err());
+    assert!(run(&mut s, k, SketchOp::Trim { curve: sp, at: [0.012, 0.009] }).is_err());
+    assert!(s.doc().same_content(&with_line));
+    // A point inserted on the closing span lands between the last fit point and the first.
+    run(&mut s, k, SketchOp::Delete(vec![gc_sketch::Item::Curve(_line)])).unwrap();
+    let sk = s.active_sketch().unwrap().1;
+    let outline = sk.spline_outline(&sk.curves[&sp].geom, 16).unwrap();
+    let on_closing = outline[3 * 16 + 8];
+    let created = run(&mut s, k, SketchOp::InsertSplinePoint { curve: sp, at: on_closing }).unwrap();
+    let [Created::Point(new)] = created[..] else { panic!() };
+    let CurveGeom::Spline { points: now } = geom(&s, sp) else { panic!() };
+    assert_eq!(now.len(), 6);
+    assert_eq!(now[4], new);
+    assert_eq!(now[0], now[5]);
+    // A closed spline offsets to a closed spline.
+    let made = curves(
+        &run(
+            &mut s,
+            k,
+            SketchOp::Offset { curves: vec![sp], distance: 0.001, loop_select: false, constrain: false },
+        )
+        .unwrap(),
+    );
+    let CurveGeom::Spline { points: offset } = geom(&s, made[0]) else { panic!() };
+    assert!(gc_sketch::spline_closed(&offset));
+    // Two fit points cannot close.
+    let two = curves(
+        &run(
+            &mut s,
+            k,
+            SketchOp::AddSpline { points: vec![[0.1, 0.0, 0.0], [0.2, 0.0, 0.0]], snaps: Vec::new() },
+        )
+        .unwrap(),
+    )[0];
+    assert!(run(&mut s, k, SketchOp::CloseSpline { curve: two }).is_err());
+    let _ = before;
+}
+
+/// Extend (To Split, Trim, or Extend Curves, GUID-DD00037F-6BBA-4B95-AA90-4F99DCEB667D: "extends a curve to
+/// the nearest intersecting curve"): a spline's end goes straight on to the nearest curve, through a new
+/// end fit point tied there.
+#[test]
+fn a_spline_extends_to_the_nearest_curve() {
+    let (mut s, k) = setup();
+    let sp = spline(&mut s, k);
+    let tall = SketchOp::AddLine {
+        a: [0.05, -0.2, 0.0],
+        b: [0.05, 0.2, 0.0],
+        snap_a: EndSnap::default(),
+        snap_b: EndSnap::default(),
+        horizontal: Some(false),
+    };
+    let wall = curves(&run(&mut s, k, tall).unwrap())[0];
+    let steps = s.history().undo_depth();
+    run(&mut s, k, SketchOp::Extend { curve: sp, at: [0.029, -0.009] }).unwrap();
+    assert_eq!(s.history().undo_depth(), steps + 1);
+    let CurveGeom::Spline { points } = geom(&s, sp) else { panic!() };
+    assert_eq!(points.len(), 5);
+    let end = xy(&s, points[4]);
+    assert!((end[0] - 0.05).abs() < 1e-9, "{end:?}");
+    // Tied to the wall: the end is held on it.
+    let sk = s.active_sketch().unwrap().1;
+    assert!(
+        sk.constraints.values().any(
+            |c| matches!(*c, gc_sketch::GeoConstraint::PointOnCurve(p, w) if p == points[4] && w == wall)
+        )
+    );
+    // Nothing ahead of the other end: refused, nothing changed.
+    let before = s.doc().clone();
+    assert!(run(&mut s, k, SketchOp::Extend { curve: sp, at: [0.001, 0.001] }).is_err());
+    assert!(s.doc().same_content(&before));
+}
