@@ -15,6 +15,7 @@ mod assembly;
 mod autoproject;
 mod cell;
 mod design;
+mod editing;
 pub mod library;
 mod measure;
 mod project;
@@ -98,6 +99,8 @@ pub struct Session {
     recovered: bool,
     cell: cell::CellState,
     spatial: spatial::SpatialState,
+    /// The component being edited in place and the ones before it.
+    editing: editing::EditStack,
 }
 
 /// The browser's Representations folder.
@@ -151,6 +154,7 @@ impl Session {
             recovered: false,
             cell: cell::CellState::default(),
             spatial: spatial::SpatialState::default(),
+            editing: editing::EditStack::default(),
         }
     }
 

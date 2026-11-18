@@ -757,6 +757,8 @@ pub enum Created {
     Assembly(Id<crate::design::Assembly>),
     /// An assembly constraint.
     Relationship(Id<crate::relate::Relationship>),
+    /// A subassembly made in the cell.
+    Subassembly(crate::subassembly::SubassemblyId),
 }
 
 /// The result of a command that was applied.
