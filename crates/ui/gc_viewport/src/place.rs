@@ -55,3 +55,30 @@ pub(crate) fn follow(
 pub(crate) fn set_down(placing: &Placing, session: &mut Session) {
     gizmo::commit(session, placing.item);
 }
+
+/// A pasted group hanging on the cursor (Inventor 2026 help, About Placing Components,
+/// GUID-249C50F9-5A8C-48BD-8341-D1BDB7A16B19: "Use Copy and Paste to place new instances"): the new
+/// components with where they stand; the first is the one that follows the cursor.
+#[derive(Clone, Debug)]
+pub(crate) struct GroupPlacing {
+    pub(crate) members: Vec<(gc_core::AnyId, DPose3)>,
+}
+
+impl GroupPlacing {
+    /// The members moved so that the first one's origin goes to `point`.
+    pub(crate) fn moved_to(&self, point: DVec3) -> Vec<(gc_core::AnyId, DPose3)> {
+        let Some((_, first)) = self.members.first() else { return Vec::new() };
+        let by = point - first.translation;
+        self.members
+            .iter()
+            .map(|(item, pose)| (*item, DPose3::from_parts(pose.translation + by, pose.rotation)))
+            .collect()
+    }
+
+    /// Hangs the group on the cursor at `at` (view pixels), as a preview.
+    pub(crate) fn follow(&self, camera: &Camera, size: [f64; 2], session: &mut Session, at: [f64; 2]) {
+        let Some((_, first)) = self.members.first() else { return };
+        let Some(point) = ground_hit(camera, size, at, first.translation) else { return };
+        drop(session.preview_components(&self.moved_to(point)));
+    }
+}

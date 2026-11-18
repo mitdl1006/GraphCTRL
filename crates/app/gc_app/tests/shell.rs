@@ -5117,19 +5117,46 @@ fn ctrl_c_and_ctrl_v_paste_a_copy_of_the_selected_body() {
     let body =
         app.session.add_body(gc_doc::Solid::Box { size: [0.1; 3] }, gc_doc::Placement::default()).unwrap();
     app.session.select_item(Some(gc_session::CellItem::Body(body)));
+    app.fit_view();
+    app.viewport_mut().camera.pan([0.0, 0.0], [-250.0, 0.0], [1280.0, 700.0]);
     harness.run();
     harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::C);
     harness.run_steps(2);
-    assert_eq!(harness.state().session.doc().bodies().iter().count(), 1);
+    assert_eq!(harness.state().session.clipboard().len(), 1, "Ctrl+C remembered the component");
+    let bodies =
+        |h: &egui_kittest::Harness<'_, GraphCtrlApp>| h.state().session.doc().bodies().iter().count();
+    assert_eq!(bodies(&harness), 1);
+    // Ctrl+V makes the copy; Esc takes the paste back.
+    let over_view = egui::pos2(500.0, 400.0);
+    harness.event(egui::Event::PointerMoved(over_view));
+    harness.run_steps(2);
     harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::V);
     harness.run_steps(3);
-    assert_eq!(harness.state().session.doc().bodies().iter().count(), 2, "a copy was made");
+    assert_eq!(bodies(&harness), 2, "a copy was made");
     assert!(harness.state().viewport().is_placing(), "it hangs on the cursor");
     harness.key_press(egui::Key::Escape);
     harness.run_steps(3);
-    harness.event(egui::Event::PointerMoved(egui::pos2(600.0, 400.0)));
-    harness.run_steps(2);
-    assert!(harness.state().session.doc().bodies().iter().count() >= 1);
+    assert_eq!(bodies(&harness), 1, "Esc took the paste back");
+    // Pasted again, a click sets the copy down where the cursor is.
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::V);
+    harness.run_steps(3);
+    let target = egui::pos2(700.0, 500.0);
+    harness.event(egui::Event::PointerMoved(target));
+    harness.run_steps(3);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: target,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run_steps(3);
+    }
+    assert_eq!(bodies(&harness), 2);
+    assert!(!harness.state().viewport().is_placing(), "set down");
+    let moved =
+        harness.state().session.doc().bodies().iter().filter(|(_, b)| b.placement.xyz != [0.0; 3]).count();
+    assert_eq!(moved, 1, "the copy stands where it was set down");
 }
 
 /// F10 shows or hides the sketch (shortcut table GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E).

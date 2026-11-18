@@ -169,7 +169,7 @@
 - 근거: 단축키 원문 GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E ("Tab Demote", "Shift + Tab Promote", "Alt + drag mouse: In assemblies, applies a mate constraint", "F10 Sketch visibility", Windows 키 Ctrl+C/V), Alt+드래그 본문 GUID-0F500089-4F69-41C5-AFE8-B58AC9E8E15E ("To drag a component into position and place a Mate constraint").
 - **Tab**: 선택한 구성요소의 Demote(브라우저 메뉴와 같이 새 서브어셈블리 이름 입력 줄), **Shift+Tab**: 한 단계 위로 Promote(소속 서브어셈블리의 부모로 이동, 최상위면 최상위로). 테스트 `tab_demotes_and_shift_tab_promotes_the_selected_component`.
 - **Alt+드래그**: Alt를 누른 채 구성요소의 면·원통을 눌러 다른 구성요소의 면·원통으로 끌어 놓으면 미리보기 선(초록=가능, 회색=불가)이 보이고, 놓으면 `possible_relations`의 첫 해(평면끼리 Mate, 원통끼리 축 Mate)를 오프셋 0으로 만든다(풀 수 없으면 구속 오류 대화상자). 테스트 `alt_drag_places_a_mate_between_two_faces`. 원문과 차이: 끄는 동안 구성요소 자체는 움직이지 않고 놓을 때 해에 따라 이동하며(원문은 접근하는 위치를 미리 보여 준다), 평면·원통 외 형상(모서리·점)과 평면의 Flush 자동 선택은 없다.
-- **Ctrl+C / Ctrl+V**: 선택한 본체를 복사하고 붙여넣으면 관계 없이(Copy Components 경로, 오프셋 0) 사본이 커서에 매달려 배치처럼 클릭마다 놓이고 Esc·우클릭으로 끝난다. 본체만(로봇·가져온 어셈블리는 복사하지 않음). 테스트 `ctrl_c_and_ctrl_v_paste_a_copy_of_the_selected_body`.
+- **Ctrl+C / Ctrl+V**: Ctrl+C는 선택한 구성요소(본체·로봇과 툴·가져온 어셈블리)를 `copy_to_clipboard`로 기억하고, Ctrl+V는 `paste`(관계 없이, 같은 방향, Undo 한 단계)로 제자리에 새로 만든 뒤 커서에 매달아 놓는다(`start_placing_group`, `preview_components`). 클릭하면 그 자리에 내려놓고(`grip_snap_commit`, Undo 한 단계 더), Esc·우클릭이면 붙여넣기를 되돌린다(`undo`). 원문 GUID-249C50F9-5A8C-48BD-8341-D1BDB7A16B19("Use Copy and Paste to place new instances using the same orientation"). 테스트 `ctrl_c_and_ctrl_v_paste_a_copy_of_the_selected_body`. 원문과 차이: 서브어셈블리 행 자체를 복사하는 단축키는 브라우저 행 선택이 키보드로 닿지 않아 없다(API는 지원), 한 번 붙여넣으면 한 번만 놓인다(연속 배치는 다시 Ctrl+V).
 - **F10**: 편집 중인 스케치(없으면 마지막 스케치)의 가시성을 토글. 테스트 `f10_toggles_the_visibility_of_the_latest_sketch`.
 
 ### 리본 아이콘 정리
