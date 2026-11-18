@@ -505,7 +505,7 @@ fn trim_split_extend_offset_and_fillet_refuse_ellipses() {
                 &mut s,
                 k,
                 &format!("offset {distance}"),
-                SketchOp::Offset { curves: vec![e], distance, loop_select, constrain },
+                SketchOp::Offset { curves: vec![e], distance, loop_select, constrain, picked: None },
             );
         }
     }

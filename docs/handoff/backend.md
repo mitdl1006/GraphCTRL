@@ -54,6 +54,20 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 사분점 사이 타원 Offset → 스플라인(리드 다음 ③)
+
+근거: To Create 2D Shape Geometry, GUID-D489CE6D-7299-4211-A43A-F3580A4BA357 — "If you select an ellipse near a quadrant and an axis is visible, the offset
+geometry is an ellipse. If you select an ellipse between quadrants and an axis is not visible, the offset geometry is a spline. … An offset spline is
+associative to the shape of the original ellipse."
+
+- `SketchOp::Offset`에 `picked: Option<[f64; 2]>`(serde 기본 `None`, 옛 파일 그대로)를 추가.
+  - 타원을 사분점에서 10°(이심 각) 밖에서 고르면 스플라인, 안쪽이거나 `None`이면 지금처럼 타원.
+  - 스플라인은 참 오프셋 곡선 위 점으로 만든다. 온 타원은 16점 닫힌 스플라인, 호는 비슷한 밀도의 열린 스플라인(끝 포함).
+  - 안쪽으로 가장 작은 곡률 반지름(b²/a) 이상 들어가면 거부.
+- 간격띄우기 도구가 곡선을 고른 위치를 `picked`로 넘긴다. 다른 생성 지점은 `picked: None`(QA 테스트 포함, 기계적으로만 바꿈).
+- 차이: 원문의 스플라인은 원본 타원에 연관되고 둘 사이에 치수를 걸 수 있다. 여기 스플라인은 비연관이다. 연관에는 스케치 파생 형상(원본을 따라 맞춤점 갱신)이 필요해 남겨 둠.
+- 테스트: `gc_session/tests/ellipse_spline_edit.rs::an_ellipse_picked_between_quadrants_offsets_to_a_spline`.
+
 ## 2026-11-18 — 스플라인 Close Curve·Insert Point·Extend(리드 다음 ②)
 
 근거: To Create, Lock Spline Length, and Edit Splines, GUID-DB15C479-66F2-456A-9E54-40A60F83DC92 — "To add a point, right-click the spline and choose
@@ -138,7 +152,7 @@ ellipse." / To Create, Lock Spline Length, and Edit Splines, GUID-DB15C479-66F2-
 point and choose Split Spline."
 
 - `SketchOp::Offset`이 타원·타원 호·스플라인을 받는다(루프에는 끼지 않고 각각 따로).
-  - 타원: 같은 중심·축 방향, 두 반지름에 거리를 더한 새 타원(구속 없음 = 원문의 nonassociative). 호는 끝 각(이심 각)을 유지. 반지름이 0 이하가 되면 거부.
+  - 타원: 같은 중심·축 방향, 두 반지름에 거리를 더한 새 타원(구속 없음 = 원문의 nonassociative). 호는 끝 각(이심 각)을 유지. 반지름이 0 이하가 되면 거부. (사분점 사이를 고르면 스플라인 — 위 ③ 항목)
   - 스플라인: 맞춤점마다 진행 방향 왼쪽(양수)으로 거리만큼 옮긴 새 스플라인(구속 없음).
   - 간격띄우기 도구(`ToolKind::Offset`)는 그대로 동작(커서로 거리·방향).
 - `SketchOp::SplitSpline { curve, point }`: 안쪽 맞춤점에서 둘로. 원래 스플라인은 그 점까지, 새 스플라인(결과 `Created::Curve`)은 그 점부터. 두 조각이 점을 공유. 끝점·다른 점·스플라인 아님은 거부. 한 번의 실행 취소.

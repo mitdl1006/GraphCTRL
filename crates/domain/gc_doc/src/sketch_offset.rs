@@ -294,11 +294,17 @@ fn offset_free(
     ids: &mut IdAlloc,
     id: Id<Curve>,
     distance: f64,
+    picked: Option<P>,
     created: &mut Vec<Created>,
 ) -> Result<(), EditError> {
     let geom = sketch.curves.get(&id).ok_or(SketchError::MissingCurve)?.geom.clone();
     let made: Id<Curve> = ids.alloc();
     let geom = match geom {
+        CurveGeom::Ellipse { c, major, minor, arc }
+            if picked.is_some_and(|p| !near_quadrant(sketch, c, major, minor, p)) =>
+        {
+            ellipse_offset_spline(sketch, ids, (c, major, minor, arc), distance, created)?
+        }
         CurveGeom::Ellipse { c, major, minor, arc } => {
             let (o, m) = (xy(sketch, c)?, xy(sketch, major)?);
             let a = norm(sub(m, o));
@@ -369,6 +375,62 @@ fn offset_free(
     Ok(())
 }
 
+/// True when `p` lies within 10° (eccentric angle) of one of the ellipse's quadrant points, where Inventor
+/// shows the axis and offsets to an ellipse.
+fn near_quadrant(sketch: &Sketch, c: Id<SkPoint>, major: Id<SkPoint>, minor: f64, p: P) -> bool {
+    let (Ok(o), Ok(m)) = (xy(sketch, c), xy(sketch, major)) else { return true };
+    let t = gc_sketch::ellipse_param(o, m, minor, p);
+    let quarter = std::f64::consts::FRAC_PI_2;
+    let off = (t / quarter - (t / quarter).round()).abs() * quarter;
+    off <= 10f64.to_radians()
+}
+
+/// An ellipse's centre, major axis end, minor radius and arc ends.
+type EllipseParts = (Id<SkPoint>, Id<SkPoint>, f64, Option<(Id<SkPoint>, Id<SkPoint>)>);
+
+/// The offset of an ellipse (or elliptical arc) as a spline through points of the true offset curve:
+/// sixteen round a whole ellipse (closed), or about as dense along an arc, its ends included. Refused when
+/// an inward offset would fold over (past the smallest radius of curvature, b²/a).
+fn ellipse_offset_spline(
+    sketch: &mut Sketch,
+    ids: &mut IdAlloc,
+    (c, major, minor, arc): EllipseParts,
+    distance: f64,
+    created: &mut Vec<Created>,
+) -> Result<CurveGeom, EditError> {
+    let (o, m) = (xy(sketch, c)?, xy(sketch, major)?);
+    let a = norm(sub(m, o));
+    let u = unit(sub(m, o)).ok_or(SketchError::InvalidValue)?;
+    let b = minor;
+    if !(a > TOL && b > TOL) || -distance >= a.min(b).powi(2) / a.max(b) {
+        return Err(SketchError::InvalidValue.into());
+    }
+    let at = |t: f64| {
+        let (sin, cos) = fm::sin_cos(t);
+        let on = add(o, add(scale(u, a * cos), scale(left(u), b * sin)));
+        let normal = unit(add(scale(u, b * cos), scale(left(u), a * sin))).unwrap_or(u);
+        add(on, scale(normal, distance))
+    };
+    let tau = std::f64::consts::TAU;
+    let (params, open): (Vec<f64>, bool) = match arc {
+        None => ((0..16).map(|k| tau * f64::from(k) / 16.0).collect(), false),
+        Some((s, e)) => {
+            let start = gc_sketch::ellipse_param(o, m, b, xy(sketch, s)?);
+            let sweep = (gc_sketch::ellipse_param(o, m, b, xy(sketch, e)?) - start).rem_euclid(tau);
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "at most 16 steps")]
+            let steps = ((sweep / tau * 16.0).ceil() as u32).max(2);
+            ((0..=steps).map(|k| start + sweep * f64::from(k) / f64::from(steps)).collect(), true)
+        }
+    };
+    let mut points: Vec<Id<SkPoint>> =
+        params.into_iter().map(|t| point(sketch, ids, at(t), created)).collect();
+    // A whole ellipse closes back on its first point.
+    if !open && let Some(first) = points.first().copied() {
+        points.push(first);
+    }
+    Ok(CurveGeom::Spline { points })
+}
+
 /// Offsets curves by `distance` (positive: outside a closed loop, or left of an open chain's direction;
 /// circles grow). Returns the label.
 pub(crate) fn offset(
@@ -378,6 +440,7 @@ pub(crate) fn offset(
     distance: f64,
     loop_select: bool,
     constrain: bool,
+    picked: Option<P>,
     created: &mut Vec<Created>,
 ) -> Result<&'static str, EditError> {
     if curves.is_empty() || !distance.is_finite() || distance.abs() < TOL || sketch.is_spatial() {
@@ -392,7 +455,7 @@ pub(crate) fn offset(
         )
     });
     for id in free {
-        offset_free(sketch, ids, id, distance, created)?;
+        offset_free(sketch, ids, id, distance, picked, created)?;
     }
     let (chains, circles) = chains(sketch, &chosen)?;
     // Gauges: construction lines whose lengths are the offset distance, to be made equal.

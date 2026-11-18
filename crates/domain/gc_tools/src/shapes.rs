@@ -278,6 +278,7 @@ impl Tool {
             distance,
             loop_select: self.offset_loop,
             constrain: self.offset_constrain,
+            picked: self.offset_at,
         })
     }
 
@@ -721,6 +722,7 @@ impl Tool {
             ToolKind::Offset => {
                 if self.offset_pick.is_none() {
                     self.offset_pick = nearest_curve(sketch, pos, px, &[]).map(|(c, _)| c);
+                    self.offset_at = Some(pos);
                     return Some(Vec::new());
                 }
                 let out = self.shape_op(sketch, pos).map(ToolOutput::Edit);

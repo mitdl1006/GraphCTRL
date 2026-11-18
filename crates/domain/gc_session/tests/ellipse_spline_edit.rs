@@ -60,7 +60,13 @@ fn an_offset_ellipse_is_a_new_ellipse_with_longer_radii() {
         &run(
             &mut s,
             k,
-            SketchOp::Offset { curves: vec![e], distance: 0.005, loop_select: true, constrain: true },
+            SketchOp::Offset {
+                curves: vec![e],
+                distance: 0.005,
+                loop_select: true,
+                constrain: true,
+                picked: None,
+            },
         )
         .unwrap(),
     );
@@ -77,7 +83,13 @@ fn an_offset_ellipse_is_a_new_ellipse_with_longer_radii() {
         run(
             &mut s,
             k,
-            SketchOp::Offset { curves: vec![e], distance: -0.03, loop_select: false, constrain: false }
+            SketchOp::Offset {
+                curves: vec![e],
+                distance: -0.03,
+                loop_select: false,
+                constrain: false,
+                picked: None
+            }
         )
         .is_err()
     );
@@ -115,6 +127,7 @@ fn an_offset_elliptical_arc_keeps_its_end_angles() {
                 distance: 0.01,
                 loop_select: false,
                 constrain: false,
+                picked: None,
             },
         )
         .unwrap(),
@@ -135,7 +148,13 @@ fn an_offset_spline_runs_beside_the_original() {
         &run(
             &mut s,
             k,
-            SketchOp::Offset { curves: vec![sp], distance: 0.002, loop_select: true, constrain: true },
+            SketchOp::Offset {
+                curves: vec![sp],
+                distance: 0.002,
+                loop_select: true,
+                constrain: true,
+                picked: None,
+            },
         )
         .unwrap(),
     );
@@ -368,7 +387,13 @@ fn close_curve_and_insert_point() {
         &run(
             &mut s,
             k,
-            SketchOp::Offset { curves: vec![sp], distance: 0.001, loop_select: false, constrain: false },
+            SketchOp::Offset {
+                curves: vec![sp],
+                distance: 0.001,
+                loop_select: false,
+                constrain: false,
+                picked: None,
+            },
         )
         .unwrap(),
     );
@@ -420,4 +445,50 @@ fn a_spline_extends_to_the_nearest_curve() {
     let before = s.doc().clone();
     assert!(run(&mut s, k, SketchOp::Extend { curve: sp, at: [0.001, 0.001] }).is_err());
     assert!(s.doc().same_content(&before));
+}
+
+/// "If you select an ellipse near a quadrant and an axis is visible, the offset geometry is an ellipse. If
+/// you select an ellipse between quadrants … the offset geometry is a spline" (GUID-D489CE6D): picked
+/// between quadrants, the offset is a closed spline on the true offset curve; near a quadrant, an ellipse.
+#[test]
+fn an_ellipse_picked_between_quadrants_offsets_to_a_spline() {
+    let (mut s, k) = setup();
+    let e = ellipse(&mut s, k); // a = 0.04, b = 0.02
+    let offset = |picked: [f64; 2]| SketchOp::Offset {
+        curves: vec![e],
+        distance: 0.005,
+        loop_select: false,
+        constrain: false,
+        picked: Some(picked),
+    };
+    // Near the end of the major axis: an ellipse.
+    let near = curves(&run(&mut s, k, offset([0.0399, 0.001])).unwrap());
+    assert!(matches!(geom(&s, near[0]), CurveGeom::Ellipse { .. }));
+    s.undo();
+    // Between: a closed spline whose fit points lie 5 mm out from the ellipse.
+    let between = [0.04 * std::f64::consts::FRAC_1_SQRT_2, 0.02 * std::f64::consts::FRAC_1_SQRT_2];
+    let made = curves(&run(&mut s, k, offset(between)).unwrap());
+    let CurveGeom::Spline { points } = geom(&s, made[0]) else { panic!("{:?}", geom(&s, made[0])) };
+    assert!(gc_sketch::spline_closed(&points));
+    assert_eq!(points.len(), 17);
+    let sk = s.active_sketch().unwrap().1;
+    let outline = sk.ellipse_outline(e, 2048).unwrap().0;
+    for p in &points[..16] {
+        let q = xy(&s, *p);
+        let gap = outline
+            .iter()
+            .map(|o| gc_math::fm::hypot(o[0] - q[0], o[1] - q[1]))
+            .fold(f64::INFINITY, f64::min);
+        assert!((gap - 0.005).abs() < 1e-4, "{gap}");
+    }
+    s.undo();
+    // Inward past the tightest curvature (b²/a = 10 mm): refused.
+    let deep = SketchOp::Offset {
+        curves: vec![e],
+        distance: -0.011,
+        loop_select: false,
+        constrain: false,
+        picked: Some(between),
+    };
+    assert!(run(&mut s, k, deep).is_err());
 }

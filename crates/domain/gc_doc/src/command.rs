@@ -285,6 +285,11 @@ pub enum SketchOp {
         loop_select: bool,
         /// Keep the offset at one distance from the original everywhere.
         constrain: bool,
+        /// Where the curve was picked. An ellipse picked between its quadrants offsets to a spline, near a
+        /// quadrant (or with no pick) to an ellipse (To Create 2D Shape Geometry,
+        /// GUID-D489CE6D-7299-4211-A43A-F3580A4BA357).
+        #[serde(default)]
+        picked: Option<[f64; 2]>,
     },
     /// The Center Point toggle on selected standalone points (curve ends and centres are refused).
     SetCenterPoint {
@@ -2218,15 +2223,18 @@ fn sketch_op(
             }
             if *suppress { "Suppress elements" } else { "Unsuppress elements" }
         }
-        SketchOp::Offset { curves, distance, loop_select, constrain } => crate::sketch_offset::offset(
-            sketch,
-            ids,
-            curves,
-            *distance,
-            *loop_select,
-            *constrain,
-            &mut created,
-        )?,
+        SketchOp::Offset { curves, distance, loop_select, constrain, picked } => {
+            crate::sketch_offset::offset(
+                sketch,
+                ids,
+                curves,
+                *distance,
+                *loop_select,
+                *constrain,
+                *picked,
+                &mut created,
+            )?
+        }
         SketchOp::SetCenterPoint { points, center } => {
             let owned: std::collections::BTreeSet<Id<SkPoint>> =
                 sketch.curves.values().flat_map(gc_sketch::Curve::points).collect();

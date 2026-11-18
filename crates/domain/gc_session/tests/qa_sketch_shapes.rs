@@ -439,6 +439,7 @@ fn offset_distances_and_inputs_are_checked() {
         distance,
         loop_select,
         constrain,
+        picked: None,
     };
     refused(&mut s, k, "nothing", op(vec![], 0.005, true, true));
     refused(&mut s, k, "a ghost", op(vec![ghost], 0.005, true, true));
@@ -498,7 +499,13 @@ fn offsetting_a_circle_inward_past_its_centre_is_safe() {
         let result = run(
             &mut s,
             k,
-            SketchOp::Offset { curves: vec![circle], distance, loop_select: true, constrain: false },
+            SketchOp::Offset {
+                curves: vec![circle],
+                distance,
+                loop_select: true,
+                constrain: false,
+                picked: None,
+            },
         );
         if result.is_ok() {
             let sk = s.active_sketch().unwrap().1;
