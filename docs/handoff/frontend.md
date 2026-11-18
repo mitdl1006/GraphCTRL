@@ -96,7 +96,7 @@
 - 근거: 인벤터 도움말 Select Other (선택 항목 겹침 목록). 원문 GUID는 커밋 메시지 참고.
 - 뷰 위에서 Ctrl+A를 누르면 커서 아래에 겹친 구성요소를 거리순으로 나열한다(`Picker::pick_all`, 중복 제거). 항목에 마우스를 올리면 강조, 클릭하면 선택하고 목록이 닫힌다.
 - 증거: `docs/evidence/img/review-54-select-other.png`, 테스트 `select_other_lists_what_lies_under_the_cursor`.
-- Ctrl+A 근거: 단축키 원문 GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E에 "Ctrl + A Activates Select Other." (재확인). Shift+우클릭도 같은 목록을 연다. 근거: 같은 단축키 원문 GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E의 "Shift+ right-click Activates the Select command menu." — 원문은 Select 명령 메뉴(선택 우선순위 메뉴)를 여는 것이라 우리 목록은 그 일부(겹친 후보)만 구현한 것이다( 테스트 `shift_right_click_lists_what_lies_under_the_cursor`).
+- Ctrl+A 근거: 단축키 원문 GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E에 "Ctrl + A Activates Select Other." (재확인). Shift+우클릭은 Select 명령 메뉴(아래)를 연다. 일반 우클릭(마킹 메뉴) 목록에도 "다른 항목 선택" 항목이 있다.
 - 원문과 차이: 보통 우클릭 메뉴(마킹 메뉴)에는 "다른 항목 선택" 없음, 멈춤 지연 설정 없음, 화살표 키 순환 없음, 구성요소만 대상.
 
 ### 그립 스냅 (Grip Snap)
@@ -115,11 +115,18 @@
 - 어셈블 명령과 구속 대화상자가 뷰에서 보이는 작업 피처(축 선 / 평면 테두리 / 점 십자)를 누르면 `work_feature_selection`을 첫째·둘째 선택으로 쓴다. 작업 피처가 원점 기하보다 먼저 잡힌다. 선택 이름은 작업 피처 이름(예: `Point1 · 점`).
 - 테스트 `a_work_feature_clicked_in_the_view_fills_the_assemble_selection`.
 - 원문과 차이: 조인트·패턴·복사·미러 대화상자는 원점 기하만 받는다(작업 피처 선택 연결 없음). 곡선·면 선택은 아직 없음.
-- 같이: Shift+우클릭 = 다른 항목 선택 목록(Ctrl+A와 같은 목록).
+- 같이: Shift+우클릭 = Select 명령 메뉴(아래 항목).
 
 ### `이름 = 값` 한 단계 Undo
 
 - 치수 상자의 새 매개변수 이름은 백엔드 `edit_dimension_with_param`(한 Txn)으로 만든다. 이미 있는 이름은 값 변경(SetParam) 후 치수 연결의 두 단계로 남는다(백엔드 API가 추가만 지원). 테스트 `a_parameter_is_made_from_the_dimension_box`가 한 번의 Undo로 매개변수와 연결이 함께 사라지는지 확인.
+
+### Select 명령 메뉴 (Shift+우클릭)
+
+- 근거: 단축키 원문 GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E "Shift+ right-click Activates the Select command menu."; 선택 모드는 GUID-E3E49BD5-3F55-4836-8CD1-2C1855CF9986(Select Bodies/Features/Faces/Sketches 등), 선택 방법 GUID-B8F6E805-2E4B-4366-8FF6-33F0ED1C1C4A("right-click, choose Select Other").
+- 메뉴: 구성요소 우선(기본) / 작업 피처 우선 + 다른 항목 선택. 작업 피처 우선에서는 평범한 클릭이 작업 피처·원점 기하만 잡고 본체는 선택하지 않는다(`Viewport::select_priority`). 마킹 메뉴(일반 우클릭) 목록에도 "다른 항목 선택".
+- 테스트 `shift_right_click_opens_the_select_menu`, `the_work_feature_priority_leaves_bodies_unselected`.
+- 원문과 차이: 원문의 모드(본체·피처·면·스케치 선택, 부품 우선 등)는 앱에 해당 선택 대상이 없어 둘만 둔다. 상태 표시(어느 우선순위인지)는 메뉴에서만 보인다. 면과 모서리 선택은 측정 명령에서만.
 
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate

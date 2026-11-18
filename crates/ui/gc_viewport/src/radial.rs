@@ -51,6 +51,8 @@ pub(crate) enum Cmd {
     SketchHere(Occurrence, OriginPlane),
     /// Hide an origin element.
     HideOrigin(Occurrence, OriginElement),
+    /// List what lies under the cursor (Select Other).
+    SelectOther,
     /// The isometric view.
     Home,
     /// Fit everything.
@@ -98,6 +100,7 @@ impl Set {
             }
             overflow.push(Cmd::Delete(item));
         }
+        overflow.push(Cmd::SelectOther);
         overflow.push(Cmd::Home);
         overflow.push(Cmd::FitAll);
         Self { radial, overflow }
@@ -129,6 +132,7 @@ impl Cmd {
             }
             Self::SketchHere(..) => tr!(lang, CmdSketchHere).to_owned(),
             Self::HideOrigin(..) => tr!(lang, CmdHide).to_owned(),
+            Self::SelectOther => tr!(lang, SelOther).to_owned(),
             Self::Home => tr!(lang, NavHome).to_owned(),
             Self::FitAll => tr!(lang, NavZoomAll).to_owned(),
         };
@@ -142,6 +146,8 @@ pub(crate) enum Effect {
     None,
     /// The application is asked to do something.
     Request(ViewportRequest),
+    /// Show the Select Other list at the cursor.
+    SelectOther,
     /// Turn the view to the isometric one.
     Home,
     /// Fit everything in the view.
@@ -175,6 +181,7 @@ pub(crate) fn run(cmd: Cmd, session: &mut Session) -> Effect {
         Cmd::HideOrigin(occurrence, element) => {
             drop(session.set_origin_visible(occurrence, &[element], false))
         }
+        Cmd::SelectOther => return Effect::SelectOther,
         Cmd::Home => return Effect::Home,
         Cmd::FitAll => return Effect::Fit,
     }
