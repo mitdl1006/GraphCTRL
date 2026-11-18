@@ -810,6 +810,30 @@ messages! {
     ToolRectangle3 => ("3점 직사각형", "Three Point Rectangle"),
     /// Browser menu: makes a representation the active one.
     CmdActivate => ("활성화", "Activate"),
+    /// Assemble tab: the Assemble command (pick geometry, the geometry decides the constraint types).
+    AssembleTitle => ("어셈블", "Assemble"),
+    /// Assemble command: the two selections allow no constraint.
+    AssembleNone => ("이 형상 조합에는 구속이 없습니다.", "No constraint fits this geometry."),
+    /// Assemble command: the angle field.
+    AssembleAngle => ("각도", "Angle"),
+    /// Assemble command: deletes the selections and goes on.
+    AssembleUndo => ("선택 지우기", "Clear selections"),
+    /// Assemble command solution: mate with faces facing.
+    SolMateMate => ("맞춤 (마주봄)", "Mate (opposed)"),
+    /// Assemble command solution: flush.
+    SolMateFlush => ("플러시", "Flush"),
+    /// Assemble command solution: mate of axes pointing the same way.
+    SolMateAligned => ("맞춤 (정렬)", "Mate (aligned)"),
+    /// Assemble command solution: directed angle.
+    SolAngleDirected => ("각도 (방향)", "Angle (directed)"),
+    /// Assemble command solution: tangent inside.
+    SolTangentInside => ("접선 (안쪽)", "Tangent (inside)"),
+    /// Assemble command solution: tangent outside.
+    SolTangentOutside => ("접선 (바깥쪽)", "Tangent (outside)"),
+    /// Assemble command solution: insert, opposed.
+    SolInsertOpposed => ("삽입 (반대)", "Insert (opposed)"),
+    /// Assemble command solution: insert, aligned.
+    SolInsertAligned => ("삽입 (정렬)", "Insert (aligned)"),
     /// Plan card: what the checks guarantee. `{0}` padding mm, `{1}` step mm, `{2}` step degrees, `{3}` clearance mm.
     PlanGuarantee => ("패딩 {0} mm, 검사 간격 {1} mm·{2}°에서 볼록 충돌 모델이 장애물과 {3} mm 이상 떨어짐", "Padding {0} mm; with check steps of {1} mm and {2} degrees the convex collision model stays at least {3} mm from obstacles"),
     /// Plan card: the guarantee holds only at the checked states.
