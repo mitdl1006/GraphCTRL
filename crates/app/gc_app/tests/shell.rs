@@ -4408,3 +4408,47 @@ fn a_parameter_is_made_from_the_dimension_box() {
     retype(&mut harness, "HGHT = 8 mm");
     assert_eq!(names(&harness), vec![("HGHT".to_owned(), "8 mm".to_owned())]);
 }
+
+/// Ctrl+A over the view lists the components under the cursor (Select Other); a click on one selects it
+/// (Inventor 2026 help, Predefined Command Alias and Shortcut Reference,
+/// GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E).
+#[test]
+fn select_other_lists_what_lies_under_the_cursor() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.1, 0.1, 0.1] };
+    let app = harness.state_mut();
+    app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    // The same place: a ray through one passes the other as well.
+    let second = app.session.add_body(solid, gc_doc::Placement::default()).unwrap();
+    app.fit_view();
+    app.viewport_mut().camera.pan([0.0, 0.0], [-250.0, 0.0], [1280.0, 700.0]);
+    harness.run();
+    let at = harness.state().viewport().screen_of(gc_math::DVec3::ZERO).unwrap();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run_steps(3);
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.run_steps(3);
+    let button = egui::accesskit::Role::Button;
+    harness.get_by_role_and_label(button, "Body1");
+    if gpu {
+        let image = harness.render().unwrap();
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        image.save(out.join("review-54-select-other.png")).unwrap();
+    }
+    harness.get_by_role_and_label(button, "Body2").click();
+    harness.run_steps(3);
+    assert_eq!(
+        harness.state().session.selected_item(),
+        Some(gc_session::CellItem::Body(second)),
+        "the second one is selected"
+    );
+    assert!(
+        harness.query_all_by_role_and_label(button, "Body1").next().is_none(),
+        "the list closed after the choice"
+    );
+}

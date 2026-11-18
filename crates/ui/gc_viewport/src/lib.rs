@@ -102,6 +102,8 @@ pub struct Viewport {
     pub origin_selected: Option<(gc_doc::Occurrence, gc_doc::OriginElement)>,
     /// The work feature selected in the view (drawn heavier; Delete removes it, a double click edits it).
     pub work_selected: Option<Id<gc_doc::WorkFeature>>,
+    /// Select Other: where the list stands and what lies under the cursor there, nearest first.
+    select_other: Option<(egui::Pos2, Vec<gc_session::CellItem>)>,
     /// The heads-up display of the drawing tools.
     hud: hud::Hud,
     /// Whether the heads-up display (dynamic input) is on.
@@ -169,6 +171,7 @@ impl Viewport {
             nav_tool: None,
             origin_selected: None,
             work_selected: None,
+            select_other: None,
             hud: hud::Hud::default(),
             hud_on: true,
             free_tool: None,
@@ -367,6 +370,8 @@ impl Viewport {
         } else if active.is_none() && self.navigating.is_none() {
             self.cell_input(ui, &response, rect, session);
         }
+
+        self.select_other_list(ui, session);
 
         // The marking menu: a right press opens it (in a sketch or among the components); a quick mark
         // toward a command picks it, otherwise the radial menu and its overflow list show.
@@ -1087,6 +1092,38 @@ impl Viewport {
         self.picker.pick(&scene, &self.camera.ray(at, size)).map(|(_, item)| item)
     }
 
+    /// The Select Other list: what lies under the cursor, nearest first. Passing over a row highlights that
+    /// component in the view; a click selects it; Esc or a click elsewhere closes the list.
+    fn select_other_list(&mut self, ui: &egui::Ui, session: &mut Session) {
+        let Some((at, items)) = self.select_other.take() else { return };
+        let mut chosen = None;
+        let mut hovered = None;
+        let area = egui::Area::new(egui::Id::unique("gc_select_other"))
+            .fixed_pos(at)
+            .order(egui::Order::Foreground)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    for item in &items {
+                        let name = session.item_name(*item).unwrap_or_else(|| "?".to_owned());
+                        let row = ui.button(&name);
+                        if row.hovered() {
+                            hovered = Some(*item);
+                        }
+                        if row.clicked() {
+                            chosen = Some(*item);
+                        }
+                    }
+                });
+            });
+        session.hover_item(hovered);
+        let outside = ui.input(|i| i.pointer.any_pressed()) && !area.response.contains_pointer();
+        if let Some(item) = chosen {
+            session.select_item(Some(item));
+        } else if !(outside || ui.input(|i| i.key_pressed(Key::Escape))) {
+            self.select_other = Some((at, items));
+        }
+    }
+
     /// Starts placing a component: it hangs on the cursor until Esc or a right click. `copy` marks one
     /// that is dropped when placing ends without a click.
     pub fn start_placing(&mut self, item: gc_session::CellItem, copy: bool) {
@@ -1154,6 +1191,24 @@ impl Viewport {
             if self.free_drag.is_some() {
                 return;
             }
+        }
+        // Select Other (Ctrl+A over the view): the components under the cursor in a list, nearest first
+        // (Inventor 2026 help, Predefined Command Alias and Shortcut Reference,
+        // GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E: Ctrl+A activates Select Other).
+        let select_other_key = ui.input(|i| {
+            i.events.iter().any(|event| {
+                matches!(
+                    event,
+                    egui::Event::Key { key: egui::Key::A, pressed: true, modifiers, .. } if modifiers.command
+                )
+            })
+        });
+        if select_other_key && let Some(at) = response.hover_pos() {
+            let scene = Scene::of(session);
+            let ray = self.camera.ray(to_view(at), size);
+            let found: Vec<gc_session::CellItem> =
+                self.picker.pick_all(&scene, &ray).into_iter().map(|(_, item)| item).collect();
+            self.select_other = (found.len() > 1).then_some((at, found));
         }
         // Place Component: the component hangs on the cursor; a click sets it down and attaches a copy.
         if let Some(placing) = self.placing {

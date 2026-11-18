@@ -469,6 +469,37 @@ impl Picker {
         })
     }
 
+    /// Every owner whose solid the ray passes through, nearest first, each once: what Select Other lists.
+    pub fn pick_all(&mut self, scene: &Scene, ray: &gc_math::Ray) -> Vec<(f64, CellItem)> {
+        let mut hits: Vec<(f64, CellItem)> = Vec::new();
+        for solid in &scene.solids {
+            let Some(owner) = solid.owner else { continue };
+            let centre = solid.pose.translation - ray.origin;
+            let along = centre.dot(ray.dir);
+            if (centre - ray.dir * along).length() > solid.shape.radius() + 1e-9 {
+                continue;
+            }
+            let key = solid.shape.key();
+            let tree = match self.trees.entry(key) {
+                std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
+                std::collections::btree_map::Entry::Vacant(entry) => {
+                    let Ok(mesh) = solid.shape.mesh() else { continue };
+                    entry.insert(Arc::new(gc_mesh::MeshBvh::build(&mesh)))
+                }
+            };
+            let to_local = solid.pose.inverse();
+            let local = gc_math::Ray { origin: to_local * ray.origin, dir: to_local.rotation * ray.dir };
+            if let Some(hit) = tree.raycast(&local, f64::INFINITY) {
+                match hits.iter_mut().find(|(_, item)| *item == owner) {
+                    Some(known) => known.0 = known.0.min(hit.t),
+                    None => hits.push((hit.t, owner)),
+                }
+            }
+        }
+        hits.sort_by(|a, b| a.0.total_cmp(&b.0));
+        hits
+    }
+
     /// The owner of the nearest solid the ray hits, and the distance along the ray.
     pub fn pick(&mut self, scene: &Scene, ray: &gc_math::Ray) -> Option<(f64, CellItem)> {
         let mut best: Option<(f64, CellItem)> = None;
