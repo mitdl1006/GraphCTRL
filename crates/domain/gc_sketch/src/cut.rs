@@ -1012,6 +1012,106 @@ impl Sketch {
         Ok(result)
     }
 
+    /// Bend (To Create Lines, Arcs, and Bends, GUID-4F861674-F74C-474E-869A-4C190ED6EC4B: "place tangent
+    /// corner bends on lines in a 3D sketch"): two lines of a 3D sketch that meet at a corner are cut back
+    /// and joined by an arc of `radius` that runs along both, in their plane. The arc is the first of the
+    /// result. Refused when the lines do not meet, are in line, or are too short for the radius.
+    pub fn bend(
+        &mut self,
+        alloc: &mut IdAlloc,
+        lines: [Id<Curve>; 2],
+        radius: f64,
+    ) -> Result<CutResult, SketchError> {
+        if !self.is_spatial() {
+            return Err(SketchError::WrongSpace);
+        }
+        let [l1, l2] = lines;
+        if l1 == l2 || !(radius.is_finite() && radius > 0.0) {
+            return Err(SketchError::InvalidValue);
+        }
+        let ((a1, b1), (a2, b2)) = (
+            self.line(l1).ok_or(SketchError::WrongCurveKind)?,
+            self.line(l2).ok_or(SketchError::WrongCurveKind)?,
+        );
+        let at = |p: Id<SkPoint>| self.pos(p).ok_or(SketchError::MissingPoint);
+        let d3 = |p: [f64; 3], q: [f64; 3]| {
+            ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2) + (p[2] - q[2]).powi(2)).sqrt()
+        };
+        // The corner: an end of each that are one point, or at one place.
+        let mut corner = None;
+        for (e1, f1) in [(a1, b1), (b1, a1)] {
+            for (e2, f2) in [(a2, b2), (b2, a2)] {
+                if corner.is_none() && (e1 == e2 || d3(at(e1)?, at(e2)?) <= 1e-9) {
+                    corner = Some(((e1, f1), (e2, f2)));
+                }
+            }
+        }
+        let ((e1, f1), (e2, f2)) = corner.ok_or(SketchError::InvalidValue)?;
+        let p = at(e1)?;
+        let unit = |q: [f64; 3]| -> Option<([f64; 3], f64)> {
+            let d = [q[0] - p[0], q[1] - p[1], q[2] - p[2]];
+            let n = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+            (n > 1e-12).then(|| ([d[0] / n, d[1] / n, d[2] / n], n))
+        };
+        let ((u1, len1), (u2, len2)) = (
+            unit(at(f1)?).ok_or(SketchError::InvalidValue)?,
+            unit(at(f2)?).ok_or(SketchError::InvalidValue)?,
+        );
+        let cos = (u1[0] * u2[0] + u1[1] * u2[1] + u1[2] * u2[2]).clamp(-1.0, 1.0);
+        let theta = fm::acos(cos);
+        if !(theta > 1e-6 && theta < std::f64::consts::PI - 1e-6) {
+            return Err(SketchError::InvalidValue);
+        }
+        let back = radius / fm::tan(theta / 2.0);
+        if back >= len1 - 1e-9 || back >= len2 - 1e-9 {
+            return Err(SketchError::InvalidValue);
+        }
+        let along = |u: [f64; 3], t: f64| [p[0] + u[0] * t, p[1] + u[1] * t, p[2] + u[2] * t];
+        let (t1, t2) = (along(u1, back), along(u2, back));
+        let half = [u1[0] + u2[0], u1[1] + u2[1], u1[2] + u2[2]];
+        let half_len = (half[0] * half[0] + half[1] * half[1] + half[2] * half[2]).sqrt();
+        let centre = along(
+            [half[0] / half_len, half[1] / half_len, half[2] / half_len],
+            radius / fm::sin(theta / 2.0),
+        );
+        // A corner point both lines share: the second gets its own end.
+        let e2 = if e1 == e2 {
+            let own = self.add_point(alloc, p);
+            if let Some(Curve { geom: CurveGeom::Line { a, b }, .. }) = self.curves.get_mut(&l2) {
+                if *a == e1 {
+                    *a = own;
+                } else if *b == e1 {
+                    *b = own;
+                }
+            }
+            own
+        } else {
+            e2
+        };
+        for (line, end, far, to) in [(l1, e1, f1, t1), (l2, e2, f2, t2)] {
+            self.move_end(line, end, Some(far), [to[0], to[1]]);
+            if let Some(q) = self.points.get_mut(&end) {
+                q.pos = to;
+            }
+        }
+        let arc3 = crate::Arc3::new(centre, t1, t2).ok_or(SketchError::InvalidValue)?;
+        let points = [centre, t1, arc3.at(1.0)].map(|q| self.add_point(alloc, q));
+        let arc: Id<Curve> = alloc.alloc();
+        self.curves.insert(
+            arc,
+            Curve { geom: CurveGeom::Arc { c: points[0], s: points[1], e: points[2] }, construction: false },
+        );
+        let mut result = CutResult::default();
+        result.curves.push(arc);
+        self.add_required(alloc, GeoConstraint::Coincident(e1, points[1]), &mut result)?;
+        self.add_required(alloc, GeoConstraint::Coincident(e2, points[2]), &mut result)?;
+        for line in [l1, l2] {
+            let tangent = GeoConstraint::Tangent { a: line, b: arc, side: 1.0, external: true };
+            self.add_quietly(alloc, tangent, &mut result);
+        }
+        Ok(result)
+    }
+
     /// Where a split at `at` would cut `curve`: the crossing with another curve nearest `at` (Inventor 2026
     /// help, To Split, Trim, or Extend Curves, GUID-DD00037F-6BBA-4B95-AA90-4F99DCEB667D). `None` for a
     /// circle, or when nothing crosses the curve between its ends.

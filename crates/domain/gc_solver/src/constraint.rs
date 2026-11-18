@@ -279,6 +279,20 @@ pub enum Constraint {
     Parallel3(Line3, Line3),
     /// Two 3D lines are at right angles (they need not meet).
     Perpendicular3(Line3, Line3),
+    /// 3D: a line ending at the arc's point `at` runs along the arc there: square to the radius to `at`, and
+    /// in the arc's plane (through `c`, `s`, `e`).
+    EndTangent3 {
+        /// The line.
+        line: Line3,
+        /// The arc's centre.
+        c: P3,
+        /// The arc's start.
+        s: P3,
+        /// The arc's end.
+        e: P3,
+        /// The shared point (the arc's start or end).
+        at: P3,
+    },
     /// Two 3D lines lie on one line.
     Collinear3(Line3, Line3),
     /// Two 3D lines are as long as each other.
@@ -540,6 +554,17 @@ impl Constraint {
             }
             Self::Perpendicular3(a, b) => {
                 out.rows.push((RowKind::Dot3 { scale: nonzero(len3(a).max(len3(b))) }, two3(a, b)));
+            }
+            Self::EndTangent3 { line, c, s, e, at } => {
+                let radius = Line3 { a: *c, b: *at };
+                out.rows.push((
+                    RowKind::Dot3 { scale: nonzero(len3(line).max(len3(&radius))) },
+                    two3(line, &radius),
+                ));
+                // The line's far end (the one further from the joint) in the arc's plane.
+                let dist2 = |p: &P3| (0..3).map(|k| (get(p[k]) - get(at[k])).powi(2)).sum::<f64>();
+                let far = if dist2(&line.a) >= dist2(&line.b) { line.a } else { line.b };
+                out.rows.push((RowKind::Coplanar, [far.as_slice(), c, s, e].concat()));
             }
             Self::Collinear3(a, b) => {
                 for point in [b.a, b.b] {
