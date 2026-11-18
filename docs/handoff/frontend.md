@@ -663,6 +663,13 @@
 - 하지 않은 것: 직접 입력한 수량을 파란색으로 표시(Inventor는 진한 파랑), BOM 설정의 열 사용자 정의·First Level 보기.
 - 테스트: `the_bom_dialog_has_settings_and_static_quantities`.
 
+## 원형 모서리·구 면 픽 (백엔드 2f513fc)
+
+- `gc_scene::SurfaceHit`에 `sphere`(중심·반지름: 평면·원통·원뿔이 아닌 곡면에서 `spherical_region_in`, 굽힘 0.6 rad·허용 1 %)와 `circle`(중심·법선·반지름·히트에서의 거리: 가장 가까운 특징 모서리로 `circular_edge`, 허용 1e-3; 특징 모서리는 메시마다 캐시)을 더했다.
+- 뷰포트 `pick_feature_with(.., cones=true)`(구속 대화상자·Alt 끌기 맞춤): 원형 모서리(포인터가 카메라 거리의 1.2 % 안)가 우선, 다음 구, 원뿔, 원통·면 순. `Feature::Circle`→`Geometry::Circle`(Insert), `Feature::Sphere`→`Geometry::Sphere`(Tangent·Mate 중심), Joint 대화상자는 원→원 중심·법선 프레임, 구→중심 프레임. 호버 하이라이트: 원은 모서리 원, 구는 중심 원.
+- 병합: 백엔드가 같은 자리에 넣은 `Feature::Circle/Sphere` arm과 내 `Feature::Cone` arm을 모두 남겼다. Measure는 계속 원뿔·구·원을 고르지 않는다(백엔드가 측정을 지원하니 필요하면 켠다).
+- 테스트: `gc_scene` `a_surface_hit_reports_a_sphere_and_a_circular_edge`(공의 구, 원통 테두리의 원). 뷰에서 Insert를 만드는 끝단 테스트는 없다.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

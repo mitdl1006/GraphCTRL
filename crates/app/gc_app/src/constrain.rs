@@ -615,6 +615,7 @@ impl Joint {
             Geometry::Cylinder { point, direction, .. } => frame(point, direction),
             Geometry::Cone { apex, direction, .. } => frame(apex, direction),
             Geometry::Circle { centre, normal } => frame(centre, normal),
+            Geometry::Sphere { centre, .. } => frame(centre, [0.0, 0.0, 1.0]),
             Geometry::Point(point) => frame(point, [0.0, 0.0, 1.0]),
             other => other,
         };

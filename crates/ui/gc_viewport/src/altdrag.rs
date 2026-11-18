@@ -60,6 +60,8 @@ pub(crate) fn selection_of(session: &Session, item: CellItem, feature: &Feature)
         Geometry::Cone { apex, direction, half_angle } => {
             Geometry::Cone { apex: p(apex), direction: d(direction), half_angle }
         }
+        Geometry::Circle { centre, normal } => Geometry::Circle { centre: p(centre), normal: d(normal) },
+        Geometry::Sphere { centre, radius } => Geometry::Sphere { centre: p(centre), radius },
         other => other,
     };
     Some(Selection { occurrence, geometry })

@@ -488,8 +488,12 @@ impl Measure {
                             painter.arrow(a, b - a, egui::Stroke::new(2.5, colour));
                         }
                     }
-                    Some(Feature::Cone { apex: centre, .. })
-                    | Some(Feature::Circle { centre, .. } | Feature::Sphere { centre, .. }) => {
+                    Some(Feature::Cone { apex, .. }) => {
+                        if let Some(at) = screen(*apex) {
+                            painter.circle(at, 5.0, colour, egui::Stroke::new(1.5, egui::Color32::WHITE));
+                        }
+                    }
+                    Some(Feature::Circle { centre, .. } | Feature::Sphere { centre, .. }) => {
                         if let Some(at) = screen(*centre) {
                             painter.circle(at, 5.0, colour, egui::Stroke::new(1.5, egui::Color32::WHITE));
                         }

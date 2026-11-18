@@ -118,3 +118,40 @@ fn a_paste_preview_draws_ghosts_at_the_offset() {
     session.end_paste_preview();
     assert_eq!(Scene::of(&session).solids.len(), plain.solids.len());
 }
+
+/// The surface under a ray knows its sphere (Tangent), and a circular edge near the hit (Insert): a cylinder's rim.
+#[test]
+fn a_surface_hit_reports_a_sphere_and_a_circular_edge() {
+    use gc_math::{DVec3, Ray};
+    use gc_scene::Picker;
+    let mut session = Session::new();
+    session
+        .add_body(Solid::Sphere { radius: 0.1 }, Placement { xyz: [0.0, 0.0, 0.1], rpy: [0.0; 3] })
+        .unwrap();
+    session
+        .add_body(
+            Solid::Cylinder { radius: 0.05, length: 0.2 },
+            Placement { xyz: [1.0, 0.0, 0.1], rpy: [0.0; 3] },
+        )
+        .unwrap();
+    let mut picker = Picker::default();
+    let scene = Scene::of(&session);
+    // Down on the ball, off its pole so the hit is on its curved surface.
+    let ball = picker
+        .pick_surface(&scene, &Ray { origin: DVec3::new(0.05, 0.02, 5.0), dir: -DVec3::Z })
+        .expect("the ball is hit");
+    let (centre, radius) = ball.sphere.expect("a sphere");
+    assert!(
+        (radius - 0.1).abs() < 5e-3 && centre.distance(DVec3::new(0.0, 0.0, 0.1)) < 5e-3,
+        "{centre:?} {radius}"
+    );
+    // Down on the cylinder's top face right at its rim: the rim is a circular edge of the cylinder's radius.
+    let rim = picker
+        .pick_surface(&scene, &Ray { origin: DVec3::new(1.0 + 0.0499, 0.0, 5.0), dir: -DVec3::Z })
+        .expect("the cylinder is hit");
+    let (centre, normal, radius, distance) = rim.circle.expect("a circular edge");
+    assert!((radius - 0.05).abs() < 2e-3, "{radius}");
+    assert!(distance < 2e-3, "the hit is at the rim: {distance}");
+    assert!(normal.z.abs() > 0.99, "the circle faces up or down: {normal:?}");
+    assert!((centre.x - 1.0).abs() < 2e-3 && centre.y.abs() < 2e-3);
+}
