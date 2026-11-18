@@ -34,9 +34,9 @@ pub use cell::{
     Solid, Tool, Waypoint, WaypointTarget, WorkFrame,
 };
 pub use command::{
-    Applied, ArcSlotKind, ChamferKind, Command, Created, DimSlot, EditError, EndSnap, Motion, SketchOp,
-    SketchPatternDirection, SlotKind, TangentArc, apply, evaluate_value, flipped, preview_sketch_op,
-    tangent_arc,
+    Applied, ArcSlotKind, ChamferKind, Command, Created, DimSlot, EditError, EndSnap, HelixShape, Motion,
+    SketchOp, SketchPatternDirection, SlotKind, TangentArc, apply, evaluate_value, flipped,
+    preview_sketch_op, tangent_arc,
 };
 pub use design::{
     Assembly, AssemblyMesh, AssemblyPart, ComponentFlag, Components, ContactSolver, CurveRef, Extent,
