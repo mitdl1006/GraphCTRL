@@ -71,6 +71,43 @@ To Work with Sketch Dimensions GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185.
 | Flip Direction 대상의 "line to an arc (the arc itself)"·"between 2 arcs" 거리 | 없음 | 선-호·호-호 거리 치수 |
 | 구동 치수 토글 | 있음(`SketchOp::SetDriving`) | — |
 
+## 2026-11-18 — 문서 설정 마무리: 단위 해석·격자 스냅·구속 추론(리드 ①)
+
+근거: About Units of Measure, GUID-671A8679-AEC1-413A-A23B-428967648CE6 — "When you change the units setting, all existing values in the file display as the new
+units"; "You can also override the default units in any value box. For example, you can type 12mm in the dimension value box of a file using an inch unit".
+Sketch Tab Reference(Document Settings), GUID-58DD9A89-84C7-48F3-8E4E-0303E755B10F(Snap Spacing).
+
+- 단위 없이 친 값은 문서 단위로 읽는다.
+  - 대상: 치수 상자, HUD, 대화상자 값(`evaluate_value`), 필렛·모따기·패턴 등 `SketchOp` 식.
+  - 방법: `gc_expr::Scope`에 기본 메서드 `default_units()`를 추가했다(기존 구현은 그대로 동작). 문서 스코프가 길이·각 단위를 돌려주고, 길이 필드(mm 자리)·각 필드(deg 자리)를 그 단위로 바꾼다.
+  - 단위를 쓰면 그 단위가 이긴다.
+  - 매개변수 표(Param)는 자기 단위를 그대로 쓴다(`evaluate_exact`).
+- 문서 단위를 바꾸면 크기가 그대로다(`command::keep_sizes`). 새 단위에서 값이 달라지는 구동 치수의 식(맨 숫자 등)은 옛 단위를 붙인 값으로 바꿔 적는다(예: `25` → `25 mm`). 한 번의 실행 취소에 함께 들어간다.
+- 구속 추론 끔(`infer_constraints = false`): 그리기 도구의 Move·Click을 Ctrl을 누른 것처럼 다룬다(스냅·추론 없음). 선택 도구는 영향 없음.
+- Snap to grid: `Session::set_snap_to_grid(bool)` / `snap_to_grid()`(응용 옵션, 기본 끔). 켜면 그리기 도구의 스냅 안 된 커서 위치를 문서 `snap_spacing` 격자점으로 옮긴다.
+- 아직 안 됨:
+  - `persist_constraints = false`: 추론 구속과 도구 고유 구속을 구분해야 해서 저장만 한다.
+  - 격자 그리기(`snaps_per_minor`·`minor_per_major`): FE.
+  - `input_as_expression`: FE가 입력 상자에 식/값 중 무엇을 보일지 읽으면 된다.
+  - 도구 미리보기의 숫자 해석(`gc_tools` 내부)은 아직 mm·deg. 확정 값은 문서 단위로 들어간다.
+- 테스트: `gc_session/tests/doc_settings.rs`(`a_bare_number_means_the_documents_unit`, `changing_units_keeps_every_size`, `inference_and_grid_shape_what_the_tools_place`).
+- QA·FE·리드 브랜치 영향: 시그니처 변경 없음(트레이트 기본 메서드, 새 세션 메서드만).
+
+## 2026-11-18 — 원-타원·타원-타원 Tangent(리드 다음 ③)
+
+근거: GUID-A85A7A30-7D81-4C75-8769-CAD034EEA930(Tangent: "click the first curve … Click the second curve").
+
+- `GeoConstraint::Tangent`가 타원 + 원(호)과 타원 + 타원을 받는다.
+- 닫힌 식이 없어서 풀이에 숨은 접점 P(매개변수 2개)를 넣는다. 자유도 −1.
+  - 원-타원: P가 원 위·타원 위, 그리고 P의 타원 법선이 원 중심을 지난다(솔버 `TangentCircleEllipse`, 새 행 `EllipseNormalThrough`).
+  - 타원-타원: P가 두 타원 위, 법선이 평행(`TangentEllipseEllipse`, 행 `EllipseNormals`).
+  - P는 바인딩마다 지금 모양에서 "타원 위에서 상대 곡선에 가장 가까운 점"으로 시작한다(`bind.rs::contact_start`). 그래서 바깥·안쪽 접촉은 지금 놓인 쪽을 따른다.
+- 접선 도구가 타원 + 원/타원 클릭을 받는다.
+- 기울기 검사에 새 행 2개를 넣었다.
+- 차이: 접점이 문서에 저장되지 않고 매번 가장 가까운 점에서 다시 시작한다. 크게 끌면 다른 접촉 쪽으로 넘어갈 수 있다.
+- 테스트: `gc_session/tests/ellipse_round_tangent.rs`(원 바깥·안쪽, 두 타원, 도구, 저장·불러오기).
+- QA 브랜치 영향: 없음(새 솔버 변형; QA 테스트에 원-타원 접선 거부 단언 없음).
+
 ## 2026-11-18 — iProperties 기초(리드 다음 ②)
 
 근거:
