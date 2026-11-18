@@ -718,6 +718,54 @@ impl Session {
         self.execute(&Command::Cell(gc_doc::CellOp::DeleteRelationship(id))).map(|_| ())
     }
 
+    /// Accept the relationship (the error dialog's third choice): adds it even when it cannot be
+    /// satisfied; it is then kept with an error mark, left out of the solve, and loses the mark as soon
+    /// as the assembly can satisfy it. One undo step.
+    pub fn accept_relationship(
+        &mut self,
+        relationship: gc_doc::Relationship,
+    ) -> Result<Id<gc_doc::Relationship>, EditError> {
+        let created = self.execute(&Command::Cell(gc_doc::CellOp::AcceptRelationship(relationship)))?;
+        created
+            .iter()
+            .find_map(|c| if let gc_doc::Created::Relationship(id) = c { Some(*id) } else { None })
+            .ok_or(EditError::BadValue)
+    }
+
+    /// Accepts a change to a relationship although it cannot be solved. One undo step.
+    pub fn accept_relationship_edit(
+        &mut self,
+        id: Id<gc_doc::Relationship>,
+        relationship: gc_doc::Relationship,
+    ) -> Result<(), EditError> {
+        let op = gc_doc::CellOp::AcceptRelationshipEdit { id, relationship: Box::new(relationship) };
+        self.execute(&Command::Cell(op)).map(|_| ())
+    }
+
+    /// The relationships kept with an error mark (what Recover lists).
+    pub fn sick_relationships(&self) -> Vec<Id<gc_doc::Relationship>> {
+        self.doc.sick_relationships()
+    }
+
+    /// Isolate Related Failed: the relationships that stand in the way of one with an error, and the
+    /// components to keep visible (pass them to Isolate).
+    pub fn related_failed(
+        &self,
+        id: Id<gc_doc::Relationship>,
+    ) -> (Vec<Id<gc_doc::Relationship>>, Vec<gc_doc::Occurrence>) {
+        self.doc.related_failed(id)
+    }
+
+    /// Check in Relationship Conflict Analysis: whether everything can be satisfied with the `broken`
+    /// relationships left out and the grounding of the `toggled` components turned round. Changes nothing.
+    pub fn conflict_check(
+        &self,
+        broken: &[Id<gc_doc::Relationship>],
+        toggled: &[gc_doc::Occurrence],
+    ) -> bool {
+        self.doc.conflict_check(broken, toggled)
+    }
+
     /// Free Move / Free Rotate: drops a component (body, robot, imported assembly) at `placement` without
     /// solving its relationships (Inventor 2026 help, Move assembly components,
     /// GUID-9796C22B-23C1-4D69-BC2E-54056E46F255). It stays there until [`Session::update_assembly`] or

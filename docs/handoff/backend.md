@@ -124,6 +124,26 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 구속 오류: Accept the relationship · Recover 도우미 (대조 목록 8)
+
+근거: Place/Edit Connection Error Reference(`GUID-23D0D333-AD6A-4CB6-9786-6966DFE8FDFF`) — "Accept the relationship: Creates the relationship or accepts the change to the existing relationship. The relationship is created and added to the browser with an icon." Use Design Doctor to repair relationship errors(`GUID-8C95B0AB-4505-4092-8C37-E60C68DCF4A0`) — Recover, 처치: Edit / Delete / Suppress / Isolate and Edit / Isolate Related Failed / Diagnose. Relationship Conflict Analysis Reference(`GUID-528B2CD0-93FD-45BC-AB69-6C5A559BB8E8`) — Keep/Break, 고정 토글, Check, Delete/Suppress broken. To Manage the Display of Constraint Status in the Browser(`GUID-A0573060-3778-4D6F-9431-28587D837CC7`) — 상태는 Fully / Under / Unknown 세 가지뿐(= 기존 `ComponentStatus`).
+
+- **결정(리드 질문에 대한 답)**: 원문대로 "풀리지 않는 구속도 저장하고 오류 표시"가 맞다. 다만 그것은 오류 대화상자의 **선택지**(Accept)이고, 기본은 지금처럼 거부 → 대화상자다. 그래서 **기존 거부 동작은 바꾸지 않았다**(`AddRelationship`·`SetRelationship`은 그대로 `Unsolvable`; QA 테스트 영향 없음). 새 op만 더했다.
+- 모델: `Components.sick_relationships: Vec<Id<Relationship>>`(serde default). 여기 든 관계는 풀이에서 빠진다(억제처럼). 관계를 푸는 명령이 끝날 때마다 다시 시도해서, 넣어도 풀리게 되면 표시가 사라지고 그때부터 같이 풀린다(다른 관계를 억제·삭제·수정한 뒤 등). 오류 관계를 `SetRelationship`으로 고치면 보통 편집처럼 풀려야 통과한다(안 풀리면 `Unsolvable`, 그대로 오류 상태).
+
+| 무엇 | 호출 |
+|---|---|
+| Accept(새 관계) | `session.accept_relationship(rel) -> Id` = `CellOp::AcceptRelationship(rel)` |
+| Accept(편집) | `session.accept_relationship_edit(id, rel)` = `CellOp::AcceptRelationshipEdit { id, relationship: Box<_> }` |
+| Recover 목록 | `session.sick_relationships()`, `doc.is_sick(id)`; `relationship_status(id)`는 `Sick` |
+| Isolate Related Failed | `session.related_failed(id) -> (막는 관계들, 보이게 둘 컴포넌트)` → 기존 `CellOp::Isolate { keep }` |
+| Conflict Analysis의 Check | `session.conflict_check(&broken, &toggled_ground) -> bool` (문서 불변) |
+| Delete/Suppress broken, Edit/Delete/Suppress 처치 | 기존 `DeleteRelationship`, `SetSuppressed`, `SetRelationship`(여러 개면 `Command::Sequence`) |
+
+- 오류 관계가 걸린 컴포넌트의 `component_status`는 `Unknown`(대시).
+- 하지 않은 것: "중복(redundant)" 상태 — 읽은 2026 페이지에 어셈블리 구속의 중복 상태 서술이 없다.
+- 테스트: `gc_doc/tests/relate.rs::a_relationship_that_cannot_be_solved_can_be_accepted_with_an_error`.
+
 ## 2026-11-18 — 표현: 뷰 Lock·따라가기·Copy, 위치 표현 Copy (대조 목록 9 중 원문에 있는 부분)
 
 근거: To Create, Edit, and Restore View Representations(`GUID-397F9263-12C3-47A1-B6A6-16FC05EDEF47`) — "Copy: Duplicates the current View representation to make it active. The incremental number appends the name", "Lock: Prevents changes to the View representation display characteristics. Components added after a view is locked are not visible while the view is active", "Edit a View representation … Activate. Edit the display of components", "select Lock so the representation does not update changes to the display". To Create, Edit, or Copy Positional Representations(`GUID-34C28C35-45CA-4476-9336-30146F7C9471`) — Copy. Positional representations in assemblies(`GUID-C728DFAC-1B45-4879-A004-45A8DC991954`), Overrides in Positional Representations(`GUID-EB1593D3-E545-489F-9008-EE01F2AFD5C2`)도 읽었다.
