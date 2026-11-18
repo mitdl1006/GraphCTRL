@@ -502,6 +502,12 @@ pub struct Components {
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub joint_conditions:
         std::collections::BTreeMap<Id<crate::relate::Relationship>, crate::relate::JointCondition>,
+    /// Subassemblies made in the cell (Component Demote).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subassemblies: Vec<crate::subassembly::Subassembly>,
+    /// Which subassembly each component placed in the cell belongs to (absent: the top level).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub placed_in: Vec<(Occurrence, crate::subassembly::SubassemblyId)>,
 }
 
 /// Interactive Contact (Document Settings, Modeling tab): the contact solver off, on for the contact set

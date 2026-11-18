@@ -579,6 +579,8 @@ pub enum CellOp {
         /// Protect its freedom.
         protect: bool,
     },
+    /// Subassemblies made in the cell: Demote, move between levels, dissolve, rename.
+    Subassembly(crate::subassembly::SubassemblyOp),
     /// Ground and Root, "Ground at origin": moves the components (bodies, robots, assemblies) to the
     /// assembly's origin, aligned with it, and grounds them. Refused when constraints then cannot be met.
     GroundAtOrigin(Vec<AnyId>),
@@ -796,6 +798,7 @@ pub(crate) fn set_timeline(
                 .chain(&c.dof_shown)
                 .copied()
                 .chain(c.origins_shown.iter().map(|(o, _)| *o))
+                .chain(c.placed_in.iter().map(|(o, _)| *o))
                 .filter(|o| !txn.doc().has_occurrence(*o))
                 .collect()
         })
@@ -817,6 +820,7 @@ pub(crate) fn set_timeline(
             c.origins_shown.retain(|(o, _)| !gone.contains(o));
             c.contact_set.retain(|o| !gone.contains(o));
             c.dof_shown.retain(|o| !gone.contains(o));
+            c.placed_in.retain(|(o, _)| !gone.contains(o));
         }
         t.components.joint_conditions.retain(|id, _| !dropped.contains(id));
         edit(t);
@@ -1346,6 +1350,7 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
             set_timeline(txn, |t| t.components.contact_solver = *mode)?;
             Ok((Vec::new(), "Interactive contact"))
         }
+        CellOp::Subassembly(op) => crate::subassembly::run(txn, op),
         CellOp::SetJointCondition { id, lock, protect } => {
             let relationship = txn.doc().get(*id).ok_or(EditError::BadValue)?.clone();
             if !crate::relate::is_joint_kind(&relationship.kind) {
