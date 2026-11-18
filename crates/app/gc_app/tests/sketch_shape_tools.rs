@@ -332,7 +332,7 @@ fn the_three_dimensional_sketch_offers_parallel_perpendicular_and_equal() {
         .with_pixels_per_point(1.0)
         .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
     harness.run();
-    harness.get_by_label("3D 스케치").click();
+    pick_variant(&mut harness, "스케치", "3D 스케치");
     harness.run();
     assert!(harness.state().session.active_sketch().unwrap().1.is_spatial());
     for (label, kind) in [

@@ -138,19 +138,31 @@ pub(crate) fn show(
         match tab {
             Tab::Model => {
                 ribbon_group(ui, tr!(lang, GroupSketch), |ui| {
-                    for plane in ["XY", "XZ", "YZ"] {
-                        let label = tr!(lang, CmdSketchOn, plane);
-                        if ribbon_button(ui, Icon::Sketch, &label, false, !sketching).clicked() {
-                            // A failure is shown in the status bar.
-                            // A new sketch starts with the line tool, as drawing is what comes first.
-                            if session.create_sketch(plane).is_ok() {
-                                session.set_tool(ToolKind::Line);
-                            }
-                            *tab = Tab::Sketch;
-                        }
-                    }
-                    if ribbon_button(ui, Icon::Line, tr!(lang, CmdSketch3d), false, !sketching).clicked() {
-                        if session.create_sketch_3d().is_ok() {
+                    // One split button: the body starts the sketch made last, the arrow lists the planes
+                    // and the 3D sketch.
+                    let planes = ["XY", "XZ", "YZ"];
+                    let labels: Vec<String> =
+                        planes.iter().map(|plane| tr!(lang, CmdSketchOn, plane)).collect();
+                    let mut items: Vec<gc_ui::SplitItem<'_>> = labels
+                        .iter()
+                        .map(|label| gc_ui::SplitItem { icon: Icon::Sketch, label, active: false })
+                        .collect();
+                    items.push(gc_ui::SplitItem {
+                        icon: Icon::Line,
+                        label: tr!(lang, CmdSketch3d),
+                        active: false,
+                    });
+                    let more = tr!(lang, SplitMore, tr!(lang, GroupSketch));
+                    if let Some(index) =
+                        gc_ui::ribbon_split_button(ui, "new_sketch", &more, &items, !sketching)
+                    {
+                        // A failure is shown in the status bar. A new sketch starts with the line tool, as
+                        // drawing is what comes first.
+                        let made = match planes.get(index) {
+                            Some(plane) => session.create_sketch(plane).is_ok(),
+                            None => session.create_sketch_3d().is_ok(),
+                        };
+                        if made {
                             session.set_tool(ToolKind::Line);
                         }
                         *tab = Tab::Sketch;
@@ -683,26 +695,39 @@ fn assemble_tab(
     // components in place, GUID-C79C36C9-A6DB-46C5-8864-41F66C750231).
     ribbon_group(ui, tr!(lang, GroupEdit), |ui| {
         let editing = session.edit_target().is_some();
-        if ribbon_button(ui, Icon::Home, tr!(lang, CmdReturn), false, editing).clicked() {
-            session.return_edit();
-        }
-        if ribbon_button(ui, Icon::Home, tr!(lang, CmdReturnParent), false, editing).clicked() {
-            session.return_to_parent();
-        }
-        if ribbon_button(ui, Icon::Home, tr!(lang, CmdReturnTop), false, editing).clicked() {
-            session.return_to_top();
+        // One split button: the body is the way back used last.
+        let items = [
+            gc_ui::SplitItem { icon: Icon::Home, label: tr!(lang, CmdReturn), active: false },
+            gc_ui::SplitItem { icon: Icon::Home, label: tr!(lang, CmdReturnParent), active: false },
+            gc_ui::SplitItem { icon: Icon::Home, label: tr!(lang, CmdReturnTop), active: false },
+        ];
+        let more = tr!(lang, SplitMore, tr!(lang, GroupEdit));
+        match gc_ui::ribbon_split_button(ui, "return", &more, &items, editing) {
+            Some(0) => session.return_edit(),
+            Some(1) => session.return_to_parent(),
+            Some(2) => session.return_to_top(),
+            _ => {}
         }
     });
     ribbon_group(ui, tr!(lang, GroupPosition), |ui| {
         let has = !session.components().is_empty();
-        for (tool, label) in [
+        // Free Move and Free Rotate share one split button; the one running is on its body.
+        let tools = [
             (gc_viewport::FreeTool::Move, tr!(lang, MarkMove)),
             (gc_viewport::FreeTool::Rotate, tr!(lang, MarkRotate)),
-        ] {
-            let active = viewport.free_tool == Some(tool);
-            if ribbon_button(ui, Icon::Pan, label, active, has).clicked() {
-                viewport.free_tool = if active { None } else { Some(tool) };
-            }
+        ];
+        let items: Vec<gc_ui::SplitItem<'_>> = tools
+            .iter()
+            .map(|(tool, label)| gc_ui::SplitItem {
+                icon: Icon::Pan,
+                label,
+                active: viewport.free_tool == Some(*tool),
+            })
+            .collect();
+        let more = tr!(lang, SplitMore, tr!(lang, GroupPosition));
+        if let Some(index) = gc_ui::ribbon_split_button(ui, "free", &more, &items, has) {
+            let tool = tools[index].0;
+            viewport.free_tool = if viewport.free_tool == Some(tool) { None } else { Some(tool) };
         }
         // Ground: the selected body, robot or imported assembly, shown pressed when it is grounded.
         let selected = session.selected_occurrence().filter(|o| session.can_ground(*o));
