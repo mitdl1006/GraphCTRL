@@ -199,6 +199,7 @@ fn field_name(lang: Lang, field: HudField) -> &'static str {
         HudField::Distance => tr!(lang, HudDistance),
         HudField::X => tr!(lang, HudX),
         HudField::Y => tr!(lang, HudY),
+        HudField::Scale => tr!(lang, HudScale),
     }
 }
 
@@ -209,6 +210,7 @@ fn measured_text(slot: &HudSlot) -> String {
     }
     match slot.field {
         HudField::Angle => format!("{:.1}°", slot.measured.to_degrees()),
+        HudField::Scale => format!("{:.3}", slot.measured),
         _ => format_length(slot.measured),
     }
 }

@@ -483,3 +483,14 @@ fn flip_direction_on_the_ribbon() {
     let (_, sketch) = harness.state().session.active_sketch().unwrap();
     assert!((sketch.pos(point).unwrap()[1] + 0.02).abs() < 1e-9, "below the origin now");
 }
+
+#[test]
+fn scale_and_stretch_on_the_ribbon() {
+    let mut harness = sketching();
+    for (label, kind) in [("축척", ToolKind::Scale), ("신축", ToolKind::Stretch)] {
+        harness.get_by_label(label).click();
+        harness.run();
+        assert_eq!(harness.state().session.tool(), kind);
+        harness.get_by_label("기준점을 클릭하십시오(선택한 형상)");
+    }
+}

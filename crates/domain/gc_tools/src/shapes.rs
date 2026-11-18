@@ -47,6 +47,8 @@ pub(super) fn is_shape_tool(kind: ToolKind) -> bool {
             | ToolKind::Move
             | ToolKind::Copy
             | ToolKind::Rotate
+            | ToolKind::Scale
+            | ToolKind::Stretch
     )
 }
 
@@ -144,6 +146,7 @@ impl Tool {
         tool.offset_loop = self.offset_loop;
         tool.offset_constrain = self.offset_constrain;
         tool.chamfer = self.chamfer.clone();
+        tool.selection_points.clone_from(&self.selection_points);
         tool.chamfer_dimensions = self.chamfer_dimensions;
         tool
     }
@@ -210,8 +213,10 @@ impl Tool {
             ToolKind::CenterRectangle3 => Prompt::CenterRectWidth,
             ToolKind::TangentCircle => Prompt::TangentCircleLine,
             ToolKind::Split => Prompt::SplitPick,
-            ToolKind::Move | ToolKind::Copy if self.anchor.is_none() => Prompt::MoveBase,
-            ToolKind::Move | ToolKind::Copy => Prompt::MoveEnd,
+            ToolKind::Move | ToolKind::Copy | ToolKind::Stretch if self.anchor.is_none() => Prompt::MoveBase,
+            ToolKind::Move | ToolKind::Copy | ToolKind::Stretch => Prompt::MoveEnd,
+            ToolKind::Scale if self.anchor.is_none() => Prompt::ScaleBase,
+            ToolKind::Scale => Prompt::ScaleEnd,
             ToolKind::Rotate if self.anchor.is_none() => Prompt::RotateCentre,
             ToolKind::Rotate => Prompt::RotateEnd,
             ToolKind::Chamfer if self.fillet_first.is_none() => Prompt::ChamferFirst,
@@ -322,6 +327,15 @@ impl Tool {
             ToolKind::Move | ToolKind::Copy => {
                 Some(gc_doc::Motion::Translate { by: [end[0] - base[0], end[1] - base[1]] })
             }
+            ToolKind::Scale => {
+                let factor = match self.locked(HudField::Scale).and_then(|t| t.trim().parse::<f64>().ok()) {
+                    Some(factor) => factor,
+                    None => distance(base, end) / self.scale_reference()?,
+                };
+                (factor.is_finite() && factor > 1e-9)
+                    .then_some(gc_doc::Motion::Scale { centre: base, factor })
+            }
+            ToolKind::Stretch => Some(gc_doc::Motion::Translate { by: [end[0] - base[0], end[1] - base[1]] }),
             ToolKind::Rotate => {
                 let angle = match self.locked_value(HudField::Angle) {
                     Some(angle) => angle,
@@ -332,6 +346,19 @@ impl Tool {
             }
             _ => None,
         }
+    }
+
+    /// Scale: the selected points' positions (the session passes them when the tool starts).
+    pub fn set_selection_points(&mut self, points: Vec<[f64; 2]>) {
+        self.selection_points = points;
+    }
+
+    /// Scale: the distance from the base point to the farthest selected point — the cursor there is a
+    /// factor of 1.
+    fn scale_reference(&self) -> Option<f64> {
+        let base = self.anchor?;
+        let far = self.selection_points.iter().map(|p| distance(base, *p)).fold(0.0, f64::max);
+        (far > 1e-12).then_some(far)
     }
 
     /// The motion the cursor gives now (for the preview).
@@ -413,6 +440,10 @@ impl Tool {
         };
         match self.kind {
             ToolKind::Point => vec![slot(HudField::X, cursor[0]), slot(HudField::Y, cursor[1])],
+            ToolKind::Scale => match self.anchor.zip(self.scale_reference()) {
+                Some((c, reference)) => vec![slot(HudField::Scale, distance(c, cursor) / reference)],
+                None => Vec::new(),
+            },
             ToolKind::Rotate => match self.anchor {
                 Some(c) if distance(c, cursor) > 1e-12 => {
                     vec![slot(HudField::Angle, fm::atan2(cursor[1] - c[1], cursor[0] - c[0]))]
@@ -573,13 +604,18 @@ impl Tool {
                 }
                 Vec::new()
             }
-            ToolKind::Move | ToolKind::Copy | ToolKind::Rotate => {
+            ToolKind::Move | ToolKind::Copy | ToolKind::Rotate | ToolKind::Scale | ToolKind::Stretch => {
                 let here = self.place(sketch, pos, px, None, modifier).pos;
                 if self.anchor.is_none() {
                     self.anchor = Some(here);
                     return Some(Vec::new());
                 }
-                let out = self.transform_motion(here).map(ToolOutput::Transform);
+                let out = match (self.kind, self.transform_motion(here)) {
+                    (ToolKind::Stretch, Some(gc_doc::Motion::Translate { by })) => {
+                        Some(ToolOutput::Stretch(by))
+                    }
+                    (_, motion) => motion.map(ToolOutput::Transform),
+                };
                 self.reset();
                 out.into_iter().collect()
             }

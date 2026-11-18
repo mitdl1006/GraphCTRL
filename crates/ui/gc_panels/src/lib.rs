@@ -904,6 +904,8 @@ fn prompt_text(lang: Lang, prompt: Prompt) -> &'static str {
         Prompt::MoveEnd => Msg::PromptMoveEnd,
         Prompt::RotateCentre => Msg::PromptRotateCentre,
         Prompt::RotateEnd => Msg::PromptRotateEnd,
+        Prompt::ScaleBase => Msg::PromptScaleBase,
+        Prompt::ScaleEnd => Msg::PromptScaleEnd,
         Prompt::PickGeometry => Msg::PromptPickGeometry,
         Prompt::PickLine => Msg::PromptPickLine,
         Prompt::PickPoint => Msg::PromptPickPoint,

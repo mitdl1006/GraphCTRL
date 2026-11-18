@@ -1055,3 +1055,68 @@ fn flip_direction_puts_the_geometry_on_the_other_side() {
     assert!(gc_doc::flipped(&gc_sketch::DimKind::Distance { p: a, q: b }).is_none());
     assert!(bench.op(SketchOp::FlipDimensions(Vec::new())).is_err());
 }
+
+/// Scale and Stretch (To Stretch, Scale, or Offset 2D Sketch Geometry,
+/// GUID-962CEE71-8BE4-4DA6-B51E-341319C64FA4).
+#[test]
+fn scale_and_stretch_selected_geometry() {
+    use gc_doc::{EndSnap, Motion};
+    let mut bench = Bench::new();
+    let lines = Bench::curves(
+        &bench
+            .op(SketchOp::AddRectangle { a: [0.01, 0.01], b: [0.03, 0.02], snap_a: EndSnap::default() })
+            .unwrap(),
+    );
+    let circle = Bench::curves(
+        &bench
+            .op(SketchOp::AddCircle {
+                centre: [0.05, 0.015, 0.0],
+                radius: 0.004,
+                centre_snap: Default::default(),
+                rim_snap: Default::default(),
+            })
+            .unwrap(),
+    )[0];
+    let mut all = lines.clone();
+    all.push(circle);
+    let twice = Motion::Scale { centre: [0.01, 0.01], factor: 2.0 };
+    bench.op(SketchOp::Transform { curves: all, motion: twice, copy: false, relax: false }).unwrap();
+    let length = |bench: &Bench, line| {
+        let (a, b) = bench.sketch().line(line).unwrap();
+        let (a, b) = (bench.sketch().pos(a).unwrap(), bench.sketch().pos(b).unwrap());
+        ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt()
+    };
+    assert!((length(&bench, lines[0]) - 0.04).abs() < 1e-9, "20 mm wide became 40");
+    assert!((bench.sketch().round(circle).unwrap().1 - 0.008).abs() < 1e-9);
+    let c = centre_of(&bench, circle);
+    assert!((c[0] - 0.09).abs() < 1e-9 && (c[1] - 0.02).abs() < 1e-9, "{c:?}");
+
+    // Stretch the right side of a rectangle: the top and bottom stretch, still horizontal.
+    let mut bench = Bench::new();
+    let lines = Bench::curves(
+        &bench
+            .op(SketchOp::AddRectangle { a: [0.0, 0.0], b: [0.02, 0.01], snap_a: EndSnap::default() })
+            .unwrap(),
+    );
+    let right = lines[1];
+    let created = bench
+        .op(SketchOp::AddDimension {
+            kind: gc_sketch::DimKind::Distance {
+                p: bench.sketch().line(lines[0]).unwrap().0,
+                q: bench.sketch().line(lines[0]).unwrap().1,
+            },
+            source: "20".into(),
+            text_pos: [0.0; 2],
+        })
+        .unwrap();
+    let width = dimensions(&created)[0];
+    let stretch =
+        |relax| SketchOp::Stretch { curves: vec![right], points: Vec::new(), by: [0.01, 0.0], relax };
+    // Not relaxed, the width dimension holds: the free rectangle slides along instead.
+    bench.op(stretch(false)).unwrap();
+    assert!((length(&bench, lines[0]) - 0.02).abs() < 1e-9);
+    bench.op(stretch(true)).unwrap();
+    assert!((length(&bench, lines[0]) - 0.03).abs() < 1e-9);
+    assert!((length(&bench, lines[2]) - 0.03).abs() < 1e-9, "top and bottom both stretched");
+    assert!((bench.sketch().dimensions[&width].value - 0.03).abs() < 1e-9, "the width took 30 mm");
+}

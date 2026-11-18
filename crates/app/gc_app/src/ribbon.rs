@@ -349,11 +349,13 @@ pub(crate) fn show(
                                     (ToolKind::Offset, Icon::Offset, Msg::ToolOffset),
                                     (ToolKind::Split, Icon::Text("-|-"), Msg::ToolSplit),
                                     (ToolKind::Move, Icon::Text("->"), Msg::ToolMove),
+                                    (ToolKind::Scale, Icon::Text("[]+"), Msg::ToolScale),
                                 ],
                                 vec![
                                     (ToolKind::Chamfer, Icon::Text("/_"), Msg::ToolChamfer),
                                     (ToolKind::Copy, Icon::Text("+>"), Msg::ToolCopy),
                                     (ToolKind::Rotate, Icon::Text("@"), Msg::ToolRotate),
+                                    (ToolKind::Stretch, Icon::Text("<->"), Msg::ToolStretch),
                                 ],
                             ];
                             for row in rows {

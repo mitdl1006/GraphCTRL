@@ -1102,6 +1102,19 @@ impl Session {
     pub fn set_tool(&mut self, kind: ToolKind) {
         // The tools' settings (Center Point, the Polygon dialog, the Offset toggles) outlive the tool.
         self.tool = self.tool.renewed(kind);
+        // Scale reads the factor off the selection's size.
+        if kind == ToolKind::Scale
+            && let Some((_, sketch)) = self.active_sketch()
+        {
+            let points: Vec<[f64; 2]> = self
+                .selected_curves()
+                .iter()
+                .filter_map(|c| sketch.curves.get(c))
+                .flat_map(gc_sketch::Curve::points)
+                .filter_map(|p| sketch.pos(p).map(|q| [q[0], q[1]]))
+                .collect();
+            self.tool.set_selection_points(points);
+        }
         // Another command ends picking for an open sketch dialog.
         if kind != ToolKind::Select {
             self.pick_target = None;
@@ -1258,6 +1271,11 @@ impl Session {
             .and_then(|i| sketch.patterns.get(i).cloned())
     }
 
+    /// The points selected on their own (not the centres of selected circles).
+    pub fn selected_points_only(&self) -> Vec<Id<gc_sketch::SkPoint>> {
+        self.selection.iter().filter_map(|i| if let Item::Point(p) = i { Some(*p) } else { None }).collect()
+    }
+
     /// The curves selected in the sketch being edited.
     pub fn selected_curves(&self) -> Vec<Id<Curve>> {
         self.selection
@@ -1342,6 +1360,15 @@ impl Session {
                 self.request = Some(ValueRequest { kind, measured, text_pos });
             }
             ToolOutput::Finish => self.set_tool(ToolKind::Select),
+            ToolOutput::Stretch(by) => {
+                let (curves, points) = (self.selected_curves(), self.selected_points_only());
+                if curves.is_empty() && points.is_empty() {
+                    self.last_error = Some(gc_sketch::SketchError::InvalidValue.into());
+                    return;
+                }
+                // A refusal shows in the status bar.
+                drop(self.sketch_op(SketchOp::Stretch { curves, points, by, relax: self.transform_relax }));
+            }
             ToolOutput::Transform(motion) => {
                 let curves = self.selected_curves();
                 if curves.is_empty() {

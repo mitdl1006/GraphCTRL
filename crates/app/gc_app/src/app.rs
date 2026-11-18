@@ -1175,7 +1175,11 @@ impl eframe::App for GraphCtrlApp {
             gc_tools::ToolKind::Chamfer => {
                 crate::sketch_dialogs::chamfer_window(&ctx, &mut self.session, lang)
             }
-            gc_tools::ToolKind::Move | gc_tools::ToolKind::Copy | gc_tools::ToolKind::Rotate => {
+            gc_tools::ToolKind::Move
+            | gc_tools::ToolKind::Copy
+            | gc_tools::ToolKind::Rotate
+            | gc_tools::ToolKind::Scale
+            | gc_tools::ToolKind::Stretch => {
                 crate::sketch_dialogs::transform_window(&ctx, &mut self.session, lang);
             }
             _ => {}

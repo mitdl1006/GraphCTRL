@@ -15,7 +15,7 @@
 | 3 | ~~Cancel Sketch~~ **완료** | 스케치 32 (P2) | — | 아래 작업 기록 |
 | 4 | ~~Tangent Circle·Midpoint Line·중심 사각형 2종~~ **완료** | 44, 46, 57 (P2) | — | 아래 작업 기록 |
 | 5 | ~~Chamfer·Split~~ **완료** | 65, 81 (P2) | — | 아래 작업 기록 |
-| 6 | ~~Move·Copy·Rotate~~ **완료** / Scale·Stretch | 76–78 (P2) / 83–84 (P3) | Scale·Stretch 남음 | 아래 작업 기록 |
+| 6 | ~~Move·Copy·Rotate / Scale·Stretch~~ **완료** | 76–78 (P2) / 83–84 (P3) | — | 아래 작업 기록 |
 | 7 | Auto-project — **면 스케치의 면 윤곽 자동 투영 완료** / 그리기 중 문질러 투영 남음 | 68 (P2) | 문질러 투영(rubbing)은 뷰포트 스냅 작업 | 아래 작업 기록 |
 | 8 | ~~Automatic Dimensions and Constraints~~ **완료** | 126 (P2) | — | 아래 작업 기록 |
 | 9 | ~~치수 방향 뒤집기(Flip)~~ **완료** | 124 (P3) | 선-호·호-호 거리 치수 종류는 없음 | 아래 작업 기록 |
@@ -53,6 +53,25 @@
 | 모션(오래된 남은 일) | 맨 아래 "남은 일(백엔드)" 절 그대로 |
 
 # 작업 기록(최신 순)
+
+## 2026-11-18 — 스케치 축척·신축(우선순위 표 6 나머지)
+
+- **원문**: To Stretch, Scale, or Offset 2D Sketch Geometry `GUID-962CEE71-8BE4-4DA6-B51E-341319C64FA4.htm`. 이동과 같은 흐름(선택 → 기준점 → 끝점, 미리보기, More), 축척 비율은 직접 입력할 수 있다.
+- **gc_sketch**:
+  - `MoveRules{break_ties, break_level, recompute_crossing, recompute_inside, radius}`, `move_with(curves, points, place, rules)`. 이동·회전은 `MoveRules::moving`을 쓴다.
+  - 선택 점과 일치로 묶인 점도 함께 옮기고, 치수를 다시 계산할지 판단할 때도 함께 센다. 직사각형의 변 끝이 그렇다.
+- **gc_doc**:
+  - `Motion::Scale{centre, factor}`: 원 반지름도 배율. 풀면(relax) 선택 안의 치수도 새 값.
+  - `SketchOp::Stretch{curves, points, by, relax}`: 연결을 끊지 않아 이어진 형상이 늘어난다. 풀면 경계를 넘는 치수가 새 값.
+- **도구**:
+  - `ToolKind::{Scale, Stretch}`.
+  - 축척 비율 = 기준점에서 커서까지 ÷ 기준점에서 가장 먼 선택 점까지. 세션이 `set_tool` 때 선택 점을 넘긴다. `HudField::Scale`에 숫자로 입력할 수 있다.
+  - 신축은 `ToolOutput::Stretch(by)`를 내고, 세션이 선택한 곡선과 따로 선택한 점(`selected_points_only`)으로 명령을 만든다.
+- **UI**: 리본 '수정' 패널 4×2(간격띄우기·분할·이동·축척 / 모따기·복사·회전·신축). 이동 창을 같이 쓴다(복사 상자는 이동·회전에만). 1280 px에서 취소 버튼이 1261에서 끝난다.
+- **원문과 다른 점**:
+  - 원문은 커서로 정하는 축척 비율의 기준을 적지 않았다. 여기서는 가장 먼 선택 점까지의 거리를 1로 본다.
+  - 풀지 않은 신축을 치수가 막으면, 자유로운 형상은 늘어나는 대신 통째로 미끄러진다(구속은 지킴).
+- **테스트**: `gc_doc/tests/sketch_shapes.rs` scale_and_stretch…, 세션 scale_and_stretch_tools, 앱 kittest scale_and_stretch_on_the_ribbon.
 
 ## 2026-11-18 — 치수 방향 뒤집기(우선순위 표 9)
 

@@ -473,6 +473,8 @@ pub(crate) fn transform_window(ctx: &egui::Context, session: &mut Session, lang:
     let title = match tool {
         ToolKind::Copy => tr!(lang, ToolCopy),
         ToolKind::Rotate => tr!(lang, ToolRotate),
+        ToolKind::Scale => tr!(lang, ToolScale),
+        ToolKind::Stretch => tr!(lang, ToolStretch),
         _ => tr!(lang, ToolMove),
     };
     let (mut copy, mut relax) = session.transform_options();
@@ -480,7 +482,8 @@ pub(crate) fn transform_window(ctx: &egui::Context, session: &mut Session, lang:
     let mut done = false;
     sketch_window(title, ctx).open(&mut open).resizable(false).show(ctx, |ui| {
         ui.label(tr!(lang, TransformSelection, session.selected_curves().len()));
-        if tool != ToolKind::Copy {
+        // Copy is an option of Move and Rotate (Inventor's dialogs); Scale and Stretch have none.
+        if matches!(tool, ToolKind::Move | ToolKind::Rotate) {
             ui.checkbox(&mut copy, tr!(lang, TransformCopy));
         }
         ui.checkbox(&mut relax, tr!(lang, TransformRelax));

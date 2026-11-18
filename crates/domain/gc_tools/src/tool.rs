@@ -55,6 +55,8 @@ pub enum HudField {
     X,
     /// A point's Y coordinate in the sketch (the Point tool).
     Y,
+    /// A scale factor (the Scale tool; a plain number).
+    Scale,
 }
 
 /// One input box as the display should show it now.
@@ -222,6 +224,10 @@ pub enum ToolKind {
     Copy,
     /// Rotate the selection: centre point, then end point (or a typed angle).
     Rotate,
+    /// Scale the selection: base point, then end point (or a typed factor).
+    Scale,
+    /// Stretch the selection: base point, then end point.
+    Stretch,
     /// Offset curves (whole loops by default): pick one, then where the offset goes.
     Offset,
 }
@@ -233,6 +239,8 @@ pub enum ToolOutput {
     Edit(SketchOp),
     /// Move, Copy or Rotate what is selected (the session knows the selection and the dialog's options).
     Transform(gc_doc::Motion),
+    /// Stretch what is selected by this much.
+    Stretch([f64; 2]),
     /// Select `item` (or clear the selection); with `extend`, toggle it in the current selection.
     Select {
         /// What was clicked.
@@ -322,6 +330,8 @@ pub enum Prompt {
     MoveEnd,
     RotateCentre,
     RotateEnd,
+    ScaleBase,
+    ScaleEnd,
     /// A sketch dialog's Geometry selector is active.
     PickGeometry,
     /// A sketch dialog's line selector is active.
@@ -403,6 +413,8 @@ pub struct Tool {
     slot_third: Option<[f64; 2]>,
     /// Tangent Circle: the lines picked so far and where.
     tangent_lines: Vec<(Id<Curve>, [f64; 2])>,
+    /// Scale: where the selected points are (the session tells), for the factor the cursor gives.
+    selection_points: Vec<[f64; 2]>,
     /// Chamfer: the dialog's type and sizes, and Create Dimensions.
     chamfer: gc_doc::ChamferKind,
     chamfer_dimensions: bool,
@@ -650,6 +662,7 @@ impl Tool {
             offset_measured: 0.0,
             slot_third: None,
             tangent_lines: Vec::new(),
+            selection_points: Vec::new(),
             chamfer: gc_doc::ChamferKind::Equal("5 mm".to_owned()),
             chamfer_dimensions: true,
         }
@@ -712,7 +725,9 @@ impl Tool {
                 | ToolKind::Chamfer
                 | ToolKind::Move
                 | ToolKind::Copy
-                | ToolKind::Rotate,
+                | ToolKind::Rotate
+                | ToolKind::Scale
+                | ToolKind::Stretch,
                 _,
             ) => self.shape_prompt(),
         }
@@ -1068,6 +1083,8 @@ impl Tool {
                         | ToolKind::Move
                         | ToolKind::Copy
                         | ToolKind::Rotate
+                        | ToolKind::Scale
+                        | ToolKind::Stretch
                 );
                 self.hover = matches!(
                     self.kind,
@@ -1079,6 +1096,8 @@ impl Tool {
                         | ToolKind::Move
                         | ToolKind::Copy
                         | ToolKind::Rotate
+                        | ToolKind::Scale
+                        | ToolKind::Stretch
                 )
                 .then(|| nearest_curve(sketch, pos, px, &[]))
                 .flatten();
@@ -1328,7 +1347,9 @@ impl Tool {
             | ToolKind::Chamfer
             | ToolKind::Move
             | ToolKind::Copy
-            | ToolKind::Rotate => Vec::new(),
+            | ToolKind::Rotate
+            | ToolKind::Scale
+            | ToolKind::Stretch => Vec::new(),
             ToolKind::Select => vec![ToolOutput::Select { item: pick(sketch, pos, px), extend: modifier }],
             ToolKind::Line => {
                 let here = self.place(sketch, pos, px, self.anchor, modifier);

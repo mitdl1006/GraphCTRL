@@ -527,3 +527,52 @@ fn move_copy_and_rotate_tools_act_on_the_selection() {
     let (a, b) = ends(&session);
     assert!((b[0] - a[0]).abs() < 1e-9 && (b[1] - a[1] - 0.01).abs() < 1e-9, "turned upright: {a:?} {b:?}");
 }
+
+/// Scale and Stretch through the tools (To Stretch, Scale, or Offset 2D Sketch Geometry,
+/// GUID-962CEE71-8BE4-4DA6-B51E-341319C64FA4).
+#[test]
+fn scale_and_stretch_tools() {
+    let mut session = new_session();
+    session.set_tool(ToolKind::Line);
+    click(&mut session, mm(0.0, 0.0));
+    click(&mut session, mm(10.0, 0.0));
+    session.tool_event(ToolEvent::Key(Key::Escape));
+    let line = drawn(&session)[0];
+    let length = |session: &Session| {
+        let (_, sketch) = session.active_sketch().unwrap();
+        let (a, b) = sketch.line(line).unwrap();
+        let (a, b) = (sketch.pos(a).unwrap(), sketch.pos(b).unwrap());
+        ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt()
+    };
+    session.set_tool(ToolKind::Select);
+    session.tool_event(ToolEvent::Click { pos: mm(5.0, 0.0), px: PX, modifier: false });
+    // Scale about the start; the cursor at twice the far end's distance is a factor of 2.
+    session.set_tool(ToolKind::Scale);
+    assert_eq!(session.prompt(), Prompt::ScaleBase);
+    click(&mut session, mm(0.0, 0.0));
+    session.tool_event(ToolEvent::Move { pos: mm(20.0, 0.0), px: PX, suppress_snap: true });
+    let hud = session.tool_hud();
+    assert!((hud[0].measured - 2.0).abs() < 1e-9, "{hud:?}");
+    click(&mut session, mm(20.0, 0.0));
+    assert!((length(&session) - 0.02).abs() < 1e-9);
+    // Typed: half.
+    click(&mut session, mm(0.0, 0.0));
+    session.tool_event(ToolEvent::Move { pos: mm(5.0, 5.0), px: PX, suppress_snap: true });
+    session.tool_event(ToolEvent::Hud { field: HudField::Scale, value: Some("0.5".into()) });
+    session.tool_event(ToolEvent::Key(Key::Enter));
+    assert!((length(&session) - 0.01).abs() < 1e-9);
+
+    // Stretch the selected end point: the line gets longer.
+    session.set_tool(ToolKind::Select);
+    let (_, sketch) = session.active_sketch().unwrap();
+    let (_, end) = sketch.line(line).unwrap();
+    session.tool_event(ToolEvent::ClickItem {
+        item: Some(gc_sketch::Item::Point(end)),
+        pos: [0.0; 2],
+        modifier: false,
+    });
+    session.set_tool(ToolKind::Stretch);
+    click(&mut session, mm(10.0, 0.0));
+    click(&mut session, mm(15.0, 0.0));
+    assert!((length(&session) - 0.015).abs() < 1e-9);
+}

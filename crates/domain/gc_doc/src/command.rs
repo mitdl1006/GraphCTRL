@@ -88,6 +88,14 @@ pub enum Motion {
         /// Angle, radians, counter-clockwise.
         angle: f64,
     },
+    /// Scale about the base point (To Stretch, Scale, or Offset 2D Sketch Geometry,
+    /// GUID-962CEE71-8BE4-4DA6-B51E-341319C64FA4); circles scale with it.
+    Scale {
+        /// Base point.
+        centre: [f64; 2],
+        /// Scale factor, positive.
+        factor: f64,
+    },
 }
 
 impl Motion {
@@ -100,6 +108,17 @@ impl Motion {
                 let (x, y) = (p[0] - centre[0], p[1] - centre[1]);
                 [centre[0] + cos * x - sin * y, centre[1] + sin * x + cos * y, p[2]]
             }
+            Motion::Scale { centre, factor } => {
+                [centre[0] + factor * (p[0] - centre[0]), centre[1] + factor * (p[1] - centre[1]), p[2]]
+            }
+        }
+    }
+
+    /// What it does to a circle's radius.
+    pub fn radius_factor(&self) -> f64 {
+        match *self {
+            Motion::Scale { factor, .. } => factor,
+            _ => 1.0,
         }
     }
 }
@@ -447,6 +466,20 @@ pub enum SketchOp {
         dimensions: bool,
         /// Add constraints.
         constraints: bool,
+    },
+    /// Stretch (Inventor 2026 help, To Stretch, Scale, or Offset 2D Sketch Geometry,
+    /// GUID-962CEE71-8BE4-4DA6-B51E-341319C64FA4): the curves and points move by `by`, and the geometry
+    /// joined to them stretches to follow; with `relax`, dimensions across the selection's edge take
+    /// their new values, otherwise a stretch they hold back is refused.
+    Stretch {
+        /// Curves that move whole.
+        curves: Vec<Id<Curve>>,
+        /// Points that move (vertices picked on their own).
+        points: Vec<Id<SkPoint>>,
+        /// Displacement, metres.
+        by: [f64; 2],
+        /// Recompute what holds the stretch back.
+        relax: bool,
     },
     /// Split (Inventor 2026 help, To Split, Trim, or Extend Curves, GUID-DD00037F-6BBA-4B95-AA90-4F99DCEB667D):
     /// cuts a line or arc in two at its crossing with another curve nearest `at`.
@@ -2523,21 +2556,60 @@ fn sketch_op(
             let fine = match *motion {
                 Motion::Translate { by } => by.iter().all(|v| v.is_finite()),
                 Motion::Rotate { centre, angle } => centre.iter().all(|v| v.is_finite()) && angle.is_finite(),
+                Motion::Scale { centre, factor } => {
+                    centre.iter().all(|v| v.is_finite()) && factor.is_finite() && factor > 1e-9
+                }
             };
             if !fine {
                 return Err(SketchError::InvalidValue.into());
             }
             if *copy {
-                let result = sketch.copy_placed(ids, curves, &place)?;
+                let result = sketch.copy_placed(ids, curves, &place, motion.radius_factor())?;
                 created.extend(result.points.iter().map(|p| Created::Point(*p)));
                 created.extend(result.curves.iter().map(|c| Created::Curve(*c)));
                 created.extend(result.constraints.iter().map(|c| Created::Constraint(*c)));
                 "Copy"
             } else {
-                let turned = matches!(motion, Motion::Rotate { .. });
-                sketch.move_placed(ids, curves, &place, turned, *relax)?;
-                if turned { "Rotate" } else { "Move" }
+                match motion {
+                    Motion::Scale { factor, .. } => {
+                        // Relaxed, a scale also gives the selection's own dimensions their new sizes.
+                        let rules = gc_sketch::MoveRules {
+                            break_ties: *relax,
+                            break_level: false,
+                            recompute_crossing: *relax,
+                            recompute_inside: *relax,
+                            radius: *factor,
+                        };
+                        sketch.move_with(ids, curves, &[], &place, rules)?;
+                        "Scale"
+                    }
+                    Motion::Rotate { .. } => {
+                        sketch.move_placed(ids, curves, &place, true, *relax)?;
+                        "Rotate"
+                    }
+                    Motion::Translate { .. } => {
+                        sketch.move_placed(ids, curves, &place, false, *relax)?;
+                        "Move"
+                    }
+                }
             }
+        }
+        SketchOp::Stretch { curves, points, by, relax } => {
+            if !by.iter().all(|v| v.is_finite()) {
+                return Err(SketchError::InvalidValue.into());
+            }
+            let motion = Motion::Translate { by: *by };
+            // Connected geometry stretches: nothing is broken; relaxed, the dimensions across the
+            // selection's edge take their new values.
+            let rules = gc_sketch::MoveRules {
+                break_ties: false,
+                break_level: false,
+                recompute_crossing: *relax,
+                recompute_inside: false,
+                radius: 1.0,
+            };
+            sketch.move_with(ids, curves, points, &|p| motion.place(p), rules)?;
+            "Stretch"
         }
         SketchOp::FlipDimensions(dims) => {
             if dims.is_empty() {

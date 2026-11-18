@@ -30,4 +30,4 @@ pub use model::{
     Curve, CurveGeom, DimKind, Dimension, ExternalRef, GeoConstraint, PointKind, SkPoint, Sketch, Space,
 };
 pub use pattern::{PatternCopy, PatternDefinition, PatternDirection, PatternStep, SketchPattern};
-pub use transform::{CopyResult, copied_items};
+pub use transform::{CopyResult, MoveRules, copied_items};

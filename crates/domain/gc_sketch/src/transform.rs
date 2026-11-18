@@ -1,5 +1,6 @@
-//! Copy, Move and Rotate of 2D sketch geometry (Inventor 2026 help, To Copy, Move, or Rotate 2D Sketch
-//! Geometry, GUID-F8114270-18F7-4C7A-947E-AC489EDACFA9).
+//! Copy, Move, Rotate, Scale and Stretch of 2D sketch geometry (Inventor 2026 help, To Copy, Move, or
+//! Rotate 2D Sketch Geometry, GUID-F8114270-18F7-4C7A-947E-AC489EDACFA9; To Stretch, Scale, or Offset 2D
+//! Sketch Geometry, GUID-962CEE71-8BE4-4DA6-B51E-341319C64FA4).
 //!
 //! - A copy takes the curves, their points and the geometric constraints among them (nothing ties a copy
 //!   to the rest of the sketch).
@@ -15,6 +16,35 @@ use gc_core::{Id, IdAlloc};
 
 use crate::edit::{Item, SketchError};
 use crate::{Curve, CurveGeom, DimKind, GeoConstraint, SkPoint, Sketch, Status};
+
+/// How a move treats what holds the selection.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MoveRules {
+    /// Break constraints tying the selection to other geometry (Move, Rotate, Scale relaxed; never Stretch,
+    /// whose connected geometry stretches).
+    pub break_ties: bool,
+    /// Break horizontal and vertical constraints within the selection (a relaxed Rotate).
+    pub break_level: bool,
+    /// Dimensions between the selection and other geometry take their new values.
+    pub recompute_crossing: bool,
+    /// Dimensions within the selection take their new values (a relaxed Scale).
+    pub recompute_inside: bool,
+    /// Circle radii are multiplied by this (Scale; 1 otherwise).
+    pub radius: f64,
+}
+
+impl MoveRules {
+    /// Move or Rotate (`turned`), relaxed or not.
+    pub fn moving(turned: bool, relax: bool) -> Self {
+        MoveRules {
+            break_ties: relax,
+            break_level: relax && turned,
+            recompute_crossing: relax,
+            recompute_inside: false,
+            radius: 1.0,
+        }
+    }
+}
 
 /// What a copy made.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -42,6 +72,7 @@ impl Sketch {
         alloc: &mut IdAlloc,
         curves: &[Id<Curve>],
         place: &dyn Fn([f64; 3]) -> [f64; 3],
+        radius: f64,
     ) -> Result<CopyResult, SketchError> {
         if curves.is_empty() || self.is_spatial() {
             return Err(SketchError::InvalidValue);
@@ -64,7 +95,7 @@ impl Sketch {
             let curve = self.curves[id];
             let geom = match curve.geom {
                 CurveGeom::Line { a, b } => CurveGeom::Line { a: to(a)?, b: to(b)? },
-                CurveGeom::Circle { c, r } => CurveGeom::Circle { c: to(c)?, r },
+                CurveGeom::Circle { c, r } => CurveGeom::Circle { c: to(c)?, r: r * radius },
                 CurveGeom::Arc { c, s, e } => CurveGeom::Arc { c: to(c)?, s: to(s)?, e: to(e)? },
             };
             let copy: Id<Curve> = alloc.alloc();
@@ -98,20 +129,20 @@ impl Sketch {
         Ok(result)
     }
 
-    /// Moves `curves` (their points by `place`). `turned` says the motion turns them (horizontal and
-    /// vertical constraints within the selection then break when relaxing).
-    pub fn move_placed(
+    /// Moves `curves` and `points` (all their points by `place`), as `rules` say.
+    pub fn move_with(
         &mut self,
         alloc: &mut IdAlloc,
         curves: &[Id<Curve>],
+        extra: &[Id<SkPoint>],
         place: &dyn Fn([f64; 3]) -> [f64; 3],
-        turned: bool,
-        relax: bool,
+        rules: MoveRules,
     ) -> Result<(), SketchError> {
-        if curves.is_empty() || self.is_spatial() {
+        if (curves.is_empty() && extra.is_empty()) || self.is_spatial() {
             return Err(SketchError::InvalidValue);
         }
-        let points = self.selected_points(curves)?;
+        let mut points = self.selected_points(curves)?;
+        points.extend(extra.iter().copied().filter(|p| self.points.contains_key(p)));
         let selected: BTreeSet<Id<Curve>> = curves.iter().copied().collect();
         let touches = |pts: &[Id<SkPoint>], cvs: &[Id<Curve>]| {
             let inside = pts.iter().any(|p| points.contains(p)) || cvs.iter().any(|c| selected.contains(c));
@@ -119,21 +150,60 @@ impl Sketch {
                 pts.iter().any(|p| !points.contains(p)) || cvs.iter().any(|c| !selected.contains(c));
             (inside, outside)
         };
-        let mut recompute = Vec::new();
-        if relax {
-            self.constraints.retain(|_, c| {
-                let (inside, outside) = touches(&Self::constraint_points(c), &Self::constraint_curves(c));
-                let level = matches!(c, GeoConstraint::Horizontal(..) | GeoConstraint::Vertical(..));
-                !(inside && (outside || (turned && level)))
-            });
-            for (id, d) in &self.dimensions {
-                let (pts, cvs) = Self::dimension_refs(&d.kind);
-                if let (true, true) = touches(&pts, &cvs) {
-                    recompute.push(*id);
+        // The points that move with the selection: it, and what is coincident with it (a stretched line's
+        // end is its own point, held on the moved one).
+        let mut moving = points.clone();
+        if !rules.break_ties {
+            loop {
+                let before = moving.len();
+                for c in self.constraints.values() {
+                    if let GeoConstraint::Coincident(p, q) = *c {
+                        if moving.contains(&p) {
+                            moving.insert(q);
+                        }
+                        if moving.contains(&q) {
+                            moving.insert(p);
+                        }
+                    }
+                }
+                if moving.len() == before {
+                    break;
                 }
             }
         }
-        for p in &points {
+        let dimension_touches = |pts: &[Id<SkPoint>], cvs: &[Id<Curve>]| {
+            let inside = pts.iter().any(|p| moving.contains(p)) || cvs.iter().any(|c| selected.contains(c));
+            let outside =
+                pts.iter().any(|p| !moving.contains(p)) || cvs.iter().any(|c| !selected.contains(c));
+            (inside, outside)
+        };
+        let mut recompute = Vec::new();
+        if rules.break_ties || rules.break_level {
+            self.constraints.retain(|_, c| {
+                let (inside, outside) = touches(&Self::constraint_points(c), &Self::constraint_curves(c));
+                let level = matches!(c, GeoConstraint::Horizontal(..) | GeoConstraint::Vertical(..));
+                !(inside && ((rules.break_ties && outside) || (rules.break_level && level)))
+            });
+        }
+        for (id, d) in &self.dimensions {
+            let (pts, cvs) = Self::dimension_refs(&d.kind);
+            let (inside, outside) = dimension_touches(&pts, &cvs);
+            if (inside && outside && rules.recompute_crossing)
+                || (inside && !outside && rules.recompute_inside)
+            {
+                recompute.push(*id);
+            }
+        }
+        // Circles of the selection grow with a scale.
+        if (rules.radius - 1.0).abs() > 1e-15 {
+            for id in curves {
+                if let Some(Curve { geom: CurveGeom::Circle { r, .. }, .. }) = self.curves.get_mut(id) {
+                    *r *= rules.radius;
+                }
+            }
+        }
+        // What moves goes where it is going (points held on the selection with it).
+        for p in &moving {
             if let Some(point) = self.points.get(p).copied() {
                 let at = place(point.pos);
                 if let Some(point) = self.points.get_mut(p) {
@@ -171,6 +241,20 @@ impl Sketch {
             Ok(report) => Err(SketchError::Unsolved(report.status)),
             Err(error) => Err(error),
         }
+    }
+}
+
+impl Sketch {
+    /// Moves or turns `curves` (see [`MoveRules::moving`]).
+    pub fn move_placed(
+        &mut self,
+        alloc: &mut IdAlloc,
+        curves: &[Id<Curve>],
+        place: &dyn Fn([f64; 3]) -> [f64; 3],
+        turned: bool,
+        relax: bool,
+    ) -> Result<(), SketchError> {
+        self.move_with(alloc, curves, &[], place, MoveRules::moving(turned, relax))
     }
 }
 
