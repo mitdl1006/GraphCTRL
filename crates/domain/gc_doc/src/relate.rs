@@ -1348,7 +1348,6 @@ fn least_squares_on(free: &[usize], terms: &[Term], poses: &mut [DPose3]) {
     let cost = |r: &[Vec<f64>]| r.iter().flatten().map(|v| v * v).sum::<f64>();
     let mut r = residuals(poses);
     let mut lambda = 1e-3;
-    let mut stalled = 0;
     for _ in 0..200 {
         let current = cost(&r);
         if current < 1e-24 {
@@ -1426,8 +1425,6 @@ fn least_squares_on(free: &[usize], terms: &[Term], poses: &mut [DPose3]) {
             let r_new = residuals(&candidate);
             let new_cost = cost(&r_new);
             if new_cost < current {
-                // Stuck at a minimum that is not zero (a conflict): stop once progress stalls.
-                stalled = if current - new_cost < 1e-9 * current { stalled + 1 } else { 0 };
                 poses.copy_from_slice(&candidate);
                 r = r_new;
                 lambda = (lambda * 0.3).max(1e-12);
@@ -1436,7 +1433,7 @@ fn least_squares_on(free: &[usize], terms: &[Term], poses: &mut [DPose3]) {
             }
             lambda *= 10.0;
         }
-        if !improved || stalled >= 3 {
+        if !improved {
             break;
         }
     }
