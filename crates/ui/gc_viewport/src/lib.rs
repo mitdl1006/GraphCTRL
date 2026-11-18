@@ -1293,6 +1293,12 @@ impl Viewport {
                     GripMotion::MoveAlong => gizmo::along_axis(&self.camera, at, size, from, direction)
                         .map(|t| from + direction * t),
                     GripMotion::RotateAbout => grip::on_view_plane(&self.camera, size, from, at),
+                    // Point and plane references are not offered by this command yet (it picks an edge); the
+                    // view plane keeps the drag defined if one ever arrives here.
+                    GripMotion::Displace
+                    | GripMotion::RotateAboutPoint
+                    | GripMotion::MoveWithinPlane
+                    | GripMotion::MoveAlongNormal => grip::on_view_plane(&self.camera, size, from, at),
                 });
                 if let Some(to) = to {
                     grip.pose = session.grip_snap_pose(

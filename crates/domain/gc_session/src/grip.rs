@@ -60,6 +60,32 @@ impl Session {
         self.doc().grip_allows(item, motion, line)
     }
 
+    /// Where Grip Snap puts a component for a motion about a point, line or plane reference (Grip Snap Move
+    /// Options Bar Reference, GUID-C030C32C-7E1E-4F37-BBDF-120412898D00). `None` when the motion does not
+    /// go with the reference or the points give none.
+    pub fn grip_snap_pose_on(
+        &self,
+        item: AnyId,
+        motion: GripMotion,
+        reference: gc_doc::GripReference,
+        from: [f64; 3],
+        to: [f64; 3],
+    ) -> Option<DPose3> {
+        self.doc().grip_snap_pose_on(item, motion, reference, from, to)
+    }
+
+    /// True when the component's remaining freedom allows that snap (any reference).
+    pub fn grip_snap_allowed(
+        &self,
+        item: AnyId,
+        motion: GripMotion,
+        reference: gc_doc::GripReference,
+        from: [f64; 3],
+        to: [f64; 3],
+    ) -> bool {
+        self.doc().grip_snap_allowed(item, motion, reference, from, to)
+    }
+
     /// Ends a Grip Snap: puts the components where they were snapped (what is tied to them follows), and
     /// with `ground` (Commit and Ground) grounds them too. One undo step.
     pub fn grip_snap_commit(&mut self, moves: &[(AnyId, DPose3)], ground: bool) -> Result<(), EditError> {
