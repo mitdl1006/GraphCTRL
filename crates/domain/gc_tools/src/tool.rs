@@ -601,6 +601,14 @@ fn constraint_for(sketch: &Sketch, kind: ConstraintKind, picks: &[Item]) -> Opti
                 let side = if cross >= 0.0 { 1.0 } else { -1.0 };
                 return Some(GeoConstraint::Tangent { a: first, b: second, side, external: true });
             }
+            // An ellipse with a circle or another ellipse: they touch where they are nearest.
+            let round_or_ellipse = |c: Id<Curve>| sketch.round(c).is_some() || sketch.ellipse(c).is_some();
+            if (sketch.ellipse(first).is_some() || sketch.ellipse(second).is_some())
+                && round_or_ellipse(first)
+                && round_or_ellipse(second)
+            {
+                return Some(GeoConstraint::Tangent { a: first, b: second, side: 1.0, external: true });
+            }
             let (centre, radius) = sketch.round(second)?;
             let centre = xy(sketch, centre)?;
             let (side, external) = match line(first) {

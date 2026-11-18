@@ -40,6 +40,12 @@ pub(crate) enum RowKind {
     /// `[ax, ay, bx, by, px, py, cx, cy, mx, my, b]`: the line runs along the ellipse at its point `p`: the
     /// cosine between the line and the ellipse's normal there (`(x / a², y / b²)` in its axes), times `a`.
     EndTangentEllipse,
+    /// `[px, py, cx, cy, mx, my, b, qx, qy]`: the ellipse's normal at its point `p` passes through `q`: the
+    /// cross product of the unit normal there with `q - p` (a length).
+    EllipseNormalThrough,
+    /// `[px, py, c1.., m1.., b1, c2.., m2.., b2]`: the two ellipses' normals at `p` are parallel: the cross
+    /// product of the unit normals, times `scale`.
+    EllipseNormals { scale: f64 },
     /// `[ax, ay, bx, by, cx, cy, r]`: signed distance of `c` from the line minus `side * (r + gap)` (zero gap:
     /// tangent; else the line keeps `gap` from the circle itself).
     LineCircleTangent { side: f64, gap: f64 },
@@ -92,6 +98,28 @@ fn length<S: Scalar>(d: &[S], size: f64, degenerate: &mut bool) -> S {
     }
 }
 
+/// The unit normal of the ellipse (centre `c`, major axis end `m`, minor radius `b`) at its point `p`, from
+/// `[px, py, cx, cy, mx, my, b]`; `None` (degenerate) for no ellipse to speak of.
+fn ellipse_normal<S: Scalar>(v: &[S; 7], size: f64, degenerate: &mut bool) -> Option<(S, S)> {
+    let (wx, wy) = (v[4] - v[2], v[5] - v[3]);
+    let a = length(&[wx, wy], size, degenerate);
+    let b = v[6];
+    if a.value() == 0.0 || b.value().abs() <= DEGENERATE * size {
+        *degenerate = true;
+        return None;
+    }
+    let (ux, uy) = (wx / a, wy / a);
+    let (px, py) = (v[0] - v[2], v[1] - v[3]);
+    let (x, y) = (px * ux + py * uy, py * ux - px * uy);
+    let (nl_x, nl_y) = (x / (a * a), y / (b * b));
+    let (nx, ny) = (ux * nl_x - uy * nl_y, uy * nl_x + ux * nl_y);
+    let n = length(&[nx, ny], size / (size * size).max(1e-300), degenerate);
+    if n.value() == 0.0 {
+        return None;
+    }
+    Some((nx / n, ny / n))
+}
+
 /// `v[to..to + 3] - v[from..from + 3]`.
 fn sub3<S: Scalar>(v: &[S], to: usize, from: usize) -> [S; 3] {
     [v[to] - v[from], v[to + 1] - v[from + 1], v[to + 2] - v[from + 2]]
@@ -121,6 +149,8 @@ impl RowKind {
             Self::PointLine { .. } | Self::CircleCircle { .. } => 6,
             Self::LineCircleTangent { .. } => 7,
             Self::LineEllipseTangent { .. } => 9,
+            Self::EllipseNormalThrough => 9,
+            Self::EllipseNormals { .. } => 12,
             Self::EndTangentEllipse => 11,
             Self::Cross { .. }
             | Self::Dot { .. }
@@ -195,6 +225,20 @@ impl RowKind {
                 let across = (dx * wy - dy * wx) / l;
                 let along = (dx * wx + dy * wy) / (l * a);
                 distance - c(side) * length(&[across, v[8] * along], size, degenerate)
+            }
+            Self::EllipseNormalThrough => {
+                let Some((nx, ny)) =
+                    ellipse_normal(&[v[0], v[1], v[2], v[3], v[4], v[5], v[6]], size, degenerate)
+                else {
+                    return c(0.0);
+                };
+                nx * (v[8] - v[1]) - ny * (v[7] - v[0])
+            }
+            Self::EllipseNormals { scale } => {
+                let first = ellipse_normal(&[v[0], v[1], v[2], v[3], v[4], v[5], v[6]], size, degenerate);
+                let second = ellipse_normal(&[v[0], v[1], v[7], v[8], v[9], v[10], v[11]], size, degenerate);
+                let (Some((ax, ay)), Some((bx, by))) = (first, second) else { return c(0.0) };
+                (ax * by - ay * bx) * c(scale)
             }
             Self::EndTangentEllipse => {
                 let (dx, dy) = (v[2] - v[0], v[3] - v[1]);
@@ -349,6 +393,7 @@ mod tests {
             RowKind::LineEllipseTangent { side: 1.0 },
             RowKind::LineEllipseTangent { side: -1.0 },
             RowKind::EndTangentEllipse,
+            RowKind::EllipseNormalThrough,
             RowKind::CircleCircle { external: true, sign: 1.0, gap: 0.0 },
             RowKind::CircleCircle { external: false, sign: -1.0, gap: 0.0 },
             RowKind::CircleCircle { external: true, sign: 1.0, gap: 0.2 },
@@ -370,6 +415,7 @@ mod tests {
             RowKind::PointLine3 { k: 1 },
             RowKind::PointSphere,
             RowKind::Coplanar,
+            RowKind::EllipseNormals { scale: 1.5 },
         ];
         for kind in &spatial {
             check_gradient(kind, &twelve[..kind.arity()]);
