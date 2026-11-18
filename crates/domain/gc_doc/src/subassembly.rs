@@ -139,6 +139,23 @@ impl Document {
         }
     }
 
+    /// The components placed in the cell (bodies, robots, imported assemblies) that sit in a subassembly,
+    /// at any depth below it, in model order.
+    pub fn subassembly_components(&self, id: SubassemblyId) -> Vec<gc_core::AnyId> {
+        self.components()
+            .into_iter()
+            .filter(|n| n.parent.is_none())
+            .filter_map(|n| match n.occurrence {
+                Occurrence::Item(item) => Some(item),
+                Occurrence::Part { .. } | Occurrence::Link { .. } | Occurrence::Tool { .. } => None,
+            })
+            .filter(|item| {
+                self.subassembly_of(Occurrence::Item(*item))
+                    .is_some_and(|s| self.is_under(TreeKey::Subassembly(s), TreeKey::Subassembly(id)))
+            })
+            .collect()
+    }
+
     /// True when the row exists.
     pub fn has_tree_row(&self, key: TreeKey) -> bool {
         match key {

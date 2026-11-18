@@ -300,3 +300,45 @@ fn an_owned_sketch_in_use_keeps_its_owner() {
     assert_eq!(s.delete_item(gc_session::CellItem::Body(a)), Err(EditError::InUse));
     assert!(s.doc().same_content(&before));
 }
+
+/// A subassembly moves as one unit (help: "treated as a single unit in the parent assembly"): every
+/// component in it, nested levels too, by the same move; one undo step; refused when one is grounded.
+#[test]
+fn a_subassembly_moves_as_one_unit() {
+    use gc_math::{DPose3, DQuat, DVec3};
+    let mut s = Session::new();
+    let _first = body(&mut s, 5.0); // grounded, outside
+    let (a, b, c) = (body(&mut s, 0.0), body(&mut s, 0.3), body(&mut s, 0.6));
+    let inner = demote(&mut s, vec![key(a)], "Inner");
+    let outer = demote(&mut s, vec![TreeKey::Subassembly(inner), key(b)], "Outer");
+    let origin = |s: &Session, x: Id<Body>| s.doc().component_origin(occ(x)).unwrap().pose;
+    let (pa, pb, pc) = (origin(&s, a), origin(&s, b), origin(&s, c));
+    // A quarter turn about Z and a lift.
+    let delta =
+        DPose3::from_parts(DVec3::new(0.0, 0.0, 0.5), DQuat::from_rotation_z(std::f64::consts::FRAC_PI_2));
+    let moves = s.subassembly_moved(outer, delta).unwrap();
+    assert_eq!(moves.len(), 2, "A (nested) and B");
+    let steps = s.history().undo_depth();
+    s.move_subassembly(outer, delta).unwrap();
+    assert_eq!(s.history().undo_depth(), steps + 1);
+    for (x, before) in [(a, pa), (b, pb)] {
+        let now = origin(&s, x);
+        let want = delta * before;
+        assert!(
+            (now.translation - want.translation).length() < 1e-9,
+            "{:?} vs {:?}",
+            now.translation,
+            want.translation
+        );
+    }
+    // The two keep their distance (a rigid unit); C outside did not move.
+    assert!(((origin(&s, a).translation - origin(&s, b).translation).length() - 0.3).abs() < 1e-9);
+    assert_eq!(origin(&s, c).translation, pc.translation);
+    s.undo();
+    assert!((origin(&s, a).translation - pa.translation).length() < 1e-12);
+    // A grounded member holds the unit; an empty or missing subassembly has nothing to move.
+    s.set_component(occ(b), gc_doc::ComponentFlag::Grounded, true).unwrap();
+    assert!(s.subassembly_moved(outer, delta).is_none());
+    assert_eq!(s.move_subassembly(outer, delta), Err(EditError::BadValue));
+    assert!(s.subassembly_moved(SubassemblyId(99), delta).is_none());
+}
