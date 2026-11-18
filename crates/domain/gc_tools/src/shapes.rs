@@ -328,7 +328,7 @@ impl Tool {
                 Some(gc_doc::Motion::Translate { by: [end[0] - base[0], end[1] - base[1]] })
             }
             ToolKind::Scale => {
-                let factor = match self.locked(HudField::Scale).and_then(|t| t.trim().parse::<f64>().ok()) {
+                let factor = match self.locked_value(HudField::Scale) {
                     Some(factor) => factor,
                     None => distance(base, end) / self.scale_reference()?,
                 };
@@ -497,6 +497,7 @@ impl Tool {
                     self.locked_value(HudField::Y).unwrap_or(here[1]),
                 ];
                 self.hud.clear();
+                self.hud_values.clear();
                 vec![ToolOutput::Edit(SketchOp::PlacePoint { pos: xyz(at), center: self.center_point })]
             }
             ToolKind::Polygon => {
@@ -646,6 +647,7 @@ impl Tool {
                 }
                 let out = self.shape_op(sketch, pos).map(ToolOutput::Edit);
                 self.hud.clear();
+                self.hud_values.clear();
                 self.offset_pick = None;
                 out.into_iter().collect()
             }

@@ -1316,7 +1316,28 @@ impl Session {
             return;
         }
         let Some(sketch) = self.active.and_then(|id| self.doc.get(id)) else { return };
+        // A typed box is evaluated here, with the document's parameters (Inventor: a value, a unit, an
+        // expression or a parameter name).
+        let typed = match &event {
+            ToolEvent::Hud { field, value: Some(text) } => Some((*field, text.clone())),
+            _ => None,
+        };
         let outputs = self.tool.handle(sketch, event);
+        if let Some((field, text)) = typed {
+            let unit = match field {
+                gc_tools::HudField::Angle => gc_doc::Unit::Deg,
+                gc_tools::HudField::Scale => gc_doc::Unit::Scalar,
+                gc_tools::HudField::Length
+                | gc_tools::HudField::Radius
+                | gc_tools::HudField::Diameter
+                | gc_tools::HudField::Width
+                | gc_tools::HudField::Height
+                | gc_tools::HudField::Distance
+                | gc_tools::HudField::X
+                | gc_tools::HudField::Y => gc_doc::Unit::Mm,
+            };
+            self.tool.set_hud_value(field, gc_doc::evaluate_value(&self.doc, &text, unit));
+        }
         for output in outputs {
             self.carry_out(output);
         }

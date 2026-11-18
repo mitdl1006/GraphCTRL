@@ -320,5 +320,45 @@ impl Sketch {
             p.circles.retain(|(a, b)| curves.contains_key(a) && curves.contains_key(b));
             p.definition.curves().iter().all(|c| curves.contains_key(c))
         });
+        // A pattern whose direction line or axis is gone can no longer be placed (Inventor: without the
+        // associative relationship the geometry "is no longer a pattern, but geometric elements that you can
+        // edit individually"): the record goes with its step construction and dimensions; the copies stay
+        // as ordinary curves.
+        let mut released = Vec::new();
+        let curves = &self.curves;
+        let points = &self.points;
+        self.patterns.retain(|p| {
+            let guided = match &p.definition {
+                PatternDefinition::Rectangular { first, second, .. } => {
+                    std::iter::once(first).chain(second).all(|d| curves.contains_key(&d.line))
+                }
+                PatternDefinition::Circular { axis, .. } => points.contains_key(axis),
+            };
+            if !guided {
+                released.push(p.clone());
+            }
+            guided
+        });
+        for pattern in released {
+            let kept_curves: std::collections::BTreeSet<Id<Curve>> =
+                pattern.elements.iter().flatten().copied().collect();
+            let kept_points: std::collections::BTreeSet<Id<SkPoint>> = pattern
+                .copies
+                .iter()
+                .map(|c| c.copy)
+                .chain(kept_curves.iter().filter_map(|c| self.curves.get(c)).flat_map(Curve::points))
+                .collect();
+            let scaffold: Vec<Item> = pattern
+                .items
+                .iter()
+                .copied()
+                .filter(|item| match item {
+                    Item::Curve(c) => !kept_curves.contains(c),
+                    Item::Point(p) => !kept_points.contains(p),
+                    Item::Constraint(_) | Item::Dimension(_) => true,
+                })
+                .collect();
+            self.remove_exactly(&scaffold);
+        }
     }
 }

@@ -54,6 +54,24 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — QA 버그 2건(qa.md 151행): 패턴 방향선 삭제, HUD 식
+
+- **패턴 방향선 삭제**: `Sketch::prune_patterns`가 원본 곡선뿐 아니라 직사각형 패턴의 방향선(`first.line`, `second.line`)과
+  원형 패턴의 축 점도 확인한다. 하나라도 없으면 패턴 기록을 풀고, 단계 작도선·구속·간격 치수만 지운다. 복사본 곡선과 점은
+  일반 곡선으로 남긴다. 실행 취소 한 번이면 패턴이 돌아온다.
+  근거: Sketch Patterns 원문(GUID-AAD3A699-FED8-4614-A31D-0A2316328CEE)의 "If you remove the associative relationship among
+  pattern elements, the geometry is no longer a pattern, but geometric elements that you can edit individually".
+  원형 패턴의 축 점은 패턴의 바큇살 작도선이 쓰고 있어서 그 점만 지우면 지워지지 않는다(기록이 매달리지 않음).
+- **HUD 식**: 세션이 `ToolEvent::Hud`로 들어온 글을 문서 매개변수 범위로 평가한다(`gc_doc::evaluate_value(doc, text, unit)`,
+  `NAME = 식` 형태도 받음). 결과는 `Tool::set_hud_value(field, Option<f64>)`로 도구에 넘긴다.
+  단위는 각도 → deg, 배율 → 단위 없음, 나머지 → mm. 평가에 실패하면 도구가 예전처럼 글을 직접 읽는다(`plain_value`).
+  유한하지 않은 값은 버린다. 입력한 글은 그대로 치수의 식으로 남는다. `gc_doc`이 `Unit`(gc_expr)을 다시 내보낸다.
+  근거: Dynamic Input 원문(GUID-33A8B11D-A04C-4809-BC82-C0419215915F)은 "enter a value"까지만 말한다. 식·매개변수는
+  Sketch Dimensions 원문(GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185)의 "enter or edit an expression that defines a parameter"를 근거로 삼았다.
+  입력한 값은 치수가 되므로 같은 식 규칙을 따른다.
+- 테스트: `gc_session/tests/qa_sketch_pick_arcslots.rs`에서 `#[ignore]` 2개를 풀었다. 새 테스트 2개:
+  `deleting_the_guide_releases_the_pattern_and_keeps_the_copies`, `hud_boxes_take_units_in_expressions_and_parameter_names`.
+
 ## 2026-11-18 — 작업 축 정의 보강(우선순위 표 11 일부)
 
 - 원문: To Create Work Features `GUID-38A9748E-FA2D-44D3-928C-DFE1326A9385.htm`, Create Work Axes.
@@ -78,6 +96,7 @@
   - Lock은 잠그는 순간 첫 조인트 원점을 둘째 원점 좌표로 저장(`LockedPose`)하고, 잠긴 동안 잔차가 그 상대 자세(원점·Z·X)를 요구한다. 그래서 따라 움직이고 자유도는 0이다.
   - Protect: 관계 추가·편집 전후로 보호된 조인트의 움직이는 컴포넌트 자유도를 비교해, 줄면 `EditError::Protected(이름)`으로 거부한다.
   - 조인트를 지우면 조건도 정리된다(`set_timeline`, `prune_states`).
+  - **원문과 다른 점**: 원문은 Protect 침해 시 경고한 뒤 계속할 수 있게 한다. 우리 앱에는 경고 대화상자가 없어서 거부를 유지한다(리드 결정, 2026-11-18). 경고 대화상자가 생기면 `EditError::Protected`를 확인 후 강행하는 경로로 바꾼다.
 - **세션**: `joint_condition(id)`, `set_joint_lock(id, on)`, `set_joint_protect(id, on)`.
 - **상태 표시줄**: Protected 거부 문구(ErrProtected).
 - **UI**: 브라우저 관계 우클릭 Lock/Protect 체크는 프론트엔드 몫(모델 트리 메뉴).

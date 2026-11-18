@@ -516,7 +516,6 @@ fn deleting_one_copy_keeps_the_record_consistent() {
 /// Deleting the guide line a pattern follows must not leave the pattern pointing at a curve that is gone
 /// (Edit Pattern would open on a missing direction).
 #[test]
-#[ignore = "BUG: deleting a rectangular pattern's direction line leaves the pattern record pointing at it (owner: backend, gc_sketch::prune_patterns checks only the originals)"]
 fn deleting_the_direction_line_does_not_leave_a_dangling_pattern() {
     let Pat { mut s, k, along, .. } = pattern();
     run(&mut s, k, SketchOp::Delete(vec![Item::Curve(along)])).unwrap();
@@ -529,6 +528,62 @@ fn deleting_the_direction_line_does_not_leave_a_dangling_pattern() {
             }
         }
     }
+}
+
+/// Help (Rectangular Pattern): without its associative relationship "the geometry is no longer a
+/// pattern, but geometric elements that you can edit individually". Deleting the direction line
+/// releases the pattern: the copies stay, the step construction and dimensions go.
+#[test]
+fn deleting_the_guide_releases_the_pattern_and_keeps_the_copies() {
+    let Pat { mut s, k, along, .. } = pattern();
+    let before = s.active_sketch().unwrap().1.clone();
+    let copies: Vec<Id<Curve>> = before.patterns[0].elements.iter().flatten().copied().collect();
+    assert_eq!(copies.len(), 2);
+    run(&mut s, k, SketchOp::Delete(vec![Item::Curve(along)])).unwrap();
+    let sk = s.active_sketch().unwrap().1;
+    assert!(sk.patterns.is_empty(), "the pattern record stayed");
+    assert!(copies.iter().all(|c| sk.curves.contains_key(c)), "a copy went with the guide");
+    assert!(sk.dimensions.is_empty(), "the spacing dimension stayed");
+    assert!(sk.curves.values().all(|c| !c.construction), "the step construction stayed");
+    assert!(sk.clone().solve().is_ok());
+    // One undo brings the pattern back.
+    s.undo();
+    assert_eq!(s.active_sketch().unwrap().1.patterns.len(), 1);
+
+    // Circular: deleting the axis point.
+    let (mut s, k) = setup();
+    let original = line(&mut s, k, [0.02, 0.0], [0.03, 0.0]);
+    let axis = match run(&mut s, k, SketchOp::AddPoint { pos: [0.0, 0.0, 0.0] }).unwrap()[0] {
+        Created::Point(p) => p,
+        ref other => panic!("{other:?}"),
+    };
+    run(
+        &mut s,
+        k,
+        SketchOp::CircularPattern {
+            curves: vec![original],
+            axis,
+            count: 4,
+            angle: "90".into(),
+            flip: false,
+            fitted: false,
+        },
+    )
+    .unwrap();
+    let copies: Vec<Id<Curve>> =
+        s.active_sketch().unwrap().1.patterns[0].elements.iter().flatten().copied().collect();
+    assert_eq!(copies.len(), 3);
+    // The axis is held by the pattern's spoke, so deleting it alone keeps it; either way no pattern points
+    // at a missing axis and no copy is lost.
+    run(&mut s, k, SketchOp::Delete(vec![Item::Point(axis)])).ok();
+    let sk = s.active_sketch().unwrap().1;
+    for p in &sk.patterns {
+        if let PatternDefinition::Circular { axis, .. } = &p.definition {
+            assert!(sk.points.contains_key(axis), "a pattern kept a deleted axis");
+        }
+    }
+    assert!(copies.iter().all(|c| sk.curves.contains_key(c)));
+    assert!(sk.clone().solve().is_ok());
 }
 
 // ---- Point tool: X and Y boxes ----
@@ -603,7 +658,6 @@ fn point_x_y_clearing_and_one_box_only() {
 /// The HUD event is documented as taking "a number, with or without a unit, or an expression", but an
 /// expression ("2*3", "2+3", "(2*3)") is silently dropped and the point lands under the cursor.
 #[test]
-#[ignore = "BUG: an expression typed in a HUD box is silently ignored, only plain numbers work (owner: backend, gc_tools plain_value)"]
 fn point_x_y_boxes_evaluate_expressions() {
     let (mut s, _k) = setup();
     s.set_tool(ToolKind::Point);
@@ -613,4 +667,24 @@ fn point_x_y_boxes_evaluate_expressions() {
     s.tool_event(ToolEvent::Key(Key::Enter));
     let sk = s.active_sketch().unwrap().1;
     assert!(sk.points.values().any(|p| (p.pos[0] - 0.01).abs() < 1e-9 && (p.pos[1] - 0.006).abs() < 1e-9));
+}
+
+/// Help (Dynamic Input, Parameters): a box takes units inside an expression and parameter names.
+#[test]
+fn hud_boxes_take_units_in_expressions_and_parameter_names() {
+    let (mut s, _k) = setup();
+    s.execute(&Command::AddParam { name: "gap".into(), source: "4 mm".into(), angle: false }).unwrap();
+    s.set_tool(ToolKind::Point);
+    s.tool_event(ToolEvent::Move { pos: mm(70.0, 80.0), px: PX, suppress_snap: true });
+    s.tool_event(ToolEvent::Hud { field: HudField::X, value: Some("2 mm * 3".into()) });
+    s.tool_event(ToolEvent::Hud { field: HudField::Y, value: Some("gap * 2".into()) });
+    s.tool_event(ToolEvent::Key(Key::Enter));
+    let sk = s.active_sketch().unwrap().1;
+    assert!(sk.points.values().any(|p| (p.pos[0] - 0.006).abs() < 1e-9 && (p.pos[1] - 0.008).abs() < 1e-9));
+    // An unknown name is ignored like any unreadable text: the cursor decides.
+    s.tool_event(ToolEvent::Move { pos: mm(30.0, 40.0), px: PX, suppress_snap: true });
+    s.tool_event(ToolEvent::Hud { field: HudField::X, value: Some("nope * 2".into()) });
+    s.tool_event(ToolEvent::Key(Key::Enter));
+    let sk = s.active_sketch().unwrap().1;
+    assert!(sk.points.values().all(|p| p.pos.iter().all(|v| v.is_finite())));
 }

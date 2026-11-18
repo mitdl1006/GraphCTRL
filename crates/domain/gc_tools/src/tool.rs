@@ -389,6 +389,8 @@ pub struct Tool {
     construction: bool,
     /// Values typed into the input boxes, locked.
     hud: Vec<(HudField, String)>,
+    /// Values the caller evaluated for typed boxes (expressions, parameters), in SI units.
+    hud_values: Vec<(HudField, f64)>,
     /// Trim, Extend, Fillet: the curve under the cursor and the closest position on it.
     hover: Option<(Id<Curve>, [f64; 2])>,
     /// Shift is held: Trim and Extend swap.
@@ -648,6 +650,7 @@ impl Tool {
             tangent_from: None,
             construction: false,
             hud: Vec::new(),
+            hud_values: Vec::new(),
             hover: None,
             alternate: false,
             sweep_from: None,
@@ -790,7 +793,28 @@ impl Tool {
 
     /// The locked value of a box as a number, when the tool can read it.
     fn locked_value(&self, field: HudField) -> Option<f64> {
-        self.locked(field).and_then(|text| plain_value(text, field == HudField::Angle))
+        let text = self.locked(field)?;
+        if let Some((_, value)) = self.hud_values.iter().find(|(f, _)| *f == field) {
+            return Some(*value);
+        }
+        match field {
+            HudField::Scale => text.trim().parse::<f64>().ok().filter(|v| v.is_finite()),
+            _ => plain_value(text, field == HudField::Angle),
+        }
+    }
+
+    /// Gives the evaluated value of a typed box (the caller evaluates expressions and parameter names,
+    /// in SI units); `None` leaves the tool to read the text itself. A box that is not typed ignores it.
+    pub fn set_hud_value(&mut self, field: HudField, value: Option<f64>) {
+        self.hud_values.retain(|(f, _)| *f != field);
+        if let Some(value) = value.filter(|v| v.is_finite())
+            && self.locked(field).is_some()
+        {
+            self.hud_values.push((field, value));
+            if let Some(cursor) = self.cursor {
+                self.cursor = Some(self.apply_locks(cursor));
+            }
+        }
     }
 
     /// The cursor moved to where the locked values put it.
@@ -970,7 +994,8 @@ impl Tool {
         self.slot_third = None;
         self.tangent_lines.clear();
         if self.kind != ToolKind::Fillet {
-            self.hud.clear(); // the fillet radius stays
+            self.hud.clear();
+            self.hud_values.clear(); // the fillet radius stays
         }
     }
 
@@ -1037,6 +1062,7 @@ impl Tool {
             .filter_map(|(field, slot)| self.locked(*field).map(|text| (*slot, text.to_owned())))
             .collect();
         self.hud.clear();
+        self.hud_values.clear();
         let op = if dims.is_empty() { op } else { SketchOp::WithDimensions { op: Box::new(op), dims } };
         ToolOutput::Edit(if self.construction { SketchOp::AsConstruction(Box::new(op)) } else { op })
     }
@@ -1263,6 +1289,7 @@ impl Tool {
             }
             ToolEvent::Hud { field, value } => {
                 self.hud.retain(|(f, _)| *f != field);
+                self.hud_values.retain(|(f, _)| *f != field);
                 if let Some(value) = value.filter(|v| !v.trim().is_empty()) {
                     self.hud.push((field, value));
                 }

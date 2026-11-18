@@ -850,6 +850,14 @@ fn evaluate(source: &str, scope: &dyn Scope, unit: Unit) -> Result<f64, EditErro
     })
 }
 
+/// Evaluates what was typed in an input box (a number, a unit, an expression, parameter names) for a field
+/// of unit `unit`, in SI units; `None` when it does not evaluate to a finite value.
+#[must_use]
+pub fn evaluate_value(doc: &Document, source: &str, unit: Unit) -> Option<f64> {
+    let source = named_source(source).map_or_else(|| source.to_owned(), |(_, expr)| expr);
+    evaluate(&source, &scope_of(doc), unit).ok().filter(|v| v.is_finite())
+}
+
 /// Parameter values by name.
 fn scope_of(doc: &Document) -> BTreeMap<String, Quantity> {
     let mut scope: BTreeMap<String, Quantity> = doc

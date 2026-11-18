@@ -33,7 +33,8 @@ pub use cell::{
 };
 pub use command::{
     Applied, ArcSlotKind, ChamferKind, Command, Created, DimSlot, EditError, EndSnap, Motion, SketchOp,
-    SketchPatternDirection, SlotKind, TangentArc, apply, flipped, preview_sketch_op, tangent_arc,
+    SketchPatternDirection, SlotKind, TangentArc, apply, evaluate_value, flipped, preview_sketch_op,
+    tangent_arc,
 };
 pub use design::{
     Assembly, AssemblyMesh, AssemblyPart, ComponentFlag, Components, ContactSolver, CurveRef, Extent,
@@ -41,6 +42,7 @@ pub use design::{
     Timeline, WorkFeature, WorkGeometry,
 };
 pub use document::{ChangeSet, Contents, DocDelta, Document, Frame, FrameKind, Param, Store, Table};
+pub use gc_expr::Unit;
 pub use gc_sketch::Sketch;
 pub use history::History;
 pub use pattern::{ComponentPattern, PatternDirection, PatternElement, PatternLayout};
