@@ -689,6 +689,12 @@ messages! {
     /// Browser menu: suppress an item (kept, not computed).
     CmdSuppress => ("억제", "Suppress"),
     CmdEnabled => ("활성", "Enabled"),
+    BrowserMenu => ("브라우저 메뉴", "Browser menu"),
+    BrowserHideWork => ("작업 피처 숨기기", "Hide Work Features"),
+    BrowserHideConstrained => ("완전 구속 숨기기", "Hide Fully Constrained"),
+    BrowserShowState => ("구속 상태 표시", "Show Constraint State"),
+    BrowserEditValues => ("브라우저에서 값 편집", "Edit Values in Browser"),
+    BrowserRelationValue => ("관계 값", "Relationship value"),
     BrowserFind => ("찾기", "Find"),
     BrowserFindHint => ("이름으로 찾기", "Find by name"),
     /// Browser menu: bring a suppressed item back.

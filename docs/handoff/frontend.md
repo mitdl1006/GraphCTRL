@@ -206,7 +206,13 @@
 - 원문: Working with the Assembly Browser GUID-5F975252-BDB4-488C-A2C5-8B15C7D3C641(브라우저 메뉴: Find, Edit Values in Browser, Display Preferences = Hide Work Features / Hide Fully Constrained / Show Constraint State …, 우클릭 메뉴는 구성요소·관계에 대한 작업), Assembly Browser Reference GUID-CB6B1637-71AD-4753-8CC9-19559BFEE3A5(접지 = 압정 아이콘 변형, Disabled·Invisible 변형, 구속 상태 점).
 - 점검 결과 이미 있던 것: 가시성 체크, 억제(+흐린 이름), 이름 바꾸기, 삭제, 제자리 편집(더블클릭), 구속 상태 점(검은/속 빈/대시), 관계 행의 잠금 아이콘·+/-.
 - 이번에 채운 것: ① 구성요소 행 우클릭 메뉴에 **활성(Enabled)**·**접지(Grounded)** 체크 항목(`Command::SetComponent`, 항목 순서: 메뉴 고유 항목 → 이름 바꾸기 → 가시성 → 활성 → 접지 → 억제 → 삭제). ② 접지된 구성요소 아이콘 모서리에 **압정**(`Icon::Pin`), 비활성(Disabled)이나 숨긴(Invisible) 구성요소 이름은 배경 스타일(흐림). ③ 브라우저 위 **찾기** 상자(이름의 일부, 대소문자 무시): 구성요소·서브어셈블리 폴더(이름이 맞으면 안의 것 전부)·스케치·관계 행만 남긴다. 테스트 `the_browser_menu_enables_and_grounds_components_and_find_filters_the_rows`, 증거 `docs/evidence/img/review-63-browser-pin.png`.
-- 아직 없는 것(앱에 대상이 없거나 후속): Display Preferences(작업 피처 숨기기·완전 구속 숨기기·구속 상태 토글), Edit Values in Browser 토글, 적응(Adaptive)·BOM 제외 메뉴(앱에 적응성·BOM 없음), 사용자 정의 폴더, 찾기의 조건 검색(문제 있는 관계·억제된 항목 등 조합).
+- 아직 없는 것(앱에 대상이 없거나 보류): 적응(Adaptive)·BOM 제외 메뉴(앱에 적응성·BOM 없음), 사용자 정의 폴더, 찾기의 조건 검색(문제 있는 관계·억제된 항목 등 조합), Hide UCS·Hide Notes·Hide Documents·Show Children Only·Show Extended Names(대상 없음).
+
+### 브라우저 메뉴: Display Preferences / Edit Values in Browser
+
+- 원문: Working with the Assembly Browser GUID-5F975252-BDB4-488C-A2C5-8B15C7D3C641("Hide Work Features turns the display of all work features and the Origin folder off or on", "Hide Fully Constrained only displays components that have constraint issues", "Show Constraint State displays all constraint status", "Edit Values in Browser turns the display of the browser edit box off or on ... used for changing or measuring constraint geometry").
+- 찾기 상자 옆 "…"(접근성 이름 "브라우저 메뉴") 메뉴에 네 개 체크: **작업 피처 숨기기**(문서·구성요소 원점 폴더와 작업 피처 목록을 감춤), **완전 구속 숨기기**(완전 구속 구성요소·관계 행을 감춤), **구속 상태 표시**(점 표시, 기본 켬), **브라우저에서 값 편집**(기본 켬). 값 편집: 구속 행을 클릭하면 그 아래 값 상자("관계 값", 오프셋 mm / 각도 °)가 나타나고 Enter로 `SetRelationship` 적용(Undo 1단계). 조인트·강체 같은 값 없는 관계는 상자가 없다. 테스트 `the_browser_menu_hides_work_features_and_edits_a_constraint_value_in_place`.
+- 원문과 차이: 값을 바꾸면 인벤터처럼 상자가 닫히지 않고 선택이 유지된다, 측정 전용 동작(값 읽기)은 없다. 설정은 세션 동안만 유지(파일에 저장하지 않음).
 
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
