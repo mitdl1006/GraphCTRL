@@ -264,6 +264,7 @@ pub struct GraphCtrlApp {
     /// The Joint dialog.
     joint: crate::constrain::Joint,
     pattern: crate::pattern::Pattern,
+    replicate: crate::replicate::Replicate,
     /// The Parameters dialog.
     parameters: crate::parameters::Parameters,
     /// The open sketch Mirror or Pattern dialog.
@@ -361,6 +362,7 @@ impl GraphCtrlApp {
             conflict: crate::conflict::ConstraintError::default(),
             joint: crate::constrain::Joint::default(),
             pattern: crate::pattern::Pattern::default(),
+            replicate: crate::replicate::Replicate::default(),
             sketch_dialog: None,
             parameters: crate::parameters::Parameters::default(),
             importing: false,
@@ -1030,6 +1032,7 @@ impl eframe::App for GraphCtrlApp {
             Some(ribbon::RibbonAction::StartConstrain) => self.constrain.start(),
             Some(ribbon::RibbonAction::StartJoint) => self.joint.start(),
             Some(ribbon::RibbonAction::StartPattern) => self.pattern.start(Vec::new()),
+            Some(ribbon::RibbonAction::StartReplicate(mode)) => self.replicate.start(mode),
             Some(ribbon::RibbonAction::StartParameters) => self.parameters.open = true,
             Some(ribbon::RibbonAction::StartSketchMirror) => {
                 self.sketch_dialog = Some(crate::sketch_dialogs::SketchDialog::new(
@@ -1274,9 +1277,12 @@ impl eframe::App for GraphCtrlApp {
             None => {}
         }
         // The Constrain dialog picks origin planes, axes and points in the view.
-        self.viewport.constrain_mode = self.constrain.picking() || self.joint.open || self.pattern.open;
+        self.viewport.constrain_mode =
+            self.constrain.picking() || self.joint.open || self.pattern.open || self.replicate.picking();
         if let Some((occurrence, element)) = self.viewport.take_constrain_pick() {
-            if self.pattern.open {
+            if self.replicate.picking() {
+                self.replicate.pick(occurrence, element);
+            } else if self.pattern.open {
                 self.pattern.pick(occurrence, element);
             } else if self.joint.open {
                 self.joint.pick(occurrence, element);
@@ -1289,6 +1295,9 @@ impl eframe::App for GraphCtrlApp {
         }
         if self.pattern.open {
             self.pattern.window(&ctx, &mut self.session, lang);
+        }
+        if self.replicate.open {
+            self.replicate.window(&ctx, &mut self.session, lang);
         }
         if let Some(conflict) = self.joint.conflict.take().or_else(|| self.constrain.conflict.take()) {
             self.conflict.show_for(&self.session, conflict);
