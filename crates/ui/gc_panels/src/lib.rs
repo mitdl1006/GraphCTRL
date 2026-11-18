@@ -3,6 +3,7 @@
 mod cell;
 mod pose;
 mod role;
+mod work;
 
 use egui::{RichText, Ui};
 use gc_core::Id;
@@ -18,6 +19,7 @@ use gc_ui::panel::TreeRow;
 pub use cell::{CellUi, cell, problem_text, status_text};
 pub use pose::{PoseCalc, RotationInput, pose_calculator};
 pub use role::role_properties;
+pub use work::{WorkItem, WorkUi, work_browser, work_properties};
 
 /// What the user asked for in the browser.
 #[derive(Clone, Debug, PartialEq)]
@@ -63,6 +65,8 @@ pub enum BrowserAction {
     SuppressRelationship(gc_core::Id<gc_doc::Relationship>, bool),
     /// Select a sketch role (a waypoint or a path of a sketch), or none; the view marks it.
     SelectRole(Option<Id<gc_doc::SketchRole>>),
+    /// Change the work model (object types, objects, state variables, tasks).
+    Work(gc_doc::WorkOp),
     /// Change the browser's user-defined folders.
     Folder(gc_doc::FolderOp),
     /// Isolate these components (Inventor: Isolate; a subassembly is given as its members).
@@ -113,6 +117,8 @@ pub struct ParamsUi {
     /// The component row the pointer is over this frame: the view shows its bounding box (Inventor 2026
     /// help, assembly parity notes: hovering a browser node shows its bounding box in the graphics).
     pub hovered: Option<gc_core::AnyId>,
+    /// What the work node of the browser shows selected, and its rename.
+    pub work: work::WorkUi,
     /// The rows marked with Ctrl+click (for moving several into a folder or subassembly at once).
     pub marked: Vec<gc_doc::TreeKey>,
     /// The sketch role selected in the browser.
@@ -520,6 +526,9 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
     if let Some(command) = params(ui, session, lang, state) {
         action = Some(BrowserAction::Edit(Box::new(command)));
     }
+    if let Some(work) = work::work_browser(ui, session, lang, &mut state.work) {
+        action = Some(work);
+    }
     let row = |name: &str, item| (name.to_owned(), name.to_owned(), item);
     browser_section(
         ui,
@@ -769,7 +778,30 @@ fn role_row(
         suppressible: true,
     };
     ui.indent(("gc_role", id), |ui| {
-        let result = node_row(ui, session, lang, state, &node, action, |_, _| {});
+        let result = node_row(ui, session, lang, state, &node, action, |ui, action| {
+            // A task that moves to this waypoint or follows this path.
+            if ui.button(tr!(lang, WorkTaskFromRole)).clicked() {
+                let step = match role.kind {
+                    gc_doc::RoleKind::Waypoint { .. } => gc_doc::Step::MoveJ(gc_doc::MoveTarget::Role(id)),
+                    gc_doc::RoleKind::Path { .. } => gc_doc::Step::FollowPath(id),
+                };
+                let taken: Vec<String> = session.doc().tasks().iter().map(|(_, t)| t.name.clone()).collect();
+                let name = (taken.len() + 1..)
+                    .map(|n| format!("{}{n}", tr!(lang, WorkTaskBase)))
+                    .find(|n| !taken.contains(n))
+                    .unwrap_or_default();
+                *action = Some(BrowserAction::Work(gc_doc::WorkOp::AddTask(gc_doc::Task {
+                    name,
+                    location: gc_doc::Location::Sketch(role.sketch),
+                    precondition: String::new(),
+                    steps: vec![step],
+                    effects: Vec::new(),
+                    robots: gc_doc::RobotChoice::Any,
+                    priority: 0,
+                })));
+                ui.close();
+            }
+        });
         if result.clicked() {
             state.role = Some(id);
             *action = Some(BrowserAction::SelectRole(Some(id)));
@@ -1285,7 +1317,7 @@ fn robot_links(
 
 /// A small dot at the right of a row: filled (fully constrained), hollow (can still move) or a dash
 /// (not satisfied), as Inventor marks components and constraints.
-fn status_dot(ui: &Ui, row: egui::Rect, full: Option<bool>, sick: bool) {
+pub(crate) fn status_dot(ui: &Ui, row: egui::Rect, full: Option<bool>, sick: bool) {
     let at = egui::pos2(row.right() - 34.0, row.center().y);
     let painter = ui.painter();
     if sick {
