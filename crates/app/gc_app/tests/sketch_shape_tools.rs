@@ -702,7 +702,23 @@ fn the_spline_menu_inserts_points_and_closes_the_curve() {
     right_click(&mut harness, at);
     harness.get_by_label("점 삽입").click();
     harness.run_steps(3);
+    // The mode shows its hint as a label, so a screen test can see it.
+    harness.get_by_label("스플라인 위를 클릭해 점을 삽입합니다 (Esc로 끝)");
     let target = screen(&harness, outline[outline.len() / 2]);
+    // A click far from the curve inserts nothing.
+    let far = egui::pos2(target.x, target.y + 160.0);
+    harness.event(egui::Event::PointerMoved(far));
+    harness.run_steps(2);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: far,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run_steps(2);
+    }
+    assert_eq!(spline_points(&harness).len(), 4, "far from the curve nothing is inserted");
     harness.event(egui::Event::PointerMoved(target));
     harness.run_steps(2);
     for pressed in [true, false] {

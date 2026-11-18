@@ -128,6 +128,8 @@ pub struct Viewport {
     views: ViewHistory,
     /// Bend (3D sketch) is running: the lines picked so far and the radius typed.
     bend: Option<BendState>,
+    /// Helical Curve (3D sketch): the dialog, then the start and end clicks.
+    helix: Option<HelixState>,
     /// Insert Point is running on this spline: each click adds a fit point, Esc ends.
     insert_spline: Option<Id<gc_sketch::Curve>>,
     /// Whether Alt was held when the primary button last went down.
@@ -239,6 +241,70 @@ struct BendState {
     fresh: bool,
 }
 
+/// The Helical Curve command of a 3D sketch (Inventor 2026 help, To Draw 3D Curves,
+/// GUID-37BA1DCE-6BC4-41CD-A36D-577F31B304FC): the dialog's values as typed, then the start and end
+/// points clicked.
+#[derive(Clone, Debug)]
+struct HelixState {
+    /// 0 Pitch and Revolution, 1 Revolution and Height, 2 Pitch and Height, 3 Spiral.
+    definition: usize,
+    pitch: String,
+    revolutions: String,
+    height: String,
+    diameter: String,
+    taper: String,
+    right_hand: bool,
+    /// The dialog is done; the start and end are being clicked.
+    placing: bool,
+    start: Option<[f64; 3]>,
+    hover: Option<[f64; 3]>,
+}
+
+impl HelixState {
+    fn new() -> Self {
+        Self {
+            definition: 0,
+            pitch: "10 mm".to_owned(),
+            revolutions: "5".to_owned(),
+            height: "50 mm".to_owned(),
+            diameter: "20 mm".to_owned(),
+            taper: "0 deg".to_owned(),
+            right_hand: true,
+            placing: false,
+            start: None,
+            hover: None,
+        }
+    }
+
+    /// The operation for an axis from `start` to `end`; `None` while a value does not evaluate.
+    fn op(&self, doc: &gc_doc::Document, start: [f64; 3], end: [f64; 3]) -> Option<gc_doc::SketchOp> {
+        use gc_doc::{HelixShape, Unit, evaluate_value};
+        let length = |text: &str| evaluate_value(doc, text, Unit::Mm);
+        let number = |text: &str| evaluate_value(doc, text, Unit::Scalar);
+        let shape = match self.definition {
+            0 => HelixShape::PitchRevolution {
+                pitch: length(&self.pitch)?,
+                revolutions: number(&self.revolutions)?,
+            },
+            1 => HelixShape::RevolutionHeight {
+                revolutions: number(&self.revolutions)?,
+                height: length(&self.height)?,
+            },
+            2 => HelixShape::PitchHeight { pitch: length(&self.pitch)?, height: length(&self.height)? },
+            _ => HelixShape::Spiral { pitch: length(&self.pitch)?, revolutions: number(&self.revolutions)? },
+        };
+        let taper = if self.definition == 3 { 0.0 } else { evaluate_value(doc, &self.taper, Unit::Deg)? };
+        Some(gc_doc::SketchOp::AddHelix {
+            start,
+            end,
+            diameter: length(&self.diameter)?,
+            shape,
+            taper,
+            right_hand: self.right_hand,
+        })
+    }
+}
+
 /// What a plain click selects (Inventor 2026 help, About Component Selection Modes and Sets,
 /// GUID-E3E49BD5-3F55-4836-8CD1-2C1855CF9986: the Select command's priority).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -271,6 +337,7 @@ impl Viewport {
             placing: None,
             placing_paste: None,
             bend: None,
+            helix: None,
             insert_spline: None,
             alt_at_press: false,
             alt_drag: None,
@@ -448,20 +515,28 @@ impl Viewport {
                         self.insert_spline = None;
                     } else if response.clicked_by(PointerButton::Primary)
                         && let Some(pos) = response.interact_pointer_pos().and_then(on_sketch)
+                        && near_spline(session, curve, pos, gc_tools::tolerance::CURVE_PX * px)
                     {
-                        // A refusal is explained in the status bar.
+                        // Only a click on the spline (within the pick distance) inserts a point; a refusal
+                        // is explained in the status bar.
                         drop(session.edit_active_sketch(gc_doc::SketchOp::InsertSplinePoint {
                             curve,
                             at: [pos[0], pos[1]],
                         }));
                     }
-                    ui.painter_at(self.rect).text(
-                        self.rect.center_top() + egui::vec2(0.0, 14.0),
-                        egui::Align2::CENTER_TOP,
-                        tr!(lang, SplineInsertHint),
-                        egui::FontId::proportional(13.0),
-                        colors::ACCENT,
-                    );
+                    // The hint is a label (it has an accessibility node), not painted text.
+                    egui::Area::new(egui::Id::unique("gc_insert_spline_hint"))
+                        .fixed_pos(self.rect.center_top() + egui::vec2(0.0, 14.0))
+                        .pivot(egui::Align2::CENTER_TOP)
+                        .order(egui::Order::Foreground)
+                        .interactable(false)
+                        .show(ui.ctx(), |ui| {
+                            ui.label(
+                                egui::RichText::new(tr!(lang, SplineInsertHint))
+                                    .size(13.0)
+                                    .color(colors::ACCENT),
+                            );
+                        });
                 } else if response.clicked_by(PointerButton::Primary)
                     && let Some(pos) = response.interact_pointer_pos().and_then(on_sketch)
                 {
@@ -496,6 +571,7 @@ impl Viewport {
         self.select_other_list(ui, session);
         self.select_menu(ui, session, size, lang);
         self.bend_box(ui, session, rect, lang);
+        self.helix_dialog(ui, session, lang);
 
         // The marking menu: a right press opens it (in a sketch or among the components); a quick mark
         // toward a command picks it, otherwise the radial menu and its overflow list show.
@@ -1206,6 +1282,43 @@ impl Viewport {
                     bend.lines.push(id);
                 }
             }
+        } else if self.helix.as_ref().is_some_and(|h| h.placing) {
+            // Helical Curve: the start point, then the end point that gives the axis direction.
+            let anchor = self.helix.as_ref().and_then(|h| h.start).map(DVec3::from_array);
+            let plane_axis = session.spatial_plane();
+            let place = |at: egui::Pos2| {
+                let ray = camera.ray(to_view(at), size);
+                let ray = gc_math::Ray { origin: local(ray.origin), dir: turned(ray.dir) };
+                gc_tools::spatial::place(&ray, anchor, plane_axis, &points, &away(to_view(at)))
+            };
+            if let Some(helix) = self.helix.as_mut() {
+                helix.hover = cursor.and_then(place).map(|placed| placed.pos.to_array());
+                if let Some(placed) = clicked.and_then(place) {
+                    let at = placed.pos.to_array();
+                    match helix.start {
+                        None => helix.start = Some(at),
+                        Some(start) => {
+                            // A refusal (a value that does not evaluate, a zero-length axis) shows in the
+                            // status bar and the command stays open.
+                            let op = helix.op(session.doc(), start, at);
+                            if let Some(op) = op
+                                && session.edit_active_sketch(op).is_ok()
+                            {
+                                self.helix = None;
+                            }
+                        }
+                    }
+                }
+            }
+            if let Some(helix) = &self.helix
+                && let (Some(from), Some(to)) = (helix.start, helix.hover)
+                && let (Some(a), Some(b)) =
+                    (on_screen(DVec3::from_array(from)), on_screen(DVec3::from_array(to)))
+            {
+                #[allow(clippy::cast_possible_truncation, reason = "screen coordinates fit f32")]
+                let pt = |p: [f64; 2]| egui::pos2(rect.left() + p[0] as f32, rect.top() + p[1] as f32);
+                ui.painter().line_segment([pt(a), pt(b)], egui::Stroke::new(1.6, colors::PREVIEW));
+            }
         } else if matches!(
             session.tool(),
             gc_tools::ToolKind::Line
@@ -1605,6 +1718,88 @@ impl Viewport {
             }
         }
         self.bend = Some(bend);
+    }
+
+    /// Starts Helical Curve in the 3D sketch being edited: the dialog first.
+    pub fn start_helix(&mut self) {
+        self.helix = Some(HelixState::new());
+    }
+
+    /// Whether Helical Curve is running.
+    pub fn is_helixing(&self) -> bool {
+        self.helix.is_some()
+    }
+
+    /// The Helical Curve dialog (Helical Shape tab: Constant, a Definition, values, Rotation) while it is
+    /// open; once OK is pressed, the prompt for the two clicks. Esc ends.
+    fn helix_dialog(&mut self, ui: &egui::Ui, session: &Session, lang: Lang) {
+        let Some(mut helix) = self.helix.take() else { return };
+        if !session.sketch_is_spatial() || ui.input(|i| i.key_pressed(Key::Escape)) {
+            return;
+        }
+        let mut cancel = false;
+        if helix.placing {
+            let prompt =
+                if helix.start.is_none() { tr!(lang, HelixPickStart) } else { tr!(lang, HelixPickEnd) };
+            egui::Area::new(egui::Id::unique("gc_helix_prompt"))
+                .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 80.0))
+                .order(egui::Order::Foreground)
+                .show(ui.ctx(), |ui| {
+                    egui::Frame::popup(ui.style()).show(ui, |ui| ui.label(prompt));
+                });
+        } else {
+            let mut ok = false;
+            egui::Window::new(tr!(lang, ToolHelix))
+                .id(egui::Id::unique("gc_helix_dialog"))
+                .collapsible(false)
+                .resizable(false)
+                .default_width(300.0)
+                .show(ui.ctx(), |ui| {
+                    for (index, name) in [
+                        tr!(lang, HelixPitchRevolution),
+                        tr!(lang, HelixRevolutionHeight),
+                        tr!(lang, HelixPitchHeight),
+                        tr!(lang, HelixSpiral),
+                    ]
+                    .into_iter()
+                    .enumerate()
+                    {
+                        ui.radio_value(&mut helix.definition, index, name);
+                    }
+                    ui.separator();
+                    let d = helix.definition;
+                    let field = |ui: &mut egui::Ui, name: &str, text: &mut String, on: bool| {
+                        if on {
+                            ui.horizontal(|ui| {
+                                ui.label(name);
+                                let edit = ui.add(egui::TextEdit::singleline(text).desired_width(90.0));
+                                edit.widget_info(|| {
+                                    egui::WidgetInfo::labeled(egui::Role::TextInput, true, name)
+                                });
+                            });
+                        }
+                    };
+                    field(ui, tr!(lang, HelixDiameter), &mut helix.diameter, true);
+                    field(ui, tr!(lang, HelixPitch), &mut helix.pitch, d != 1);
+                    field(ui, tr!(lang, HelixRevolutions), &mut helix.revolutions, d != 2);
+                    field(ui, tr!(lang, HelixHeight), &mut helix.height, d == 1 || d == 2);
+                    field(ui, tr!(lang, HelixTaper), &mut helix.taper, d != 3);
+                    ui.horizontal(|ui| {
+                        ui.radio_value(&mut helix.right_hand, false, tr!(lang, HelixLeftHand));
+                        ui.radio_value(&mut helix.right_hand, true, tr!(lang, HelixRightHand));
+                    });
+                    ui.horizontal(|ui| {
+                        ok = ui.button(tr!(lang, Ok)).clicked();
+                        cancel = ui.button(tr!(lang, Cancel)).clicked();
+                    });
+                });
+            if ok {
+                helix.placing = true;
+            }
+        }
+        if !cancel {
+            self.helix = Some(helix);
+        }
     }
 
     /// Starts Grip Snap: pick an edge, then two points.
@@ -2123,6 +2318,25 @@ impl Viewport {
             session.tool_event(ToolEvent::Key(ToolKey::Delete));
         }
     }
+}
+
+/// Whether `pos` (sketch coordinates) is within `reach` of the spline `curve`.
+fn near_spline(session: &Session, curve: Id<gc_sketch::Curve>, pos: [f64; 2], reach: f64) -> bool {
+    let Some((_, sketch)) = session.active_sketch() else { return false };
+    let Some(line) = sketch.curves.get(&curve).and_then(|c| sketch.spline_outline(&c.geom, 16)) else {
+        return false;
+    };
+    line.windows(2).any(|w| {
+        let (dx, dy) = (w[1][0] - w[0][0], w[1][1] - w[0][1]);
+        let length = dx * dx + dy * dy;
+        let t = if length > 0.0 {
+            (((pos[0] - w[0][0]) * dx + (pos[1] - w[0][1]) * dy) / length).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let (x, y) = (w[0][0] + dx * t - pos[0], w[0][1] + dy * t - pos[1]);
+        x * x + y * y <= reach * reach
+    })
 }
 
 /// The context menu of an item of the cell: its name, show or hide, plan (a path), delete.

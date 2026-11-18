@@ -5731,3 +5731,47 @@ fn the_auto_bend_option_is_off_by_default_saved_and_read_back() {
         egui_kittest::Harness::builder().with_size(SIZE).build_eframe(|cc| GraphCtrlApp::new(cc, options()));
     assert_eq!(again.state().session.auto_bend(), Some("10 mm"));
 }
+
+/// Helical Curve in a 3D sketch (GUID-37BA1DCE-6BC4-41CD-A36D-577F31B304FC): the dialog's values, then the start
+/// and end clicked in the viewport.
+#[test]
+fn the_helical_curve_dialog_then_two_clicks_make_a_helix() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    pick_variant(&mut harness, "스케치", "3D 스케치");
+    harness.run();
+    harness.get_by_label("나선 곡선").click();
+    harness.run();
+    assert!(harness.state().viewport().is_helixing());
+    harness.get_by_label("확인").click();
+    harness.run();
+    let splines = |h: &egui_kittest::Harness<'_, GraphCtrlApp>| {
+        h.state()
+            .session
+            .active_sketch()
+            .unwrap()
+            .1
+            .curves
+            .values()
+            .filter(|c| matches!(c.geom, gc_sketch::CurveGeom::Spline { .. }))
+            .count()
+    };
+    for at in [egui::pos2(480.0, 520.0), egui::pos2(640.0, 440.0)] {
+        harness.event(egui::Event::PointerMoved(at));
+        harness.run();
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.run();
+        }
+    }
+    assert_eq!(splines(&harness), 1);
+    assert!(!harness.state().viewport().is_helixing());
+}
