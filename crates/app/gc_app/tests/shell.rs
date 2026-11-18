@@ -7017,3 +7017,40 @@ fn a_row_menu_copies_the_component() {
     harness.run_steps(3);
     assert_eq!(harness.state().session.clipboard().len(), 1);
 }
+
+/// A signal a task sets shows under the chart as a row of its own.
+#[test]
+fn the_schedule_shows_the_signals_the_cell_drives() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("로봇").click();
+    harness.run();
+    harness.get_by_label("로봇 추가").click();
+    harness.run();
+    harness.get_by_label("UR5e 로봇").click();
+    harness.run();
+    let task = gc_doc::Task {
+        name: "Signal".into(),
+        location: gc_doc::Location::None,
+        precondition: String::new(),
+        steps: vec![
+            gc_doc::Step::SetIo { name: "door_open".into(), value: true },
+            gc_doc::Step::Wait { seconds: 2.0 },
+        ],
+        effects: Vec::new(),
+        robots: gc_doc::RobotChoice::Any,
+        priority: 0,
+    };
+    harness.state_mut().session.edit_work(gc_doc::WorkOp::AddTask(task)).unwrap();
+    harness.get_by_label("도구").click();
+    harness.run();
+    harness.get_by_label("스케줄").click();
+    harness.run_steps(3);
+    harness.get_by_label("스케줄 계산").click();
+    harness.run_steps(4);
+    assert!(harness.state().session.schedule_result().is_some_and(|(s, _)| !s.signals.is_empty()));
+    harness.get_by_label("door_open");
+}

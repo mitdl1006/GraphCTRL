@@ -476,6 +476,7 @@ messages! {
     SchedulePause => ("스케줄 일시정지", "Pause schedule"),
     ScheduleRewind => ("스케줄 원위치", "Reset schedule"),
     SchedulePark => ("대기 자세로 비키기", "Moving out of the way"),
+    ScheduleStepEnd => ("단계 {}: {} s", "Step {}: {} s"),
     ScheduleCutShort => ("끝없이 반복하는 작업이 있어 스케줄을 중간에서 잘랐습니다.", "The schedule was cut off: some task repeats without end."),
     ScheduleWorking => ("계산 중…", "Working it out…"),
     ScheduleStale => ("문서가 바뀌었습니다 — 다시 계산하십시오", "The document changed — work it out again"),
