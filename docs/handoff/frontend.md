@@ -304,6 +304,12 @@
 - 원문에서 확인 못 한 것: 2026 드롭다운의 전체 항목 목록(확인한 것은 ViewCube, 탐색 막대). 브라우저·속성·상태 표시줄은 앱에 있는 요소를 기준으로 붙였다.
 - 테스트: `the_user_interface_list_hides_elements_and_clean_screen_toggles_with_ctrl_0`; shell 108개 통과(1280 px 폭 검사 포함).
 
+### 구속 패널: Smooth(G2) 버튼
+
+- 근거: Inventor 2026 도움말 GUID-A85A7A30-7D81-4C75-8769-CAD034EEA930 (To Apply Geometric Constraints: Smooth).
+- 2D 스케치 구속 패널에 "부드럽게(G2)" 소형 버튼(기호 G2) 추가: `ToolKind::Constraint(ConstraintKind::Smooth)`. 스플라인 끝과 이어진 선·호·스플라인을 클릭하는 흐름은 gc_tools가 처리하고, 뷰포트의 G2 기호는 기존 그리기를 따른다. 3D 스케치 패널에는 두지 않았다(원문 목록 미확인).
+- 테스트: `the_constrain_panel_has_a_smooth_g2_button`; 폭 검사(`every_ribbon_tab_fits_1280_px`) 통과.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

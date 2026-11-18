@@ -157,6 +157,7 @@ messages! {
     ConCollinear => ("동일선상", "Collinear"),
     /// Constraint: tangent.
     ConTangent => ("접선", "Tangent"),
+    ConSmooth => ("부드럽게(G2)", "Smooth (G2)"),
     /// Constraint: equal.
     ConEqual => ("동일", "Equal"),
     /// Constraint: concentric.
