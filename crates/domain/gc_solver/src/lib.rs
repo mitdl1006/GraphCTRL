@@ -26,7 +26,7 @@ mod rows;
 mod scalar;
 mod system;
 
-pub use constraint::{Constraint, Line2, P2, P3, Round};
+pub use constraint::{Constraint, Line2, Line3, P2, P3, Round};
 pub use drag::{DragRefused, Dragging, FrameOutcome, Grab};
 pub use system::{AddOutcome, Blame, DepKind, Dependency, Flip, SolveReport, Status, System};
 

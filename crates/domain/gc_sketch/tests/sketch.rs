@@ -312,3 +312,76 @@ fn measurements_use_the_signs_of_their_driving_form() {
         (measure(DimKind::Angle { l1: l2, rev1: false, l2: l1, rev2: false }) - 3.0 * quarter).abs() < 1e-12
     );
 }
+
+/// Inventor 2026 help, To Apply Geometric Constraints (GUID-A85A7A30-7D81-4C75-8769-CAD034EEA930): the 3D
+/// sketch's Parallel, Perpendicular, Collinear, Equal and Coincident (point on a line), with Midpoint and the
+/// angle between two lines. Each removes its share of freedom and holds after solving.
+#[test]
+fn three_dimensional_line_relations() {
+    let fresh = || {
+        let mut alloc = IdAlloc::new();
+        alloc.reserve_through(NonZeroU64::new(1).unwrap());
+        let mut sketch = Sketch::new(Space::Spatial(frame()));
+        let a = sketch.add_line(&mut alloc, [0.0, 0.0, 0.0], [1.0, 0.2, 0.3]);
+        let b = sketch.add_line(&mut alloc, [0.5, 1.0, 0.1], [0.8, 1.9, 1.2]);
+        (alloc, sketch, a, b)
+    };
+    let dir = |s: &Sketch, l| {
+        let (p, q) = s.line(l).unwrap();
+        let (p, q) = (s.pos(p).unwrap(), s.pos(q).unwrap());
+        [q[0] - p[0], q[1] - p[1], q[2] - p[2]]
+    };
+    let dot = |u: [f64; 3], w: [f64; 3]| u[0] * w[0] + u[1] * w[1] + u[2] * w[2];
+    let norm = |u: [f64; 3]| dot(u, u).sqrt();
+    type Relation = fn(Id<Curve>, Id<Curve>, &Sketch) -> GeoConstraint;
+    let cases: [(&str, Relation, usize); 5] = [
+        ("parallel", |a, b, _| GeoConstraint::Parallel(a, b), 2),
+        ("perpendicular", |a, b, _| GeoConstraint::Perpendicular(a, b), 1),
+        ("equal", |a, b, _| GeoConstraint::Equal(a, b), 1),
+        ("collinear", |a, b, _| GeoConstraint::Collinear(a, b), 4),
+        ("on line", |a, b, s| GeoConstraint::PointOnCurve(s.line(b).unwrap().0, a), 2),
+    ];
+    for (name, make, removed) in cases {
+        let (mut alloc, mut sketch, a, b) = fresh();
+        let before = sketch.solve().unwrap().dof;
+        assert_eq!(before, 12);
+        let constraint = make(a, b, &sketch);
+        let AddResult::Added { report, .. } = sketch.try_add_constraint(&mut alloc, constraint).unwrap()
+        else {
+            panic!("{name} refused")
+        };
+        assert_eq!(report.dof, before - removed, "{name}");
+        let (u, w) = (dir(&sketch, a), dir(&sketch, b));
+        let cross = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
+        match name {
+            "parallel" | "collinear" => assert!(norm(cross) < 1e-9 * norm(u) * norm(w), "{name}"),
+            "perpendicular" => assert!(dot(u, w).abs() < 1e-9, "{name}"),
+            "equal" => assert!((norm(u) - norm(w)).abs() < 1e-9, "{name}"),
+            _ => {}
+        }
+    }
+
+    // Midpoint: three coordinates.
+    let (mut alloc, mut sketch, a, _) = fresh();
+    let p = sketch.add_point(&mut alloc, [0.3, 0.4, 0.5]);
+    let AddResult::Added { report, .. } =
+        sketch.try_add_constraint(&mut alloc, GeoConstraint::Midpoint(p, a)).unwrap()
+    else {
+        panic!("midpoint")
+    };
+    assert_eq!(report.dof, 12);
+
+    // The angle between two lines in space: 0 to 180°, one freedom.
+    let (mut alloc, mut sketch, a, b) = fresh();
+    let kind = DimKind::Angle { l1: a, rev1: false, l2: b, rev2: false };
+    let AddResult::Added { report, .. } =
+        sketch.try_add_dimension(&mut alloc, kind, "60 deg", 60f64.to_radians(), [0.0; 2]).unwrap()
+    else {
+        panic!("angle")
+    };
+    assert_eq!(report.dof, 11);
+    let (u, w) = (dir(&sketch, a), dir(&sketch, b));
+    assert!((dot(u, w) / (norm(u) * norm(w)) - 0.5).abs() < 1e-9);
+    assert!((sketch.measure(&kind).unwrap() - 60f64.to_radians()).abs() < 1e-9);
+    assert!(sketch.try_add_dimension(&mut alloc, kind, "200 deg", 200f64.to_radians(), [0.0; 2]).is_err());
+}

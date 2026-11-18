@@ -5,8 +5,8 @@
 
 use std::ops::{Add, Div, Mul, Neg, Sub};
 
-/// The most inputs a single residual row reads (two lines of two 2D points each).
-pub(crate) const MAX_VARS: usize = 8;
+/// The most inputs a single residual row reads (two lines of two 3D points each).
+pub(crate) const MAX_VARS: usize = 12;
 
 pub(crate) trait Scalar:
     Copy + Add<Output = Self> + Sub<Output = Self> + Mul<Output = Self> + Div<Output = Self> + Neg<Output = Self>

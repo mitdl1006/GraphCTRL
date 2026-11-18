@@ -39,6 +39,19 @@ pub(crate) enum RowKind {
     /// `[px, py, qx, qy, ax, ay, bx, by]`: signed distance of the midpoint of `p q` from the line, with the
     /// cross product divided by `frozen`.
     MidOnLine { frozen: f64 },
+    /// `[a.., b.., c.., d..]` (3D points): `scale` times component `k` of `cross(b - a, d - c)` over both
+    /// lengths (a sine). Divided by the live lengths, so a line shrinking to a point does not satisfy it.
+    Cross3 { scale: f64, k: usize },
+    /// Same inputs: `scale` times `dot(b - a, d - c)` over both lengths (a cosine).
+    Dot3 { scale: f64 },
+    /// Same inputs: `|b - a| - |d - c|`.
+    EqualLen3,
+    /// Same inputs: `scale * (angle between (b - a) and (d - c) - target)`, the angle in `[0, pi]`, each
+    /// direction optionally reversed.
+    Angle3 { target: f64, scale: f64, rev1: bool, rev2: bool },
+    /// `[p.., a.., b..]` (3D points): component `k` of `cross(b - a, p - a) / |b - a|` (the point's offset
+    /// from the line across it).
+    PointLine3 { k: usize },
 }
 
 /// Lengths below this (relative to the sketch size) have no usable direction.
@@ -58,6 +71,15 @@ fn length<S: Scalar>(d: &[S], size: f64, degenerate: &mut bool) -> S {
     } else {
         n2.sqrt()
     }
+}
+
+/// `v[to..to + 3] - v[from..from + 3]`.
+fn sub3<S: Scalar>(v: &[S], to: usize, from: usize) -> [S; 3] {
+    [v[to] - v[from], v[to + 1] - v[from + 1], v[to + 2] - v[from + 2]]
+}
+
+fn cross3<S: Scalar>(u: [S; 3], w: [S; 3]) -> [S; 3] {
+    [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]]
 }
 
 /// Wraps an angle difference into `(-pi, pi]`; a value within 1e-12 of `-pi` counts as `+pi`.
@@ -83,6 +105,8 @@ impl RowKind {
             | Self::EqualLen
             | Self::Angle { .. }
             | Self::MidOnLine { .. } => 8,
+            Self::PointLine3 { .. } => 9,
+            Self::Cross3 { .. } | Self::Dot3 { .. } | Self::EqualLen3 | Self::Angle3 { .. } => 12,
         }
     }
 
@@ -147,6 +171,48 @@ impl RowKind {
                 let (mx, my) = ((v[0] + v[2]) / c(2.0), (v[1] + v[3]) / c(2.0));
                 ((v[6] - v[4]) * (my - v[5]) - (v[7] - v[5]) * (mx - v[4])) / c(frozen)
             }
+            Self::Cross3 { scale, k } => {
+                let (u, w) = (sub3(v, 3, 0), sub3(v, 9, 6));
+                let lengths = length(&u, size, degenerate) * length(&w, size, degenerate);
+                if lengths.value() == 0.0 {
+                    return c(0.0);
+                }
+                cross3(u, w)[k] / lengths * c(scale)
+            }
+            Self::Dot3 { scale } => {
+                let (u, w) = (sub3(v, 3, 0), sub3(v, 9, 6));
+                let lengths = length(&u, size, degenerate) * length(&w, size, degenerate);
+                if lengths.value() == 0.0 {
+                    return c(0.0);
+                }
+                (u[0] * w[0] + u[1] * w[1] + u[2] * w[2]) / lengths * c(scale)
+            }
+            Self::EqualLen3 => {
+                length(&sub3(v, 3, 0), size, degenerate) - length(&sub3(v, 9, 6), size, degenerate)
+            }
+            Self::Angle3 { target, scale, rev1, rev2 } => {
+                let flip = |on: bool| c(if on { -1.0 } else { 1.0 });
+                let (u, w) = (sub3(v, 3, 0), sub3(v, 9, 6));
+                let (u, w) = (u.map(|x| x * flip(rev1)), w.map(|x| x * flip(rev2)));
+                let short = |d: [S; 3]| {
+                    d.iter().map(|x| x.value() * x.value()).sum::<f64>() <= (DEGENERATE * size).powi(2)
+                };
+                if short(u) || short(w) {
+                    *degenerate = true;
+                    return c(0.0);
+                }
+                let across = length(&cross3(u, w), size, degenerate);
+                let along = u[0] * w[0] + u[1] * w[1] + u[2] * w[2];
+                (S::atan2(across, along) - c(target)) * c(scale)
+            }
+            Self::PointLine3 { k } => {
+                let (d, p) = (sub3(v, 6, 3), sub3(v, 0, 3));
+                let len = length(&d, size, degenerate);
+                if len.value() == 0.0 {
+                    return c(0.0);
+                }
+                cross3(d, p)[k] / len
+            }
         }
     }
 }
@@ -199,6 +265,18 @@ mod tests {
         ];
         for kind in &kinds {
             check_gradient(kind, &eight[..kind.arity()]);
+        }
+        let twelve = [0.1, 0.2, 0.3, 2.3, 1.1, -0.7, -0.4, 0.9, 0.5, 1.7, 2.6, -1.2];
+        let spatial = [
+            RowKind::Cross3 { scale: 2.0, k: 0 },
+            RowKind::Cross3 { scale: 2.0, k: 2 },
+            RowKind::Dot3 { scale: 1.5 },
+            RowKind::EqualLen3,
+            RowKind::Angle3 { target: 0.7, scale: 1.5, rev1: false, rev2: true },
+            RowKind::PointLine3 { k: 1 },
+        ];
+        for kind in &spatial {
+            check_gradient(kind, &twelve[..kind.arity()]);
         }
     }
 
