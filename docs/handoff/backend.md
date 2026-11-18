@@ -124,6 +124,47 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 미러의 Mirror 상태: 진짜 거울상 메시 (리드 결정 방식)
+
+근거: Mirror Components: Reference(`GUID-7B19CA69-8D14-40DA-9543-115A8AFE6336`) — 상태 Mirror "Creates a mirrored component and saves it in a new file", Reuse "Adds a component instance …".
+
+- 방식(렌더·충돌 변경 없음, 음수 행렬식 변환 없음): 거울상 메시 파일을 새로 만들고 복사본의 `Solid::Mesh`가 그 파일을 가리킨다.
+  - `gc_mesh::MeshData::mirrored(axis)`: 그 축 좌표 부호 반전 + 삼각형 감기 순서 뒤집기 + (있으면) 정점 법선 반사.
+  - 파일: 원본 옆에 `<이름>.mirror-<x|y|z>-<내용 해시 16자리>.stl`(이진 STL). 같은 거울상은 이름이 같아 한 번만 쓴다. 원본이 STL이 아니어도(여러 부분으로 된 파일은 합쳐서) STL로 쓴다.
+  - 어느 축인가: `doc.mirror_axis(item, &plane)` — 미러가 그 컴포넌트의 대칭면으로 잡는 로컬 좌표 평면(미러 법선에 가장 가까운 것). 복사본 자세는 지금과 같고(R′ = M·R·F), 형상을 로컬에서 F로 뒤집으면 월드에서 정확한 거울상이 된다.
+- API:
+
+| 무엇 | 호출 |
+|---|---|
+| Mirror 상태로 미러 | `session.mirror_components_reflected(&items, plane, relationships, ground) -> Result<MirrorOutcome { suppressed, not_reflected }, EditError>` — 실행 취소 1단계 |
+| Reuse 상태(같은 형상을 돌려 놓기) | 기존 `session.mirror_components(...)` 그대로 |
+| 문서 op | `CellOp::MirrorComponentsWith { items, plane, relationships, ground, mirrored: Vec<(Id<Body>, Solid)> }`(추가) |
+
+- `not_reflected`: 로봇·가져온 어셈블리(형상을 뒤집지 않는다), 파일을 못 읽거나 못 쓴 바디 — Reuse처럼 놓인다. 박스·원통·구는 자기 자신이 거울상이라 그대로 맞다.
+- 주의: 실행 취소해도 써 둔 거울상 파일은 남는다(다시 쓰일 수 있는 캐시). 프런트는 상태 단추를 Mirror/Reuse/Exclude로 두고 Mirror면 이 함수, Reuse면 기존 함수, Exclude면 `items`에서 빼면 된다(컴포넌트마다 섞으려면 두 번 호출).
+- 테스트: `gc_session/tests/mirror_reflected.rs`.
+
+## 2026-11-18 — QA 관찰 2건: 구속 걸린 컴포넌트 삭제, Accept 표시 즉시 재평가
+
+- **동작 변화**: `DeleteBody`·`DeleteRobot`·`DeleteAssembly`가 그 컴포넌트를 쓰는 관계(셋째 선택 — 대칭면·각도 기준 포함)를 같이 지운다. 전에는 거부(참조 무결성 오류)였다. 한 실행 취소 단계로 컴포넌트·관계·구속 매개변수가 함께 돌아온다. 그 구속 이름을 쓰던 식에는 값이 대신 들어간다(기존 규칙).
+  - 근거: 리드의 인벤터 관찰. 2026 도움말에서 "컴포넌트를 지우면 관계도 지워진다"는 문장은 찾지 못했다(어셈블리 관계·컴포넌트 관련 68쪽 검색; Delete assembly relationships `GUID-0E2BD426…`에는 관계 삭제 절차만 있다) → **원문 미확인**으로 표시.
+  - 로봇은 웨이포인트·경로가 쓰고 있으면 여전히 `InUse`. 작업 피처(`DeleteWorkFeature`)는 관계가 쓰면 여전히 `InUse`.
+  - 고친 테스트(리드 승인): `gc_doc/tests/relate.rs`의 두 곳("Deleting a constrained component …", "The plane's component …").
+- `DeleteRelationship`(과 컴포넌트 삭제) 직후 Accept된 구속을 바로 다시 시도한다 — 풀리면 그 명령 안에서 표시가 사라지고 같이 풀린다. 억제(`SetSuppressed`)는 원래 즉시였다. 오류 구속이 없으면 삭제는 전처럼 아무것도 다시 풀지 않는다.
+- 지워진 관계의 `motion_refs` 찌꺼기도 정리한다.
+- `(3 + 4) mm`: 스케치 치수와 같은 파서를 쓰므로 그대로 둔다(리드 확인).
+
+## 2026-11-18 — 접촉 솔버: 관계에 묶였지만 자유도가 남은 컴포넌트는 그 자유도로 밀린다
+
+근거: About the Contact Solver and Component Collision(`GUID-0BBD4ACE-7BD1-40BF-A011-74416B229035`) — "One part moves and comes into contact with another and the second part, which has open degrees of freedom, moves in response", 예: "a trip sensor … wheel … on the end of the sensor arm … when a cam surface comes in contact".
+
+- 전: 밀리는 것은 관계가 하나도 없는 바디·어셈블리뿐이었고(병진만), 관계가 있으면 무조건 정지였다.
+- 지금: 접지가 아니고 `component_dof(b).total > 0`이면 그 컴포넌트의 열린 자유도(`dof_symbol`의 자유 병진 방향·자유 회전축)로 움직여 본다. 병진은 겹침을 법선 방향으로 덮는 만큼, 회전은 1 mrad부터 두 배씩 키워 겹침이 풀리는 각을 찾고 이분으로 "막 풀리는" 각까지 줄인다. 가장 작은 움직임을 고른 뒤 관계를 다시 풀어(움직이는 쪽은 잡아 둠) 묶인 다른 컴포넌트도 따라오게 한다. 어떤 자유 운동으로도 안 풀리면 지금처럼 정지(`contact_stop`).
+- 드래그(`preview_body`)와 Drive(`drive_relationship`) 둘 다 같은 경로다. 놓으면 밀린 것까지 한 실행 취소 단계(기존대로).
+- 같이 고친 것: 앞서 밀린 컴포넌트의 id가 움직이는 컴포넌트보다 작으면, 계속 밀 때 "밀린 것이 움직이는 것에 부딪혔다"로 보고 정지하던 순서 의존(자유 박스에도 있던 문제) — 이제 움직이는 쪽 차례에 처리한다.
+- 한계: 접촉점이 아니라 자유도 후보를 시험하는 방식이라, 회전은 0.6 rad(한 번의 접촉 처리당)까지, 병진은 1 m까지만 찾는다. 자유도 축은 문서에 저장된 자세 기준이다(움직이는 부모에 달린 축은 근사). 접촉마다 문서 사본에서 관계를 한 번 푼다.
+- 테스트: `gc_session/tests/contact.rs::a_pushed_lever_turns_about_its_pivot`.
+
 ## 2026-11-18 — 미러 패턴(연관 미러); 미러/복사의 컴포넌트별 상태 검토
 
 근거: Mirror Components: Reference(`GUID-7B19CA69-8D14-40DA-9543-115A8AFE6336`, What's New 2026) — "Create mirror pattern: Enables to mirror the geometry and position of the source components while preserving the associativity between the source and target components. This feature also creates the Mirror browser node." / "Create flat structure: Creates only mirrored geometry and has no associativity". 상태: Mirror / Reuse / Exclude / Mixed. Copy assembly components(`GUID-5AAA6CB1-7BB2-4AF0-9A3D-AB729E5160C5`) — 상태: Copy / Reuse / Exclude.

@@ -253,8 +253,17 @@ fn a_constrained_component_cannot_be_deleted_while_constrained() {
             second: on(table, top(1.0)),
         })
         .unwrap();
-    // Deleting a constrained component takes nothing with it silently: it is in use.
-    assert!(bench.cell(CellOp::DeleteBody(block)).is_err());
+    // Deleting a constrained component deletes its relationships with it, as Inventor does; one undo
+    // step brings both back (lead-approved test change).
+    let depth = bench.history.undo_depth();
+    bench.cell(CellOp::DeleteBody(block)).unwrap();
+    assert_eq!(bench.history.undo_depth(), depth + 1);
+    assert!(bench.doc.get(block).is_none() && bench.doc.relationships().is_empty());
+    assert!(bench.doc.relation_params().is_empty());
+    bench.history.undo(&mut bench.doc).unwrap();
+    assert!(bench.doc.get(block).is_some());
+    assert_eq!(bench.doc.relationships().iter().count(), 1);
+    assert_eq!(bench.doc.relation_params().len(), 1);
 }
 
 fn table_frame() -> Geometry {
@@ -558,8 +567,9 @@ fn symmetry_mirrors_one_component_across_a_plane() {
         "{:?}",
         bench.pose(right).translation
     );
-    // The plane's component cannot be deleted while it is used.
-    assert!(bench.cell(CellOp::DeleteBody(table)).is_err());
+    // Deleting the plane's component deletes the relationship that used it (lead-approved test change).
+    bench.cell(CellOp::DeleteBody(table)).unwrap();
+    assert!(bench.doc.relationships().iter().all(|(_, r)| !r.references(table.erase())));
 }
 
 #[test]
@@ -1052,7 +1062,11 @@ fn a_relationship_that_cannot_be_solved_can_be_accepted_with_an_error() {
     // Treatments. Suppressing the first mate lets the accepted one be satisfied: the mark goes and the
     // block moves to 0.3 m above the table.
     bench.cell(CellOp::SetSuppressed { item: first.erase(), suppressed: true }).unwrap();
-    bench.cell(CellOp::UpdateAssembly).unwrap();
+    assert!(bench.doc.sick_relationships().is_empty());
+    // The same at once when the relationship in its way is deleted instead.
+    bench.history.undo(&mut bench.doc).unwrap();
+    assert!(bench.doc.is_sick(second));
+    bench.cell(CellOp::DeleteRelationship(first)).unwrap();
     assert!(bench.doc.sick_relationships().is_empty());
     assert!(
         (bench.pose(block).translation.z - bench.pose(table).translation.z - 0.5 - 0.3 - 0.1).abs() < 1e-7

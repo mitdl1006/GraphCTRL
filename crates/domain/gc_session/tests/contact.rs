@@ -194,3 +194,63 @@ fn collision_detection_reports_new_overlap_not_touching_and_needs_no_contact_set
     assert_eq!(session.drive_collision(), None);
     let _ = floor;
 }
+
+/// "One part moves and comes into contact with another and the second part, which has open degrees of
+/// freedom, moves in response" (About the Contact Solver, GUID-0BBD4ACE-7BD1-40BF-A011-74416B229035): a
+/// lever on a pivot turns when its end is pushed; one that a second relationship holds stops the motion.
+#[test]
+fn a_pushed_lever_turns_about_its_pivot() {
+    let mut session = Session::new();
+    let floor = session.add_body(Solid::Box { size: [6.0, 2.0, 0.1] }, at(0.0, -0.05)).unwrap();
+    let lever = session.add_body(Solid::Box { size: [0.6, 0.05, 0.1] }, at(0.0, 0.05)).unwrap();
+    let frame = |origin: [f64; 3], z: [f64; 3]| Geometry::Frame { origin, z, x: [1.0, 0.0, 0.0] };
+    session
+        .add_relationship(Relationship::new(
+            "Pivot",
+            RelationKind::Rotational { flip: false },
+            on(lever, frame([0.0, 0.0, -0.05], [0.0, 0.0, -1.0])),
+            on(floor, frame([0.0, 0.0, 0.05], [0.0, 0.0, 1.0])),
+        ))
+        .unwrap();
+    let start = Placement { xyz: [0.25, -0.3, 0.05], rpy: [0.0; 3] };
+    let pusher = session.add_body(Solid::Box { size: [0.1; 3] }, start).unwrap();
+    session.set_contact_set(&[pusher.erase(), lever.erase()], true).unwrap();
+    session.set_contact_solver(ContactSolver::ContactSet).unwrap();
+    let yaw = |session: &Session| session.shown_body(lever).unwrap().placement.rpy[2];
+    let mut dragged = session.doc().get(pusher).unwrap().clone();
+    for y in [-0.2, -0.1, -0.07, -0.05, -0.03] {
+        dragged.placement.xyz[1] = y;
+        session.preview_body(pusher, dragged.clone());
+        assert!(session.contact_stop().is_none(), "y = {y}: {:?}", session.contact_stop());
+    }
+    // The pusher is where it was dragged to; the lever turned out of its way about the pivot.
+    assert!((session.shown_body(pusher).unwrap().placement.xyz[1] + 0.03).abs() < 1e-12);
+    let turned = yaw(&session);
+    assert!(turned > 0.05 && turned < 0.5, "{turned}");
+    let at_pivot = session.shown_body(lever).unwrap().placement.xyz;
+    assert!(at_pivot[0].abs() < 1e-6 && at_pivot[1].abs() < 1e-6 && (at_pivot[2] - 0.05).abs() < 1e-6);
+    // Dropped: one undo step for the pusher and the lever together.
+    let depth = session.history().undo_depth();
+    session.end_body_preview();
+    assert_eq!(session.history().undo_depth(), depth + 1);
+    assert!((session.doc().get(lever).unwrap().placement.rpy[2] - turned).abs() < 1e-9);
+    assert!(session.undo());
+    assert!(session.doc().get(lever).unwrap().placement.rpy[2].abs() < 1e-12);
+
+    // With the lever's angle held by a second relationship it cannot give way: the drag stops.
+    let side = |body: Id<Body>| on(body, Geometry::Plane { point: [0.0; 3], normal: [0.0, 1.0, 0.0] });
+    session
+        .add_relationship(Relationship::new(
+            "Hold",
+            RelationKind::Angle { angle: 0.0, solution: gc_doc::AngleSolution::Undirected },
+            side(lever),
+            side(floor),
+        ))
+        .unwrap();
+    for y in [-0.2, -0.05] {
+        dragged.placement.xyz[1] = y;
+        session.preview_body(pusher, dragged.clone());
+    }
+    let stop = session.contact_stop().unwrap();
+    assert_eq!((stop.first, stop.second), (pusher.erase(), lever.erase()));
+}

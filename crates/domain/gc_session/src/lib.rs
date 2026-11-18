@@ -144,6 +144,16 @@ impl Default for Session {
     }
 }
 
+/// What [`Session::mirror_components_reflected`] did.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MirrorOutcome {
+    /// Names of the relationships made suppressed (their orientation was ambiguous or they could not be
+    /// satisfied).
+    pub suppressed: Vec<String>,
+    /// Components placed as the same shape turned round instead of a mirror image.
+    pub not_reflected: Vec<gc_core::AnyId>,
+}
+
 impl Session {
     /// A session with a new, empty document.
     pub fn new() -> Self {
@@ -1053,6 +1063,51 @@ impl Session {
             relationships,
             ground,
         })
+    }
+
+    /// Mirror Components with true mirror images (the dialog's Mirror status, Inventor 2026 help, Mirror
+    /// Components: Reference, GUID-7B19CA69-8D14-40DA-9543-115A8AFE6336: "Creates a mirrored component
+    /// and saves it in a new file"): for every body whose shape is a mesh file, the reflected mesh is
+    /// written next to that file as `<name>.mirror-<x|y|z>-<content hash>.stl` (once: the same mirror
+    /// image is found again by its name) and the copy points to it. Boxes, cylinders and spheres are
+    /// their own mirror images. Robots, imported assemblies and bodies whose file cannot be read or
+    /// written are placed like [`Session::mirror_components`] does (the same shape, turned) and are
+    /// returned in `not_reflected`. One undo step.
+    pub fn mirror_components_reflected(
+        &mut self,
+        items: &[gc_core::AnyId],
+        plane: gc_doc::Selection,
+        relationships: bool,
+        ground: bool,
+    ) -> Result<MirrorOutcome, EditError> {
+        let mut mirrored = Vec::new();
+        let mut not_reflected = Vec::new();
+        for item in items {
+            if item.kind != gc_core::Kind::Body {
+                not_reflected.push(*item);
+                continue;
+            }
+            let id = Id::<gc_doc::Body>::from_raw(item.raw);
+            let Some(gc_doc::Solid::Mesh { file, scale }) = self.doc.get(id).map(|b| b.solid.clone()) else {
+                continue;
+            };
+            let reflected = self
+                .doc
+                .mirror_axis(*item, &plane)
+                .and_then(|axis| cell::mirrored_mesh_file(&file, axis).ok());
+            match reflected {
+                Some(file) => mirrored.push((id, gc_doc::Solid::Mesh { file, scale })),
+                None => not_reflected.push(*item),
+            }
+        }
+        let suppressed = self.replicate(gc_doc::CellOp::MirrorComponentsWith {
+            items: items.to_vec(),
+            plane,
+            relationships,
+            ground,
+            mirrored,
+        })?;
+        Ok(MirrorOutcome { suppressed, not_reflected })
     }
 
     /// Copy Components, moved by `offset`. One undo step. Returns the names of the relationships made
