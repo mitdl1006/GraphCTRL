@@ -417,6 +417,9 @@ pub(crate) struct CellState {
     schedule: Option<(gc_core::Revision, crate::Schedule)>,
     /// The moment of the schedule the robots are shown at.
     schedule_time: Option<f64>,
+    /// Candidates of a task being worked out, and the last ones worked out per task.
+    candidates_job: Option<CandidatesJob>,
+    candidates: BTreeMap<Id<gc_doc::Task>, (gc_core::Revision, Vec<TaskCandidate>)>,
     compare_job: Option<CompareJob>,
     /// An assembly file being read in the background, and what came of the last one.
     import_job: Option<JobHandle<ImportLoad>>,
@@ -484,6 +487,8 @@ impl Default for CellState {
             schedule_job: None,
             schedule: None,
             schedule_time: None,
+            candidates_job: None,
+            candidates: BTreeMap::new(),
             compare_job: None,
             import_job: None,
             import_result: None,
@@ -2577,7 +2582,7 @@ impl Session {
                 }
             }
         }
-        arrived | self.poll_schedule() | self.poll_plan()
+        arrived | self.poll_schedule() | self.poll_candidates() | self.poll_plan()
     }
 
     fn poll_plan(&mut self) -> bool {
@@ -3349,6 +3354,21 @@ struct PlanningCopy {
     equipment: Result<Vec<Obstacle>, String>,
 }
 
+impl PlanningCopy {
+    fn view<'a>(&'a self, control: &'a dyn Control) -> Planning<'a> {
+        Planning {
+            doc: &self.doc,
+            robots: &self.robots,
+            meshes: &self.meshes,
+            equipment: self.equipment.clone(),
+            control,
+        }
+    }
+}
+
+/// A task's candidates being worked out: the task and the revision asked for, and the job.
+type CandidatesJob = ((Id<gc_doc::Task>, gc_core::Revision), JobHandle<Option<Vec<TaskCandidate>>>);
+
 impl Session {
     fn planning(&self) -> Planning<'_> {
         Planning {
@@ -3416,27 +3436,78 @@ impl Session {
         if let Some((_, job)) = self.cell.schedule_job.take() {
             job.cancel();
         }
-        let planning = self.planning();
-        let copy = PlanningCopy {
-            doc: self.doc.clone(),
-            robots: self.cell.robots.clone(),
-            meshes: self.cell.meshes.clone(),
-            equipment: planning.equipment,
-        };
+        let copy = self.planning_copy();
         let job = self.cell.executor.spawn("schedule", move |ctx| {
             let control = JobControl(ctx.cancel.clone());
-            let planning = Planning {
-                doc: &copy.doc,
-                robots: &copy.robots,
-                meshes: &copy.meshes,
-                equipment: copy.equipment.clone(),
-                control: &control,
-            };
-            let schedule = planning.schedule();
+            let schedule = copy.view(&control).schedule();
             (!ctx.cancel.is_cancelled()).then_some(schedule)
         });
         self.cell.schedule_job = Some((revision, job));
         self.poll_jobs();
+    }
+
+    fn planning_copy(&self) -> PlanningCopy {
+        PlanningCopy {
+            doc: self.doc.clone(),
+            robots: self.cell.robots.clone(),
+            meshes: self.cell.meshes.clone(),
+            equipment: self.planning().equipment,
+        }
+    }
+
+    /// Starts working out [`Session::task_candidates`] for a task in the background (on the executor's
+    /// threads; with the default executor, here and now), for the document as it is at this moment. The
+    /// result arrives through [`Session::poll_jobs`]; see [`Session::task_candidates_result`]. Asking
+    /// again for the same task and document starts nothing new; asking for another task or a newer
+    /// document cancels the one being worked out.
+    pub fn request_task_candidates(&mut self, task: Id<gc_doc::Task>) {
+        let revision = self.doc.revision();
+        let wanted = (task, revision);
+        if self.cell.candidates_job.as_ref().is_some_and(|(asked, _)| *asked == wanted)
+            || self.cell.candidates.get(&task).is_some_and(|(made, _)| *made == revision)
+        {
+            return;
+        }
+        if let Some((_, job)) = self.cell.candidates_job.take() {
+            job.cancel();
+        }
+        let copy = self.planning_copy();
+        let job = self.cell.executor.spawn("task candidates", move |ctx| {
+            let control = JobControl(ctx.cancel.clone());
+            let candidates = copy.view(&control).task_candidates(task);
+            (!ctx.cancel.is_cancelled()).then_some(candidates)
+        });
+        self.cell.candidates_job = Some((wanted, job));
+        self.poll_jobs();
+    }
+
+    /// The candidates last worked out for a task by [`Session::request_task_candidates`], and whether
+    /// they are still current (the document has not changed since they were asked for).
+    pub fn task_candidates_result(&self, task: Id<gc_doc::Task>) -> Option<(&[TaskCandidate], bool)> {
+        let (made, candidates) = self.cell.candidates.get(&task)?;
+        Some((candidates, *made == self.doc.revision()))
+    }
+
+    /// The task whose candidates are being worked out, if any.
+    pub fn task_candidates_pending(&self) -> Option<Id<gc_doc::Task>> {
+        self.cell.candidates_job.as_ref().map(|((task, _), _)| *task)
+    }
+
+    fn poll_candidates(&mut self) -> bool {
+        let Some((asked, mut job)) = self.cell.candidates_job.take() else { return false };
+        match job.poll() {
+            None => {
+                self.cell.candidates_job = Some((asked, job));
+                false
+            }
+            Some(JobOutcome::Done(Some(candidates))) => {
+                // Results of tasks that are gone are dropped along the way.
+                self.cell.candidates.retain(|task, _| self.doc.get(*task).is_some());
+                self.cell.candidates.insert(asked.0, (asked.1, candidates));
+                true
+            }
+            Some(JobOutcome::Done(None) | JobOutcome::Failed(_)) => true,
+        }
     }
 
     /// The last schedule worked out by [`Session::request_schedule`], and whether it is still current:

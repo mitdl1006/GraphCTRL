@@ -244,3 +244,89 @@ fn a_screw_driver_picks_then_fastens_and_only_the_robot_that_carries_it_can() {
     }
     s.edit_work(WorkOp::DeleteToolKit(kit)).unwrap();
 }
+
+/// One robot sets a signal, the other waits for it: the wait holds the second task back until the first
+/// has ended (a handshake), and the program waits on the input pin.
+#[test]
+fn a_wait_for_a_signal_another_robot_sets_is_a_handshake() {
+    use gc_doc::signal_condition;
+    assert_eq!(signal_condition("ready"), Some(("ready".into(), true)));
+    assert_eq!(signal_condition("not ready"), Some(("ready".into(), false)));
+    assert_eq!(signal_condition("\"part ready\" == true"), Some(("part ready".into(), true)));
+    assert_eq!(signal_condition("false != ready"), Some(("ready".into(), true)));
+    assert_eq!(signal_condition("ready == done"), None);
+    assert_eq!(signal_condition("door closed"), None);
+
+    let (mut s, [left, right], at_hole) = cell();
+    let signal = |name: &str, direction, pin| IoSignal { name: name.into(), direction, pin };
+    let kit = |name: &str, signals: Vec<IoSignal>| ToolKit {
+        name: name.into(),
+        signals,
+        states: Vec::new(),
+        actions: Vec::new(),
+    };
+    let feeder: Id<ToolKit> =
+        made(&mut s, WorkOp::AddToolKit(kit("Feeder", vec![signal("part ready", IoDirection::Out, 1)])));
+    let taker: Id<ToolKit> = made(
+        &mut s,
+        WorkOp::AddToolKit(kit(
+            "Taker",
+            vec![signal("part ready", IoDirection::In, 4), signal("clamp closed", IoDirection::In, 5)],
+        )),
+    );
+    s.edit_work(WorkOp::SetRobotTool { robot: left, kit: Some(feeder), state: None }).unwrap();
+    s.edit_work(WorkOp::SetRobotTool { robot: right, kit: Some(taker), state: None }).unwrap();
+
+    // Take comes first by priority but waits for the signal Feed sets; the clamp is a device's signal,
+    // which nothing in the cell drives, so it does not hold the task back.
+    let take = Task {
+        priority: 5,
+        robots: RobotChoice::Only(vec![right]),
+        ..task(
+            "Take",
+            vec![
+                Step::WaitIo { condition: "\"part ready\" == true".into(), timeout: 5.0 },
+                Step::WaitIo { condition: "\"clamp closed\"".into(), timeout: 2.0 },
+                Step::Wait { seconds: 0.25 },
+            ],
+        )
+    };
+    let take: Id<Task> = made(&mut s, WorkOp::AddTask(take));
+    let feed: Id<Task> = made(
+        &mut s,
+        WorkOp::AddTask(task(
+            "Feed",
+            vec![
+                Step::MoveJ(MoveTarget::Role(at_hole)),
+                Step::SetIo { name: "part ready".into(), value: true },
+            ],
+        )),
+    );
+    assert!(s.task_problems(take).is_empty() && s.task_problems(feed).is_empty());
+    assert_eq!(s.doc().driven_signals(), vec!["part ready".to_owned()]);
+
+    let schedule = s.schedule();
+    assert!(schedule.blocked.is_empty(), "{:?}", schedule.blocked);
+    let of = |task: Id<Task>| schedule.assignments.iter().find(|x| x.task == task).unwrap();
+    assert_eq!((of(feed).robot, of(feed).start), (left, 0.0), "only the feeder has the output");
+    assert_eq!((of(take).robot, of(take).start), (right, of(feed).end), "after the signal is set");
+    // Without the task that sets it, the wait never ends and says which signal.
+    s.set_suppressed(feed.erase(), true).unwrap();
+    let schedule = s.schedule();
+    assert_eq!(schedule.blocked.len(), 1);
+    assert!(schedule.blocked[0].1.contains("part ready"), "{}", schedule.blocked[0].1);
+    s.set_suppressed(feed.erase(), false).unwrap();
+
+    // The program waits on the robot's own input pins and stops when the signal does not come.
+    let text = s.task_urscript(take, right).unwrap();
+    assert!(text.contains("while (get_digital_in(4) != True and waited < 5.000):"), "{text}");
+    assert!(text.contains("while (get_digital_in(5) != True and waited < 2.000):"));
+    assert!(text.contains("popup(\"part_ready: not seen on input 4\", \"GraphCTRL\", False, True)"));
+    assert!(text.contains("  halt"));
+    // A wait that cannot be read as a signal and a value is pointed out.
+    let odd: Id<Task> = made(
+        &mut s,
+        WorkOp::AddTask(task("Odd", vec![Step::WaitIo { condition: "door closed".into(), timeout: 1.0 }])),
+    );
+    assert!(s.task_problems(odd)[0].contains("door closed"));
+}

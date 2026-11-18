@@ -180,10 +180,65 @@ impl Document {
                 Step::SetIo { name, .. } if !self.tool_kits().iter().any(|(_, k)| k.has_output(name)) => {
                     problems.push(format!("no tool has the output signal `{name}`"));
                 }
+                Step::WaitIo { condition, .. } if signal_condition(condition).is_none() => {
+                    problems.push(format!("`{condition}` is not a signal and a value to wait for"));
+                }
                 _ => {}
             }
         }
         problems
+    }
+}
+
+/// A signal wait read as "this signal has this value": `ready`, `not ready`, `ready == true`,
+/// `"door closed" == false` (a name with spaces in double quotes). `None` for anything else.
+pub fn signal_condition(text: &str) -> Option<(String, bool)> {
+    let truth = |part: &Condition| match part {
+        Condition::Literal(CondValue::Bool(value), _) => Some(*value),
+        _ => None,
+    };
+    match Condition::parse(text).ok()? {
+        Condition::Word(name, _) => Some((name, true)),
+        Condition::Not(inner, _) => match *inner {
+            Condition::Word(name, _) => Some((name, false)),
+            _ => None,
+        },
+        Condition::Compare(op, a, b) => {
+            let equal = match op {
+                gc_expr::Compare::Eq => true,
+                gc_expr::Compare::Ne => false,
+                _ => return None,
+            };
+            match (&*a, &*b) {
+                (Condition::Word(name, _), other) | (other, Condition::Word(name, _)) => {
+                    Some((name.clone(), truth(other)? == equal))
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+impl Document {
+    /// The signals the cell itself drives: those a task's step sets and those a tool action sets. A wait
+    /// for one of them waits for a task to have set it; a wait for any other signal (a sensor, a device)
+    /// is taken to be answered.
+    pub fn driven_signals(&self) -> Vec<String> {
+        let mut names: Vec<String> = Vec::new();
+        for (_, task) in self.tasks().iter() {
+            for step in &task.steps {
+                if let Step::SetIo { name, .. } = step {
+                    names.push(name.clone());
+                }
+            }
+        }
+        for (_, kit) in self.tool_kits().iter() {
+            names.extend(kit.actions.iter().filter_map(|a| a.set.as_ref()).map(|(name, _)| name.clone()));
+        }
+        names.sort();
+        names.dedup();
+        names
     }
 }
 
