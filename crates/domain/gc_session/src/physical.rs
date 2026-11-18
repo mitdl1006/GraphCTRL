@@ -169,6 +169,9 @@ impl Session {
                     .iter()
                     .map(|(id, _)| id.erase())
                     .chain(doc.robots().iter().map(|(id, _)| id.erase()))
+                    // Reference components are "excluded from mass and volume calculations" (About the BOM
+                    // Structure, GUID-A0A95805-CBF6-4524-8314-4AC8B53C19CF).
+                    .filter(|item| !self.bom_reference(*item))
                     .filter_map(of)
                     .collect()
             }

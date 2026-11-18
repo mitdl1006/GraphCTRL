@@ -8,6 +8,12 @@ use crate::{BinaryOp, Dim, Expr, Func, Quantity, Span, Unit};
 pub trait Scope {
     /// The value of `name`, or `None` when no such parameter exists (or it has no valid value).
     fn lookup(&self, name: &str) -> Option<Quantity>;
+
+    /// The units a bare number means in a length field and an angle field (a document's units), when they
+    /// are not millimetres and degrees.
+    fn default_units(&self) -> Option<(Unit, Unit)> {
+        None
+    }
 }
 
 /// A scope without parameters.

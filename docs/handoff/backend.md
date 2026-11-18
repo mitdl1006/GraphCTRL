@@ -54,6 +54,35 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — BOM 기초(리드 ②)
+
+원문: About the BOM Structure, GUID-A0A95805-CBF6-4524-8314-4AC8B53C19CF.
+
+| 원문 | 구현 |
+|---|---|
+| Normal: "numbered and included in quantity calculations" | 기본값. 항목 번호, 수량 |
+| Phantom: 행 아님, 자식은 상위로 올라가 수량이 곱해지고 같은 항목과 합쳐짐, 질량에는 포함 | 자식을 부모 수준으로 올려 부품 번호로 합침 |
+| Reference: BOM에서 자식과 함께 무시, 질량·부피에서 제외 | 두 보기에서 빠짐. 문서 전체 `physical_properties(None)`에서도 제외 |
+| Purchased: 하나의 줄. 구조 보기에는 Normal 자식이 나오고 부품 전용에서는 자식이 숨음 | 그대로 |
+| Inseparable: 부품 전용에서 부품처럼 취급, Normal·Inseparable 자식은 숨고 Purchased 자식은 나옴 | 그대로 |
+| 기본 BOM 구조는 문서 설정 Bill of Materials 탭 | 미구현. 컴포넌트마다 Normal이 기본 |
+
+- 같은 부품 번호는 한 줄로 합치고 수량을 더한다. 같은 파일은 같은 부품 번호라는 인벤터 동작을 따른 것이다.
+  - 부품 번호가 비어 있으면 이름을 쓴다(iProperties 원문).
+  - 하위 어셈블리는 iProperties가 없어 이름이 부품 번호다.
+- 구조 보기는 모든 수준(All Levels)을 보이고 항목 번호는 "1", "1.2" 꼴이다.
+  - 합쳐진 줄의 자식은 첫 인스턴스 기준이다(단위당 수량).
+- 부품 전용 보기에는 자식이 없는 컴포넌트와 Purchased·Inseparable 어셈블리가 나온다. 일반 어셈블리는 나오지 않는다.
+- 다르게 한 점: 단위(Base Quantity "Each")와 열 사용자 정의는 없다. CSV 열은 Item, Part Number, Quantity, Description, BOM Structure 고정이다.
+- 프론트용 API:
+  - `session.bill_of_materials(BomView::{Structured, PartsOnly}) -> Vec<BomRow { item, level, part_number, description, quantity, structure, keys }>`
+  - `session.bom_csv(view) -> String`: RFC 4180, CRLF. 수식처럼 보이는 값(`= + - @`로 시작)은 앞에 `'`를 붙인다.
+  - `session.bom_structure(TreeKey)`, `session.set_bom_structure(TreeKey, BomStructure)`: 실행 취소 한 단계. 트리에 없는 행은 거부한다.
+  - `gc_session::structure_name(BomStructure)`: 표시 이름.
+  - 저장: `Components.bom`(Normal이 아닌 것만). 사라진 행의 값은 정리된다.
+  - 공용 타입 영향: `CellOp::SetBomStructure` 추가, `Components.bom` 필드 추가(serde default). 리드·QA·프론트 브랜치에서
+    `CellOp`를 빠짐없이 매치하거나 `Components { .. }` 리터럴을 쓰는 곳은 없다(grep 확인).
+
 ## 2026-11-18 — 2D 구속·치수 원문 대조(리드 다음 ①, 시작 전)
 
 원문: To Apply Geometric Constraints GUID-A85A7A30-7D81-4C75-8769-CAD034EEA930, Sketch Dimension Reference GUID-3F4E5140-259E-45F1-AD6B-2D31416E1138,
@@ -70,6 +99,28 @@ To Work with Sketch Dimensions GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185.
 | 치수: 선형(한 요소·두 요소)·정렬·각도(두 모서리·세 점·내/외각·기준선)·반지름·지름 | 있음(각도는 사분면 선택) | — |
 | Flip Direction 대상의 "line to an arc (the arc itself)"·"between 2 arcs" 거리 | 없음 | 선-호·호-호 거리 치수 |
 | 구동 치수 토글 | 있음(`SketchOp::SetDriving`) | — |
+
+## 2026-11-18 — 문서 설정 마무리: 단위 해석·격자 스냅·구속 추론(리드 ①)
+
+근거: About Units of Measure, GUID-671A8679-AEC1-413A-A23B-428967648CE6 — "When you change the units setting, all existing values in the file display as the new
+units"; "You can also override the default units in any value box. For example, you can type 12mm in the dimension value box of a file using an inch unit".
+Sketch Tab Reference(Document Settings), GUID-58DD9A89-84C7-48F3-8E4E-0303E755B10F(Snap Spacing).
+
+- 단위 없이 친 값은 문서 단위로 읽는다.
+  - 대상: 치수 상자, HUD, 대화상자 값(`evaluate_value`), 필렛·모따기·패턴 등 `SketchOp` 식.
+  - 방법: `gc_expr::Scope`에 기본 메서드 `default_units()`를 추가했다(기존 구현은 그대로 동작). 문서 스코프가 길이·각 단위를 돌려주고, 길이 필드(mm 자리)·각 필드(deg 자리)를 그 단위로 바꾼다.
+  - 단위를 쓰면 그 단위가 이긴다.
+  - 매개변수 표(Param)는 자기 단위를 그대로 쓴다(`evaluate_exact`).
+- 문서 단위를 바꾸면 크기가 그대로다(`command::keep_sizes`). 새 단위에서 값이 달라지는 구동 치수의 식(맨 숫자 등)은 옛 단위를 붙인 값으로 바꿔 적는다(예: `25` → `25 mm`). 한 번의 실행 취소에 함께 들어간다.
+- 구속 추론 끔(`infer_constraints = false`): 그리기 도구의 Move·Click을 Ctrl을 누른 것처럼 다룬다(스냅·추론 없음). 선택 도구는 영향 없음.
+- Snap to grid: `Session::set_snap_to_grid(bool)` / `snap_to_grid()`(응용 옵션, 기본 끔). 켜면 그리기 도구의 스냅 안 된 커서 위치를 문서 `snap_spacing` 격자점으로 옮긴다.
+- 아직 안 됨:
+  - `persist_constraints = false`: 추론 구속과 도구 고유 구속을 구분해야 해서 저장만 한다.
+  - 격자 그리기(`snaps_per_minor`·`minor_per_major`): FE.
+  - `input_as_expression`: FE가 입력 상자에 식/값 중 무엇을 보일지 읽으면 된다.
+  - 도구 미리보기의 숫자 해석(`gc_tools` 내부)은 아직 mm·deg. 확정 값은 문서 단위로 들어간다.
+- 테스트: `gc_session/tests/doc_settings.rs`(`a_bare_number_means_the_documents_unit`, `changing_units_keeps_every_size`, `inference_and_grid_shape_what_the_tools_place`).
+- QA·FE·리드 브랜치 영향: 시그니처 변경 없음(트레이트 기본 메서드, 새 세션 메서드만).
 
 ## 2026-11-18 — 원-타원·타원-타원 Tangent(리드 다음 ③)
 

@@ -80,3 +80,117 @@ fn auto_bend_uses_the_documents_radius() {
     let r = ((c[0] - p[0]).powi(2) + (c[1] - p[1]).powi(2) + (c[2] - p[2]).powi(2)).sqrt();
     assert!((r - 0.005).abs() < 1e-9, "{r}");
 }
+
+fn line_dimension_setup() -> (Session, gc_core::Id<gc_doc::Sketch>, gc_core::Id<gc_sketch::Curve>) {
+    use gc_doc::{Command, Created, EndSnap, SketchOp};
+    let mut s = Session::new();
+    let k = s.create_sketch("XY").unwrap();
+    let op = SketchOp::AddLine {
+        a: [0.0, 0.0, 0.0],
+        b: [0.03, 0.0, 0.0],
+        snap_a: EndSnap::default(),
+        snap_b: EndSnap::default(),
+        horizontal: Some(true),
+    };
+    let created = s.execute(&Command::Sketch { sketch: k, op }).unwrap();
+    let line =
+        created.iter().find_map(|c| if let Created::Curve(id) = c { Some(*id) } else { None }).unwrap();
+    (s, k, line)
+}
+
+/// "You can also override the default units in any value box" (About Units of Measure): a bare number means
+/// the document's unit; one with a unit means that unit.
+#[test]
+fn a_bare_number_means_the_documents_unit() {
+    use gc_doc::{Command, SketchOp};
+    use gc_sketch::DimKind;
+    let (mut s, k, line) = line_dimension_setup();
+    s.set_doc_settings(DocSettings { length_unit: LengthUnit::In, ..DocSettings::default() }).unwrap();
+    let (a, b) = s.active_sketch().unwrap().1.line(line).unwrap();
+    let kind = DimKind::Distance { p: a, q: b };
+    s.execute(&Command::Sketch {
+        sketch: k,
+        op: SketchOp::AddDimension { kind, source: "1".into(), text_pos: [0.0; 2] },
+    })
+    .unwrap();
+    assert!((s.active_sketch().unwrap().1.measure(&kind).unwrap() - 0.0254).abs() < 1e-12);
+    // A unit typed overrides it.
+    let id = *s.active_sketch().unwrap().1.dimensions.keys().next().unwrap();
+    s.execute(&Command::Sketch { sketch: k, op: SketchOp::SetDimension { id, source: "12 mm".into() } })
+        .unwrap();
+    assert!((s.active_sketch().unwrap().1.measure(&kind).unwrap() - 0.012).abs() < 1e-12);
+    // The common value box too.
+    assert!((gc_doc::evaluate_value(s.doc(), "2", gc_doc::Unit::Mm).unwrap() - 0.0508).abs() < 1e-12);
+    // Angles: radians.
+    s.set_doc_settings(DocSettings {
+        length_unit: LengthUnit::In,
+        angle_unit: AngleUnit::Rad,
+        ..DocSettings::default()
+    })
+    .unwrap();
+    assert!((gc_doc::evaluate_value(s.doc(), "1", gc_doc::Unit::Deg).unwrap() - 1.0).abs() < 1e-12);
+}
+
+/// "When you change the units setting, all existing values in the file display as the new units": sizes do
+/// not change; a bare number is written out in the old unit.
+#[test]
+fn changing_units_keeps_every_size() {
+    use gc_doc::{Command, SketchOp};
+    use gc_sketch::DimKind;
+    let (mut s, k, line) = line_dimension_setup();
+    let (a, b) = s.active_sketch().unwrap().1.line(line).unwrap();
+    let kind = DimKind::Distance { p: a, q: b };
+    s.execute(&Command::Sketch {
+        sketch: k,
+        op: SketchOp::AddDimension { kind, source: "25".into(), text_pos: [0.0; 2] },
+    })
+    .unwrap();
+    s.set_doc_settings(DocSettings { length_unit: LengthUnit::In, ..DocSettings::default() }).unwrap();
+    let sk = s.active_sketch().unwrap().1;
+    let d = sk.dimensions.values().next().unwrap();
+    assert_eq!(d.source, "25 mm");
+    assert!((sk.measure(&kind).unwrap() - 0.025).abs() < 1e-12);
+    // One undo step brings back the source and the unit.
+    s.undo();
+    assert_eq!(s.active_sketch().unwrap().1.dimensions.values().next().unwrap().source, "25");
+}
+
+/// Constraint inference off: drawing does not snap or infer (as with Ctrl held). Snap to grid: an unsnapped
+/// point goes to the document's snap spacing.
+#[test]
+fn inference_and_grid_shape_what_the_tools_place() {
+    use gc_sketch::{CurveGeom, GeoConstraint};
+    use gc_tools::{ToolEvent, ToolKind};
+    let px = 1e-4;
+    let click = |s: &mut Session, at: [f64; 2]| {
+        s.tool_event(ToolEvent::Move { pos: at, px, suppress_snap: false });
+        s.tool_event(ToolEvent::Click { pos: at, px, modifier: false });
+    };
+    // With inference: a line drawn from the end of another joins it.
+    let (mut s, _k, _line) = line_dimension_setup();
+    s.set_doc_settings(DocSettings { infer_constraints: false, ..DocSettings::default() }).unwrap();
+    s.set_tool(ToolKind::Line);
+    click(&mut s, [0.03, 0.00001]);
+    click(&mut s, [0.05, 0.02]);
+    let sk = s.active_sketch().unwrap().1;
+    assert!(
+        !sk.constraints.values().any(|c| matches!(c, GeoConstraint::Coincident(..))),
+        "no join inferred: {:?}",
+        sk.constraints
+    );
+    // Snap to grid with a 5 mm spacing.
+    let mut s = Session::new();
+    s.set_doc_settings(DocSettings { snap_spacing: [0.005, 0.005], ..DocSettings::default() }).unwrap();
+    let _k = s.create_sketch("XY").unwrap();
+    s.set_snap_to_grid(true);
+    s.set_tool(ToolKind::Line);
+    click(&mut s, [0.0123, 0.0071]);
+    click(&mut s, [0.0412, 0.0188]);
+    let sk = s.active_sketch().unwrap().1;
+    let (_, line) = sk.curves.iter().find(|(_, c)| matches!(c.geom, CurveGeom::Line { .. })).unwrap();
+    let CurveGeom::Line { a, b } = line.geom else { panic!() };
+    let (pa, pb) = (sk.pos(a).unwrap(), sk.pos(b).unwrap());
+    for (got, want) in [(pa, [0.01, 0.005]), (pb, [0.04, 0.02])] {
+        assert!((got[0] - want[0]).abs() < 1e-12 && (got[1] - want[1]).abs() < 1e-12, "{got:?} vs {want:?}");
+    }
+}

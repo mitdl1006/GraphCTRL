@@ -983,7 +983,19 @@ fn field_unit(kind: &DimKind) -> Unit {
     if matches!(kind, DimKind::Angle { .. }) { Unit::Deg } else { Unit::Mm }
 }
 
+/// Evaluates a field: a bare number in a length field (`Unit::Mm`) or an angle field (`Unit::Deg`) means the
+/// document's length or angle unit (Document Settings, Units tab).
 fn evaluate(source: &str, scope: &dyn Scope, unit: Unit) -> Result<f64, EditError> {
+    let unit = match (unit, scope.default_units()) {
+        (Unit::Mm, Some((length, _))) => length,
+        (Unit::Deg, Some((_, angle))) => angle,
+        _ => unit,
+    };
+    evaluate_exact(source, scope, unit)
+}
+
+/// Evaluates with a bare number meaning exactly `unit` (a parameter's own unit).
+fn evaluate_exact(source: &str, scope: &dyn Scope, unit: Unit) -> Result<f64, EditError> {
     let expr = gc_expr::parse(source).map_err(|e| EditError::Expr {
         message: e.kind.to_string(),
         start: e.span.start,
@@ -1018,7 +1030,59 @@ fn sketch_name(doc: &Document, name: &str) -> String {
 }
 
 /// Parameter values by name.
-fn scope_of(doc: &Document) -> BTreeMap<String, Quantity> {
+/// Keeps the size of every driving dimension when the document's units change ("When you change the units
+/// setting, all existing values in the file display as the new units", About Units of Measure,
+/// GUID-671A8679-AEC1-413A-A23B-428967648CE6): a source that would mean something else in the new units
+/// (a bare number) is written out in the old ones.
+pub(crate) fn keep_sizes(txn: &mut Txn<'_>, new: (Unit, Unit)) -> Result<(), EditError> {
+    let old = txn.doc().settings();
+    let old = (old.length(), old.angle());
+    if old == new {
+        return Ok(());
+    }
+    let after = DocScope { params: params_of(txn.doc()), units: new };
+    let mut rewrites: Vec<(Id<Sketch>, Id<gc_sketch::Dimension>, String, f64)> = Vec::new();
+    for (sketch_id, sketch) in txn.doc().sketches().iter() {
+        for (id, dimension) in sketch.dimensions.iter().filter(|(_, d)| d.driving) {
+            let field = field_unit(&dimension.kind);
+            let same = evaluate(&dimension.source, &after, field)
+                .is_ok_and(|v| (v - dimension.value).abs() <= 1e-12 * dimension.value.abs().max(1.0));
+            if !same {
+                let unit = if field == Unit::Deg { old.1 } else { old.0 };
+                let text =
+                    format!("{} {}", round_for_display(dimension.value / unit.si_factor()), unit.word());
+                rewrites.push((sketch_id, *id, text, dimension.value));
+            }
+        }
+    }
+    for (sketch_id, id, text, value) in rewrites {
+        txn.modify(sketch_id, |s: &mut Sketch, _| s.set_dimension(id, &text, value))??;
+    }
+    Ok(())
+}
+
+/// The parameters and dimensions that expressions can name, with the document's units.
+struct DocScope {
+    params: BTreeMap<String, Quantity>,
+    units: (Unit, Unit),
+}
+
+impl Scope for DocScope {
+    fn lookup(&self, name: &str) -> Option<Quantity> {
+        self.params.get(name).copied()
+    }
+
+    fn default_units(&self) -> Option<(Unit, Unit)> {
+        Some(self.units)
+    }
+}
+
+fn scope_of(doc: &Document) -> DocScope {
+    let settings = doc.settings();
+    DocScope { params: params_of(doc), units: (settings.length(), settings.angle()) }
+}
+
+fn params_of(doc: &Document) -> BTreeMap<String, Quantity> {
     let mut scope: BTreeMap<String, Quantity> = doc
         .params()
         .iter()
@@ -1170,7 +1234,7 @@ fn propagate(txn: &mut Txn<'_>) -> Result<(), EditError> {
         match node {
             Node::Param(id) => {
                 let Some(param) = txn.doc().get(id) else { continue };
-                let value = evaluate(&param.source, &scope_of(txn.doc()), param.unit)?;
+                let value = evaluate_exact(&param.source, &scope_of(txn.doc()), param.unit)?;
                 if value.to_bits() != param.value.to_bits() {
                     txn.modify(id, |p: &mut Param, _| p.value = value)?;
                 }
@@ -3135,7 +3199,7 @@ pub(crate) fn run(txn: &mut Txn<'_>, command: &Command) -> Result<(Vec<Created>,
                 return Err(EditError::BadName(name.clone()));
             }
             let unit = if *angle { Unit::Deg } else { Unit::Mm };
-            let value = evaluate(source, &scope_of(txn.doc()), unit)?;
+            let value = evaluate_exact(source, &scope_of(txn.doc()), unit)?;
             let id = txn.insert(Param { name: name.clone(), source: source.clone(), unit, value });
             propagate(txn)?;
             Ok((vec![Created::Param(id)], "Add parameter"))
