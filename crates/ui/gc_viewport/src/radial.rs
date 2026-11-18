@@ -53,6 +53,11 @@ pub(crate) enum Cmd {
     HideOrigin(Occurrence, OriginElement),
     /// List what lies under the cursor (Select Other).
     SelectOther,
+    /// Split a spline at one of its inner fit points (Inventor 2026 help, GUID-DB15C479-66F2-456A-9E54-40A60F83DC92:
+    /// "right-click a point and choose Split Spline").
+    SplitSpline(gc_core::Id<gc_sketch::Curve>, gc_core::Id<gc_sketch::SkPoint>),
+    /// Make a subassembly flexible, or rigid again (the flag is what it becomes).
+    Flexible(gc_doc::SubassemblyId, bool),
     /// The isometric view.
     Home,
     /// Fit everything.
@@ -68,7 +73,10 @@ pub(crate) struct Set {
 
 impl Set {
     /// The menu of a sketch being edited.
-    pub(crate) fn sketch(spatial: bool) -> Self {
+    pub(crate) fn sketch(
+        spatial: bool,
+        split: Option<(gc_core::Id<gc_sketch::Curve>, gc_core::Id<gc_sketch::SkPoint>)>,
+    ) -> Self {
         let mut radial = vec![None; 8];
         radial[0] = Some(Cmd::Tool(ToolKind::Line));
         if !spatial {
@@ -76,12 +84,21 @@ impl Set {
             radial[6] = Some(Cmd::Tool(ToolKind::Rectangle));
         }
         radial[4] = Some(Cmd::FinishSketch);
-        Self { radial, overflow: vec![Cmd::Done] }
+        let mut overflow = Vec::new();
+        if let Some((curve, point)) = split {
+            overflow.push(Cmd::SplitSpline(curve, point));
+        }
+        overflow.push(Cmd::Done);
+        Self { radial, overflow }
     }
 
     /// The menu of the assembly environment: the four component commands, and what the item under the
     /// cursor offers.
-    pub(crate) fn assembly(item: Option<CellItem>, origin: Option<(Occurrence, OriginElement)>) -> Self {
+    pub(crate) fn assembly(
+        item: Option<CellItem>,
+        origin: Option<(Occurrence, OriginElement)>,
+        unit: Option<(gc_doc::SubassemblyId, bool)>,
+    ) -> Self {
         let mut radial = vec![None; 8];
         radial[0] = Some(Cmd::Constrain);
         radial[2] = Some(Cmd::Move);
@@ -99,6 +116,10 @@ impl Set {
                 overflow.push(Cmd::Plan(item));
             }
             overflow.push(Cmd::Delete(item));
+        }
+        // Right-clicking a placed subassembly offers Flexible (GUID-30817F08-A5C2-44B7-B237-4791ACA3F854).
+        if let Some((id, flexible)) = unit {
+            overflow.push(Cmd::Flexible(id, !flexible));
         }
         overflow.push(Cmd::SelectOther);
         overflow.push(Cmd::Home);
@@ -132,7 +153,12 @@ impl Cmd {
             }
             Self::SketchHere(..) => tr!(lang, CmdSketchHere).to_owned(),
             Self::HideOrigin(..) => tr!(lang, CmdHide).to_owned(),
+            Self::SplitSpline(..) => tr!(lang, CmdSplitSpline).to_owned(),
             Self::SelectOther => tr!(lang, SelOther).to_owned(),
+            // The check mark shows the state it has now (the command switches it).
+            Self::Flexible(_, becomes) => {
+                format!("{}{}", if becomes { "" } else { "✓ " }, tr!(lang, CmdFlexible))
+            }
             Self::Home => tr!(lang, NavHome).to_owned(),
             Self::FitAll => tr!(lang, NavZoomAll).to_owned(),
         };
@@ -181,7 +207,13 @@ pub(crate) fn run(cmd: Cmd, session: &mut Session) -> Effect {
         Cmd::HideOrigin(occurrence, element) => {
             drop(session.set_origin_visible(occurrence, &[element], false))
         }
+        // A refusal is explained in the status bar.
+        Cmd::SplitSpline(curve, point) => {
+            drop(session.edit_active_sketch(gc_doc::SketchOp::SplitSpline { curve, point }))
+        }
         Cmd::SelectOther => return Effect::SelectOther,
+        // A refusal is explained in the status bar.
+        Cmd::Flexible(id, flexible) => drop(session.set_flexible(id, flexible)),
         Cmd::Home => return Effect::Home,
         Cmd::FitAll => return Effect::Fit,
     }

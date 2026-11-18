@@ -584,12 +584,31 @@ fn component_rows(
                         }
                     });
                 let header = folder.header_response;
+                // A flexible subassembly is marked with a spring icon.
+                if session.doc().subassemblies().iter().any(|s| s.id == id && s.flexible) {
+                    let at = egui::Rect::from_center_size(
+                        egui::pos2(header.rect.right() - 14.0, header.rect.center().y),
+                        egui::vec2(14.0, 14.0),
+                    );
+                    Icon::Flexible.paint(ui.painter(), at, gc_ui::colors::muted());
+                }
                 if header.double_clicked() {
                     *action = Some(BrowserAction::EditComponent(row.key));
                 }
                 header.context_menu(|ui| {
                     if ui.button(tr!(lang, CmdEditInPlace)).clicked() {
                         *action = Some(BrowserAction::EditComponent(row.key));
+                        ui.close();
+                    }
+                    // Flexible (Inventor 2026 help, Create and edit flexible components,
+                    // GUID-30817F08-A5C2-44B7-B237-4791ACA3F854): the freedom inside is available in the
+                    // parent; the check mark is cleared to make it rigid again.
+                    let flexible = session.doc().subassemblies().iter().any(|s| s.id == id && s.flexible);
+                    if ui.checkbox(&mut { flexible }, tr!(lang, CmdFlexible)).clicked() {
+                        *action = Some(BrowserAction::Subassembly(SubassemblyOp::SetFlexible {
+                            id,
+                            flexible: !flexible,
+                        }));
                         ui.close();
                     }
                     if ui.button(tr!(lang, CmdRename)).clicked() {

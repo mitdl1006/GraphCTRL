@@ -896,6 +896,8 @@ messages! {
     CmdMoveInto => ("서브어셈블리로 이동", "Move into subassembly"),
     /// Browser, right-click a subassembly: dissolve it; its contents go up one level.
     CmdDissolve => ("해체", "Dissolve"),
+    CmdSplitSpline => ("스플라인 분할", "Split Spline"),
+    CmdFlexible => ("유연", "Flexible"),
     /// Assemble tab, Edit group: the group's title.
     GroupEdit => ("편집", "Edit"),
     /// Assemble tab: back to the previous edit target.
