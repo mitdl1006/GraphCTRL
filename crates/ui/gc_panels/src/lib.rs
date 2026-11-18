@@ -95,6 +95,11 @@ pub struct ParamsUi {
     pub hide_fully_constrained: bool,
     /// Show Constraint State is on unless this is set (so that the default state is the usual one).
     pub hide_constraint_state: bool,
+    /// Show Children Only (Display Preferences): while a component is edited in place, only it, what is
+    /// inside it and the rows it hangs under are listed.
+    pub show_children_only: bool,
+    /// Filter: only suppressed components and relationships (Find: "suppressed components or features").
+    pub only_suppressed: bool,
     /// Hide Warnings: warnings attached to relationships (the sick marker) are not shown; failures are.
     pub hide_warnings: bool,
     /// Edit Values in Browser is on unless this is set.
@@ -260,6 +265,8 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
             let mut edit = !state.no_edit_values;
             ui.checkbox(&mut state.hide_work_features, tr!(lang, BrowserHideWork));
             ui.checkbox(&mut state.hide_fully_constrained, tr!(lang, BrowserHideConstrained));
+            ui.checkbox(&mut state.show_children_only, tr!(lang, BrowserChildrenOnly));
+            ui.checkbox(&mut state.only_suppressed, tr!(lang, BrowserOnlySuppressed));
             ui.checkbox(&mut state.hide_warnings, tr!(lang, BrowserHideWarnings));
             ui.checkbox(&mut show, tr!(lang, BrowserShowState));
             ui.checkbox(&mut edit, tr!(lang, BrowserEditValues));
@@ -309,6 +316,9 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
                         continue;
                     }
                     let suppressed = session.doc().is_inactive(id.erase());
+                    if state.only_suppressed && !suppressed {
+                        continue;
+                    }
                     let is_joint = gc_doc::is_joint_kind(&relationship.kind);
                     let condition = session.joint_condition(id);
                     let locked = condition.locked.is_some();
@@ -778,6 +788,22 @@ fn component_rows(
         if state.hide_fully_constrained
             && let TreeKey::Component(Occurrence::Item(any)) = row.key
             && state.statuses.get(&any) == Some(&gc_doc::ComponentStatus::Full)
+        {
+            continue;
+        }
+        // Show Children Only: with a component edited in place, what is neither inside it nor above it is left out.
+        if state.show_children_only
+            && let Some(target) = editing
+            && target != row.key
+            && !session.doc().is_under(row.key, target)
+            && !session.doc().is_under(target, row.key)
+        {
+            continue;
+        }
+        // The suppressed-only filter keeps folders (they may hold some) and suppressed components.
+        if state.only_suppressed
+            && let TreeKey::Component(Occurrence::Item(any)) = row.key
+            && !session.doc().is_inactive(any)
         {
             continue;
         }
