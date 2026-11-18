@@ -67,6 +67,11 @@ pub struct StackRow<'a> {
 /// Up to three small buttons one above the other, each an icon with its name beside it, as Inventor packs
 /// the less used commands of a panel next to the large ones. Returns the index of the row clicked.
 pub fn ribbon_stack(ui: &mut Ui, rows: &[StackRow<'_>]) -> Option<usize> {
+    ribbon_stack_responses(ui, rows).iter().position(|response| response.clicked())
+}
+
+/// Like [`ribbon_stack`], but returns every row's response (for a menu that opens from a row).
+pub fn ribbon_stack_responses(ui: &mut Ui, rows: &[StackRow<'_>]) -> Vec<Response> {
     const ROW_HEIGHT: f32 = 24.0;
     let font = egui::FontId::proportional(11.5);
     let widest = rows
@@ -80,13 +85,13 @@ pub fn ribbon_stack(ui: &mut Ui, rows: &[StackRow<'_>]) -> Option<usize> {
         })
         .fold(0.0_f32, f32::max);
     let width = widest + 34.0;
-    let mut clicked = None;
+    let mut responses = Vec::new();
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
         // The rows are centred in the height of a large button.
         let spare = (BUTTON_SIZE.y - ROW_HEIGHT * rows.len() as f32).max(0.0);
         ui.add_space(spare / 2.0);
-        for (index, row) in rows.iter().enumerate() {
+        for row in rows {
             let sense = if row.enabled { Sense::click() } else { Sense::hover() };
             let (rect, response) = ui.allocate_exact_size(vec2(width, ROW_HEIGHT), sense);
             response.widget_info(|| WidgetInfo::selected(Role::Button, row.enabled, row.selected, row.label));
@@ -118,12 +123,10 @@ pub fn ribbon_stack(ui: &mut Ui, rows: &[StackRow<'_>]) -> Option<usize> {
                     color,
                 );
             }
-            if response.clicked() && row.enabled {
-                clicked = Some(index);
-            }
+            responses.push(response);
         }
     });
-    clicked
+    responses
 }
 
 /// A large button: icon above, label below. `selected` marks the active tool.

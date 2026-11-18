@@ -83,6 +83,46 @@ pub enum Icon {
     WorkPoint,
     /// A block moving along a reference line: Grip Snap.
     GripSnap,
+    /// A line with its midpoint marked.
+    MidLine,
+    /// A smooth curve through fit points.
+    Spline,
+    /// A circle touching a line.
+    TangentCircle,
+    /// An ellipse with its centre.
+    Ellipse,
+    /// A rectangle drawn from its centre.
+    CenterRect,
+    /// A tilted rectangle drawn from its centre.
+    CenterRect3,
+    /// A slot with its overall length.
+    SlotOverall,
+    /// A slot with its centre point.
+    SlotCentre,
+    /// A curved slot through three points.
+    SlotArc3,
+    /// A curved slot about a centre.
+    SlotArcCentre,
+    /// A line cut in two.
+    Split,
+    /// A shape with a move arrow.
+    Move,
+    /// A small square growing into a larger one.
+    Scale,
+    /// Two lines crossing with one end cut off.
+    Trim,
+    /// Two lines joined by a rounded corner.
+    Fillet,
+    /// Two lines joined by a cut corner.
+    Chamfer,
+    /// Two overlapping squares.
+    Copy,
+    /// A circular arrow.
+    Rotate,
+    /// A box with a double arrow.
+    Stretch,
+    /// A line reaching a wall.
+    Extend,
     /// A short text, for constraint symbols.
     Text(&'static str),
 }
@@ -472,6 +512,196 @@ impl Icon {
                 line(at(0.5, 0.05), at(0.5, 0.25));
                 line(at(0.42, 0.14), at(0.5, 0.25));
                 line(at(0.58, 0.14), at(0.5, 0.25));
+            }
+            Self::MidLine => {
+                line(at(0.12, 0.85), at(0.88, 0.15));
+                dot(at(0.12, 0.85));
+                dot(at(0.88, 0.15));
+                painter.circle_stroke(at(0.5, 0.5), 3.6, stroke);
+            }
+            Self::Spline => {
+                let points: Vec<Pos2> = (0..=24)
+                    .map(|i| {
+                        let t = i as f32 / 24.0;
+                        at(0.1 + 0.8 * t, 0.5 - 0.32 * (t * std::f32::consts::TAU).sin())
+                    })
+                    .collect();
+                painter.add(egui::Shape::line(points, stroke));
+                dot(at(0.1, 0.5));
+                dot(at(0.9, 0.5));
+                dot(at(0.35, 0.18));
+                dot(at(0.65, 0.82));
+            }
+            Self::TangentCircle => {
+                painter.circle_stroke(at(0.5, 0.4), rect.width() * 0.3, stroke);
+                line(at(0.08, 0.82), at(0.92, 0.82));
+                dot(at(0.5, 0.7));
+            }
+            Self::Ellipse => {
+                let points: Vec<Pos2> = (0..=36)
+                    .map(|i| {
+                        let t = std::f32::consts::TAU * i as f32 / 36.0;
+                        at(0.5 + 0.42 * t.cos(), 0.5 + 0.26 * t.sin())
+                    })
+                    .collect();
+                painter.add(egui::Shape::line(points, stroke));
+                dot(at(0.5, 0.5));
+            }
+            Self::CenterRect => {
+                painter.rect_stroke(
+                    Rect::from_min_max(at(0.14, 0.24), at(0.86, 0.76)),
+                    1.0,
+                    stroke,
+                    egui::StrokeKind::Inside,
+                );
+                line(at(0.42, 0.5), at(0.58, 0.5));
+                line(at(0.5, 0.4), at(0.5, 0.6));
+            }
+            Self::CenterRect3 => {
+                let c = [at(0.2, 0.62), at(0.55, 0.78), at(0.8, 0.38), at(0.45, 0.22)];
+                painter.add(egui::Shape::closed_line(c.to_vec(), stroke));
+                line(at(0.42, 0.5), at(0.58, 0.5));
+                line(at(0.5, 0.42), at(0.5, 0.58));
+            }
+            Self::SlotOverall | Self::SlotCentre => {
+                let outline = [at(0.3, 0.3), at(0.7, 0.3)];
+                line(outline[0], outline[1]);
+                line(at(0.3, 0.7), at(0.7, 0.7));
+                for (cx, sign) in [(0.3_f32, -1.0_f32), (0.7, 1.0)] {
+                    let points: Vec<Pos2> = (0..=10)
+                        .map(|i| {
+                            let a = std::f32::consts::PI * (i as f32 / 10.0 - 0.5);
+                            at(cx + sign * 0.2 * a.cos(), 0.5 + 0.2 * a.sin())
+                        })
+                        .collect();
+                    painter.add(egui::Shape::line(points, stroke));
+                }
+                if self == Self::SlotOverall {
+                    line(at(0.1, 0.9), at(0.9, 0.9));
+                } else {
+                    dot(at(0.5, 0.5));
+                }
+            }
+            Self::SlotArc3 | Self::SlotArcCentre => {
+                // Two arcs, one inside the other, closed at the ends.
+                let arc = |r: f32| -> Vec<Pos2> {
+                    (0..=16)
+                        .map(|i| {
+                            let a = std::f32::consts::PI * (1.15 + 0.7 * i as f32 / 16.0);
+                            at(0.5 + r * a.cos(), 1.0 + r * a.sin())
+                        })
+                        .collect()
+                };
+                let (outer, inner) = (arc(0.72), arc(0.5));
+                line(*outer.first().unwrap_or(&at(0.0, 0.0)), *inner.first().unwrap_or(&at(0.0, 0.0)));
+                line(*outer.last().unwrap_or(&at(0.0, 0.0)), *inner.last().unwrap_or(&at(0.0, 0.0)));
+                painter.add(egui::Shape::line(outer, stroke));
+                painter.add(egui::Shape::line(inner, stroke));
+                if self == Self::SlotArcCentre {
+                    dot(at(0.5, 0.95));
+                } else {
+                    dot(at(0.2, 0.45));
+                    dot(at(0.8, 0.45));
+                }
+            }
+            Self::Split => {
+                line(at(0.1, 0.5), at(0.42, 0.5));
+                line(at(0.58, 0.5), at(0.9, 0.5));
+                line(at(0.5, 0.2), at(0.5, 0.8));
+                dot(at(0.5, 0.5));
+            }
+            Self::Move => {
+                painter.rect_stroke(
+                    Rect::from_min_max(at(0.12, 0.4), at(0.5, 0.88)),
+                    1.0,
+                    stroke,
+                    egui::StrokeKind::Inside,
+                );
+                line(at(0.4, 0.3), at(0.88, 0.12));
+                line(at(0.88, 0.12), at(0.7, 0.1));
+                line(at(0.88, 0.12), at(0.8, 0.28));
+            }
+            Self::Scale => {
+                painter.rect_stroke(
+                    Rect::from_min_max(at(0.12, 0.55), at(0.45, 0.88)),
+                    1.0,
+                    stroke,
+                    egui::StrokeKind::Inside,
+                );
+                painter.rect_stroke(
+                    Rect::from_min_max(at(0.12, 0.12), at(0.88, 0.88)),
+                    1.0,
+                    Stroke::new(1.0, color),
+                    egui::StrokeKind::Inside,
+                );
+                line(at(0.45, 0.55), at(0.78, 0.22));
+            }
+            Self::Trim => {
+                line(at(0.1, 0.5), at(0.9, 0.5));
+                line(at(0.5, 0.1), at(0.5, 0.9));
+                // The cut-off end is crossed out.
+                line(at(0.62, 0.38), at(0.88, 0.62));
+                line(at(0.88, 0.38), at(0.62, 0.62));
+            }
+            Self::Fillet => {
+                line(at(0.15, 0.85), at(0.15, 0.45));
+                line(at(0.55, 0.15), at(0.9, 0.15));
+                let points: Vec<Pos2> = (0..=10)
+                    .map(|i| {
+                        let a = std::f32::consts::FRAC_PI_2 * i as f32 / 10.0;
+                        at(0.55 - 0.4 * a.sin() * 1.0, 0.15 + 0.3 * (1.0 - a.cos()))
+                    })
+                    .collect();
+                painter.add(egui::Shape::line(points, stroke));
+            }
+            Self::Chamfer => {
+                line(at(0.15, 0.85), at(0.15, 0.4));
+                line(at(0.15, 0.4), at(0.4, 0.15));
+                line(at(0.4, 0.15), at(0.9, 0.15));
+            }
+            Self::Copy => {
+                painter.rect_stroke(
+                    Rect::from_min_max(at(0.1, 0.3), at(0.6, 0.85)),
+                    1.0,
+                    stroke,
+                    egui::StrokeKind::Inside,
+                );
+                painter.rect_stroke(
+                    Rect::from_min_max(at(0.4, 0.12), at(0.9, 0.67)),
+                    1.0,
+                    stroke,
+                    egui::StrokeKind::Inside,
+                );
+            }
+            Self::Rotate => {
+                let points: Vec<Pos2> = (0..=20)
+                    .map(|i| {
+                        let a = std::f32::consts::PI * (0.3 + 1.5 * i as f32 / 20.0);
+                        at(0.5 + 0.36 * a.cos(), 0.5 - 0.36 * a.sin())
+                    })
+                    .collect();
+                let end = *points.last().unwrap_or(&at(0.5, 0.5));
+                painter.add(egui::Shape::line(points, stroke));
+                line(end, end + egui::vec2(-4.0, -5.0));
+                line(end, end + egui::vec2(5.0, -3.0));
+                dot(at(0.5, 0.5));
+            }
+            Self::Stretch => {
+                painter.rect_stroke(
+                    Rect::from_min_max(at(0.1, 0.3), at(0.55, 0.7)),
+                    1.0,
+                    stroke,
+                    egui::StrokeKind::Inside,
+                );
+                line(at(0.55, 0.5), at(0.92, 0.5));
+                line(at(0.92, 0.5), at(0.8, 0.38));
+                line(at(0.92, 0.5), at(0.8, 0.62));
+            }
+            Self::Extend => {
+                line(at(0.1, 0.5), at(0.6, 0.5));
+                line(at(0.6, 0.5), at(0.48, 0.38));
+                line(at(0.6, 0.5), at(0.48, 0.62));
+                line(at(0.85, 0.12), at(0.85, 0.88));
             }
             Self::Text(text) => {
                 painter.text(
