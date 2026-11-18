@@ -91,6 +91,8 @@ pub struct ParamsUi {
     pub hide_fully_constrained: bool,
     /// Show Constraint State is on unless this is set (so that the default state is the usual one).
     pub hide_constraint_state: bool,
+    /// Hide Warnings: warnings attached to relationships (the sick marker) are not shown; failures are.
+    pub hide_warnings: bool,
     /// Edit Values in Browser is on unless this is set.
     pub no_edit_values: bool,
     /// The relationship selected in the browser, the value typed for it and which one that was loaded for.
@@ -248,6 +250,7 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
             let mut edit = !state.no_edit_values;
             ui.checkbox(&mut state.hide_work_features, tr!(lang, BrowserHideWork));
             ui.checkbox(&mut state.hide_fully_constrained, tr!(lang, BrowserHideConstrained));
+            ui.checkbox(&mut state.hide_warnings, tr!(lang, BrowserHideWarnings));
             ui.checkbox(&mut show, tr!(lang, BrowserShowState));
             ui.checkbox(&mut edit, tr!(lang, BrowserEditValues));
             state.hide_constraint_state = !show;
@@ -337,7 +340,7 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
                             ui,
                             result.row.rect,
                             Some(status == RelationStatus::Full),
-                            status == RelationStatus::Sick,
+                            status == RelationStatus::Sick && !state.hide_warnings,
                         );
                     }
                     // A rigid joint has nothing to drive.

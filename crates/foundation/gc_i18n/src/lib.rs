@@ -720,6 +720,7 @@ messages! {
     BrowserMenu => ("브라우저 메뉴", "Browser menu"),
     BrowserHideWork => ("작업 피처 숨기기", "Hide Work Features"),
     BrowserHideConstrained => ("완전 구속 숨기기", "Hide Fully Constrained"),
+    BrowserHideWarnings => ("경고 숨기기", "Hide Warnings"),
     BrowserShowState => ("구속 상태 표시", "Show Constraint State"),
     BrowserEditValues => ("브라우저에서 값 편집", "Edit Values in Browser"),
     BrowserRelationValue => ("관계 값", "Relationship value"),

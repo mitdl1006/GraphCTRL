@@ -59,7 +59,7 @@ Suppress, Visibility, Grounded, iProperties)을 기준으로 했고, 완전한 �
 | Show Children Only | 없음 | ✗ (서브어셈블리 편집 중 부모 숨김) |
 | Hide Fully Constrained | "…" 메뉴 | ✓ |
 | Hide Notes / Hide Documents | — | ⛔ |
-| Hide Warnings | 없음 | ✗ (관계 경고 표시 끄기) |
+| Hide Warnings | "…" 메뉴 "경고 숨기기" (관계의 sick 표시를 숨김, 실패는 유지) | ✓ |
 | Show Extended Names | 없음 | ✗ |
 | Show Constraint State(●/○/—) | "…" 메뉴, 관계 상태 점 | ✓ |
 | 폴더: Model States / Relationships / Representations | 관계·표현 폴더 있음, Model States 없음 | △ |
@@ -117,7 +117,7 @@ Suppress, Visibility, Grounded, iProperties)을 기준으로 했고, 완전한 �
 
 다음(원문 근거가 있는 것부터):
 1. Isolate / Undo Isolate (브라우저·뷰 우클릭; 원문: "Select All Visible … to restore an Isolate Components operation")
-2. 브라우저 Display Preferences: Show Children Only, Hide Warnings, Show Extended Names
+2. 브라우저 Display Preferences: Show Children Only, Show Extended Names (Hide Warnings는 채움)
 3. 브라우저 필터(문제 있는 관계·억제된 것) · 사용자 정의 폴더
 4. 노드에 커서를 올리면 뷰에 경계 상자
 5. 서브어셈블리의 Enabled·Grounded·Suppress, 컴포넌트 끌어 놓기로 폴더 이동
