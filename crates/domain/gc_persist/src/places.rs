@@ -73,6 +73,9 @@ pub struct Settings {
     pub opaque_panels: bool,
     /// The light colour scheme instead of the dark one (default: dark, as in Inventor 2026).
     pub light_theme: bool,
+    /// Sketches made on a face do not get the face's edges projected into them (Application Options, Sketch
+    /// tab, "Autoproject edges for sketch creation and edit"; default: on, so this is false).
+    pub autoproject_edges_off: bool,
 }
 
 /// The settings file in the settings folder.
