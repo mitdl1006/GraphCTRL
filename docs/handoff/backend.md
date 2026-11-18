@@ -71,6 +71,38 @@ To Work with Sketch Dimensions GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185.
 | Flip Direction 대상의 "line to an arc (the arc itself)"·"between 2 arcs" 거리 | 없음 | 선-호·호-호 거리 치수 |
 | 구동 치수 토글 | 있음(`SketchOp::SetDriving`) | — |
 
+## 2026-11-18 — 3D Bend와 3D 끝 접선(리드 ③ 1번)
+
+근거: To Create Lines, Arcs, and Bends, GUID-4F861674-F74C-474E-869A-4C190ED6EC4B — "The Bend tool lets you place tangent corner bends on lines in a 3D sketch.
+… specify a Radius. … click any line".
+
+- `SketchOp::Bend { lines: [l1, l2], radius: "20 mm" }`: 3D 스케치에서 모서리(같은 점, 또는 같은 자리의 끝점)로 만나는 두 선을 반지름만큼 잘라 그 평면의 접하는 3D 호로 잇는다.
+  - 반지름 치수가 붙는다. 한 번의 실행 취소.
+  - 두 선이 한 점을 공유하면 두 번째 선에 끝점을 따로 준다.
+  - 거부: 짧아서 안 들어감, 만나지 않음, 일직선, 2D 스케치.
+- 3D `Tangent`(이전에는 `WrongSpace`): 끝이 이어진 선-호(일치 구속 또는 같은 점)만 받는다. 솔버 `EndTangent3` = 이음점의 반지름에 직각(`Dot3`) + 선의 먼 끝이 호의 평면 위(새 행 `Coplanar`, 기울기 검사 포함).
+- 없음(원문에 있음): Bend 대화상자의 Equal(같은 반지름 연속 구속), 선을 클릭할 때마다 연속 적용하는 도구 흐름. FE가 `ToolKind`를 만들면 두 선 클릭 → `SketchOp::Bend`.
+- 테스트: `gc_session/tests/sketch_bend.rs`.
+- QA 브랜치 영향: 없음(새 `SketchOp`·솔버 변형 추가뿐).
+
+## 2026-11-18 — 3D 스케치 원문 대조(리드 ③, 시작 전)
+
+원문:
+- To Draw 3D Curves, GUID-37BA1DCE-6BC4-41CD-A36D-577F31B304FC: Helical Curve, Curve on Face, Silhouette, Intersection, 복합체 와이어.
+- To Create Lines, Arcs, and Bends, GUID-4F861674-F74C-474E-869A-4C190ED6EC4B: 3D Line(Auto-Bend), 3D Arc, "Bend … tangent corner bends on lines in a 3D sketch", 반지름, Equal 옵션.
+- To Create … Splines, GUID-DB15C479-66F2-456A-9E54-40A60F83DC92: "Interpolation splines can be created in both 2D and 3D sketches".
+
+| 원문 3D 도구 | 지금 | 할 일(순서) |
+|---|---|---|
+| Line(+ Auto-Bend) | 선 있음, Auto-Bend 없음 | 3. Bend가 되면 선 도구 옵션으로 |
+| Arc(3점·중심) | 있음(반원 미만) | — |
+| Bend(반지름, Equal) | 없음 | **1. 두 선의 모서리에 접하는 3D 호**(3D 끝 접선 구속 포함) |
+| Interpolation Spline | 2D만(3D는 `WrongSpace`) | 2. 3D 맞춤점 스플라인 |
+| Helical Curve(피치·회전·높이·나선, 테이퍼, 좌·우) | 없음 | 4. 나선(맞춤점 스플라인 근사 또는 전용 곡선) |
+| Point, 구속(평행·직각·동일·동일선상·점-선·중점·X/Y/Z 평행·평면 평행), 치수 | 있음 | — |
+| Tangent(3D) | `WrongSpace` | 1번과 함께(선-호 끝 접선) |
+| Curve on Face, Project to Surface, Intersection, Silhouette, Equation Curve | 없음 | 해당 없음/보류: 솔리드 면 데이터 없음. Equation Curve는 요청 시 |
+
 ## 2026-11-18 — Look At·Slice Graphics의 세션 쪽(리드 ②)
 
 원문 대조:

@@ -131,6 +131,34 @@ impl Binding {
         }))
     }
 
+    /// 3D: a line and an arc joined end to end run along each other at the joint (the Bend's corners, To
+    /// Create Lines, Arcs, and Bends, GUID-4F861674-F74C-474E-869A-4C190ED6EC4B). Other pairs have no
+    /// tangency in space here.
+    fn end_tangent3(&self, sketch: &Sketch, a: Id<Curve>, b: Id<Curve>) -> Result<Constraint, SketchError> {
+        let (line_id, arc) = if sketch.line(a).is_some() { (a, b) } else { (b, a) };
+        let (la, lb) = sketch.line(line_id).ok_or(SketchError::WrongCurveKind)?;
+        let Some(CurveGeom::Arc { c, s, e }) = sketch.curves.get(&arc).map(|k| k.geom.clone()) else {
+            return Err(SketchError::WrongSpace);
+        };
+        let joined = |p: Id<SkPoint>, q: Id<SkPoint>| {
+            p == q
+                || sketch.constraints.values().any(|k| {
+                    matches!(*k, GeoConstraint::Coincident(x, y) if (x == p && y == q) || (x == q && y == p))
+                })
+        };
+        let at = [s, e]
+            .into_iter()
+            .find(|end| joined(la, *end) || joined(lb, *end))
+            .ok_or(SketchError::WrongSpace)?;
+        Ok(Constraint::EndTangent3 {
+            line: self.line3(sketch, line_id)?,
+            c: self.p3(c)?,
+            s: self.p3(s)?,
+            e: self.p3(e)?,
+            at: self.p3(at)?,
+        })
+    }
+
     fn end_tangent(
         &self,
         sketch: &Sketch,
@@ -270,9 +298,9 @@ impl Binding {
                 }
                 _ => return Err(SketchError::WrongCurveKind),
             },
+            GeoConstraint::Tangent { a, b, .. } if spatial => self.end_tangent3(sketch, a, b)?,
             GeoConstraint::Horizontal(..)
             | GeoConstraint::Vertical(..)
-            | GeoConstraint::Tangent { .. }
             | GeoConstraint::Concentric(..)
             | GeoConstraint::Symmetric { .. }
                 if spatial =>
