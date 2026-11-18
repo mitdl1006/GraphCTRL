@@ -18,6 +18,8 @@ pub enum ViewportRequest {
     Constrain,
     /// Ask for a mesh file and place it as a component.
     PlaceComponent,
+    /// Double click on a component: edit the unit that holds it in place (a subassembly as one).
+    EditUnit(gc_doc::Occurrence),
 }
 
 /// A command of the marking menu.

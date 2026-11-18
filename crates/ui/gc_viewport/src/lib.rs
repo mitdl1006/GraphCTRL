@@ -1166,6 +1166,20 @@ impl Viewport {
             }
             return;
         }
+        // A double click on a component edits it in place; a subassembly is edited as one unit.
+        if response.double_clicked_by(PointerButton::Primary)
+            && !self.constrain_mode
+            && let Some(at) = response.interact_pointer_pos().map(to_view)
+            && let Some(item) = self.pick_item(session, at, size)
+            && let gc_session::CellItem::Body(_) | gc_session::CellItem::Robot(_) = item
+        {
+            let any = match item {
+                gc_session::CellItem::Body(id) => id.erase(),
+                gc_session::CellItem::Robot(id) => id.erase(),
+                _ => return,
+            };
+            self.request = Some(ViewportRequest::EditUnit(gc_doc::Occurrence::Item(any)));
+        }
         if self.constrain_mode && response.clicked_by(PointerButton::Primary) {
             let at = response.interact_pointer_pos().map(to_view);
             self.constrain_pick = at.and_then(|at| origin::pick(&self.camera, size, session, at, true));

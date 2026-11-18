@@ -664,6 +664,20 @@ fn assemble_tab(
             action = Some(RibbonAction::StartDrive);
         }
     });
+    // Edit in place: back out of the component or subassembly being edited (Inventor 2026 help, Edit
+    // components in place, GUID-C79C36C9-A6DB-46C5-8864-41F66C750231).
+    ribbon_group(ui, tr!(lang, GroupEdit), |ui| {
+        let editing = session.edit_target().is_some();
+        if ribbon_button(ui, Icon::Home, tr!(lang, CmdReturn), false, editing).clicked() {
+            session.return_edit();
+        }
+        if ribbon_button(ui, Icon::Home, tr!(lang, CmdReturnParent), false, editing).clicked() {
+            session.return_to_parent();
+        }
+        if ribbon_button(ui, Icon::Home, tr!(lang, CmdReturnTop), false, editing).clicked() {
+            session.return_to_top();
+        }
+    });
     ribbon_group(ui, tr!(lang, GroupPosition), |ui| {
         let has = !session.components().is_empty();
         for (tool, label) in [

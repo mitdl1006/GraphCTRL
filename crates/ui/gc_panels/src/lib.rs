@@ -47,6 +47,10 @@ pub enum BrowserAction {
     JointLock(gc_core::Id<gc_doc::Relationship>, bool),
     /// Protect a joint's freedom, or not.
     JointProtect(gc_core::Id<gc_doc::Relationship>, bool),
+    /// Edit a component or subassembly in place (double-click in the browser).
+    EditComponent(gc_doc::TreeKey),
+    /// Demote, move, dissolve or rename subassemblies.
+    Subassembly(gc_doc::SubassemblyOp),
     /// Put a component into the contact set, or take it out.
     ContactSet(gc_core::AnyId, bool),
     /// Suppress a relationship (or bring it back) and solve again.
@@ -68,6 +72,17 @@ pub struct ParamsUi {
     pub origin_selected: Option<(gc_doc::Occurrence, gc_doc::OriginElement)>,
     /// The component statuses of this frame: one query for the whole tree, not one per row.
     pub statuses: std::collections::BTreeMap<gc_core::AnyId, gc_doc::ComponentStatus>,
+    /// A name being asked for: the new subassembly of Demote, or the new name of a subassembly.
+    pub group_name: Option<GroupName>,
+}
+
+/// What a name typed in the browser is for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum GroupName {
+    /// Demote these rows into a new subassembly.
+    Demote(Vec<gc_doc::TreeKey>, String),
+    /// Rename a subassembly.
+    Rename(gc_doc::SubassemblyId, String),
 }
 
 /// The named parameters: a list, and one editor that adds a parameter or, when the name exists, changes
@@ -138,6 +153,7 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
     let mut action = None;
     state.statuses = session.component_statuses();
     gc_ui::panel::header(ui, tr!(lang, PanelBrowser));
+    group_name_row(ui, lang, state, &mut action);
     // F2 renames the selected node when the mouse is over the browser (over the 3D view, F2 pans).
     let hovering = ui.rect_contains_pointer(ui.max_rect());
     if hovering && ui.input(|i| i.key_pressed(egui::Key::F2)) {
@@ -158,22 +174,7 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
     let doc = session.doc();
     let selected = session.selected_item();
     use gc_session::CellItem;
-    type Row = (String, String, CellItem);
 
-    let components: Vec<Row> = session
-        .components()
-        .iter()
-        .filter(|node| node.parent.is_none())
-        .filter_map(|node| {
-            let gc_doc::Occurrence::Item(any) = node.occurrence else { return None };
-            let item = match any.kind {
-                gc_core::Kind::Body => CellItem::Body(any.downcast()?),
-                gc_core::Kind::RobotInstance => CellItem::Robot(any.downcast()?),
-                _ => return None,
-            };
-            Some((node.name.clone(), format!("{}:1", node.name), item))
-        })
-        .collect();
     let document = session.file_path().and_then(|p| p.file_stem().map(|n| n.to_string_lossy().into_owned()));
     let document = document.unwrap_or_else(|| tr!(lang, BrowserDocument).to_owned());
     egui::CollapsingHeader::new(RichText::new(document).strong())
@@ -300,7 +301,8 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
                     gc_ui::panel::tree_row(ui, row);
                 }
             });
-            browser_section(ui, session, lang, state, selected, &mut action, None, components);
+            let rows = session.component_tree();
+            component_rows(ui, session, lang, state, selected, &mut action, &rows, None);
         });
     egui::CollapsingHeader::new(tr!(lang, BrowserSketches)).default_open(true).show(ui, |ui| {
         let active = session.active_sketch().map(|(id, _)| id);
@@ -450,6 +452,125 @@ fn representations(ui: &mut Ui, session: &Session, lang: Lang, action: &mut Opti
     });
 }
 
+/// The components of the browser as the assembly tree: subassemblies are folders (the one being edited in
+/// place is marked), the components below them are rows of their own. Double-click edits in place; the menus
+/// demote, move, dissolve and rename. Inventor 2026 help: Create Subassemblies in Place
+/// (GUID-FCEE3F0E-AAE2-4619-8645-2588FEECD353), Edit components in place
+/// (GUID-C79C36C9-A6DB-46C5-8864-41F66C750231).
+#[allow(clippy::too_many_arguments, reason = "the browser's shared state")]
+fn component_rows(
+    ui: &mut Ui,
+    session: &Session,
+    lang: Lang,
+    state: &mut ParamsUi,
+    selected: Option<gc_session::CellItem>,
+    action: &mut Option<BrowserAction>,
+    rows: &[gc_doc::TreeRow],
+    parent: Option<gc_doc::TreeKey>,
+) {
+    use gc_doc::{Occurrence, SubassemblyOp, TreeKey};
+    use gc_session::CellItem;
+    let editing = session.edit_target();
+    for row in rows.iter().filter(|row| row.parent == parent) {
+        match row.key {
+            TreeKey::Subassembly(id) => {
+                let mark = if editing == Some(row.key) { "● " } else { "" };
+                let title = format!("{mark}{}", row.name);
+                let folder = egui::CollapsingHeader::new(title)
+                    .id_salt(("gc_subassembly", id))
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        component_rows(ui, session, lang, state, selected, action, rows, Some(row.key));
+                    });
+                let header = folder.header_response;
+                if header.double_clicked() {
+                    *action = Some(BrowserAction::EditComponent(row.key));
+                }
+                header.context_menu(|ui| {
+                    if ui.button(tr!(lang, CmdEditInPlace)).clicked() {
+                        *action = Some(BrowserAction::EditComponent(row.key));
+                        ui.close();
+                    }
+                    if ui.button(tr!(lang, CmdRename)).clicked() {
+                        state.group_name = Some(GroupName::Rename(id, row.name.clone()));
+                        ui.close();
+                    }
+                    if row.parent.is_some() && ui.button(tr!(lang, CmdMoveToTop)).clicked() {
+                        *action = Some(BrowserAction::Subassembly(SubassemblyOp::Move {
+                            members: vec![row.key],
+                            into: None,
+                        }));
+                        ui.close();
+                    }
+                    if ui.button(tr!(lang, CmdDissolve)).clicked() {
+                        *action = Some(BrowserAction::Subassembly(SubassemblyOp::Dissolve(id)));
+                        ui.close();
+                    }
+                });
+            }
+            TreeKey::Component(Occurrence::Item(any)) => {
+                let item = match any.kind {
+                    gc_core::Kind::Body => any.downcast().map(CellItem::Body),
+                    gc_core::Kind::RobotInstance => any.downcast().map(CellItem::Robot),
+                    _ => None,
+                };
+                if let Some(item) = item {
+                    let shown = format!("{}:1", row.name);
+                    browser_section(
+                        ui,
+                        session,
+                        lang,
+                        state,
+                        selected,
+                        action,
+                        None,
+                        vec![(row.name.clone(), shown, item)],
+                    );
+                }
+            }
+            // Parts, links and tools hang below their components, which draw them.
+            TreeKey::Component(_) => {}
+        }
+    }
+}
+
+/// The name being asked for (Demote's new subassembly, a subassembly's new name).
+fn group_name_row(ui: &mut Ui, lang: Lang, state: &mut ParamsUi, action: &mut Option<BrowserAction>) {
+    use gc_doc::SubassemblyOp;
+    let Some(entry) = state.group_name.as_mut() else { return };
+    let (label, text) = match entry {
+        GroupName::Demote(_, text) => (tr!(lang, CmdDemote), text),
+        GroupName::Rename(_, text) => (tr!(lang, CmdRename), text),
+    };
+    let (mut confirmed, mut cancelled) = (false, false);
+    ui.horizontal(|ui| {
+        ui.label(label);
+        let field = ui.add(egui::TextEdit::singleline(text).desired_width(110.0));
+        field.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, label));
+        if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            confirmed = true;
+        }
+        if ui.small_button(tr!(lang, Ok)).clicked() {
+            confirmed = true;
+        }
+        if ui.small_button(tr!(lang, Cancel)).clicked() {
+            cancelled = true;
+        }
+    });
+    if confirmed {
+        let op = match entry {
+            GroupName::Demote(members, name) => {
+                SubassemblyOp::Demote { members: members.clone(), name: name.trim().to_owned() }
+            }
+            GroupName::Rename(id, name) => SubassemblyOp::Rename { id: *id, name: name.trim().to_owned() },
+        };
+        *action = Some(BrowserAction::Subassembly(op));
+    }
+    if confirmed || cancelled {
+        state.group_name = None;
+    }
+}
+
 /// A group of rows of the browser tree (components, frames, waypoints, paths): a folder with `title`, or
 /// the rows alone.
 #[allow(clippy::too_many_arguments, reason = "the browser's shared state")]
@@ -486,6 +607,7 @@ fn browser_section(
                 delete: gc_doc::Command::Cell(item.delete_op()),
                 suppressible: matches!(item, CellItem::Waypoint(_) | CellItem::Path(_)),
             };
+            let mut ask: Option<GroupName> = None;
             let result = node_row(ui, session, lang, state, &node, action, |ui, action| {
                 if let CellItem::Body(_) | CellItem::Robot(_) = item {
                     // Inventor: right-click a component > Contact Set.
@@ -495,6 +617,39 @@ fn browser_section(
                         *action = Some(BrowserAction::ContactSet(any, !member));
                         ui.close();
                     }
+                    let key = gc_doc::TreeKey::Component(gc_doc::Occurrence::Item(any));
+                    if ui.button(tr!(lang, CmdEditInPlace)).clicked() {
+                        *action = Some(BrowserAction::EditComponent(key));
+                        ui.close();
+                    }
+                    if ui.button(tr!(lang, CmdDemote)).clicked() {
+                        ask = Some(GroupName::Demote(vec![key], String::new()));
+                        ui.close();
+                    }
+                    // Move between levels: to the top, or into another subassembly.
+                    let current = session.doc().subassembly_of(gc_doc::Occurrence::Item(any));
+                    let move_to = |into| {
+                        Some(BrowserAction::Subassembly(gc_doc::SubassemblyOp::Move {
+                            members: vec![key],
+                            into,
+                        }))
+                    };
+                    if current.is_some() && ui.button(tr!(lang, CmdMoveToTop)).clicked() {
+                        *action = move_to(None);
+                        ui.close();
+                    }
+                    let others: Vec<_> =
+                        session.doc().subassemblies().into_iter().filter(|s| Some(s.id) != current).collect();
+                    if !others.is_empty() {
+                        ui.menu_button(tr!(lang, CmdMoveInto), |ui| {
+                            for other in others {
+                                if ui.button(&other.name).clicked() {
+                                    *action = move_to(Some(other.id));
+                                    ui.close();
+                                }
+                            }
+                        });
+                    }
                 }
                 if let CellItem::Path(path) = item
                     && ui.button(tr!(lang, CmdPlan)).clicked()
@@ -503,8 +658,17 @@ fn browser_section(
                     ui.close();
                 }
             });
+            if ask.is_some() {
+                state.group_name = ask;
+            }
             if result.clicked() || result.secondary_clicked() {
                 *action = Some(BrowserAction::Select(Some(item)));
+            }
+            if result.double_clicked()
+                && let CellItem::Body(_) | CellItem::Robot(_) = item
+            {
+                let key = gc_doc::TreeKey::Component(gc_doc::Occurrence::Item(cell_any(item)));
+                *action = Some(BrowserAction::EditComponent(key));
             }
             // Components have an origin folder of their own.
             if let CellItem::Body(_) | CellItem::Robot(_) = item {
@@ -746,7 +910,10 @@ fn node_row(
 ) -> egui::Response {
     let doc = session.doc();
     let mut visible = doc.is_visible(node.any);
-    let inactive = doc.is_inactive(node.any);
+    // What lies outside the component being edited in place is faded.
+    let out_of_scope = matches!(node.any.kind, gc_core::Kind::Body | gc_core::Kind::RobotInstance)
+        && !session.in_edit_scope(gc_doc::Occurrence::Item(node.any));
+    let inactive = doc.is_inactive(node.any) || out_of_scope;
     let show_label = tr!(lang, ShowItem, node.name);
     let delete_label = tr!(lang, CmdDeleteItem, node.name);
     let renaming = state.rename.as_ref().is_some_and(|(id, _)| *id == node.any);

@@ -3937,3 +3937,90 @@ fn the_autoproject_choice_is_saved_and_read_back() {
         egui_kittest::Harness::builder().with_size(SIZE).build_eframe(|cc| GraphCtrlApp::new(cc, options()));
     assert!(!again.state().session.autoproject_face_edges());
 }
+
+/// Subassemblies in the browser: Demote groups a component into a folder, a double click edits it in place
+/// (the rest is out of scope, faded), the ribbon's Return to Top backs out, Dissolve ungroups (Inventor 2026
+/// help, Create Subassemblies in Place, GUID-FCEE3F0E-AAE2-4619-8645-2588FEECD353; Edit components in
+/// place, GUID-C79C36C9-A6DB-46C5-8864-41F66C750231).
+#[test]
+fn subassemblies_are_made_edited_in_place_and_dissolved_from_the_browser() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder =
+        egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0).with_step_dt(0.05);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.05, 0.05, 0.05] };
+    let app = harness.state_mut();
+    let first = app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    let second =
+        app.session.add_body(solid, gc_doc::Placement { xyz: [0.2, 0.0, 0.0], rpy: [0.0; 3] }).unwrap();
+    harness.run();
+
+    let right_click = |harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, label: &str| {
+        let at = harness.get_by_label(label).rect().center();
+        harness.event(egui::Event::PointerMoved(at));
+        harness.run();
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Secondary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.run();
+        }
+    };
+    right_click(&mut harness, "Body2:1");
+    harness.get_by_label("서브어셈블리로 묶기 (강등)").click();
+    harness.run_steps(3);
+    let name = egui::accesskit::Role::TextInput;
+    harness.get_by_role_and_label(name, "서브어셈블리로 묶기 (강등)").click();
+    harness.run();
+    harness.get_by_role_and_label(name, "서브어셈블리로 묶기 (강등)").type_text("Group");
+    harness.run();
+    harness.get_by_label("확인").click();
+    harness.run_steps(3);
+    assert_eq!(harness.state().session.doc().subassemblies().len(), 1);
+    assert_eq!(harness.state().session.doc().subassemblies()[0].name, "Group");
+
+    // A double click on the folder edits it in place: the other component is outside, faded.
+    let at = harness.get_by_label("Group").rect().center();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run();
+    // Two clicks close in time: a short step on the harness clock.
+    for _ in 0..2 {
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.step();
+        }
+    }
+    harness.run_steps(3);
+    assert!(harness.state().session.edit_target().is_some());
+    assert!(harness.state().session.in_edit_scope(gc_doc::Occurrence::Item(second.erase())));
+    assert!(!harness.state().session.in_edit_scope(gc_doc::Occurrence::Item(first.erase())));
+    if gpu {
+        let image = harness.render().unwrap();
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        image.save(out.join("review-51-edit-in-place.png")).unwrap();
+    }
+
+    // Return to Top on the Assemble tab backs out.
+    harness.get_by_label("조립").click();
+    harness.run();
+    harness.get_by_label("최상위로").click();
+    harness.run_steps(3);
+    assert!(harness.state().session.edit_target().is_none());
+
+    // Dissolve ungroups.
+    right_click(&mut harness, "Group");
+    harness.get_by_label("해체").click();
+    harness.run_steps(3);
+    assert!(harness.state().session.doc().subassemblies().is_empty());
+}

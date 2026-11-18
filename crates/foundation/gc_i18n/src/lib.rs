@@ -816,6 +816,24 @@ messages! {
     MenuOptions => ("응용 프로그램 옵션", "Application Options"),
     /// Application Options, Sketch tab: project the edges of the selected face when a sketch is created.
     OptAutoproject => ("스케치 작성·편집 시 모서리 자동 투영", "Autoproject edges for sketch creation and edit"),
+    /// Browser, right-click a component or subassembly: edit it in place.
+    CmdEditInPlace => ("제자리 편집", "Edit"),
+    /// Browser, right-click a component: group it into a new subassembly.
+    CmdDemote => ("서브어셈블리로 묶기 (강등)", "Component Demote"),
+    /// Browser: move a component or subassembly to the top level.
+    CmdMoveToTop => ("최상위로 이동", "Move to top level"),
+    /// Browser: move a component into another subassembly.
+    CmdMoveInto => ("서브어셈블리로 이동", "Move into subassembly"),
+    /// Browser, right-click a subassembly: dissolve it; its contents go up one level.
+    CmdDissolve => ("해체", "Dissolve"),
+    /// Assemble tab, Edit group: the group's title.
+    GroupEdit => ("편집", "Edit"),
+    /// Assemble tab: back to the previous edit target.
+    CmdReturn => ("복귀", "Return"),
+    /// Assemble tab: edit the parent of the edit target.
+    CmdReturnParent => ("상위로", "Return to Parent"),
+    /// Assemble tab: back to the top-level assembly.
+    CmdReturnTop => ("최상위로", "Return to Top"),
     /// Browser, right-click a joint: refuse relationships that take its freedom away.
     JointProtectItem => ("보호", "Protect"),
     /// Assemble tab: the Assemble command (pick geometry, the geometry decides the constraint types).
