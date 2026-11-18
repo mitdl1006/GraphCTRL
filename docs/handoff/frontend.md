@@ -148,13 +148,14 @@
 - 근거: Create Subassemblies in Place, GUID-FCEE3F0E-AAE2-4619-8645-2588FEECD353 (서브어셈블리는 부모 안에서 하나의 단위). 백엔드 `subassembly_moved` / `move_subassembly`.
 - 자유 이동·자유 회전: 서브어셈블리에 속한 구성요소를 끌면 서브어셈블리 전체가 움직이고(`delta = 새 포즈 × 시작 포즈⁻¹`) 놓을 때 Undo 한 단계. 접지된 구성요소가 있는 서브어셈블리는 끌려가지 않는다(드래그 시작 안 함). 그립 스냅: 서브어셈블리의 구성요소를 잡으면 확정 때 나머지도 함께 이동(접지 후 완료는 모두 접지).
 - 같이 고침: 자유 이동/회전이 켜져 있으면 이동·회전 핸들(기즈모)을 끈다. 선택한 구성요소의 핸들 위로 끌면 핸들이 드래그를 가로채 자유 이동이 끝나지 않던 버그.
-- 원문과 차이: 끄는 동안 화면에는 잡은 구성요소만 미리보기로 움직이고 나머지는 놓을 때 따라온다(세션 미리보기가 한 구성요소만 지원 — 다중 미리보기 API(`preview_components`)가 있으면 바꾼다). 핸들(기즈모) 드래그와 속성 패널 위치 입력은 서브어셈블리 단위가 아니다.
+- 끄는 동안 서브어셈블리 전체가 `preview_components`로 미리보기되고, 놓을 때 `end_component_preview` 후 `move_subassembly`(문서·Undo는 놓을 때만).
+- 원문과 차이: 핸들(기즈모) 드래그와 속성 패널 위치 입력은 서브어셈블리 단위가 아니다. 그립 스냅의 미리보기는 잡은 구성요소만 보이고 나머지는 확정 때 따라온다.
 - 테스트 `free_move_drags_a_whole_subassembly`, `grip_snap_moves_the_whole_subassembly_of_the_picked_component`.
 
 ### Trim 미리보기 (지울 조각 강조)
 
 - 근거: Trim/Extend/Split 원문 GUID-DD00037F(원문 목록은 앞 항목 참고): 지워질 부분이 클릭 전에 강조된다.
-- `Preview.cut`(Trim이 지울 조각)을 스케치 뷰에서 빨간 점선(2.6 px)으로 그린다. 선분·호·원 조각을 샘플링해서 그리고, 타원호(`Piece::EllipseArc`)와 `Piece::polyline`은 아직 gc_sketch에 없어 목록에서 건너뛴다(들어오면 `piece_points`에 추가).
+- `Preview.cut`(Trim이 지울 조각)을 스케치 뷰에서 빨간 점선(2.6 px)으로 그린다. `Piece::polyline`으로 선분·호·원·타원호(`EllipseArc`)를 모두 그린다.
 - 증거 `docs/evidence/img/review-57-trim-preview.png`, 테스트 `trim_highlights_the_piece_that_would_go`.
 
 ## 남은 일

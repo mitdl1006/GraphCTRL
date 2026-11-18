@@ -701,7 +701,7 @@ fn preview(view: &View<'_>, plane: &SketchPlane, session: &Session) {
     let cut = Stroke::new(2.6, Color32::from_rgb(0xE0, 0x30, 0x30));
     for piece in &preview.cut {
         let points: Vec<Pos2> =
-            piece_points(piece).into_iter().filter_map(|p| view.screen(world(p))).collect();
+            piece.polyline(72).into_iter().filter_map(|p| view.screen(world(p))).collect();
         if points.len() >= 2 {
             view.painter.extend(egui::Shape::dashed_line(&points, cut, 7.0, 4.0));
         }
@@ -736,27 +736,6 @@ fn preview(view: &View<'_>, plane: &SketchPlane, session: &Session) {
         {
             view.painter.circle_stroke(at, 7.0, stroke);
         }
-    }
-}
-
-/// The points along a piece of a curve, in sketch coordinates (enough of them to look round).
-fn piece_points(piece: &gc_sketch::Piece) -> Vec<[f64; 2]> {
-    use gc_sketch::Piece;
-    const STEPS: u32 = 72;
-    let on = |centre: [f64; 2], radius: f64, start: f64, sweep: f64| -> Vec<[f64; 2]> {
-        (0..=STEPS)
-            .map(|i| {
-                let angle = start + sweep * f64::from(i) / f64::from(STEPS);
-                [centre[0] + radius * fm::cos(angle), centre[1] + radius * fm::sin(angle)]
-            })
-            .collect()
-    };
-    match piece {
-        Piece::Segment(a, b) => vec![*a, *b],
-        Piece::Arc { centre, radius, start, sweep } => on(*centre, *radius, *start, *sweep),
-        Piece::Circle { centre, radius } => on(*centre, *radius, 0.0, std::f64::consts::TAU),
-        #[allow(unreachable_patterns, reason = "pieces the sketch crate adds later (ellipse arcs)")]
-        _ => Vec::new(),
     }
 }
 

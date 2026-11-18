@@ -97,14 +97,22 @@ pub(crate) fn update(
         }
     };
     drag.delta = pose * drag.start.inverse();
+    if let Some(unit) = drag.unit
+        && let Some(moves) = session.subassembly_moved(unit, drag.delta)
+        && session.preview_components(&moves).is_ok()
+    {
+        // The whole subassembly is shown at its new place.
+        return;
+    }
     gizmo::preview(session, drag.item, &pose);
 }
 
 /// Ends the drag: one undo step.
 pub(crate) fn end(drag: &FreeDrag, session: &mut Session) {
     if let Some(unit) = drag.unit {
-        // The dragged component's preview goes; the whole subassembly moves in one undo step. A refusal is
-        // explained in the status bar.
+        // The preview goes; the whole subassembly moves in one undo step. A refusal is explained in the
+        // status bar.
+        session.end_component_preview();
         gizmo::preview(session, drag.item, &drag.start);
         gizmo::commit(session, drag.item);
         drop(session.move_subassembly(unit, drag.delta));
