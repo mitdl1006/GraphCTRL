@@ -15,6 +15,7 @@
 mod cell;
 mod command;
 mod document;
+mod folder;
 mod grip;
 mod history;
 mod iproperties;
@@ -47,6 +48,7 @@ pub use design::{
     PlaneSource, PointRef, Timeline, WorkFeature, WorkGeometry,
 };
 pub use document::{ChangeSet, Contents, DocDelta, Document, Frame, FrameKind, Param, Store, Table};
+pub use folder::{BrowserFolder, FolderOp};
 pub use gc_expr::Unit;
 pub use gc_sketch::Sketch;
 pub use grip::{GripLine, GripMotion, GripReference, grip_pose, grip_pose_on};
