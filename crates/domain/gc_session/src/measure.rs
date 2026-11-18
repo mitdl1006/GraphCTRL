@@ -146,6 +146,34 @@ pub enum Feature {
         /// The area.
         area: f64,
     },
+    /// A circular edge (the rim of a hole, the end of a shaft): what Insert takes
+    /// (`gc_doc::Geometry::Circle`). Found with `gc_mesh::region::circular_edge`.
+    Circle {
+        /// The centre.
+        centre: [f64; 3],
+        /// The unit normal of its plane, the side the flat face next to it looks to.
+        normal: [f64; 3],
+        /// The radius.
+        radius: f64,
+    },
+    /// A spherical face: what Tangent takes (`gc_doc::Geometry::Sphere`). Found with
+    /// `gc_mesh::region::spherical_region_in`.
+    Sphere {
+        /// The centre.
+        centre: [f64; 3],
+        /// The radius.
+        radius: f64,
+    },
+}
+
+impl Feature {
+    /// A circular edge or a sphere measures by its centre point; other features are themselves.
+    fn measured(&self) -> Option<Feature> {
+        match self {
+            Feature::Circle { centre, .. } | Feature::Sphere { centre, .. } => Some(Feature::Point(*centre)),
+            _ => None,
+        }
+    }
 }
 
 /// What two features measure together.
@@ -236,6 +264,10 @@ fn with_cylinder(centre: [f64; 3], axis: [f64; 3], radius: f64, length: f64, oth
         }
     };
     match other {
+        // Measured by their centres (see `measure_features`).
+        Feature::Circle { centre: other_centre, .. } | Feature::Sphere { centre: other_centre, .. } => {
+            with_cylinder(centre, axis, radius, length, &Feature::Point(*other_centre))
+        }
         Feature::Point(p) => {
             let foot = on_segment(v(*p), lo, hi);
             let d = v(*p).distance(foot);
@@ -300,6 +332,13 @@ pub fn angle_at(a: [f64; 3], vertex: [f64; 3], c: [f64; 3]) -> Option<f64> {
 
 /// What two picked features measure together (Inventor's Measure with Edges and Faces priority).
 pub fn measure_features(first: &Feature, second: &Feature) -> FeaturePair {
+    // Circular edges and spheres: to and from their centres.
+    if let Some(centre) = first.measured() {
+        return measure_features(&centre, second);
+    }
+    if let Some(centre) = second.measured() {
+        return measure_features(first, &centre);
+    }
     if let Feature::Cylinder { centre, axis, radius, length } = first {
         return with_cylinder(*centre, *axis, *radius, *length, second);
     }
@@ -353,6 +392,9 @@ pub fn measure_features(first: &Feature, second: &Feature) -> FeaturePair {
         }
         // Cylinders were measured above.
         (Feature::Cylinder { .. }, _) | (_, Feature::Cylinder { .. }) => FeaturePair::default(),
+        // Measured by their centres above.
+        (Feature::Circle { .. } | Feature::Sphere { .. }, _)
+        | (_, Feature::Circle { .. } | Feature::Sphere { .. }) => FeaturePair::default(),
         (Feature::Face { point: p1, normal: n1, .. }, Feature::Face { point: p2, normal: n2, .. }) => {
             let (n1, n2) = (v(*n1), v(*n2));
             let mut pair = FeaturePair { angle: Some(angle_between(n1, n2)), ..FeaturePair::default() };
@@ -430,6 +472,14 @@ mod tests {
             &Feature::Edge([0.0; 3], [-1.0, 0.1, 0.0]),
         );
         assert!(reversed.angle.unwrap() < 0.11);
+
+        // A circular edge and a sphere measure by their centres.
+        let rim = Feature::Circle { centre: [0.0, 0.0, 1.0], normal: UP, radius: 0.1 };
+        let ball = Feature::Sphere { centre: [3.0, 4.0, 1.0], radius: 0.5 };
+        assert_eq!(measure_features(&rim, &ball).distance, Some(5.0));
+        assert_eq!(measure_features(&ball, &Feature::Point([3.0, 4.0, 0.0])).distance, Some(1.0));
+        let shaft = Feature::Cylinder { centre: [0.0; 3], axis: UP, radius: 0.05, length: 4.0 };
+        assert_eq!(measure_features(&shaft, &ball).centre_distance, Some(5.0));
     }
 }
 
