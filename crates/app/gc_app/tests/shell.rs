@@ -4870,7 +4870,32 @@ fn free_move_drags_a_whole_subassembly() {
     let (a0, b0) = (xyz(&harness, a), xyz(&harness, b));
     let depth = harness.state().session.history().undo_depth();
     let on_a = harness.state().viewport().screen_of(gc_math::DVec3::new(0.3, 0.0, 0.05)).unwrap();
-    drag(&mut harness, on_a, egui::vec2(60.0, 0.0));
+    // Half way through the drag the whole unit is shown moved; nothing is in the document yet.
+    harness.event(egui::Event::PointerMoved(on_a));
+    harness.run_steps(2);
+    harness.event(egui::Event::PointerButton {
+        pos: on_a,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run_steps(2);
+    for step in 1..=2 {
+        harness.event(egui::Event::PointerMoved(on_a + egui::vec2(30.0 * step as f32, 0.0)));
+        harness.run_steps(2);
+    }
+    let shown = harness.state().session.shown_body(b).unwrap().placement.xyz;
+    assert!(shown[0] > b0[0] + 0.005, "the other component is previewed too: {shown:?}");
+    assert_eq!(xyz(&harness, b), b0, "the document is untouched until the drop");
+    harness.event(egui::Event::PointerMoved(on_a + egui::vec2(60.0, 0.0)));
+    harness.run_steps(2);
+    harness.event(egui::Event::PointerButton {
+        pos: on_a + egui::vec2(60.0, 0.0),
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run_steps(2);
     let (a1, b1) = (xyz(&harness, a), xyz(&harness, b));
     let da = [a1[0] - a0[0], a1[1] - a0[1], a1[2] - a0[2]];
     let db = [b1[0] - b0[0], b1[1] - b0[1], b1[2] - b0[2]];
