@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use gc_core::{Id, IdAlloc};
 
 use crate::edit::{Item, SketchError};
-use crate::{Curve, CurveGeom, DimKind, GeoConstraint, SkPoint, Sketch, Status};
+use crate::{Curve, CurveGeom, DimKind, GeoConstraint, PointKind, SkPoint, Sketch, Status};
 
 /// How a move treats what holds the selection.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -77,6 +77,10 @@ impl Sketch {
         if curves.is_empty() || self.is_spatial() {
             return Err(SketchError::InvalidValue);
         }
+        // A curve listed twice is copied once.
+        let mut seen = BTreeSet::new();
+        let curves: Vec<Id<Curve>> = curves.iter().copied().filter(|c| seen.insert(*c)).collect();
+        let curves = curves.as_slice();
         let points = self.selected_points(curves)?;
         let mut result = CopyResult::default();
         let mut point_map = BTreeMap::new();
@@ -169,6 +173,17 @@ impl Sketch {
                 if moving.len() == before {
                     break;
                 }
+            }
+        }
+        // Obeying every constraint (not relaxed), a fixed point or a reference (projected) point cannot go
+        // anywhere: the move is refused rather than carrying the Fix along.
+        if !rules.break_ties {
+            let fixed = |p: &Id<SkPoint>| {
+                self.points.get(p).is_some_and(|q| matches!(q.kind, PointKind::External(_)))
+                    || self.constraints.values().any(|c| *c == GeoConstraint::Fix(*p))
+            };
+            if moving.iter().any(fixed) {
+                return Err(SketchError::Unsolved(Status::Inconsistent));
             }
         }
         let dimension_touches = |pts: &[Id<SkPoint>], cvs: &[Id<Curve>]| {

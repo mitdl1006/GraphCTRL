@@ -54,6 +54,16 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — QA 버그 3건(transform.rs): 고정 곡선 이동, 투영 선 이동, 중복 복사
+
+- relax 없이 Move·Rotate·Stretch하면(`MoveRules::break_ties == false`) 움직일 점(일치 구속으로 함께 가는 점 포함) 중에
+  Fix 구속이 있거나 참조점(`PointKind::External`)이 있으면 `SketchError::Unsolved(Inconsistent)`로 거부한다.
+  예전에는 Fix가 점을 따라가서 고정 곡선도 움직였다. 투영된 선은 끝점이 Fix라서 같은 규칙으로 거부된다.
+  근거: To Copy, Move, or Rotate 2D Sketch Geometry(GUID-F8114270-18F7-4C7A-947E-AC489EDACFA9)의 기하 구속 "Never"인
+  "The operation obeys all existing geometric constraints".
+- `copy_placed`: 곡선 목록의 중복을 없애고 복사한다(한 번만 복사).
+- `gc_session/tests/qa_sketch_transform_auto.rs`의 `#[ignore]` 3개를 풀었다.
+
 ## 2026-11-18 — QA 버그 2건(qa.md 151행): 패턴 방향선 삭제, HUD 식
 
 - **패턴 방향선 삭제**: `Sketch::prune_patterns`가 원본 곡선뿐 아니라 직사각형 패턴의 방향선(`first.line`, `second.line`)과

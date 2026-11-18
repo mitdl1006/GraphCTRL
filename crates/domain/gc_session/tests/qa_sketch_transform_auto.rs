@@ -231,7 +231,6 @@ fn transform_needs_curves_that_exist() {
 
 /// Listing a curve twice must copy it once.
 #[test]
-#[ignore = "BUG: Copy with a curve listed twice makes two coincident copies (owner: backend, gc_sketch::transform copy_placed does not dedupe the curve list)"]
 fn copying_a_curve_listed_twice_makes_one_copy() {
     let (mut s, k) = setup();
     let l = line(&mut s, k, [0.01, 0.0], [0.03, 0.0]);
@@ -245,7 +244,6 @@ fn copying_a_curve_listed_twice_makes_one_copy() {
 /// Help (Change Constraint Behavior when Moving or Rotating Geometry): with geometric constraints at "Never"
 /// the operation obeys all existing constraints, so a curve fixed to the sketch does not move.
 #[test]
-#[ignore = "BUG: Move/Rotate without relax moves a curve whose ends carry Fix constraints (the Fix follows the points) instead of refusing (owner: backend, gc_sketch::transform move_placed)"]
 fn moving_a_fixed_curve_is_refused() {
     let (mut s, k) = setup();
     let l = line(&mut s, k, [0.01, 0.0], [0.03, 0.0]);
@@ -260,7 +258,6 @@ fn moving_a_fixed_curve_is_refused() {
 
 /// Projected reference lines are fixed too.
 #[test]
-#[ignore = "BUG: a projected (fixed reference) line can be moved without relax (owner: backend, gc_sketch::transform move_placed)"]
 fn moving_a_projected_line_is_refused() {
     let (mut s, k) = setup();
     run(&mut s, k, SketchOp::ProjectedLines { lines: vec![([0.0, 0.0, 0.0], [0.05, 0.0, 0.0])] }).unwrap();
