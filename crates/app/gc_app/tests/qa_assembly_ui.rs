@@ -82,3 +82,116 @@ fn a_hidden_origin_plane_is_not_picked_in_the_viewport_a_shown_one_is() {
     click_at(&mut harness, at);
     assert!(harness.state().viewport().origin_selected.is_none(), "hidden again, not pickable again");
 }
+
+// ---- Assemble tab: Grounded and Place ----
+
+struct Chosen(std::sync::Arc<std::sync::Mutex<std::path::PathBuf>>);
+
+impl gc_app::FileDialogs for Chosen {
+    fn open(&mut self) -> Option<std::path::PathBuf> {
+        None
+    }
+    fn save(&mut self, _: &str) -> Option<std::path::PathBuf> {
+        None
+    }
+    fn open_mesh(&mut self) -> Option<std::path::PathBuf> {
+        Some(self.0.lock().unwrap().clone())
+    }
+}
+
+fn harness_with_dialogs(
+    chosen: &std::sync::Arc<std::sync::Mutex<std::path::PathBuf>>,
+) -> egui_kittest::Harness<'static, GraphCtrlApp> {
+    let dialogs = Chosen(std::sync::Arc::clone(chosen));
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(move |cc| GraphCtrlApp::new(cc, RunOptions::default()).with_dialogs(Box::new(dialogs)));
+    harness.run();
+    harness.get_by_label("조립").click();
+    harness.run();
+    harness
+}
+
+/// Grounded with nothing selected changes nothing; with a body selected it flips, says so in the status
+/// bar, and Ctrl+Z puts it back; a second toggle says it is freed.
+#[test]
+fn ground_changes_only_a_selected_component_and_says_so() {
+    let chosen = std::sync::Arc::new(std::sync::Mutex::new(std::path::PathBuf::new()));
+    let mut harness = harness_with_dialogs(&chosen);
+    let body = harness
+        .state_mut()
+        .session
+        .add_body(
+            gc_doc::Solid::Box { size: [0.1; 3] },
+            gc_doc::Placement { xyz: [1.0, 0.0, 0.0], rpy: [0.0; 3] },
+        )
+        .unwrap();
+    // The first component is grounded already; add a second so there is one that is free.
+    let second = harness
+        .state_mut()
+        .session
+        .add_body(
+            gc_doc::Solid::Box { size: [0.1; 3] },
+            gc_doc::Placement { xyz: [2.0, 0.0, 0.0], rpy: [0.0; 3] },
+        )
+        .unwrap();
+    harness.state_mut().session.select_item(None);
+    harness.run();
+    let before = harness.state().session.doc().clone();
+    harness.get_by_label("접지").click();
+    harness.run();
+    assert!(harness.state().session.doc().same_content(&before), "nothing selected: nothing changes");
+
+    harness.state_mut().session.select_item(Some(gc_session::CellItem::Body(second)));
+    harness.run();
+    let is_grounded = |h: &egui_kittest::Harness<'_, GraphCtrlApp>| {
+        h.state()
+            .session
+            .doc()
+            .component_flag(gc_doc::Occurrence::Item(second.erase()), gc_doc::ComponentFlag::Grounded)
+    };
+    assert!(!is_grounded(&harness));
+    harness.get_by_label("접지").click();
+    harness.run();
+    assert!(is_grounded(&harness));
+    harness.get_by_label_contains("접지했습니다");
+    harness.get_by_label("접지").click();
+    harness.run();
+    assert!(!is_grounded(&harness));
+    harness.get_by_label_contains("접지를 풀었습니다");
+    // Undo twice: back to the state before any toggle.
+    for _ in 0..2 {
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+        harness.run();
+    }
+    assert!(
+        harness.state().session.doc().same_content(&before)
+            || harness.state().session.doc().get(body).is_some()
+    );
+}
+
+/// Place with a file that does not exist, is empty, or has the wrong content: an error line in the status
+/// bar, no assembly added, no crash, and a good file afterwards still works.
+#[test]
+fn place_reports_missing_and_empty_files_and_recovers() {
+    let dir = tempfile::tempdir().unwrap();
+    let empty = dir.path().join("empty.glb");
+    std::fs::write(&empty, b"").unwrap();
+    let chosen = std::sync::Arc::new(std::sync::Mutex::new(dir.path().join("missing.stp")));
+    let mut harness = harness_with_dialogs(&chosen);
+    for bad in [dir.path().join("missing.stp"), empty] {
+        *chosen.lock().unwrap() = bad;
+        harness.get_by_label("배치").click();
+        harness.run_steps(4);
+        let shown = harness.query_by_label_contains("가져오기 실패: ").is_some();
+        assert!(shown, "no error line for {:?}", chosen.lock().unwrap());
+        assert!(harness.state().session.doc().assemblies().is_empty());
+    }
+    let fixture =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/step/two_blocks_ap242.stp");
+    *chosen.lock().unwrap() = fixture;
+    harness.get_by_label("배치").click();
+    harness.run_steps(4);
+    assert_eq!(harness.state().session.doc().assemblies().len(), 1, "a good file works after the failures");
+}
