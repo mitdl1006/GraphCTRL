@@ -976,6 +976,9 @@ impl GraphCtrlApp {
                 }
                 if ui.button(tr!(lang, ScheduleTitle)).clicked() {
                     self.schedule_open = !self.schedule_open;
+                    if !self.schedule_open {
+                        self.schedule.stop(&mut self.session);
+                    }
                     ui.close();
                 }
                 if ui.button(tr!(lang, MenuDocSettings)).clicked() {
@@ -1448,6 +1451,7 @@ impl eframe::App for GraphCtrlApp {
                         ui.strong(tr!(lang, ScheduleTitle));
                         if ui.small_button("✕").clicked() {
                             self.schedule_open = false;
+                            self.schedule.stop(&mut self.session);
                         }
                     });
                     gc_panels::schedule_panel(ui, &mut self.session, lang, &mut self.schedule);

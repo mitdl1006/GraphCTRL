@@ -435,6 +435,11 @@
 - QA 버그: 작업 편집기 "효과 추가"가 변수에 항상 `true`를 넣었다 → 변수 종류별 기본값(참/거짓=true, 정수=0, 실수=0.0, 열거=첫 선택지). QA `add_effect_works_for_an_integer_variable`의 `#[ignore]`를 풀었다.
 - 테스트: shell `the_schedule_panel_…`에 "오래된 결과" 단언 추가, qa_work_screens 7개 통과.
 
+### 스케줄 재생
+
+- 스케줄 패널에 "스케줄 재생/일시정지", "스케줄 원위치", 시각 슬라이더(0..=makespan, s), 간트 위 현재 시각 세로선. 재생 중에만 repaint(`unstable_dt`로 시각을 진행, 끝에서 멈춤). 슬라이더·재생은 `set_schedule_playback(Some(t))`, 원위치·패널 닫기는 `None`(로봇이 원래 자리로, 문서는 바뀌지 않음). 버튼 이름은 셀 패널의 "재생"과 겹치지 않게 "스케줄 …"로 했다.
+- 테스트: `the_schedule_panel_plays_the_schedule_and_resets`.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹
