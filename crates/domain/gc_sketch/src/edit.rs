@@ -356,6 +356,12 @@ impl Sketch {
         alloc: &mut IdAlloc,
         constraint: GeoConstraint,
     ) -> Result<AddResult<GeoConstraint>, SketchError> {
+        // Tangent and Smooth take two curves; a curve with itself is not a pair.
+        if let GeoConstraint::Tangent { a, b, .. } | GeoConstraint::Smooth(a, b) = constraint
+            && a == b
+        {
+            return Err(SketchError::InvalidValue);
+        }
         if self.shapes_spline(&constraint) {
             return self.add_spline_shaping(alloc, constraint);
         }
