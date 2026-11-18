@@ -54,6 +54,23 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — Bend Equal 옵션(리드 ③)
+
+원문: To Create Lines, Arcs, and Bends, GUID-4F861674-F74C-474E-869A-4C190ED6EC4B — "(Optional) Deselect Equal to prevent automatic
+constraints. If selected, the Equal option constrains successively placed bends of the same radius."
+
+- 새 연산 `SketchOp::BendEqual { lines, to }`:
+  - 반지름은 호 `to`(대화상자에서 처음 놓은 굽힘)의 반지름을 쓴다.
+  - 치수 대신 `Equal(새 호, to)` 구속을 건다. 첫 굽힘의 치수를 바꾸면 둘 다 따라간다.
+  - 실행 취소 한 단계. `to`가 호·원이 아니면 거부한다.
+- `SketchOp::Bend`에 필드를 더하지 않은 이유: 뷰포트(`gc_viewport/src/lib.rs`)와 QA 테스트가 리터럴로 쓴다.
+- 프론트 배선:
+  - Bend 대화상자의 Equal 체크(기본 켬)를 둔다.
+  - 켜져 있고 반지름 칸이 바뀌지 않았으면 두 번째부터 `BendEqual { lines, to: 첫 굽힘 호 }`를 보낸다.
+  - 꺼져 있거나 반지름을 바꿨으면 지금처럼 `Bend`를 보낸다. 반지름을 바꿨으면 그 굽힘이 새 기준이 된다.
+  - 첫 굽힘 호는 `Bend` 결과 `Created::Curve`의 첫 항목이다.
+- Auto-Bend(선 그리기 중 자동 굽힘)는 원문에 Equal 언급이 없어 그대로 둔다(굽힘마다 치수).
+
 ## 2026-11-18 — BOM 기초(리드 ②)
 
 원문: About the BOM Structure, GUID-A0A95805-CBF6-4524-8314-4AC8B53C19CF.
