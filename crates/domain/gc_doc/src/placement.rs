@@ -109,8 +109,68 @@ fn shape(doc: &Document, id: Id<WorkFeature>, depth: usize) -> Option<WorkShape>
             let base = plane(doc, *base, depth)?;
             Some(WorkShape::Axis { point: point(doc, *through, depth)?, direction: base.rotation * DVec3::Z })
         }
+        WorkGeometry::AxisOnLine { line } => {
+            let (a, b) = line_points(doc, *line)?;
+            let d = b - a;
+            (d.length() > 1e-12).then(|| WorkShape::Axis { point: a, direction: d.normalize() })
+        }
+        WorkGeometry::AxisParallelThrough { line, through } => {
+            let (a, b) = line_points(doc, *line)?;
+            let d = b - a;
+            let at = point(doc, *through, depth)?;
+            (d.length() > 1e-12).then(|| WorkShape::Axis { point: at, direction: d.normalize() })
+        }
+        WorkGeometry::AxisPlanesIntersection { planes } => {
+            let (p, q) = (plane(doc, planes[0], depth)?, plane(doc, planes[1], depth)?);
+            let (n1, n2) = (p.rotation * DVec3::Z, q.rotation * DVec3::Z);
+            let direction = n1.cross(n2);
+            if direction.length() < 1e-9 {
+                return None;
+            }
+            // The point of the line nearest the first plane's origin: on both planes.
+            let (d1, d2) = (n1.dot(p.translation), n2.dot(q.translation));
+            let n12 = n1.dot(n2);
+            let det = 1.0 - n12 * n12;
+            let (c1, c2) = ((d1 - d2 * n12) / det, (d2 - d1 * n12) / det);
+            Some(WorkShape::Axis { point: n1 * c1 + n2 * c2, direction: direction.normalize() })
+        }
+        WorkGeometry::AxisThroughCircle { curve } => {
+            let sketch = doc.get(curve.sketch)?;
+            let frame = sketch_frame(doc, sketch)?;
+            let world = |p: [f64; 3]| frame.translation + frame.rotation * DVec3::from_array(p);
+            match sketch.curves.get(&curve.curve)?.geom {
+                gc_sketch::CurveGeom::Circle { c, .. } | gc_sketch::CurveGeom::Arc { c, .. }
+                    if !sketch.is_spatial() =>
+                {
+                    Some(WorkShape::Axis {
+                        point: world(sketch.pos(c)?),
+                        direction: frame.rotation * DVec3::Z,
+                    })
+                }
+                gc_sketch::CurveGeom::Arc { c, s, e } => {
+                    let arc = gc_sketch::Arc3::new(sketch.pos(c)?, sketch.pos(s)?, sketch.pos(e)?)?;
+                    let normal = DVec3::from_array(arc.u).cross(DVec3::from_array(arc.v));
+                    Some(WorkShape::Axis { point: world(arc.centre), direction: frame.rotation * normal })
+                }
+                _ => None,
+            }
+        }
         WorkGeometry::Point { at } => Some(WorkShape::Point(point(doc, *at, depth)?)),
     }
+}
+
+fn sketch_frame(doc: &Document, sketch: &gc_sketch::Sketch) -> Option<DPose3> {
+    let (Space::Planar(frame) | Space::Spatial(frame)) = sketch.space;
+    doc.frame_world_pose(Id::from_raw(frame.raw))
+}
+
+/// A sketch line's ends in the world.
+fn line_points(doc: &Document, line: crate::design::CurveRef) -> Option<(DVec3, DVec3)> {
+    let sketch = doc.get(line.sketch)?;
+    let frame = sketch_frame(doc, sketch)?;
+    let (a, b) = sketch.line(line.curve)?;
+    let world = |p: [f64; 3]| frame.translation + frame.rotation * DVec3::from_array(p);
+    Some((world(sketch.pos(a)?), world(sketch.pos(b)?)))
 }
 
 fn plane(doc: &Document, plane: PlaneRef, depth: usize) -> Option<DPose3> {
