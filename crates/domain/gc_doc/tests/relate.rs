@@ -1058,3 +1058,118 @@ fn a_relationship_that_cannot_be_solved_can_be_accepted_with_an_error() {
         (bench.pose(block).translation.z - bench.pose(table).translation.z - 0.5 - 0.3 - 0.1).abs() < 1e-7
     );
 }
+
+/// Motion constraints (Inventor 2026 help, Place Motion constraints between assembly components,
+/// GUID-493DEAF8-D124-47BE-AFF2-B0535E9005C5; Place Constraint Reference - Motion Tab,
+/// GUID-0293C151-565F-4980-AA95-DD76C54AB538): Rotation ties the turning of two components by a ratio,
+/// Rotation-Translation the travel of one to the turning of the other; they never stand in the way of
+/// positional constraints or move grounded components.
+#[test]
+fn motion_constraints_tie_turning_and_travel_together() {
+    use gc_doc::AngleSolution;
+    let mut bench = Bench::new();
+    let table = bench.body("Table", [2.0, 1.0, 1.0], Placement { xyz: [0.0, 0.0, 0.5], rpy: [0.0; 3] });
+    let frame = |origin: [f64; 3], z: [f64; 3], x: [f64; 3]| Geometry::Frame { origin, z, x };
+    let axis = |direction: [f64; 3]| Geometry::Axis { point: [0.0; 3], direction };
+    // Two gears lying on the table, each on a rotational joint about the vertical.
+    let gear = |bench: &mut Bench, name: &str, x: f64| {
+        let body = bench.body(name, [0.2, 0.2, 0.1], Placement { xyz: [x, 0.0, 1.3], rpy: [0.0; 3] });
+        let joint = Relationship::new(
+            format!("Rotational {name}"),
+            RelationKind::Rotational { flip: false },
+            on(body, frame([0.0, 0.0, -0.05], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0])),
+            on(table, frame([x, 0.0, 0.5], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0])),
+        );
+        bench.relate(joint).unwrap();
+        body
+    };
+    let (driver, driven) = (gear(&mut bench, "Driver", -0.3), gear(&mut bench, "Driven", 0.3));
+    // A rack on a slider along the table's X.
+    let rack = bench.body("Rack", [0.4, 0.05, 0.05], Placement { xyz: [0.0, 0.4, 1.3], rpy: [0.0; 3] });
+    let slide = Relationship::new(
+        "Slider",
+        RelationKind::Slider { flip: true },
+        on(rack, frame([0.0; 3], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0])),
+        on(table, frame([0.0, 0.4, 0.525], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0])),
+    );
+    bench.relate(slide).unwrap();
+    // The driver's angle to the table is held by an angle constraint about the vertical.
+    let side = |body: Id<Body>| on(body, Geometry::Plane { point: [0.1, 0.0, 0.0], normal: [1.0, 0.0, 0.0] });
+    let angle = |value: f64| Relationship {
+        limits: None,
+        name: "Angle".into(),
+        kind: RelationKind::Angle { angle: value, solution: AngleSolution::Explicit(on(table, top(1.0))) },
+        first: side(table),
+        second: side(driver),
+    };
+    let held = bench.relate(angle(0.0)).unwrap();
+    let yaw = |bench: &Bench, body: Id<Body>| {
+        let x = bench.pose(body).rotation * DVec3::X;
+        gc_math::fm::atan2(x.y, x.x)
+    };
+    // Gears: the driven one turns twice as far, the other way. Rack: 0.1 m a turn.
+    let gears = Relationship::new(
+        "Rotation",
+        RelationKind::Rotation { ratio: 2.0, reverse: true },
+        on(driver, axis([0.0, 0.0, 1.0])),
+        on(driven, axis([0.0, 0.0, 1.0])),
+    );
+    bench.relate(gears).unwrap();
+    let pinion = Relationship::new(
+        "Rotation-Translation",
+        RelationKind::RotationTranslation { distance: 0.1, reverse: false },
+        on(driver, axis([0.0, 0.0, 1.0])),
+        on(rack, axis([1.0, 0.0, 0.0])),
+    );
+    let pinion = bench.relate(pinion).unwrap();
+    // Placing them moves nothing.
+    assert!(yaw(&bench, driver).abs() < 1e-9 && yaw(&bench, driven).abs() < 1e-9);
+    let rack_at = bench.pose(rack).translation.x;
+
+    let mut turned = 0.0;
+    for step in [0.3, 0.5, -0.2] {
+        let before = (yaw(&bench, driver), yaw(&bench, driven), bench.pose(rack).translation.x);
+        bench.cell(CellOp::SetRelationship { id: held, relationship: angle(step) }).unwrap();
+        let by = yaw(&bench, driver) - before.0;
+        assert!(by.abs() > 0.1, "the driver turned: {by}");
+        turned += by;
+        assert!((yaw(&bench, driven) - before.1 + 2.0 * by).abs() < 1e-6, "{step}");
+        let travel = bench.pose(rack).translation.x - before.2;
+        assert!((travel - 0.1 * by / std::f64::consts::TAU).abs() < 1e-7, "{step}: {travel}");
+    }
+    assert!((bench.pose(rack).translation.x - rack_at - 0.1 * turned / std::f64::consts::TAU).abs() < 1e-6);
+    // Undo takes the driver, the driven gear and the rack back together.
+    let driven_now = yaw(&bench, driven);
+    bench.history.undo(&mut bench.doc).unwrap();
+    assert!((yaw(&bench, driven) - driven_now).abs() > 0.1);
+    bench.history.redo(&mut bench.doc).unwrap();
+    assert!((yaw(&bench, driven) - driven_now).abs() < 1e-12);
+
+    // A grounded component is not moved, and the motion constraint does not make the edit fail.
+    let command = Command::SetComponent {
+        occurrence: Occurrence::Item(driven.erase()),
+        flag: ComponentFlag::Grounded,
+        on: true,
+    };
+    apply(&mut bench.doc, &command).unwrap();
+    let fixed = bench.pose(driven);
+    bench.cell(CellOp::SetRelationship { id: held, relationship: angle(0.6) }).unwrap();
+    assert_eq!(bench.pose(driven), fixed);
+    // Not for Drive, no zero ratio, and the dialog's defaults.
+    assert!(bench.doc.driven(pinion, 1.0).is_err());
+    let zero = Relationship::new(
+        "Zero",
+        RelationKind::Rotation { ratio: 0.0, reverse: false },
+        on(driver, axis([0.0, 0.0, 1.0])),
+        on(driven, axis([0.0, 0.0, 1.0])),
+    );
+    assert_eq!(bench.relate(zero), Err(EditError::BadValue));
+    let cylinder = |radius: f64| Geometry::Cylinder { point: [0.0; 3], direction: [0.0, 0.0, 1.0], radius };
+    let (small, large) = (on(driver, cylinder(0.02)), on(driven, cylinder(0.08)));
+    assert_eq!(Document::motion_default(&small, &large, false), Some(0.25));
+    assert_eq!(
+        Document::motion_default(&small, &on(rack, axis([1.0, 0.0, 0.0])), true),
+        Some(std::f64::consts::TAU * 0.02)
+    );
+    assert_eq!(Document::motion_default(&on(driver, axis([0.0, 0.0, 1.0])), &large, false), Some(1.0));
+}

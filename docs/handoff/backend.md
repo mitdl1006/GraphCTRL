@@ -124,6 +124,18 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — Motion 구속(Rotation, Rotation-Translation) (대조 목록 1); Transitional은 보류 (2)
+
+근거: Place Motion constraints between assembly components(`GUID-493DEAF8-D124-47BE-AFF2-B0535E9005C5`), Place Constraint Reference - Motion Tab(`GUID-0293C151-565F-4980-AA95-DD76C54AB538`) — "Because they operate only on open degrees of freedom, they do not conflict with positional constraints, resize adaptive parts, or move grounded components", "The Drive Constraint command is not available for motion constraints", "a value of 4.0 (4:1) rotates the second selection four units for every unit the first selection rotates", "the distance specifies how much the second selection moves relative to one rotation of the first selection", "the constraint is bidirectional", 기본값(원통 둘 → 반지름 비, 첫째가 원통 → 둘레).
+
+- `RelationKind::Rotation { ratio, reverse }`, `RelationKind::RotationTranslation { distance, reverse }` 추가. 선택: 각 컴포넌트가 도는 축(면 법선·모서리·원통 축), Rotation-Translation의 둘째는 이동 방향(직선 모서리). `ratio`는 0이 아니어야 한다(`BadValue`). gc_app·gc_panels는 `RelationKind`를 빠짐없이 match하지 않아 영향 없음(workspace check 통과).
+- 풀이: 구속마다 두 컴포넌트의 기준 자세를 저장한다(`Components.motion_refs`, serde default). 잔차 = (둘째가 기준에서 돈 각 또는 이동한 거리) − (±ratio × 첫째가 돈 각, 또는 ±distance × 각/2π). 관계를 풀 때마다 기준을 현재 자세로 갱신한다. 그래서 놓는 순간에는 아무것도 움직이지 않고, 그 뒤 한쪽이 돌면(다른 구속 값 변경, 배치 명령, Free Move 후 Update) 다른 쪽이 따라간다.
+- 모션 때문에 풀리지 않으면(상대가 고정됐거나 다른 구속에 묶임) 모션 항을 빼고 풀고 기준만 갱신한다 → 오류가 나지 않고 고정 컴포넌트는 움직이지 않는다.
+- `Document::motion_default(&first, &second, translation) -> Option<f64>`: 대화상자의 계산된 기본값. Drive(`driven`)는 `BadValue`. Limits 없음. 구속 값 매개변수(dN)는 아직 없음(비·거리는 `relation_param`이 `None`).
+- 한계: ① 한 번의 명령에서 첫째가 180° 넘게 돌면 짧은 쪽으로 돈 것으로 본다(큰 각은 나눠서). ② 도는 각은 월드 기준이다 — 두 컴포넌트를 통째로 함께 돌리면 그만큼도 "돈 것"으로 센다. ③ Free Move로 한쪽을 돌린 뒤 Update하면 양쪽이 조금씩 움직여 맞춘다(끌린 쪽이 이끄는 것이 아님). 한쪽을 다른 구속이 잡고 있으면 다른 쪽만 따라간다.
+- **Transitional(2) 보류**: 원문(`GUID-CD8AE8A0-03F0-468A-BE85-D7C5B989BA0B`)은 "a (typically) cylindrical face and a **contiguous set of faces** on another part, such as a cam in a slot". 우리 `Geometry`는 낱개 해석 기하이고 가져온 부품은 메시라 "이어진 면 집합"을 알 수 없다. 면 인접 정보(B-rep 또는 메시 면 그룹)가 생기면 Tangent 잔차를 "가장 가까운 면"에 거는 방식으로 만들 수 있다.
+- 테스트: `gc_doc/tests/relate.rs::motion_constraints_tie_turning_and_travel_together`.
+
 ## 2026-11-18 — 구속 오류: Accept the relationship · Recover 도우미 (대조 목록 8)
 
 근거: Place/Edit Connection Error Reference(`GUID-23D0D333-AD6A-4CB6-9786-6966DFE8FDFF`) — "Accept the relationship: Creates the relationship or accepts the change to the existing relationship. The relationship is created and added to the browser with an icon." Use Design Doctor to repair relationship errors(`GUID-8C95B0AB-4505-4092-8C37-E60C68DCF4A0`) — Recover, 처치: Edit / Delete / Suppress / Isolate and Edit / Isolate Related Failed / Diagnose. Relationship Conflict Analysis Reference(`GUID-528B2CD0-93FD-45BC-AB69-6C5A559BB8E8`) — Keep/Break, 고정 토글, Check, Delete/Suppress broken. To Manage the Display of Constraint Status in the Browser(`GUID-A0573060-3778-4D6F-9431-28587D837CC7`) — 상태는 Fully / Under / Unknown 세 가지뿐(= 기존 `ComponentStatus`).

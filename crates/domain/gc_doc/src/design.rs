@@ -703,6 +703,11 @@ pub struct Components {
     /// the relationship"): kept with an error mark and left out of the solve until they can be satisfied.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sick_relationships: Vec<Id<crate::relate::Relationship>>,
+    /// Motion constraints: where their components stood when the relationships were last solved (the
+    /// turning and travel they tie together are counted from there).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub motion_refs:
+        std::collections::BTreeMap<Id<crate::relate::Relationship>, crate::relate::MotionReference>,
     /// The model parameters of constraint offsets and angles.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub relation_params:
@@ -797,6 +802,7 @@ impl Components {
             && self.joint_conditions.is_empty()
             && self.relation_params.is_empty()
             && self.sick_relationships.is_empty()
+            && self.motion_refs.is_empty()
             && self.subassemblies.is_empty()
             && self.placed_in.is_empty()
             && self.sketch_owners.is_empty()

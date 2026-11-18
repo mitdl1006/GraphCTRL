@@ -1928,7 +1928,14 @@ pub(crate) fn settle_holding(txn: &mut Txn<'_>, held: &[AnyId]) -> Result<(), Ed
         EditError::Unsolvable { ids: u.sick, names }
     })?;
     apply_moves(txn, moves)?;
-    heal(txn)
+    heal(txn)?;
+    // Motion constraints count from where their components stand now.
+    let references = txn.doc().motion_references_now();
+    let stored = txn.doc().timeline().map(|(_, t)| t.components.motion_refs.clone()).unwrap_or_default();
+    if references != stored {
+        set_timeline(txn, |t| t.components.motion_refs = references)?;
+    }
+    Ok(())
 }
 
 /// Relationships accepted with an error are tried again: one that the assembly can now satisfy loses

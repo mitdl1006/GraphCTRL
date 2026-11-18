@@ -299,7 +299,30 @@ pub enum RelationKind {
         /// False (Opposed, the default): normals opposite, like a bolt head on the face around a hole.
         aligned: bool,
     },
+    /// A Motion constraint, Rotation (Inventor 2026 help, Place Constraint Reference - Motion Tab,
+    /// GUID-0293C151-565F-4980-AA95-DD76C54AB538: "the ratio specifies how much the second selection
+    /// rotates when the first selection rotates … a value of 4.0 (4:1) rotates the second selection four
+    /// units for every unit the first selection rotates"; typically bearings, gears and pulleys). Each
+    /// selection gives the axis its component turns about.
+    Rotation {
+        /// Turns of the second per turn of the first.
+        ratio: f64,
+        /// Reverse: the second turns the other way about its axis.
+        reverse: bool,
+    },
+    /// A Motion constraint, Rotation-Translation (same page: "the distance specifies how much the second
+    /// selection moves relative to one rotation of the first selection"; a rack and pinion). The first
+    /// selection gives the axis of rotation, the second the direction of travel.
+    RotationTranslation {
+        /// Travel of the second per full turn of the first, metres.
+        distance: f64,
+        /// Reverse: the second travels the other way along its direction.
+        reverse: bool,
+    },
 }
+
+/// Where a motion constraint's two components (as the solver moves them) stood at the last solve.
+pub type MotionReference = [(AnyId, crate::cell::Placement); 2];
 
 /// A relationship as Free Move draws it: an elastic band between its two selections.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -405,6 +428,8 @@ pub fn takes_limits(kind: &RelationKind, angular: bool) -> bool {
         | RelationKind::Angle { .. }
         | RelationKind::Symmetry { .. }
         | RelationKind::Rigid { .. }
+        | RelationKind::Rotation { .. }
+        | RelationKind::RotationTranslation { .. }
         | RelationKind::Ball => false,
     }
 }
@@ -509,6 +534,15 @@ impl Relationship {
             }
             RelationKind::Symmetry { plane } => {
                 matches!(plane.geometry, Geometry::Plane { .. }) && plane.geometry.is_finite()
+            }
+            RelationKind::Rotation { ratio, .. } => {
+                ratio.is_finite()
+                    && ratio != 0.0
+                    && direction_of(&g1).is_some()
+                    && direction_of(&g2).is_some()
+            }
+            RelationKind::RotationTranslation { distance, .. } => {
+                distance.is_finite() && direction_of(&g1).is_some() && direction_of(&g2).is_some()
             }
         };
         let joint = is_joint(&self.kind);
@@ -673,7 +707,10 @@ fn sense_sign(kind: &RelationKind, now: f64) -> f64 {
                 -1.0
             }
         }
-        RelationKind::Ball | RelationKind::Angle { .. } => 1.0,
+        RelationKind::Ball
+        | RelationKind::Angle { .. }
+        | RelationKind::Rotation { .. }
+        | RelationKind::RotationTranslation { .. } => 1.0,
         RelationKind::Mate { sense: AxisSense::Undirected, .. }
         | RelationKind::Tangent { .. }
         | RelationKind::Symmetry { .. } => {
@@ -774,6 +811,8 @@ struct Term {
     locked: Option<LockedPose>,
     /// A joint's angular and linear limits.
     ranges: [Option<JointRange>; 2],
+    /// A motion constraint: where its two components stood when the relationships were last solved.
+    motion: Option<[DPose3; 2]>,
 }
 
 impl Document {
@@ -875,6 +914,56 @@ impl Document {
         let local = frame.rotation.inverse() * world;
         let geometry = origin.geometry.aligned_to(local.to_array(), invert)?;
         Some(Selection { occurrence: origin.occurrence, geometry })
+    }
+
+    /// Where a motion constraint's two components stood when the relationships were last solved; `None`
+    /// before the first solve or when it now ties other components.
+    fn motion_reference(&self, id: Id<Relationship>, owners: [AnyId; 2]) -> Option<[DPose3; 2]> {
+        let stored = self.timeline().and_then(|(_, t)| t.components.motion_refs.get(&id))?;
+        let pose = |index: usize| {
+            let (item, placement) = stored[index];
+            (item == owners[index]).then(|| gc_math::pose_from_xyz_rpy(placement.xyz, placement.rpy))
+        };
+        Some([pose(0)?, pose(1)?])
+    }
+
+    /// Where the components of every motion constraint stand now, to be kept as the reference for the
+    /// next solve.
+    pub(crate) fn motion_references_now(
+        &self,
+    ) -> std::collections::BTreeMap<Id<Relationship>, MotionReference> {
+        let mut out = std::collections::BTreeMap::new();
+        for (id, relationship) in self.relationships().iter().filter(|(_, r)| is_motion(&r.kind)) {
+            let at = |selection: &Selection| {
+                let item = self.solver_owner(selection.occurrence.owner());
+                let pose = self.owner_pose(item)?;
+                let placement = crate::cell::Placement {
+                    xyz: pose.translation.to_array(),
+                    rpy: gc_math::rpy_from_quat(pose.rotation),
+                };
+                Some((item, placement))
+            };
+            if let (Some(first), Some(second)) = (at(&relationship.first), at(&relationship.second)) {
+                out.insert(id, [first, second]);
+            }
+        }
+        out
+    }
+
+    /// The ratio or distance the Motion tab proposes (Inventor 2026 help, Place Constraint Reference -
+    /// Motion Tab, GUID-0293C151-565F-4980-AA95-DD76C54AB538): for Rotation "If two cylindrical surfaces
+    /// are selected, a default ratio computes … relative to the radii of the two selections", otherwise
+    /// 1.0; for Rotation-Translation "If the first selection is a cylindrical surface, a default distance
+    /// computes … the circumference of the first selection", otherwise `None` (to be typed).
+    pub fn motion_default(first: &Selection, second: &Selection, translation: bool) -> Option<f64> {
+        match (first.geometry, second.geometry, translation) {
+            (Geometry::Cylinder { radius, .. }, _, true) => Some(std::f64::consts::TAU * radius),
+            (_, _, true) => None,
+            (Geometry::Cylinder { radius: r1, .. }, Geometry::Cylinder { radius: r2, .. }, false) => {
+                Some(r1 / r2)
+            }
+            _ => Some(1.0),
+        }
     }
 
     /// The relationships accepted although they cannot be solved (Place/Edit Connection Error, "Accept
@@ -1033,7 +1122,22 @@ impl Document {
     /// Like [`Document::solve_relationships`], with some components held where they are as if grounded
     /// (a robot whose joints were just set keeps its base; what is tied to its links follows).
     pub fn solve_relationships_holding(&self, held: &[AnyId]) -> Result<Vec<(AnyId, DPose3)>, Unsolved> {
-        let (mut owners, terms) = self.gather()?;
+        // Motion constraints "operate only on open degrees of freedom, they do not conflict with
+        // positional constraints … or move grounded components" (Place Constraint Reference - Motion
+        // Tab, GUID-0293C151-565F-4980-AA95-DD76C54AB538): where one cannot be followed, the rest is
+        // solved without them.
+        match self.solve_terms(held, false) {
+            Err(unsolved)
+                if unsolved.sick.iter().any(|id| self.get(*id).is_some_and(|r| is_motion(&r.kind))) =>
+            {
+                self.solve_terms(held, true)
+            }
+            other => other,
+        }
+    }
+
+    fn solve_terms(&self, held: &[AnyId], without_motion: bool) -> Result<Vec<(AnyId, DPose3)>, Unsolved> {
+        let (mut owners, terms) = self.gather_terms(without_motion)?;
         let held: Vec<AnyId> = held.iter().map(|h| self.solver_owner(*h)).collect();
         for owner in &mut owners {
             if held.contains(&owner.item) {
@@ -1128,6 +1232,11 @@ impl Document {
 
     /// The components the active relationships touch and the relationships ready to evaluate.
     fn gather(&self) -> Result<(Vec<Owner>, Vec<Term>), Unsolved> {
+        self.gather_terms(false)
+    }
+
+    /// [`Document::gather`], optionally leaving the motion constraints out.
+    fn gather_terms(&self, without_motion: bool) -> Result<(Vec<Owner>, Vec<Term>), Unsolved> {
         let active = self.active_position();
         let mut owners: Vec<Owner> = Vec::new();
         let mut terms: Vec<Term> = Vec::new();
@@ -1165,7 +1274,7 @@ impl Document {
                 .and_then(|p| p.suppression.iter().find(|(r, _)| *r == id).map(|(_, s)| *s))
                 .unwrap_or_else(|| self.is_inactive(id.erase()));
             // One accepted with an error waits outside the solve.
-            if suppressed || self.is_sick(id) {
+            if suppressed || self.is_sick(id) || (without_motion && is_motion(&relationship.kind)) {
                 continue;
             }
             let value = position.and_then(|p| p.values.iter().find(|(r, _)| *r == id).map(|(_, v)| *v));
@@ -1234,6 +1343,7 @@ impl Document {
                 limits: relationship.limits,
                 locked: self.joint_condition(id).and_then(|c| c.locked),
                 ranges: self.joint_condition(id).map_or([None, None], |c| [c.angular, c.linear]),
+                motion: self.motion_reference(id, [owners[a].item, owners[b].item]),
             });
         }
         Ok((owners, terms))
@@ -1375,6 +1485,47 @@ fn measured(term: &Term, poses: &[DPose3]) -> Option<f64> {
     (slope.abs() > 1e-12).then(|| -r0 / slope)
 }
 
+/// True for the Motion constraints.
+pub(crate) fn is_motion(kind: &RelationKind) -> bool {
+    matches!(kind, RelationKind::Rotation { .. } | RelationKind::RotationTranslation { .. })
+}
+
+/// How far a component has turned about an axis of its own (unit, in its frame) since `reference`:
+/// radians within a half turn either way.
+fn turned(reference: &DPose3, now: &DPose3, axis: DVec3) -> f64 {
+    let q = (reference.rotation.inverse() * now.rotation).normalize();
+    let along = DVec3::new(q.x, q.y, q.z).dot(axis);
+    let angle = 2.0 * gc_math::fm::atan2(along, q.w);
+    if angle > std::f64::consts::PI {
+        angle - std::f64::consts::TAU
+    } else if angle <= -std::f64::consts::PI {
+        angle + std::f64::consts::TAU
+    } else {
+        angle
+    }
+}
+
+/// A motion constraint's residual: what the second component did since the reference, less what the
+/// first one's turning asks of it.
+fn motion_residual(term: &Term, reference: &[DPose3; 2], pose1: &DPose3, pose2: &DPose3) -> f64 {
+    let axis =
+        |g: &Geometry| DVec3::from_array(direction_of(g).unwrap_or([0.0, 0.0, 1.0])).normalize_or_zero();
+    let (a1, a2) = (axis(&term.geometry[0]), axis(&term.geometry[1]));
+    let first = turned(&reference[0], pose1, a1);
+    match term.kind {
+        RelationKind::Rotation { ratio, reverse } => {
+            let sign = if reverse { -1.0 } else { 1.0 };
+            turned(&reference[1], pose2, a2) - sign * ratio * first
+        }
+        RelationKind::RotationTranslation { distance, reverse } => {
+            let sign = if reverse { -1.0 } else { 1.0 };
+            let travelled = (pose2.translation - reference[1].translation).dot(pose2.rotation * a2);
+            travelled - sign * distance * first / std::f64::consts::TAU
+        }
+        _ => 0.0,
+    }
+}
+
 /// The kind's value: an offset or an angle; `None` for kinds without one.
 pub(crate) fn value_of(kind: &RelationKind) -> Option<f64> {
     match *kind {
@@ -1403,6 +1554,12 @@ fn plain_residuals(term: &Term, poses: &[DPose3]) -> Vec<f64> {
     let mut out = Vec::with_capacity(9);
     let push3 = |out: &mut Vec<f64>, v: DVec3| out.extend([v.x, v.y, v.z]);
     let (pose1, pose2) = (&poses[term.owners[0]], &poses[term.owners[1]]);
+    if is_motion(&term.kind) {
+        if let Some(reference) = &term.motion {
+            out.push(motion_residual(term, reference, pose1, pose2));
+        }
+        return out;
+    }
     if is_joint(&term.kind) {
         let (p1, z1, x1) = joint_world(pose1, &term.geometry[0]);
         let (p2, z2, x2) = joint_world(pose2, &term.geometry[1]);
@@ -1500,7 +1657,11 @@ fn rough_turns(owners: &[Owner], terms: &[Term], poses: &mut [DPose3]) {
         }
         if matches!(
             term.kind,
-            RelationKind::Angle { .. } | RelationKind::Tangent { .. } | RelationKind::Symmetry { .. }
+            RelationKind::Angle { .. }
+                | RelationKind::Tangent { .. }
+                | RelationKind::Symmetry { .. }
+                | RelationKind::Rotation { .. }
+                | RelationKind::RotationTranslation { .. }
         ) {
             continue;
         }
@@ -2343,7 +2504,10 @@ impl Document {
             | RelationKind::Slider { .. }
             | RelationKind::Cylindrical { .. }
             | RelationKind::Ball
-            | RelationKind::Symmetry { .. } => return Err(EditError::BadValue),
+            | RelationKind::Symmetry { .. }
+            // "The Drive Constraint command is not available for motion constraints."
+            | RelationKind::Rotation { .. }
+            | RelationKind::RotationTranslation { .. } => return Err(EditError::BadValue),
         }
         Ok(self.moved_in(&preview))
     }
