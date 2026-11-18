@@ -54,6 +54,35 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 붙여넣기 고스트 미리보기(리드 요청)
+
+Ctrl+V 뒤 복사본 모양이 커서를 따라다니게(인벤터 Paste 동작). 문서는 바꾸지 않는다.
+
+- `Session::preview_paste(offset: Placement)`: 클립보드 내용을 `offset`에 보여 준다. 남은 복사 대상이 없거나 값이 유한하지 않으면 거부하고 미리보기도 끈다. 다시 부르면 바뀐다.
+- `Session::end_paste_preview()`: 미리보기를 끈다.
+- `Session::paste_ghosts() -> Vec<(AnyId, DPose3)>`: 고스트로 그릴 원본 컴포넌트와, 지금 모습에 앞에서 곱할 이동(모두 같은 `offset`, 월드 기준 — 실제 `paste`와 같은 식). 서브어셈블리는 안의 컴포넌트 전부.
+- `Document::pasted_components(keys)`: Paste가 복사할 컴포넌트(`paste`와 같은 수집 코드).
+- `gc_scene::Scene::of`가 고스트를 그린다. 바디는 반투명 하늘색 솔리드, 로봇은 링크·툴을 같은 색으로. `owner: None`이라 피킹되지 않는다.
+- FE: Ctrl+V → 커서 위치로 `offset`을 계산해 매 프레임 `preview_paste`, 클릭하면 `paste(offset)` 다음 `end_paste_preview`, Esc면 `end_paste_preview`.
+- 테스트: `gc_scene/tests/scene.rs::a_paste_preview_draws_ghosts_at_the_offset`.
+
+## 2026-11-18 — 스플라인 교점·Trim·Split(리드 다음 ③ 2차)
+
+근거: To Split, Trim, or Extend Curves, GUID-DD00037F-6BBA-4B95-AA90-4F99DCEB667D(Trim·Split은 가장 가까운 교차 곡선까지/에서).
+
+- 스플라인이 교점 계산에 들어간다. 그린 폴리라인(맞춤점 사이 32단계)으로 다른 곡선(선·원·호·타원·스플라인)과 만나는 곳을 구한다.
+  - `Sketch::curve_crossings`가 스플라인을 받고, 교점 스냅(`gc_tools` pick)도 스플라인 교점을 잡는다.
+  - 다른 곡선의 Trim·Split·Extend는 스플라인을 경계로 쓴다(선이 스플라인까지 잘리고 늘어남).
+- 스플라인 자체의 Trim과 `SketchOp::Split`:
+  - 끝 쪽 Trim: 교점 너머의 맞춤점을 지우고 교점에 새 끝 맞춤점을 둔다.
+  - 가운데 Trim: 두 스플라인이 된다.
+  - Split: 교점에서 둘로 나누고 두 조각이 교점 맞춤점을 공유한다.
+  - 새 끝점은 자른 곡선에 묶인다(`attach`: 점 일치 또는 점-곡선 위). 아무것도 안 걸치면 Trim은 통째 삭제, Split은 거부.
+- `Piece::Polyline(Vec<[f64; 2]>)` 추가(스플라인 Trim 미리보기). 그래서 `Piece`는 더 이상 `Copy`가 아니다. `gc_tools` 미리보기는 폴리라인으로 그린다.
+- 차이: 자른 조각은 남은 맞춤점으로 다시 맞춰서 원래 곡선과 모양이 조금 다를 수 있다(원문은 모양 유지).
+  스플라인 위 점 구속은 솔버에 없어서, 스플라인이 경계일 때 새 끝점은 묶이지 않을 수 있다(구속 추가가 거부되면 조용히 생략). 스플라인 Extend는 없음.
+- 테스트: `gc_session/tests/ellipse_spline_edit.rs`(`splines_cut_and_are_cut_where_they_cross`, `spline_against_spline_and_lone_splines`).
+
 ## 2026-11-18 — 타원·스플라인 Offset, Split Spline(리드 다음 ③ 1차)
 
 근거: To Create 2D Shape Geometry, GUID-D489CE6D-7299-4211-A43A-F3580A4BA357 — "When you Offset an ellipse, the result is either a

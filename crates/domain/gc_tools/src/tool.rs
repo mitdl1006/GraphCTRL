@@ -903,7 +903,9 @@ impl Tool {
             Piece::Segment(a, b) => preview.lines.push((a, b)),
             Piece::Arc { centre, radius, start, sweep } => preview.arcs.push((centre, radius, start, sweep)),
             Piece::Circle { centre, radius } => preview.circles.push((centre, radius)),
-            Piece::EllipseArc { .. } => shapes::push_polyline(preview, &piece.polyline(48), false),
+            Piece::EllipseArc { .. } | Piece::Polyline(_) => {
+                shapes::push_polyline(preview, &piece.polyline(48), false);
+            }
         };
         if let Some((curve, at)) = self.hover {
             match (self.cutting(), self.fillet_first) {

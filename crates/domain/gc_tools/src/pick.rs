@@ -181,14 +181,15 @@ pub fn pick(sketch: &Sketch, at: [f64; 2], px: f64) -> Option<Item> {
         .map(|(id, _)| Item::Dimension(*id))
 }
 
-/// Where two curves cross, within the curves' extents (ellipses through the sketch's own intersections).
+/// Where two curves cross, within the curves' extents (ellipses and splines through the sketch's own
+/// intersections).
 fn intersections(
     sketch: &Sketch,
     (ida, a): (Id<Curve>, &Curve),
     (idb, b): (Id<Curve>, &Curve),
 ) -> Vec<[f64; 2]> {
-    let ellipse = |c: &Curve| matches!(c.geom, CurveGeom::Ellipse { .. });
-    if ellipse(a) || ellipse(b) {
+    let own = |c: &Curve| matches!(c.geom, CurveGeom::Ellipse { .. } | CurveGeom::Spline { .. });
+    if own(a) || own(b) {
         return sketch.curve_crossings(ida, idb);
     }
     let (Some(first), Some(second)) = (curve_shape(sketch, a), curve_shape(sketch, b)) else {
