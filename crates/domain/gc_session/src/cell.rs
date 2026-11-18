@@ -3011,6 +3011,11 @@ pub struct TaskPlan {
     pub pauses: Vec<(usize, f64)>,
     /// The task as commands for the robot, in order (what a robot program is written from).
     pub program: Vec<ProgramStep>,
+    /// When each step of the task ends, seconds from the task's start (one per step of the task; a path
+    /// step ends when its motion along the path does).
+    pub step_ends: Vec<f64>,
+    /// How many of the motions are done when each step of the task ends.
+    pub step_motions: Vec<usize>,
 }
 
 /// One command of a planned task.
@@ -3046,6 +3051,16 @@ pub enum ProgramStep {
 }
 
 impl TaskPlan {
+    /// Makes the robot stand still for `seconds` more before step `step` of the task (waiting for a
+    /// signal): that step and the later ones end that much later.
+    pub(crate) fn hold_before(&mut self, step: usize, seconds: f64) {
+        let motions =
+            step.checked_sub(1).and_then(|before| self.step_motions.get(before)).copied().unwrap_or(0);
+        self.pauses.push((motions, seconds));
+        self.waiting += seconds;
+        self.step_ends.iter_mut().skip(step).for_each(|end| *end += seconds);
+    }
+
     /// Expected time in seconds: the motions and the waits.
     pub fn duration(&self) -> f64 {
         self.segments.iter().map(|s| s.trajectory.duration()).sum::<f64>() + self.waiting
@@ -3141,6 +3156,8 @@ impl Planning<'_> {
             start: start.to_vec(),
             pauses: Vec::new(),
             program,
+            step_ends: Vec::new(),
+            step_motions: Vec::new(),
         })
     }
 
@@ -3206,7 +3223,12 @@ impl Planning<'_> {
             tcp_speed: None,
             contacts: Vec::new(),
         };
-        for step in &task.steps {
+        // After each step of the task: how many motions are done and how long the robot has stood still.
+        let mut marks: Vec<(usize, f64)> = Vec::new();
+        for (number, step) in task.steps.iter().enumerate() {
+            if number > 0 {
+                marks.push((steps.len(), waiting));
+            }
             let (target, travel) = match step {
                 gc_doc::Step::MoveJ(target) => (target, Travel::Free),
                 gc_doc::Step::MoveL(target) => (target, Travel::Linear),
@@ -3291,7 +3313,27 @@ impl Planning<'_> {
                 None => ProgramStep::Joints(segment.path.iter().skip(1).cloned().collect()),
             });
         }
-        Ok(TaskPlan { robot: robot_id, segments, waiting, end, start: start.to_vec(), pauses, program })
+        if !task.steps.is_empty() {
+            marks.push((segments.len(), waiting));
+        }
+        let step_ends = marks
+            .iter()
+            .map(|(motions, still)| {
+                segments.iter().take(*motions).map(|s| s.trajectory.duration()).sum::<f64>() + still
+            })
+            .collect();
+        let step_motions = marks.iter().map(|(motions, _)| *motions).collect();
+        Ok(TaskPlan {
+            robot: robot_id,
+            segments,
+            waiting,
+            end,
+            start: start.to_vec(),
+            pauses,
+            program,
+            step_ends,
+            step_motions,
+        })
     }
 
     /// The robots a task may be given to as the states stand: the robot it is located at, the ones it
