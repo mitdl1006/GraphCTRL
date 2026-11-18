@@ -6740,3 +6740,62 @@ fn the_schedule_panel_plays_the_schedule_and_resets() {
     harness.run_steps(3);
     assert!(harness.state().session.schedule_playback().is_none(), "the robots are back where they were");
 }
+
+/// The task editor's Repeat choice and a robot's park pose (plan 9.4/9.5).
+#[test]
+fn a_task_repeats_and_a_robot_gets_a_park_pose() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("로봇").click();
+    harness.run();
+    harness.get_by_label("로봇 추가").click();
+    harness.run();
+    harness.get_by_label("UR5e 로봇").click();
+    harness.run();
+    let robot = harness.state().session.doc().robots().iter().next().unwrap().0;
+    let task = gc_doc::Task {
+        name: "Loop".into(),
+        location: gc_doc::Location::None,
+        precondition: String::new(),
+        steps: vec![gc_doc::Step::Wait { seconds: 1.0 }],
+        effects: Vec::new(),
+        robots: gc_doc::RobotChoice::Any,
+        priority: 0,
+    };
+    harness.state_mut().session.edit_work(gc_doc::WorkOp::AddTask(task)).unwrap();
+    let id = harness.state().session.tasks()[0];
+    // The task selected in the work node: its editor shows Repeat.
+    let click = |h: &mut egui_kittest::Harness<'_, GraphCtrlApp>, at: egui::Pos2| {
+        h.event(egui::Event::PointerMoved(at));
+        h.run_steps(2);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+        h.run_steps(3);
+    };
+    harness.run_steps(2);
+    let at = harness.get_all_by_label("작업").find(|n| n.rect().min.x < 300.0).unwrap().rect().center();
+    click(&mut harness, at);
+    let row =
+        harness.get_all_by_label_contains("Loop").find(|n| n.rect().min.x < 300.0).unwrap().rect().center();
+    click(&mut harness, row);
+    assert_eq!(harness.state().session.doc().task_repeat(id), None);
+    harness.get_by_label("조건이 참일 때마다").click();
+    harness.run_steps(3);
+    assert_eq!(harness.state().session.doc().task_repeat(id), Some(0));
+    // The robot, selected, can have its park pose set from where it stands.
+    harness.state_mut().session.select_item(Some(gc_session::CellItem::Robot(robot)));
+    harness.run_steps(3);
+    let before = harness.state().session.history().undo_depth();
+    harness.get_by_label("현재 자세로 설정").click();
+    harness.run_steps(3);
+    assert_eq!(harness.state().session.history().undo_depth(), before + 1);
+}

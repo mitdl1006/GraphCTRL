@@ -144,6 +144,61 @@ pub fn schedule_panel(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mu
                 Stroke::new(1.5, colors::SELECTED),
             );
         }
+        // A robot moving out of the way: a grey bar.
+        for park in schedule.parks.iter().filter(|p| p.robot == *robot) {
+            #[allow(clippy::cast_possible_truncation, reason = "screen coordinates fit f32")]
+            let (x0, x1) = (
+                track.left() + (park.start / end) as f32 * track.width(),
+                track.left() + (park.end / end) as f32 * track.width(),
+            );
+            let bar =
+                Rect::from_min_max(pos2(x0, track.top() + 4.0), pos2(x1.max(x0 + 2.0), track.bottom() - 4.0));
+            painter.rect_filled(bar, 2.0, colors::muted().gamma_multiply(0.55 * fade));
+            let response = ui.interact(
+                bar,
+                egui::Id::unique("gc_schedule_park").with(park.robot).with(park.start.to_bits()),
+                Sense::hover(),
+            );
+            response.on_hover_text(format!(
+                "{}: {:.1} – {:.1} s",
+                tr!(lang, SchedulePark),
+                park.start,
+                park.end
+            ));
+        }
+        // Waiting for a robot in the way: hatching before the task's bar.
+        for wait in schedule.waits.iter().filter(|w| w.robot == *robot) {
+            if let Some(a) =
+                schedule.assignments.iter().find(|a| a.task == wait.task && a.robot == wait.robot)
+            {
+                #[allow(clippy::cast_possible_truncation, reason = "screen coordinates fit f32")]
+                let (x0, x1) = (
+                    track.left() + ((a.start - wait.seconds) / end) as f32 * track.width(),
+                    track.left() + (a.start / end) as f32 * track.width(),
+                );
+                let hatch = Rect::from_min_max(pos2(x0, track.top()), pos2(x1.max(x0 + 1.0), track.bottom()));
+                let stroke = Stroke::new(1.0, colors::ERROR.gamma_multiply(0.8 * fade));
+                let mut x = hatch.left() - hatch.height();
+                while x < hatch.right() {
+                    // A slanted line, cut to the hatch box.
+                    let (ax, ay, bx, by) = (x, hatch.bottom(), x + hatch.height(), hatch.top());
+                    let (ax2, ay2) = if ax < hatch.left() {
+                        (hatch.left(), hatch.bottom() - (hatch.left() - ax))
+                    } else {
+                        (ax, ay)
+                    };
+                    let (bx2, by2) = if bx > hatch.right() {
+                        (hatch.right(), hatch.top() + (bx - hatch.right()))
+                    } else {
+                        (bx, by)
+                    };
+                    if bx2 >= ax2 {
+                        painter.line_segment([pos2(ax2, ay2), pos2(bx2, by2)], stroke);
+                    }
+                    x += 5.0;
+                }
+            }
+        }
         for assignment in schedule.assignments.iter().filter(|a| a.robot == *robot) {
             #[allow(clippy::cast_possible_truncation, reason = "screen coordinates fit f32")]
             let (x0, x1) = (
@@ -172,6 +227,9 @@ pub fn schedule_panel(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mu
                 ui.interact(bar, egui::Id::unique("gc_schedule_bar").with(assignment.task), Sense::hover());
             response.on_hover_text(format!("{task_name}: {:.1} – {:.1} s", assignment.start, assignment.end));
         }
+    }
+    if schedule.cut_short {
+        ui.colored_label(colors::ERROR, tr!(lang, ScheduleCutShort));
     }
     if !schedule.blocked.is_empty() {
         ui.separator();

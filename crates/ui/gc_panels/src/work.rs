@@ -499,6 +499,33 @@ fn var_properties(ui: &mut Ui, session: &mut Session, lang: Lang, id: Id<StateVa
     }
 }
 
+/// The box for a number an effect gives a numeric variable: a number or an expression over the numeric variables
+/// (`count + 1`), checked as it is typed (what is wrong and where, under the box). `Some(text)` when a valid text
+/// was left.
+fn number_box(ui: &mut Ui, session: &Session, key: egui::Id, current: &str, width: f32) -> Option<String> {
+    let doc = session.doc();
+    let lookup = |name: &str| {
+        doc.state_vars().iter().find(|(_, v)| v.name == name).and_then(|(_, v)| match v.value {
+            StateValue::Int(i) =>
+            {
+                #[allow(clippy::cast_precision_loss, reason = "counts, far below 2^53")]
+                Some(i as f64)
+            }
+            StateValue::Real(x) => Some(x),
+            _ => None,
+        })
+    };
+    let (_, done) = committed_text(ui, key, current, width);
+    let typed =
+        ui.data(|d| d.get_temp::<(String, String)>(key)).map_or_else(|| current.to_owned(), |(_, t)| t);
+    if let Err(gc_doc::EditError::Expr { message, start, end }) = gc_doc::effect_number(&typed, &lookup) {
+        let shown: String = typed.get(start..end).unwrap_or("").to_owned();
+        ui.colored_label(gc_ui::colors::ERROR, format!("{message} «{shown}»"));
+        return None;
+    }
+    done
+}
+
 /// A condition box: the text, and below it what is wrong and where (a squiggle of words, not a dialog).
 /// `Some(text)` when a valid text (or none) was left.
 fn condition_box(
@@ -733,7 +760,15 @@ fn task_properties(ui: &mut Ui, session: &mut Session, lang: Lang, id: Id<Task>)
             ui.label("=");
             let key = egui::Id::unique("gc_task_effect_value").with((id, index));
             let current = next.effects[index].value.clone();
-            if let (_, Some(text)) = committed_text(ui, key, &current, 90.0) {
+            // A numeric variable takes an expression (checked as it is typed), the rest a plain value.
+            let numeric = matches!(next.effects[index].target, EffectTarget::Var(v)
+                if matches!(session.doc().get(v).map(|var| &var.value), Some(StateValue::Int(_) | StateValue::Real(_))));
+            let done = if numeric {
+                number_box(ui, session, key, &current, 90.0)
+            } else {
+                committed_text(ui, key, &current, 90.0).1
+            };
+            if let Some(text) = done {
                 next.effects[index].value = text;
                 changed = true;
             }
@@ -842,6 +877,36 @@ fn task_properties(ui: &mut Ui, session: &mut Session, lang: Lang, id: Id<Task>)
                 ui.end_row();
             }
         });
+    }
+    // How often the task is done: once, as often as its condition comes to hold, or up to n times.
+    {
+        let repeat = session.doc().task_repeat(id);
+        let mode = match repeat {
+            None => 0,
+            Some(0) => 1,
+            Some(_) => 2,
+        };
+        let mut chosen = mode;
+        let mut times = repeat.filter(|t| *t > 0).unwrap_or(2);
+        let mut commit = false;
+        ui.horizontal(|ui| {
+            ui.label(tr!(lang, WorkRepeat));
+            ui.radio_value(&mut chosen, 0, tr!(lang, WorkRepeatOnce));
+            ui.radio_value(&mut chosen, 1, tr!(lang, WorkRepeatWhenever));
+            ui.radio_value(&mut chosen, 2, tr!(lang, WorkRepeatTimes));
+            if chosen == 2 {
+                let r = ui.add(egui::DragValue::new(&mut times).range(1..=1000).suffix("×"));
+                commit |= r.drag_stopped() || (r.lost_focus() && r.changed());
+            }
+        });
+        if chosen != mode || commit {
+            let times = match chosen {
+                0 => None,
+                1 => Some(0),
+                _ => Some(times),
+            };
+            drop(session.edit_work(WorkOp::SetTaskRepeat { task: id, times }));
+        }
     }
     ui.horizontal(|ui| {
         ui.label(tr!(lang, WorkPriority));
@@ -1073,6 +1138,19 @@ fn kit_properties(ui: &mut Ui, session: &mut Session, lang: Lang, id: Id<gc_doc:
 /// The tool kind fitted to a robot: a list to choose from, and the state it starts in. A refusal shows in
 /// the status bar.
 pub fn robot_tool_kit(ui: &mut Ui, session: &mut Session, lang: Lang, robot: Id<gc_doc::Robot>) {
+    // Where the robot waits to be out of the way of the others: set from where it stands now, or cleared.
+    ui.horizontal(|ui| {
+        let has_park = session.doc().robot_park(robot) != session.doc().get(robot).map(|r| r.joints.clone());
+        ui.label(if has_park { tr!(lang, WorkParkSet) } else { tr!(lang, WorkParkNone) });
+        if ui.button(tr!(lang, WorkParkHere)).clicked()
+            && let Some(joints) = session.robot_joints(robot)
+        {
+            drop(session.edit_work(WorkOp::SetRobotPark { robot, joints: Some(joints) }));
+        }
+        if ui.add_enabled(has_park, egui::Button::new(tr!(lang, WorkParkClear))).clicked() {
+            drop(session.edit_work(WorkOp::SetRobotPark { robot, joints: None }));
+        }
+    });
     let fitted = session.robot_tool_kit(robot);
     // Nothing to choose from while no kind of tool is defined.
     if fitted.is_none() && session.doc().tool_kits().iter().next().is_none() {
