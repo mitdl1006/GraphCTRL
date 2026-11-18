@@ -32,6 +32,10 @@ pub(crate) struct SplineMenu {
     pub(crate) split: Option<(gc_core::Id<gc_sketch::Curve>, gc_core::Id<gc_sketch::SkPoint>)>,
     pub(crate) close: Option<gc_core::Id<gc_sketch::Curve>>,
     pub(crate) insert: Option<gc_core::Id<gc_sketch::Curve>>,
+    /// The sketch point under the cursor that is not a waypoint yet ("Waypoint" role, plan 9.1).
+    pub(crate) waypoint: Option<(gc_core::Id<gc_doc::Sketch>, gc_core::Id<gc_sketch::SkPoint>)>,
+    /// The open curve under the cursor that is not in a path role yet; its chain becomes the path.
+    pub(crate) path: Option<(gc_core::Id<gc_doc::Sketch>, gc_core::Id<gc_sketch::Curve>)>,
 }
 
 /// A command of the marking menu.
@@ -72,6 +76,10 @@ pub(crate) enum Cmd {
     InsertSplinePoint(gc_core::Id<gc_sketch::Curve>),
     /// Close Curve: an open spline of three or more fit points closes.
     CloseSpline(gc_core::Id<gc_sketch::Curve>),
+    /// Make a sketch point a waypoint of the robot work.
+    AssignWaypoint(gc_core::Id<gc_doc::Sketch>, gc_core::Id<gc_sketch::SkPoint>),
+    /// Make the chain of curves around a curve a path of the robot work.
+    AssignPath(gc_core::Id<gc_doc::Sketch>, gc_core::Id<gc_sketch::Curve>),
     /// Make a subassembly flexible, or rigid again (the flag is what it becomes).
     Flexible(gc_doc::SubassemblyId, bool),
     /// The isometric view.
@@ -106,6 +114,12 @@ impl Set {
         }
         if let Some(curve) = spline.insert {
             overflow.push(Cmd::InsertSplinePoint(curve));
+        }
+        if let Some((sketch, point)) = spline.waypoint {
+            overflow.push(Cmd::AssignWaypoint(sketch, point));
+        }
+        if let Some((sketch, curve)) = spline.path {
+            overflow.push(Cmd::AssignPath(sketch, curve));
         }
         overflow.push(Cmd::LookAt);
         overflow.push(Cmd::Done);
@@ -183,6 +197,8 @@ impl Cmd {
             Self::Flexible(_, becomes) => {
                 format!("{}{}", if becomes { "" } else { "✓ " }, tr!(lang, CmdFlexible))
             }
+            Self::AssignWaypoint(..) => tr!(lang, CmdAssignWaypoint).to_owned(),
+            Self::AssignPath(..) => tr!(lang, CmdAssignPath).to_owned(),
             Self::Home => tr!(lang, NavHome).to_owned(),
             Self::FitAll => tr!(lang, NavZoomAll).to_owned(),
         };
@@ -242,6 +258,14 @@ pub(crate) fn run(cmd: Cmd, session: &mut Session) -> Effect {
         Cmd::InsertSplinePoint(curve) => return Effect::InsertSplinePoint(curve),
         // A refusal is explained in the status bar.
         Cmd::CloseSpline(curve) => drop(session.edit_active_sketch(gc_doc::SketchOp::CloseSpline { curve })),
+        // A refusal (a point that already is one, curves that do not join) is explained in the status bar.
+        Cmd::AssignWaypoint(sketch, point) => drop(session.assign_roles(sketch, &[point], &[])),
+        Cmd::AssignPath(sketch, curve) => {
+            let chain = session.chain_at(sketch, curve);
+            if !chain.is_empty() {
+                drop(session.assign_roles(sketch, &[], &chain));
+            }
+        }
         Cmd::SelectOther => return Effect::SelectOther,
         Cmd::LookAt => return Effect::LookAt,
         // A refusal is explained in the status bar.

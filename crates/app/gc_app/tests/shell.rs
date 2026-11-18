@@ -560,6 +560,12 @@ fn the_ur5e_follows_a_sketched_polyline() {
     let path = session.doc().paths().iter().next().unwrap().0;
     // Sketch -> path makes a path that follows the sketch's path role (no copied waypoints).
     assert!(!session.doc().get(path).unwrap().follow.is_empty(), "the path follows the sketch's role");
+    // The path panel lists the role it follows (name, how it is travelled) instead of waypoints.
+    let role = session.doc().get(path).unwrap().follow[0];
+    let role_name = session.doc().get(role).unwrap().name.clone();
+    // (Once in the browser below the sketch, once in the path panel.)
+    assert!(harness.get_all_by_label_contains(&role_name).count() >= 2);
+    let session = &harness.state().session;
     assert_eq!(session.plan_status(path), gc_session::PlanStatus::Ready, "{:?}", session.plan_error(path));
     // The tool passes through the three sketch points, and between them stays on the lines' height.
     let tips: Vec<[f64; 3]> = session.planned(path).unwrap().tip_path().collect();
