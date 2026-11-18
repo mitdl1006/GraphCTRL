@@ -31,6 +31,7 @@ impl Session {
             sketch,
             kind: RoleKind::Waypoint { point },
             aim: ToolAim::default(),
+            travel: gc_doc::PathTravel::default(),
         }
     }
 
@@ -45,6 +46,7 @@ impl Session {
                 tcp_speed: None,
             },
             aim: ToolAim::default(),
+            travel: gc_doc::PathTravel::default(),
         }
     }
 
@@ -167,6 +169,39 @@ impl Session {
         self.path_role_edit(id, |_, tcp_speed, _| *tcp_speed = speed)
     }
 
+    /// Whether the tool turns with a path role, its X axis pointing the way it travels (seen in the plane
+    /// the attitude is measured from), instead of keeping one attitude. Refused for a waypoint role.
+    pub fn set_role_tangent(&mut self, id: Id<SketchRole>, tangent: bool) -> Result<(), EditError> {
+        if !self.doc().get(id).is_some_and(SketchRole::is_path) {
+            return Err(EditError::BadValue);
+        }
+        self.edit_role(id, |r| r.travel.tangent = tangent)
+    }
+
+    /// Where a closed path role (a circle, a whole ellipse, a closed spline, a closed loop of curves)
+    /// starts and ends: at its place nearest to this point of its sketch; `None` for where the curve
+    /// itself starts. Refused for a waypoint role or a point that is not in the sketch.
+    pub fn set_role_start(
+        &mut self,
+        id: Id<SketchRole>,
+        start: Option<Id<SkPoint>>,
+    ) -> Result<(), EditError> {
+        if !self.doc().get(id).is_some_and(SketchRole::is_path) {
+            return Err(EditError::BadValue);
+        }
+        self.edit_role(id, |r| r.travel.start = start)
+    }
+
+    /// True when a path role is closed: it ends where it starts ([`Session::set_role_start`] applies).
+    pub fn role_closed(&self, id: Id<SketchRole>) -> bool {
+        self.doc().role_runs(id).is_some_and(|runs| {
+            match (runs.first().and_then(|r| r.first()), runs.last().and_then(|r| r.last())) {
+                (Some(first), Some(last)) => (*first - *last).length() <= 1e-7,
+                _ => false,
+            }
+        })
+    }
+
     /// Travels a path role from its other end. Refused for a waypoint role.
     pub fn reverse_role(&mut self, id: Id<SketchRole>) -> Result<(), EditError> {
         self.path_role_edit(id, |_, _, reversed| *reversed = !*reversed)
@@ -204,11 +239,8 @@ impl Session {
         if let Some(pose) = doc.role_pose(id) {
             return Some((pose, pose));
         }
-        let runs = doc.role_runs(id)?;
-        let rotation = doc.role_rotation(id)?;
-        let first = runs.first()?.first()?;
-        let last = runs.last()?.last()?;
-        Some((DPose3::from_parts(*first, rotation), DPose3::from_parts(*last, rotation)))
+        let runs = doc.role_poses(id)?;
+        Some((*runs.first()?.first()?, *runs.last()?.last()?))
     }
 
     /// World points along a path role in the direction of travel, for drawing it: the curves themselves

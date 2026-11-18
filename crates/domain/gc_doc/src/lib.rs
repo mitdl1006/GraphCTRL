@@ -64,7 +64,7 @@ pub use relate::{
 };
 pub use replicate::Replacement;
 pub use representation::{PositionalRepresentation, Representations, ViewRepresentation};
-pub use role::{AimReference, PathMotion, RoleKind, SketchRole, ToolAim};
+pub use role::{AimReference, PathMotion, PathTravel, RoleKind, SketchRole, ToolAim};
 pub use settings::{AngleUnit, DimensionDisplay, DocSettings, LengthUnit};
 pub use subassembly::{Subassembly, SubassemblyId, SubassemblyOp, TreeKey, TreeRow};
 pub use tree::ComponentNode;
