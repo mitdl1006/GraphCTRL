@@ -314,11 +314,17 @@ fn curve_path(
                 view.polyline(ring(c, radius.unwrap_or(r), 0.0, tau), stroke);
             }
         }
+        // In space for a 3D sketch's spline; round to the start for a closed one.
         CurveGeom::Spline { ref points } => {
-            let fit: Option<Vec<[f64; 2]>> = points.iter().map(|p| pos(*p).map(|q| [q[0], q[1]])).collect();
-            if let Some(fit) = fit {
-                let line = gc_sketch::spline_points(&fit, 24);
-                view.polyline(line.iter().map(|p| plane.world([p[0], p[1], 0.0])), stroke);
+            let fit: Option<Vec<[f64; 3]>> = points.iter().map(|p| pos(*p)).collect();
+            if let Some(mut fit) = fit {
+                let line = if gc_sketch::spline_closed(points) {
+                    fit.pop();
+                    gc_sketch::closed_spline_points3(&fit, 24)
+                } else {
+                    gc_sketch::spline_points3(&fit, 24)
+                };
+                view.polyline(line.iter().map(|p| plane.world(*p)), stroke);
             }
         }
         CurveGeom::Ellipse { c, major, minor, arc } => {

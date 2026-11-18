@@ -547,7 +547,11 @@ impl Sketch {
             return Some(Track::Shape(shape));
         }
         let geom = &self.curves.get(&curve)?.geom;
+        // A spline of a 3D sketch is not cut in its plane (it has none).
         let CurveGeom::Spline { .. } = geom else { return None };
+        if self.is_spatial() {
+            return None;
+        }
         let points = self.spline_outline(geom, SPLINE_STEPS)?;
         (points.len() >= 2).then_some(Track::Poly(Poly(points)))
     }
@@ -1360,16 +1364,15 @@ impl Sketch {
     /// starting point and choose Close Curve"): an open spline of three or more fit points runs on from its
     /// last point smoothly back round to its first.
     pub fn close_spline(&mut self, curve: Id<Curve>) -> Result<(), SketchError> {
-        if self.is_spatial() {
-            return Err(SketchError::WrongSpace);
-        }
         let Some(CurveGeom::Spline { points }) = self.curves.get(&curve).map(|c| c.geom.clone()) else {
             return Err(SketchError::InvalidValue);
         };
         let (Some(first), Some(last)) = (points.first().copied(), points.last().copied()) else {
             return Err(SketchError::InvalidValue);
         };
-        let apart = self.xy(first).zip(self.xy(last)).is_some_and(|(a, b)| dist(a, b) > 1e-9);
+        let apart = self.pos(first).zip(self.pos(last)).is_some_and(|(a, b)| {
+            ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt() > 1e-9
+        });
         if points.len() < 3 || crate::model::spline_closed(&points) || !apart {
             return Err(SketchError::InvalidValue);
         }
@@ -1393,6 +1396,9 @@ impl Sketch {
         let Some(CurveGeom::Spline { points }) = self.curves.get(&curve).map(|c| c.geom.clone()) else {
             return Err(SketchError::InvalidValue);
         };
+        if self.is_spatial() {
+            return Err(SketchError::WrongSpace);
+        }
         if !at.iter().all(|v| v.is_finite()) {
             return Err(SketchError::InvalidValue);
         }

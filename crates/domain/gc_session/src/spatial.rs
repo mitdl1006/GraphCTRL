@@ -21,11 +21,13 @@ pub(crate) struct SpatialState {
     plane: usize,
     /// The points clicked so far for an arc, with the existing points they were placed on.
     arc: Vec<([f64; 3], Option<Id<SkPoint>>)>,
+    /// The fit points clicked so far for a spline, with the existing points they were placed on.
+    spline: Vec<([f64; 3], Option<Id<SkPoint>>)>,
 }
 
 impl Default for SpatialState {
     fn default() -> Self {
-        Self { anchor: None, hover: None, plane: 2, arc: Vec::new() }
+        Self { anchor: None, hover: None, plane: 2, arc: Vec::new(), spline: Vec::new() }
     }
 }
 
@@ -34,13 +36,15 @@ impl SpatialState {
         self.anchor = None;
         self.hover = None;
         self.arc.clear();
+        self.spline.clear();
     }
 
     /// Drops the line or arc in progress. Returns false when there was none.
     pub(crate) fn drop_line(&mut self) -> bool {
         self.hover = None;
-        let arc = !self.arc.is_empty();
+        let arc = !self.arc.is_empty() || !self.spline.is_empty();
         self.arc.clear();
+        self.spline.clear();
         self.anchor.take().is_some() || arc
     }
 }
@@ -68,7 +72,7 @@ impl Session {
     /// Where the 3D line in progress starts, or the last point of the arc in progress (axis locks run
     /// through it).
     pub fn spatial_anchor(&self) -> Option<[f64; 3]> {
-        match self.spatial.arc.last() {
+        match self.spatial.arc.last().or(self.spatial.spline.last()) {
             Some((pos, _)) => Some(*pos),
             None => self.spatial.anchor.map(|(pos, _)| pos),
         }
@@ -123,6 +127,10 @@ impl Session {
             self.spatial_arc_click(pos, point);
             return;
         }
+        if self.tool() == ToolKind::Spline {
+            self.spatial_spline_click(pos, point);
+            return;
+        }
         if self.tool() != ToolKind::Line {
             return;
         }
@@ -157,6 +165,49 @@ impl Session {
         // The next line starts at the end of this one, wherever solving left it.
         let end = self.point_pos(to).unwrap_or(pos);
         self.spatial.anchor = Some((end, Some(to)));
+    }
+
+    /// A click of the spline tool in a 3D sketch: a fit point; a second click on the last one finishes
+    /// the spline (as in a 2D sketch), and so does [`Session::spatial_finish`] (Enter).
+    fn spatial_spline_click(&mut self, pos: [f64; 3], point: Option<Id<SkPoint>>) {
+        let again = self.spatial.spline.last().is_some_and(|(at, p)| {
+            (point.is_some() && *p == point) || (0..3).map(|k| (at[k] - pos[k]).powi(2)).sum::<f64>() < 1e-18
+        });
+        if again {
+            self.spatial_finish();
+        } else {
+            self.spatial.spline.push((pos, point));
+        }
+    }
+
+    /// Finishes the 3D spline in progress (Enter): a spline through the fit points clicked, two or more;
+    /// with fewer, nothing.
+    pub fn spatial_finish(&mut self) {
+        if self.spatial.spline.len() < 2 {
+            return;
+        }
+        let points: Vec<[f64; 3]> = self.spatial.spline.iter().map(|(p, _)| *p).collect();
+        let snaps: Vec<EndSnap> = self
+            .spatial
+            .spline
+            .iter()
+            .map(|(_, point)| EndSnap { point: *point, ..EndSnap::default() })
+            .collect();
+        if self.sketch_op(SketchOp::AddSpline { points, snaps }).is_ok() {
+            self.spatial.spline.clear();
+        }
+    }
+
+    /// The 3D spline in progress through its fit points and the cursor, as points along it.
+    pub fn spatial_spline_preview(&self) -> Option<Vec<[f64; 3]>> {
+        if self.spatial.spline.is_empty() {
+            return None;
+        }
+        let mut fit: Vec<[f64; 3]> = self.spatial.spline.iter().map(|(p, _)| *p).collect();
+        if let Some((cursor, _)) = self.spatial.hover {
+            fit.push(cursor);
+        }
+        Some(gc_sketch::spline_points3(&fit, 16))
     }
 
     /// A click of an arc tool in a 3D sketch: three points, then the arc.
