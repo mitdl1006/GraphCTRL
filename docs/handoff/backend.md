@@ -124,6 +124,17 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 미러 패턴(연관 미러); 미러/복사의 컴포넌트별 상태 검토
+
+근거: Mirror Components: Reference(`GUID-7B19CA69-8D14-40DA-9543-115A8AFE6336`, What's New 2026) — "Create mirror pattern: Enables to mirror the geometry and position of the source components while preserving the associativity between the source and target components. This feature also creates the Mirror browser node." / "Create flat structure: Creates only mirrored geometry and has no associativity". 상태: Mirror / Reuse / Exclude / Mixed. Copy assembly components(`GUID-5AAA6CB1-7BB2-4AF0-9A3D-AB729E5160C5`) — 상태: Copy / Reuse / Exclude.
+
+- **미러 패턴**: `PatternLayout::Mirror { plane: Selection }` — `CellOp::AddPattern { name, parents, layout }`로 만든다. 요소 하나(소스들의 거울상)가 생기고 소스나 미러 평면이 움직이면 따라간다(패턴과 같은 갱신). 브라우저에는 패턴 노드로 나온다(`doc.patterns()`), 독립·억제·삭제도 패턴과 같다. 기존 `CellOp::MirrorComponents`는 "Create flat structure"(연관 없음)에 해당하고 그대로다.
+- **컴포넌트별 상태**:
+  - Exclude = 그 컴포넌트를 `items`(또는 패턴의 `parents`)에 넣지 않으면 된다. 가져온 어셈블리는 한 인스턴스라서 그 안의 부품만 따로 제외할 수는 없다(부품 파일이 없다).
+  - Mirror와 Reuse는 여기서 같은 결과다(셀에는 부품 파일이 없어 "새 파일로 저장된 거울상 부품"이 없다). 박스·원통·구는 자기 대칭면이 있어 정확하고, 메시·어셈블리·로봇은 돌려 놓을 뿐 형상이 뒤집히지 않는다. 진짜 거울상 형상(Mirror 상태)을 내려면 `Solid::Mesh`에 "뒤집힘" 표시와 렌더·충돌 쪽 지원이 필요하다 — 여러 크레이트를 건드리므로 리드 결정 사항으로 남긴다.
+  - Copy의 Copy/Reuse도 같은 이유로 구분이 없다.
+- 테스트: `gc_doc/tests/pattern.rs::a_mirror_pattern_follows_its_sources`.
+
 ## 2026-11-18 — Motion 구속의 비·거리도 모델 매개변수 (리드 요청)
 
 - `relation_params` 대상에 `Rotation.ratio`(단위 없음)와 `RotationTranslation.distance`(길이)를 넣었다. `SetRelationValue`로 편집한다(`teeth = 36 / 12`, `teeth * 8 mm`). 비율 칸에 길이를 넣으면 `EditError::Expr`(차원 불일치), 0이면 `BadValue`.
