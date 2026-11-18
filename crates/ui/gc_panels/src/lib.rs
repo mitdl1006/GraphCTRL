@@ -2,6 +2,7 @@
 
 mod cell;
 mod pose;
+mod role;
 
 use egui::{RichText, Ui};
 use gc_core::Id;
@@ -16,6 +17,7 @@ use gc_ui::panel::TreeRow;
 
 pub use cell::{CellUi, cell, problem_text, status_text};
 pub use pose::{PoseCalc, RotationInput, pose_calculator};
+pub use role::role_properties;
 
 /// What the user asked for in the browser.
 #[derive(Clone, Debug, PartialEq)]

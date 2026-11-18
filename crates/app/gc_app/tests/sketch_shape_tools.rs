@@ -951,3 +951,34 @@ fn the_browser_lists_sketch_roles_and_selects_them() {
     harness.run_steps(3);
     assert_eq!(harness.state().viewport().role_selected, Some(role));
 }
+
+/// The properties of a selected path role: motion, direction and speed are edited in the panel.
+#[test]
+fn the_properties_panel_edits_a_path_role() {
+    let mut harness = sketching();
+    harness.state_mut().session.set_tool(ToolKind::Line);
+    for p in [mm(-60.0, 0.0), mm(60.0, 0.0)] {
+        click(harness.state_mut(), p, false);
+    }
+    harness.state_mut().session.tool_event(ToolEvent::Key(gc_tools::Key::Escape));
+    harness.state_mut().session.set_tool(ToolKind::Select);
+    let (sketch, curve) = {
+        let (id, s) = harness.state().session.active_sketch().unwrap();
+        (id, *s.curves.keys().next().unwrap())
+    };
+    let role = harness.state_mut().session.add_path_role(sketch, &[curve]).unwrap();
+    harness.state_mut().viewport_mut().role_selected = Some(role);
+    harness.run_steps(3);
+    harness.get_by_label("직선 이동").click();
+    harness.run_steps(2);
+    harness.get_by_label("경로 방향 뒤집기").click();
+    harness.run_steps(2);
+    let kind = harness.state().session.doc().get(role).unwrap().kind.clone();
+    match kind {
+        gc_doc::RoleKind::Path { motion, reversed, .. } => {
+            assert_eq!(motion, gc_doc::PathMotion::Linear);
+            assert!(reversed);
+        }
+        other => panic!("{other:?}"),
+    }
+}

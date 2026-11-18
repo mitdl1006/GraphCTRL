@@ -1650,6 +1650,13 @@ impl eframe::App for GraphCtrlApp {
             |ui| {
                 ui.set_max_width(ui.available_width());
                 egui::ScrollArea::vertical().show(ui, |ui| {
+                    // A sketch role selected in the browser has its own properties.
+                    if let Some(role) =
+                        self.viewport.role_selected.filter(|id| self.session.doc().get(*id).is_some())
+                    {
+                        gc_panels::role_properties(ui, &mut self.session, lang, role);
+                        ui.separator();
+                    }
                     gc_panels::properties(ui, &mut self.session, lang, &mut self.expression);
                     self.cell.hold_previews = self.viewport.is_grip_snapping();
                     gc_panels::cell(ui, &mut self.session, lang, &mut self.cell);
