@@ -520,6 +520,11 @@
 - 이번에 맞춘 것: ① 중앙 클릭으로 닫기는 있다. Esc로도 계속 닫는다(원문은 Esc를 쓰지 말라고 하나 QA 테스트 여러 개가 Esc로 닫는다고 가정하고, 메뉴가 Esc를 먹어도 해롭지 않아 유지). ② 위/아래 화살표로 명령을 옮기고 클릭으로 확정(방사형 순서, 북쪽부터 시계 방향). ③ View > User Interface의 "마킹 메뉴" 체크 해제 = "Use Classic Context Menu": 명령 전체를 목록으로(설정 `classic_context_menu`로 저장).
 - 하지 않은 것(원문에 있으나 우리 범위 밖): Customize 대화상자의 명령 배치 편집·XML 가져오기/내보내기, Ctrl+우클릭 사용자 메뉴, 표시 형식(글자만/아이콘만), 오버플로 형식(전체/방사형만/짧게). 방향별 기본 항목 표는 2026 원문에 없다(위치는 우리가 북·동·남·서로 정함).
 
+## 리본 배치 대조 (조사 결과)
+
+- 2026 도움말에는 탭·패널을 한 장에 나열한 "Ribbon reference"가 없다. About the Ribbon(GUID-78BFC5E2-5323-48E3-A704-58DDD1836EFE)은 "탭 > 패널(드롭다운 화살표 = 추가 명령)" 구조만 설명하고, 패널 이름·순서는 명령 페이지마다 "Assemble tab > Component panel > Place" 식으로 흩어져 나온다.
+- 우리 스케치 탭 패널 이름(Create·Modify·Pattern·Constrain·Exit)은 명령 페이지의 표기와 같다. 조립 탭은 Component·Pattern·Productivity·Relationships·Edit·Position 순이라 원문 표기(Component > Position > Relationships > Pattern > … > Productivity)와 순서가 다를 수 있으나, 순서를 확정할 원문 페이지를 못 찾아 바꾸지 않았다. 순서 근거(리본 스크린샷 또는 패널 목록)를 받으면 조정한다.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹
