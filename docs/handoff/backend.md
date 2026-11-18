@@ -54,6 +54,18 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 작업 축 정의 보강(우선순위 표 11 일부)
+
+- 원문: To Create Work Features `GUID-38A9748E-FA2D-44D3-928C-DFE1326A9385.htm`, Create Work Axes.
+  - On Line or Edge, Parallel to Line Through Point, Through Two Points, Intersection of Two Planes, Normal to Plane Through Point(파트 전용), Through Center of Circular or Elliptical Shape, Through Revolved Face or Feature.
+- `WorkGeometry` 추가:
+  - `AxisOnLine{line: CurveRef}`, `AxisParallelThrough{line, through: PointRef}`, `AxisPlanesIntersection{planes}`, `AxisThroughCircle{curve}`.
+  - `CurveRef{sketch, curve}`는 스케치 곡선을 가리키고 스케치를 따라간다. 참조된 스케치는 지울 수 없다.
+  - 원 축: 2D 스케치는 원·호 중심을 지나는 스케치 법선, 3D 호는 세 점 평면의 법선.
+  - 검사: 선 자리에 원, 원 자리에 선, 같은 평면 두 번은 거부한다.
+- 원문과 다른 점: 모델 모서리·회전 면은 없다. 메시라 정확한 모서리·원통 면이 없어서, 스케치 선·원(투영된 선 포함)만 받는다.
+- 테스트: `gc_doc/tests/design.rs` work_axes_on_a_line….
+
 ## 2026-11-18 — 조인트 Lock·Protect(우선순위 표 11 일부)
 
 - **원문**: To Define and Manage Joint Relationships `GUID-21DC3336-5C51-42C1-90FB-4299CD66E0C6.htm`.
