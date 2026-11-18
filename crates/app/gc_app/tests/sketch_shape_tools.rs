@@ -494,3 +494,30 @@ fn scale_and_stretch_on_the_ribbon() {
         harness.get_by_label("기준점을 클릭하십시오(선택한 형상)");
     }
 }
+
+/// Trim shows the piece a click would remove, in red and dashed (Inventor 2026 help, To Trim, Extend, or
+/// Split Sketch Geometry, GUID-DD00037F-8EE7-4C7C-9CF6-7B7B3C0F1F36 family: the part to go is highlighted
+/// under the cursor). The screenshot is the evidence; the preview itself is the session's.
+#[test]
+fn trim_highlights_the_piece_that_would_go() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("XY 스케치").click();
+    harness.run();
+    let app = harness.state_mut();
+    line(app, mm(-30.0, 0.0), mm(30.0, 0.0));
+    line(app, mm(10.0, -20.0), mm(10.0, 20.0));
+    app.session.set_tool(ToolKind::Trim);
+    app.session.tool_event(ToolEvent::Move { pos: mm(-5.0, 0.0), px: PX, suppress_snap: true });
+    assert_eq!(app.session.preview().cut.len(), 1, "one piece would go");
+    harness.run_steps(3);
+    if gpu {
+        let image = harness.render().unwrap();
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        image.save(out.join("review-57-trim-preview.png")).unwrap();
+    }
+}
