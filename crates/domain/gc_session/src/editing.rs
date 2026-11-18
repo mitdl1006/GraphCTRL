@@ -112,6 +112,43 @@ impl Session {
         }
     }
 
+    /// Where a subassembly's components go when it is moved as one unit by `delta` (a move in the world,
+    /// applied after where each stands now): a subassembly is treated as a single unit in its parent
+    /// (Create Subassemblies in Place, GUID-FCEE3F0E-AAE2-4619-8645-2588FEECD353). `None` for a missing or
+    /// empty subassembly, or when one of its components is grounded (the unit cannot move).
+    pub fn subassembly_moved(
+        &self,
+        id: gc_doc::SubassemblyId,
+        delta: gc_math::DPose3,
+    ) -> Option<Vec<(gc_core::AnyId, gc_math::DPose3)>> {
+        let doc = self.doc();
+        let members = doc.subassembly_components(id);
+        if members.is_empty() || !(delta.translation.is_finite() && delta.rotation.is_finite()) {
+            return None;
+        }
+        members
+            .into_iter()
+            .map(|item| {
+                if doc.component_flag(Occurrence::Item(item), gc_doc::ComponentFlag::Grounded) {
+                    return None;
+                }
+                let now = doc.component_origin(Occurrence::Item(item))?.pose;
+                Some((item, delta * now))
+            })
+            .collect()
+    }
+
+    /// Moves a subassembly as one unit by `delta` (see [`Session::subassembly_moved`]); what is tied to its
+    /// components follows. One undo step. Refused for a missing or empty subassembly or a grounded member.
+    pub fn move_subassembly(
+        &mut self,
+        id: gc_doc::SubassemblyId,
+        delta: gc_math::DPose3,
+    ) -> Result<(), EditError> {
+        let moves = self.subassembly_moved(id, delta).ok_or(EditError::BadValue)?;
+        self.grip_snap_commit(&moves, false)
+    }
+
     /// What a click on a component picks: the row directly inside the edit target (or at the top level)
     /// that holds it, so that a subassembly is picked as one unit. A component of an imported assembly or
     /// a robot link is picked itself. `None` for a component outside the edit target.
