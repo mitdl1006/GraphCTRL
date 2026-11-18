@@ -768,3 +768,78 @@ fn sketch_patterns_can_be_edited_suppressed_and_deleted_as_a_whole() {
     assert_eq!(bench.sketch().curves.len(), before.curves.len() - 1);
     assert!(bench.op(SketchOp::DeleteSketchPattern { element: hole }).is_err());
 }
+
+/// Midpoint Line (To Create Lines, Arcs, and Bends, GUID-4F861674-F74C-474E-869A-4C190ED6EC4B), the center
+/// rectangles (To Create 2D Shape Geometry, GUID-D489CE6D-7299-4211-A43A-F3580A4BA357) and a circle
+/// touching three lines.
+#[test]
+fn midpoint_lines_center_rectangles_and_tangent_circles() {
+    use gc_doc::EndSnap;
+    // Midpoint line: the line runs from the mirrored end through the end; its middle point is held there.
+    let mut bench = Bench::new();
+    let dof = bench.dof();
+    let created = bench
+        .op(SketchOp::AddMidpointLine {
+            mid: [0.1, 0.1, 0.0],
+            end: [0.15, 0.12, 0.0],
+            snap_mid: EndSnap::default(),
+            snap_end: EndSnap::default(),
+        })
+        .unwrap();
+    let line = Bench::curves(&created)[0];
+    let (a, b) = bench.sketch().line(line).unwrap();
+    let (pa, pb) = (bench.sketch().pos(a).unwrap(), bench.sketch().pos(b).unwrap());
+    assert!((pa[0] - 0.05).abs() < 1e-12 && (pa[1] - 0.08).abs() < 1e-12, "{pa:?}");
+    assert!((pb[0] - 0.15).abs() < 1e-12);
+    assert_eq!(bench.dof(), dof + 4, "a free line; the midpoint follows it");
+
+    // Two point center rectangle: corners mirrored about the centre, the centre point on the diagonal.
+    let mut bench = Bench::new();
+    let dof = bench.dof();
+    let created = bench
+        .op(SketchOp::AddCenterRectangle {
+            centre: [0.1, 0.05, 0.0],
+            corner: [0.14, 0.08, 0.0],
+            snap_centre: EndSnap::default(),
+        })
+        .unwrap();
+    let xs: Vec<f64> = Bench::curves(&created)
+        .iter()
+        .filter_map(|c| bench.sketch().line(*c))
+        .flat_map(|(a, b)| [a, b])
+        .filter_map(|p| bench.sketch().pos(p))
+        .map(|p| p[0])
+        .collect();
+    let (min, max) = xs.iter().fold((f64::MAX, f64::MIN), |(lo, hi), x| (lo.min(*x), hi.max(*x)));
+    assert!((min - 0.06).abs() < 1e-12 && (max - 0.14).abs() < 1e-12, "{xs:?}");
+    assert_eq!(bench.dof(), dof + 4, "centre 2, width, height");
+
+    // Three point center rectangle at an angle: four sides, the first side's middle where clicked.
+    let mut bench = Bench::new();
+    let dof = bench.dof();
+    let created = bench
+        .op(SketchOp::AddCenterRectangle3 {
+            centre: [0.0, 0.0, 0.0],
+            side: [0.03, 0.04, 0.0],
+            width: [-0.08, 0.06, 0.0],
+            snap_centre: EndSnap::default(),
+        })
+        .unwrap();
+    let drawn =
+        Bench::curves(&created).into_iter().filter(|c| !bench.sketch().curves[c].construction).count();
+    assert_eq!(drawn, 4);
+    assert_eq!(bench.dof(), dof + 5, "centre 2, turn, two half-sizes");
+
+    // Tangent circle: the incircle of a 3-4-5 triangle (radius 1) when clicked on the triangle's sides.
+    let mut bench = Bench::new();
+    let s1 = add_line(&mut bench, [0.0, 0.0], [0.4, 0.0]);
+    let s2 = add_line(&mut bench, [0.0, 0.0], [0.0, 0.3]);
+    let s3 = add_line(&mut bench, [0.4, 0.0], [0.0, 0.3]);
+    let created = bench
+        .op(SketchOp::AddTangentCircle { lines: [s1, s2, s3], near: [[0.1, 0.0], [0.0, 0.1], [0.2, 0.15]] })
+        .unwrap();
+    let circle = Bench::curves(&created)[0];
+    let (c, r) = bench.sketch().round(circle).unwrap();
+    let c = bench.sketch().pos(c).unwrap();
+    assert!((r - 0.1).abs() < 1e-9 && (c[0] - 0.1).abs() < 1e-9 && (c[1] - 0.1).abs() < 1e-9, "{c:?} {r}");
+}

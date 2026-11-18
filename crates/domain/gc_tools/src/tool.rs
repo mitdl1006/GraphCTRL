@@ -204,6 +204,14 @@ pub enum ToolKind {
     Slot(gc_doc::SlotKind),
     /// Draw an arc slot of this kind: three points for the centre arc, then the width.
     ArcSlot(gc_doc::ArcSlotKind),
+    /// Midpoint Line: the midpoint, then an end.
+    MidpointLine,
+    /// Two Point Center Rectangle: the centre, then a corner.
+    CenterRectangle,
+    /// Three Point Center Rectangle: the centre, the middle of a side, then the other half-size.
+    CenterRectangle3,
+    /// Tangent Circle: three lines it touches.
+    TangentCircle,
     /// Offset curves (whole loops by default): pick one, then where the offset goes.
     Offset,
 }
@@ -288,6 +296,13 @@ pub enum Prompt {
     ArcSlotCentre,
     ArcSlotThrough,
     ArcSlotEnd,
+    MidpointLineMid,
+    MidpointLineEnd,
+    CenterRectCentre,
+    CenterRectCorner,
+    CenterRectSide,
+    CenterRectWidth,
+    TangentCircleLine,
     /// A sketch dialog's Geometry selector is active.
     PickGeometry,
     /// A sketch dialog's line selector is active.
@@ -367,6 +382,8 @@ pub struct Tool {
     offset_measured: f64,
     /// Arc slot: the third click.
     slot_third: Option<[f64; 2]>,
+    /// Tangent Circle: the lines picked so far and where.
+    tangent_lines: Vec<(Id<Curve>, [f64; 2])>,
 }
 
 fn angle_about(centre: [f64; 2], point: [f64; 2]) -> f64 {
@@ -567,7 +584,7 @@ fn curve_between(sketch: &Sketch, p: [f64; 2], q: [f64; 2]) -> Option<(Id<Curve>
     })
 }
 
-fn end_snap(snap: &Snap) -> EndSnap {
+pub(crate) fn end_snap(snap: &Snap) -> EndSnap {
     EndSnap {
         point: snap.point,
         curve: snap.curve,
@@ -610,6 +627,7 @@ impl Tool {
             offset_pick: None,
             offset_measured: 0.0,
             slot_third: None,
+            tangent_lines: Vec::new(),
         }
     }
 
@@ -661,7 +679,11 @@ impl Tool {
                 | ToolKind::Polygon
                 | ToolKind::Slot(_)
                 | ToolKind::ArcSlot(_)
-                | ToolKind::Offset,
+                | ToolKind::Offset
+                | ToolKind::MidpointLine
+                | ToolKind::CenterRectangle
+                | ToolKind::CenterRectangle3
+                | ToolKind::TangentCircle,
                 _,
             ) => self.shape_prompt(),
         }
@@ -902,6 +924,7 @@ impl Tool {
         self.sweep_from = None;
         self.offset_pick = None;
         self.slot_third = None;
+        self.tangent_lines.clear();
         if self.kind != ToolKind::Fillet {
             self.hud.clear(); // the fillet radius stays
         }
@@ -1007,6 +1030,10 @@ impl Tool {
                         | ToolKind::Slot(_)
                         | ToolKind::ArcSlot(_)
                         | ToolKind::Offset
+                        | ToolKind::MidpointLine
+                        | ToolKind::CenterRectangle
+                        | ToolKind::CenterRectangle3
+                        | ToolKind::TangentCircle
                 );
                 self.hover = matches!(self.kind, ToolKind::Trim | ToolKind::Extend | ToolKind::Fillet)
                     .then(|| nearest_curve(sketch, pos, px, &[]))
@@ -1248,7 +1275,11 @@ impl Tool {
             | ToolKind::Polygon
             | ToolKind::Slot(_)
             | ToolKind::ArcSlot(_)
-            | ToolKind::Offset => Vec::new(),
+            | ToolKind::Offset
+            | ToolKind::MidpointLine
+            | ToolKind::CenterRectangle
+            | ToolKind::CenterRectangle3
+            | ToolKind::TangentCircle => Vec::new(),
             ToolKind::Select => vec![ToolOutput::Select { item: pick(sketch, pos, px), extend: modifier }],
             ToolKind::Line => {
                 let here = self.place(sketch, pos, px, self.anchor, modifier);

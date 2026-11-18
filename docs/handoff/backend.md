@@ -13,7 +13,7 @@
 | 1 | ~~3D 스케치 구속: 평행·직각·동일(선 길이)·동일선상·점-선 위·중점, 3D 각도 치수~~ **완료** | 스케치 §3D(리드 지정) | — | 아래 작업 기록 |
 | 2 | ~~3D 호~~ **완료**(반원 미만) | 리드 지정 | 3D 원은 아직 `WrongSpace` | 아래 작업 기록 |
 | 3 | ~~Cancel Sketch~~ **완료** | 스케치 32 (P2) | — | 아래 작업 기록 |
-| 4 | Tangent Circle·Midpoint Line·중심 사각형 2종 | 44, 46, 57 (P2) | 없음 | `SketchOp` + 도구 |
+| 4 | ~~Tangent Circle·Midpoint Line·중심 사각형 2종~~ **완료** | 44, 46, 57 (P2) | — | 아래 작업 기록 |
 | 5 | Chamfer·Split | 65, 81 (P2) | 없음(Split은 Trim 내부만) | `SketchOp` + 도구 |
 | 6 | Move·Copy·Rotate(스케치) / Scale·Stretch | 76–78 (P2) / 83–84 (P3) | 드래그만 | 선택 형상 변환 명령(치수 완화 옵션 포함) |
 | 7 | Auto-project(모서리 자동 투영) | 68 (P2) | 없음 | 그리기 중 모델 모서리 스냅 → 투영 |
@@ -53,6 +53,26 @@
 | 모션(오래된 남은 일) | 맨 아래 "남은 일(백엔드)" 절 그대로 |
 
 # 작업 기록(최신 순)
+
+## 2026-11-18 — 중점 선·접선 원·중심 직사각형 2종(우선순위 표 4)
+
+- **원문**: To Create Lines, Arcs, and Bends `GUID-4F861674-F74C-474E-869A-4C190ED6EC4B.htm`(Midpoint Line), To Create 2D Shape Geometry `GUID-D489CE6D-7299-4211-A43A-F3580A4BA357.htm`(Two/Three Point Center Rectangle, Tangent Circle).
+- **명령(gc_doc)**:
+  - `AddMidpointLine{mid, end, snap_mid, snap_end}`: 선 + 중점에 놓인 점(Midpoint 구속). 그 점이 스냅 대상과 일치 등을 받는다.
+  - `AddCenterRectangle{centre, corner, snap_centre}`, `AddCenterRectangle3{centre, side, width, snap_centre}`: 기존 직사각형 명령 + 구성 대각선 + 그 중점의 중심 점.
+  - 자유도: 2점 4, 3점 5 — 기존 직사각형과 같다.
+  - `AddTangentCircle{lines, near}`: 세 선(무한선)에 접하는 원(최대 4개) 중 접점이 클릭 위치에 가장 가까운 것 + 접선 구속 3개.
+- **도구**:
+  - `ToolKind::{MidpointLine, CenterRectangle, CenterRectangle3, TangentCircle}`, `Prompt` 7개.
+  - 미리보기는 같은 명령을 사본에 적용해 그린다(`draw_new`).
+- **리본**:
+  - 작성 패널에 작은 버튼 3×2를 넣었다(점·중점 선·접선 원 / 다각형·2점·3점 중심 직사각형).
+  - 점·다각형은 큰 버튼에서 작은 버튼으로 옮겼다. 그대로면 1280 px에서 '스케치 마무리'(1231–1331)와 '스케치 취소'가 창 밖으로 밀렸다. 지금은 취소가 1275에서 끝난다.
+  - 더 넣으려면 인벤터식 분할 버튼(선 ▾·원 ▾·직사각형 ▾·슬롯 ▾)이 필요하다(FE).
+- **원문과 다른 점**:
+  - 원문의 Tangent Circle 문장은 중심점 원과 같은 문장이 반복되어 모호하다. parity 문서의 "세 선에 접하는 원"을 따랐다.
+  - 중점 선의 HUD 길이·각도 입력은 없다.
+- **테스트**: `gc_doc/tests/sketch_shapes.rs` midpoint_lines_center_rectangles…(모양·자유도·내접원), 세션 midpoint_line_center_rectangles…_tools, 앱 kittest the_ribbon_starts….
 
 ## 2026-11-18 — Cancel Sketch(우선순위 표 3)
 

@@ -187,16 +187,52 @@ pub(crate) fn show(
                     // GUID-D4A4288F-32F1-4E23-A382-930EBA152E87; To Create 2D Shape Geometry,
                     // GUID-D489CE6D-7299-4211-A43A-F3580A4BA357): 2D sketches.
                     if !spatial {
-                        for (kind, icon, label) in [
-                            (ToolKind::Point, Icon::Point, Msg::ToolPoint),
-                            (ToolKind::Polygon, Icon::Polygon, Msg::ToolPolygon),
-                            (ToolKind::Slot(SlotKind::CenterToCenter), Icon::Slot, Msg::ToolSlot),
-                        ] {
+                        for (kind, icon, label) in
+                            [(ToolKind::Slot(SlotKind::CenterToCenter), Icon::Slot, Msg::ToolSlot)]
+                        {
                             if ribbon_button(ui, icon, label.text(lang), current == kind, sketching).clicked()
                             {
                                 session.set_tool(kind);
                             }
                         }
+                        // Midpoint Line, Tangent Circle and the center rectangles as small icons, two rows
+                        // (To Create Lines, Arcs, and Bends, GUID-4F861674-F74C-474E-869A-4C190ED6EC4B; To Create
+                        // 2D Shape Geometry, GUID-D489CE6D-7299-4211-A43A-F3580A4BA357).
+                        ui.vertical(|ui| {
+                            // Point and Polygon too, small, so that the sketch tab fits 1280 px.
+                            let more = [
+                                [
+                                    (ToolKind::Point, Icon::Point, Msg::ToolPoint),
+                                    (ToolKind::MidpointLine, Icon::Text("-+-"), Msg::ToolMidpointLine),
+                                    (ToolKind::TangentCircle, Icon::Text("(/)"), Msg::ToolTangentCircle),
+                                ],
+                                [
+                                    (ToolKind::Polygon, Icon::Polygon, Msg::ToolPolygon),
+                                    (ToolKind::CenterRectangle, Icon::Text("[+]"), Msg::ToolCenterRectangle),
+                                    (
+                                        ToolKind::CenterRectangle3,
+                                        Icon::Text("<+>"),
+                                        Msg::ToolCenterRectangle3,
+                                    ),
+                                ],
+                            ];
+                            for row in more {
+                                ui.horizontal(|ui| {
+                                    for (kind, icon, label) in row {
+                                        let button = gc_ui::ribbon_small_button(
+                                            ui,
+                                            icon,
+                                            label.text(lang),
+                                            current == kind,
+                                            sketching,
+                                        );
+                                        if button.clicked() {
+                                            session.set_tool(kind);
+                                        }
+                                    }
+                                });
+                            }
+                        });
                         ui.vertical(|ui| {
                             // The other slots as small icons: two rows, the Center Point toggle (Format panel) last.
                             let slots = [

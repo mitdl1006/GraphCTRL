@@ -352,3 +352,19 @@ fn cancel_sketch_on_the_ribbon_throws_a_new_sketch_away() {
     assert_eq!(harness.state().session.doc().sketches().len(), 0);
     harness.get_by_label("XY 스케치");
 }
+
+#[test]
+fn the_ribbon_starts_midpoint_line_tangent_circle_and_the_center_rectangles() {
+    let mut harness = sketching();
+    for (label, kind) in [
+        ("중점 선", ToolKind::MidpointLine),
+        ("접선 원", ToolKind::TangentCircle),
+        ("2점 중심 직사각형", ToolKind::CenterRectangle),
+        ("3점 중심 직사각형", ToolKind::CenterRectangle3),
+    ] {
+        harness.get_by_label(label).click();
+        harness.run();
+        assert_eq!(harness.state().session.tool(), kind);
+    }
+    harness.get_by_label("직사각형의 중심을 클릭하십시오");
+}

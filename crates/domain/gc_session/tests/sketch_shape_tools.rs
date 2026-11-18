@@ -385,3 +385,53 @@ fn cancel_sketch_discards_the_edit_or_the_new_sketch() {
     assert_eq!(session.doc().get(id).unwrap(), &kept);
     assert!(!session.cancel_sketch(), "nothing to cancel outside a sketch");
 }
+
+/// Midpoint Line, the center rectangles (Inventor 2026 help, GUID-4F861674-F74C-474E-869A-4C190ED6EC4B,
+/// GUID-D489CE6D-7299-4211-A43A-F3580A4BA357) and Tangent Circle, through the tools.
+#[test]
+fn midpoint_line_center_rectangles_and_tangent_circle_tools() {
+    let mut session = new_session();
+    session.set_tool(ToolKind::MidpointLine);
+    assert_eq!(session.prompt(), Prompt::MidpointLineMid);
+    click(&mut session, mm(10.0, 10.0));
+    assert_eq!(session.prompt(), Prompt::MidpointLineEnd);
+    session.tool_event(ToolEvent::Move { pos: mm(30.0, 10.0), px: PX, suppress_snap: true });
+    assert_eq!(session.preview().lines.len(), 1, "the line follows the cursor");
+    click(&mut session, mm(30.0, 10.0));
+    let (_, sketch) = session.active_sketch().unwrap();
+    let line = drawn(&session)[0];
+    let (a, _) = sketch.line(line).unwrap();
+    assert!((sketch.pos(a).unwrap()[0] + 0.01).abs() < 1e-9, "the far end mirrors the clicked one");
+
+    let mut session = new_session();
+    session.set_tool(ToolKind::CenterRectangle);
+    click(&mut session, mm(0.0, 0.0));
+    assert_eq!(session.prompt(), Prompt::CenterRectCorner);
+    click(&mut session, mm(20.0, 10.0));
+    assert_eq!(drawn(&session).len(), 4);
+
+    let mut session = new_session();
+    session.set_tool(ToolKind::CenterRectangle3);
+    click(&mut session, mm(0.0, 0.0));
+    click(&mut session, mm(10.0, 10.0));
+    assert_eq!(session.prompt(), Prompt::CenterRectWidth);
+    click(&mut session, mm(-10.0, 10.0));
+    assert_eq!(drawn(&session).len(), 4);
+
+    // Three sides of a triangle, then the circle touching them.
+    let mut session = new_session();
+    for (a, b) in [((0.0, 0.0), (40.0, 0.0)), ((0.0, 0.0), (0.0, 30.0)), ((40.0, 0.0), (0.0, 30.0))] {
+        session.set_tool(ToolKind::Line);
+        click(&mut session, mm(a.0, a.1));
+        click(&mut session, mm(b.0, b.1));
+        session.tool_event(ToolEvent::Key(Key::Escape));
+    }
+    session.set_tool(ToolKind::TangentCircle);
+    assert_eq!(session.prompt(), Prompt::TangentCircleLine);
+    for at in [mm(15.0, 0.0), mm(0.0, 12.0), mm(20.0, 15.0)] {
+        session.tool_event(ToolEvent::Click { pos: at, px: PX, modifier: false });
+    }
+    let (_, sketch) = session.active_sketch().unwrap();
+    let circle = drawn(&session).into_iter().find(|c| sketch.round(*c).is_some()).unwrap();
+    assert!((sketch.round(circle).unwrap().1 - 0.01).abs() < 1e-9, "the 30-40-50 triangle's incircle");
+}
