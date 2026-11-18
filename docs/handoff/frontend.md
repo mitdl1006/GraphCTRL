@@ -358,6 +358,13 @@
 - 치수 입력 상자: 문서 설정 "입력 식 표시"가 켜져 있으면(기본) 쓴 식, 꺼져 있으면 값(문서 단위·자릿수)으로 시작한다(`Viewport::edit_dimension`, 뷰에서 더블클릭). 새 치수를 만들 때의 값 입력 상자(도구가 요청하는 것)는 이번에 바꾸지 않았다.
 - 테스트: `the_snap_to_grid_option_is_off_by_default_saved_and_read_back`, `editing_a_dimension_starts_from_the_expression_or_the_value_as_the_document_says`, gc_viewport `the_sketch_grid_follows_the_document_settings`.
 
+### 3D Bend: Equal 체크
+
+- 근거: Inventor 2026 도움말 To Create Lines, Arcs, and Bends, GUID-4F861674-F74C-474E-869A-4C190ED6EC4B (Bend 대화상자의 Equal).
+- 굽힘 상자에 "같음" 체크(기본 켬). 첫 굽힘은 `SketchOp::Bend`(그 결과의 첫 `Created::Curve`와 입력한 반지름을 기억), 이후 굽힘은 같음이 켜져 있고 반지름 칸이 그대로면 `SketchOp::BendEqual{lines, to}`, 끄거나 반지름을 바꾸면 `Bend`(새 기준이 됨). 굽힘이 끝나도 명령은 열려 있어 다음 선 두 개를 이어서 고를 수 있다(Esc로 끝). 이전에는 한 번 만들면 끝났다.
+- 굽힘 상자는 뷰 왼쪽 아래로 옮겼다(위쪽 중앙은 고를 선을 가렸다). 반지름 칸은 선 두 개를 고를 때마다 다시 키보드를 받는다.
+- 테스트: `the_bend_command_keeps_the_first_radius_with_equal_on`(선 세 개 계단, 두 번 굽힘, 두 호의 반지름이 같음, 명령 유지). 테스트의 선은 속성 패널(오른쪽)에 가리지 않는 위치에 둔다.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

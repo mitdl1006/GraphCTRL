@@ -6199,3 +6199,91 @@ fn editing_a_dimension_starts_from_the_expression_or_the_value_as_the_document_s
     viewport.edit_dimension(&app.session, id);
     assert_eq!(viewport.dimension_edit_text(), Some("50 mm"));
 }
+
+/// Bend with Equal on (3D sketch; Inventor 2026 help, To Create Lines, Arcs, and Bends,
+/// GUID-4F861674-F74C-474E-869A-4C190ED6EC4B): the second bend takes the first one's radius and the command
+/// stays open for it.
+#[test]
+fn the_bend_command_keeps_the_first_radius_with_equal_on() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    pick_variant(&mut harness, "스케치", "3D 스케치");
+    harness.run();
+    // Three lines in a staircase in the front plane (the view looks along Y), drawn through the session.
+    let app = harness.state_mut();
+    app.session.set_tool(ToolKind::Line);
+    let origin = *app.session.active_sketch().unwrap().1.points.keys().next().unwrap();
+    app.session.spatial_click([0.0; 3], Some(origin), None);
+    app.session.spatial_click([0.04, 0.0, 0.0], None, Some(0));
+    app.session.spatial_click([0.04, 0.0, 0.04], None, Some(2));
+    app.session.spatial_click([0.08, 0.0, 0.04], None, Some(0));
+    app.session.tool_event(ToolEvent::Key(gc_tools::Key::Escape));
+    harness.run();
+    let arcs = |h: &egui_kittest::Harness<'_, GraphCtrlApp>| {
+        h.state()
+            .session
+            .active_sketch()
+            .unwrap()
+            .1
+            .curves
+            .values()
+            .filter(|c| matches!(c.geom, gc_sketch::CurveGeom::Arc { .. }))
+            .count()
+    };
+    assert_eq!(arcs(&harness), 0);
+    harness.get_by_label("굽힘").click();
+    harness.run_steps(2);
+    harness.get_by_label("같음");
+    let click_at = |h: &mut egui_kittest::Harness<'_, GraphCtrlApp>, world: gc_math::DVec3| {
+        let at = h.state().viewport().screen_of(world).unwrap();
+        h.event(egui::Event::PointerMoved(at));
+        h.run_steps(2);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            h.run_steps(2);
+        }
+        // Not a double click with the next one.
+        h.run_steps(40);
+    };
+    let enter = |h: &mut egui_kittest::Harness<'_, GraphCtrlApp>| {
+        h.key_press(egui::Key::Enter);
+        h.run_steps(3);
+    };
+    // First bend: the first and second lines, Enter in the radius box.
+    click_at(&mut harness, gc_math::DVec3::new(0.02, 0.0, 0.0));
+    click_at(&mut harness, gc_math::DVec3::new(0.04, 0.0, 0.02));
+    enter(&mut harness);
+    assert_eq!(arcs(&harness), 1);
+    assert!(harness.state().viewport().is_bending(), "the command stays open for the next bend");
+    // Second bend: the second and third lines, with Equal on and the radius unchanged.
+    click_at(&mut harness, gc_math::DVec3::new(0.04, 0.0, 0.02));
+    click_at(&mut harness, gc_math::DVec3::new(0.06, 0.0, 0.04));
+    enter(&mut harness);
+    assert_eq!(arcs(&harness), 2);
+    let sketch = harness.state().session.active_sketch().unwrap().1.clone();
+    let radii: Vec<f64> = sketch
+        .curves
+        .values()
+        .filter_map(|c| match c.geom {
+            gc_sketch::CurveGeom::Arc { c, s, .. } => {
+                let (centre, start) = (sketch.pos(c)?, sketch.pos(s)?);
+                Some(
+                    ((centre[0] - start[0]).powi(2)
+                        + (centre[1] - start[1]).powi(2)
+                        + (centre[2] - start[2]).powi(2))
+                    .sqrt(),
+                )
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(radii.len() == 2 && (radii[0] - radii[1]).abs() < 1e-9, "{radii:?}");
+}
