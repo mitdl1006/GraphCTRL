@@ -715,6 +715,9 @@ pub struct Components {
     /// The iProperties of components (Summary, Project, density).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub properties: Vec<(Occurrence, crate::iproperties::IProperties)>,
+    /// Components hidden by Isolate and not yet shown again by Undo Isolate.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub isolated: Vec<Occurrence>,
     /// BOM Structure of components and subassemblies that are not Normal.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bom: Vec<(crate::subassembly::TreeKey, crate::iproperties::BomStructure)>,

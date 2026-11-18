@@ -178,6 +178,23 @@ impl Session {
         &self.load_warnings
     }
 
+    /// Isolate (Inventor 2026 help, GUID-36AE9264-912D-4D3C-BB24-7EC16FA8777E): hides every visible
+    /// component except `keep`, what they are inside and what is inside them. One undo step; saved.
+    pub fn isolate(&mut self, keep: &[gc_doc::Occurrence]) -> Result<(), EditError> {
+        self.execute(&Command::Cell(gc_doc::CellOp::Isolate { keep: keep.to_vec() })).map(|_| ())
+    }
+
+    /// Undo Isolate: shows again what [`Session::isolate`] hid, keeping what was done meanwhile.
+    pub fn undo_isolate(&mut self) -> Result<(), EditError> {
+        self.execute(&Command::Cell(gc_doc::CellOp::UndoIsolate)).map(|_| ())
+    }
+
+    /// True while components hidden by [`Session::isolate`] have not been shown again (Undo Isolate is
+    /// offered then).
+    pub fn is_isolated(&self) -> bool {
+        self.doc.timeline().is_some_and(|(_, t)| !t.components.isolated.is_empty())
+    }
+
     /// The document.
     pub fn doc(&self) -> &Document {
         &self.doc
