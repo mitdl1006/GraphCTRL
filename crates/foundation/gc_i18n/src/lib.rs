@@ -810,6 +810,10 @@ messages! {
     ToolRectangle3 => ("3점 직사각형", "Three Point Rectangle"),
     /// Browser menu: makes a representation the active one.
     CmdActivate => ("활성화", "Activate"),
+    /// Browser, right-click a joint: lock it where it stands.
+    JointLockItem => ("잠금", "Lock"),
+    /// Browser, right-click a joint: refuse relationships that take its freedom away.
+    JointProtectItem => ("보호", "Protect"),
     /// Assemble tab: the Assemble command (pick geometry, the geometry decides the constraint types).
     AssembleTitle => ("어셈블", "Assemble"),
     /// Assemble command: the two selections allow no constraint.

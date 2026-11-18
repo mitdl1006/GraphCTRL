@@ -3826,3 +3826,67 @@ fn the_assemble_command_opens_from_the_assemble_tab() {
         image.save(out.join("review-49-assemble.png")).unwrap();
     }
 }
+
+/// Right-click a joint in the browser > Lock and Protect (Inventor 2026 help, To Define and Manage Joint
+/// Relationships, GUID-21DC3336-5C51-42C1-90FB-4299CD66E0C6); a constraint offers neither.
+#[test]
+fn lock_and_protect_are_set_on_a_joint_from_the_browser() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.05, 0.05, 0.05] };
+    let app = harness.state_mut();
+    let fixed = app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    let moving =
+        app.session.add_body(solid, gc_doc::Placement { xyz: [0.0, 0.0, 0.2], rpy: [0.0; 3] }).unwrap();
+    let frame = |body: gc_core::Id<gc_doc::Body>| gc_doc::Selection {
+        occurrence: gc_doc::Occurrence::Item(body.erase()),
+        geometry: gc_doc::Geometry::origin_frame(),
+    };
+    let joint = gc_doc::Relationship::new(
+        "Rigid:1",
+        gc_doc::RelationKind::Rigid { flip: false },
+        frame(moving),
+        frame(fixed),
+    );
+    let id = app.session.add_relationship(joint).unwrap();
+    harness.run();
+    assert!(harness.state().session.joint_condition(id).locked.is_none());
+
+    let right_click = |harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, label: &str| {
+        let at = harness.get_by_label(label).rect().center();
+        harness.event(egui::Event::PointerMoved(at));
+        harness.run();
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Secondary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.run();
+        }
+    };
+    right_click(&mut harness, "Rigid:1");
+    harness.get_by_label("잠금").click();
+    harness.run();
+    assert!(harness.state().session.joint_condition(id).locked.is_some());
+    if gpu {
+        harness.run_steps(2);
+        let image = harness.render().unwrap();
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        image.save(out.join("review-50-joint-lock.png")).unwrap();
+    }
+    right_click(&mut harness, "Rigid:1");
+    harness.get_by_label("보호").click();
+    harness.run();
+    assert!(harness.state().session.joint_condition(id).protected);
+    // Clearing the check frees it again.
+    right_click(&mut harness, "Rigid:1");
+    harness.get_by_label("잠금").click();
+    harness.run();
+    assert!(harness.state().session.joint_condition(id).locked.is_none());
+}

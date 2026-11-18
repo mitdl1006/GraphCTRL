@@ -73,6 +73,8 @@
 
 - Assemble 명령(리드 ④): 조립 탭 관계 그룹 첫 버튼 "어셈블" → 창(`gc_app/src/assemble.rs`): 첫 번째(움직일 쪽)·두 번째(고정 쪽) 형상을 뷰에서 원점 요소로 고르면 `session.possible_relations`가 돌려준 해만 버튼으로 나열(맞춤(마주봄)·플러시·맞춤(정렬)·각도(방향)·접선(안쪽/바깥쪽)·삽입(반대/정렬)), 기본은 첫 해, 오프셋(mm) 또는 각도(°) 입력, 적용(계속)/확인(끝)/선택 지우기/취소, 풀 수 없으면 구속 오류 대화상자로. 근거: Inventor 2026 Create assembly constraints using the Assemble command(GUID-C1E8D955-784D-47DE-9DD4-C9C695051320) 원문 확인 — 흐름(움직일 쪽 먼저, 형상이 유형을 결정, Apply/OK/Undo)은 원문대로. 원문과 다른 점·미구현: 인벤터는 뷰 안 미니 툴바에 해를 띄우지만 여기는 창에 나열, 새 구속을 OK 때까지 기존 것과 비교하지 않는 동작(우리는 적용 즉시 풀이)·Assemble Constraint Management 대화상자(우리 구속 오류 대화상자가 대신), 한 번에 한 컴포넌트만 구속하는 제한 없음, 원점 요소 외 형상(모서리·면) 선택. 스크린샷 `docs/evidence/img/review-49-assemble.png`, 테스트 `assemble::tests`, `the_assemble_command_opens_from_the_assemble_tab`.
 
+- 조인트 Lock·Protect(리드 큐 ①): 브라우저 관계 폴더 행 우클릭 메뉴에 조인트(`gc_doc::is_joint_kind`)만 "잠금"·"보호" 체크 항목(`BrowserAction::JointLock/JointProtect` → `set_joint_lock/set_joint_protect`, 체크 해제 = 해제), 잠긴 조인트는 행 아이콘이 자물쇠(`gc_ui::Icon::Lock`, 새 벡터 아이콘). 구속에는 항목 없음. 근거: Inventor 2026 To Define and Manage Joint Relationships(GUID-21DC3336-5C51-42C1-90FB-4299CD66E0C6) 원문 확인 — "브라우저에서 관계를 우클릭 > Lock 또는 Protect, 체크 해제로 조건 제거, 구속에는 없음"과 같음. 원문과 다른 점·미구현: 보호된 조인트 때문에 거부된 관계의 경고 문구는 상태바의 일반 오류 문구뿐, 보호 표시 아이콘 없음(잠금만), 조인트 글리프 더블클릭 편집. 스크린샷 `docs/evidence/img/review-50-joint-lock.png`, 테스트 `lock_and_protect_are_set_on_a_joint_from_the_browser`.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

@@ -43,6 +43,10 @@ pub enum BrowserAction {
     /// Create a view representation with this name from the current view (the app stores the camera
     /// and section).
     NewView(String),
+    /// Lock a joint where it stands, or free it.
+    JointLock(gc_core::Id<gc_doc::Relationship>, bool),
+    /// Protect a joint's freedom, or not.
+    JointProtect(gc_core::Id<gc_doc::Relationship>, bool),
     /// Put a component into the contact set, or take it out.
     ContactSet(gc_core::AnyId, bool),
     /// Suppress a relationship (or bring it back) and solve again.
@@ -180,9 +184,13 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
             egui::CollapsingHeader::new(tr!(lang, BrowserRelationships)).default_open(true).show(ui, |ui| {
                 for (id, relationship) in session.relationships() {
                     let suppressed = session.doc().is_inactive(id.erase());
+                    let is_joint = gc_doc::is_joint_kind(&relationship.kind);
+                    let condition = session.joint_condition(id);
+                    let locked = condition.locked.is_some();
                     let delete = tr!(lang, CmdDeleteItem, relationship.name);
                     let row = TreeRow {
-                        icon: Icon::Path,
+                        // A locked joint shows a padlock.
+                        icon: if locked { Icon::Lock } else { Icon::Path },
                         text: &relationship.name,
                         selected: false,
                         visible: None,
@@ -207,6 +215,21 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
                         if ui.add_enabled(drivable, egui::Button::new(tr!(lang, MenuDrive))).clicked() {
                             action = Some(BrowserAction::DriveRelationship(id));
                             ui.close();
+                        }
+                        // Lock and Protect are for joints only (Inventor 2026 help, To Define and Manage Joint
+                        // Relationships, GUID-21DC3336-5C51-42C1-90FB-4299CD66E0C6).
+                        if is_joint {
+                            if ui.checkbox(&mut { locked }, tr!(lang, JointLockItem)).clicked() {
+                                action = Some(BrowserAction::JointLock(id, !locked));
+                                ui.close();
+                            }
+                            if ui
+                                .checkbox(&mut { condition.protected }, tr!(lang, JointProtectItem))
+                                .clicked()
+                            {
+                                action = Some(BrowserAction::JointProtect(id, !condition.protected));
+                                ui.close();
+                            }
                         }
                         let text = if suppressed { tr!(lang, CmdUnsuppress) } else { tr!(lang, CmdSuppress) };
                         if ui.button(text).clicked() {
