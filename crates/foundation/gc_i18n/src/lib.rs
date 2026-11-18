@@ -838,6 +838,21 @@ messages! {
     /// Work axis dialog: along a sketch line.
     WorkAxisTitle => ("작업 축", "Work Axis"),
     /// Work axis type: On Line or Edge.
+    WpParallelThrough => ("평면에 평행, 점 통과", "Parallel to Plane Through Point"),
+    WpMidplane => ("두 평면의 중간면", "Midplane Between Two Planes"),
+    WpAngle => ("평면에 대한 각도 (선 기준)", "Angle to Plane Around Edge"),
+    WpLinePoint => ("선과 점", "Line and Point"),
+    WpNormalLine => ("선에 수직, 점 통과", "Normal to Axis Through Point"),
+    WpNormalCurve => ("곡선에 수직, 점 통과", "Normal to Curve at Point"),
+    WpPointLines => ("두 선의 교차", "Intersection of Two Lines"),
+    WpPointPlaneLine => ("평면과 선의 교차", "Intersection of Plane and Line"),
+    WpThreePlanes => ("세 평면의 교차", "Intersection of Three Planes"),
+    WpCurveCentre => ("곡선의 중심", "Center of a Curve"),
+    WaFirstLine => ("첫 번째 선", "First line"),
+    WaSecondLine => ("두 번째 선", "Second line"),
+    WaThirdPlane => ("세 번째 평면", "Third plane"),
+    WaCurve => ("곡선", "Curve"),
+    WaAngleDeg => ("각도 (°)", "Angle (°)"),
     WaOnLine => ("선 위", "On Line"),
     /// Work axis type: Parallel to Line Through Point.
     WaParallel => ("선에 평행, 점 통과", "Parallel to Line Through Point"),
