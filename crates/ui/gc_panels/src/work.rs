@@ -811,7 +811,7 @@ fn task_properties(ui: &mut Ui, session: &mut Session, lang: Lang, id: Id<Task>)
             let numeric = matches!(next.effects[index].target, EffectTarget::Var(v)
                 if matches!(session.doc().get(v).map(|var| &var.value), Some(StateValue::Int(_) | StateValue::Real(_))));
             let done = if numeric {
-                number_box(ui, session, key, &current, 90.0)
+                ui.vertical(|ui| number_box(ui, session, key, &current, 90.0)).inner
             } else {
                 committed_text(ui, key, &current, 90.0).1
             };

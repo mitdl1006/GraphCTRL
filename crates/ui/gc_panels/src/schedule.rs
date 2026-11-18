@@ -88,8 +88,12 @@ pub fn schedule_panel(
         if ui.button(tr!(lang, ScheduleUrScript)).clicked() {
             request = Some(ScheduleRequest::UrScript);
         }
-        let slider =
-            ui.add(egui::Slider::new(&mut now, 0.0..=end_time.max(1e-6)).suffix(" s").fixed_decimals(1));
+        let slider = ui.add(
+            egui::Slider::new(&mut now, 0.0..=end_time.max(1e-6))
+                .text(tr!(lang, ScheduleTime))
+                .suffix(" s")
+                .fixed_decimals(1),
+        );
         if slider.changed() {
             session.set_schedule_playback(Some(now));
         }

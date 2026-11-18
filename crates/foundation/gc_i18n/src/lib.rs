@@ -426,6 +426,7 @@ messages! {
     WorkFollowPath => ("경로 추종", "Follow path"),
     WorkSetIo => ("출력 설정", "Set output"),
     WorkWaitIo => ("입력 대기", "Wait for input"),
+    ScheduleTime => ("시간", "Time"),
     WorkSignalOn => ("켜짐", "on"),
     WorkSignalOff => ("꺼짐", "off"),
     WorkCandidatesPending => ("후보 로봇을 계산하는 중…", "Working out the candidates…"),
