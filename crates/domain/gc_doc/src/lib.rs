@@ -40,8 +40,8 @@ pub use command::{
 };
 pub use design::{
     Assembly, AssemblyMesh, AssemblyPart, ComponentFlag, Components, ContactSolver, CurveRef, Extent,
-    Extrude, Feature, FeatureKind, Occurrence, OriginElement, OriginPlane, PlaneRef, PlaneSource, PointRef,
-    Timeline, WorkFeature, WorkGeometry,
+    Extrude, Feature, FeatureKind, LineRef, Occurrence, OriginAxis, OriginElement, OriginPlane, PlaneRef,
+    PlaneSource, PointRef, Timeline, WorkFeature, WorkGeometry,
 };
 pub use document::{ChangeSet, Contents, DocDelta, Document, Frame, FrameKind, Param, Store, Table};
 pub use gc_expr::Unit;

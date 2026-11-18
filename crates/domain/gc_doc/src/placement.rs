@@ -5,7 +5,7 @@ use gc_core::Id;
 use gc_math::{DPose3, DQuat, DVec3};
 use gc_sketch::Space;
 
-use crate::design::{OriginPlane, PlaneRef, PointRef, WorkFeature, WorkGeometry};
+use crate::design::{LineRef, OriginAxis, OriginPlane, PlaneRef, PointRef, WorkFeature, WorkGeometry};
 use crate::document::Document;
 
 impl Document {
@@ -152,11 +152,218 @@ fn shape(doc: &Document, id: Id<WorkFeature>, depth: usize) -> Option<WorkShape>
                     let normal = DVec3::from_array(arc.u).cross(DVec3::from_array(arc.v));
                     Some(WorkShape::Axis { point: world(arc.centre), direction: frame.rotation * normal })
                 }
+                // Through Center of Circular or Elliptical Shape.
+                gc_sketch::CurveGeom::Ellipse { c, .. } if !sketch.is_spatial() => Some(WorkShape::Axis {
+                    point: world(sketch.pos(c)?),
+                    direction: frame.rotation * DVec3::Z,
+                }),
                 _ => None,
             }
         }
         WorkGeometry::Point { at } => Some(WorkShape::Point(point(doc, *at, depth)?)),
+        WorkGeometry::PlaneParallelThrough { base, through } => {
+            let base = plane(doc, *base, depth)?;
+            Some(WorkShape::Plane(DPose3::from_parts(point(doc, *through, depth)?, base.rotation)))
+        }
+        WorkGeometry::PlaneMidplane { planes } => {
+            let (p, q) = (plane(doc, planes[0], depth)?, plane(doc, planes[1], depth)?);
+            let (n1, n2) = (p.rotation * DVec3::Z, q.rotation * DVec3::Z);
+            if n1.cross(n2).length() > 1e-9 {
+                return None;
+            }
+            let gap = n1.dot(q.translation - p.translation);
+            Some(WorkShape::Plane(DPose3::from_parts(p.translation + n1 * (gap / 2.0), p.rotation)))
+        }
+        WorkGeometry::PlaneAngleToPlane { base, line: about, angle } => {
+            let base = plane(doc, *base, depth)?;
+            let (a, d) = line(doc, *about, depth)?;
+            let n = base.rotation * DVec3::Z;
+            if d.dot(n).abs() > 1e-9 {
+                return None;
+            }
+            let z = DQuat::from_axis_angle(d, *angle) * n;
+            Some(WorkShape::Plane(frame_of(a, d, z)?))
+        }
+        WorkGeometry::PlaneLineAndPoint { line: on, through } => {
+            let (a, d) = line(doc, *on, depth)?;
+            let p = point(doc, *through, depth)?;
+            let normal = d.cross(p - a);
+            if normal.length() <= 1e-9 * (p - a).length().max(1e-9) {
+                return None;
+            }
+            Some(WorkShape::Plane(frame_of(a, d, normal.normalize())?))
+        }
+        WorkGeometry::PlaneNormalToLine { line: along, through } => {
+            let (a, d) = line(doc, *along, depth)?;
+            let p = point(doc, *through, depth)?;
+            let foot = a + d * d.dot(p - a);
+            let off = p - foot;
+            let x = if off.length() > 1e-12 { off.normalize() } else { d.any_orthonormal_vector() };
+            Some(WorkShape::Plane(frame_of(foot, x, d)?))
+        }
+        WorkGeometry::PlaneNormalToCurve { curve, at } => {
+            let p = point(doc, *at, depth)?;
+            let (tangent, across) = curve_tangent(doc, *curve, p)?;
+            Some(WorkShape::Plane(frame_of(p, across, tangent)?))
+        }
+        WorkGeometry::PointLinesIntersection { lines } => {
+            let ((a, d), (b, e)) = (line(doc, lines[0], depth)?, line(doc, lines[1], depth)?);
+            let n = d.cross(e);
+            if n.length() < 1e-9 {
+                return None;
+            }
+            // The nearest points of the two lines; they must meet.
+            let w = a - b;
+            let (dd, de, ee, dw, ew) = (d.dot(d), d.dot(e), e.dot(e), d.dot(w), e.dot(w));
+            let den = dd * ee - de * de;
+            let (s, t) = ((de * ew - ee * dw) / den, (dd * ew - de * dw) / den);
+            let (p, q) = (a + d * s, b + e * t);
+            ((p - q).length() <= 1e-6).then(|| WorkShape::Point((p + q) / 2.0))
+        }
+        WorkGeometry::PointPlaneLine { plane: on, line: through } => {
+            let base = plane(doc, *on, depth)?;
+            let (a, d) = line(doc, *through, depth)?;
+            let n = base.rotation * DVec3::Z;
+            let along = n.dot(d);
+            if along.abs() < 1e-9 {
+                return None;
+            }
+            Some(WorkShape::Point(a + d * (n.dot(base.translation - a) / along)))
+        }
+        WorkGeometry::PointThreePlanes { planes } => {
+            let [p, q, r] =
+                [plane(doc, planes[0], depth)?, plane(doc, planes[1], depth)?, plane(doc, planes[2], depth)?];
+            let n = [p.rotation * DVec3::Z, q.rotation * DVec3::Z, r.rotation * DVec3::Z];
+            let d = [n[0].dot(p.translation), n[1].dot(q.translation), n[2].dot(r.translation)];
+            let det = n[0].dot(n[1].cross(n[2]));
+            if det.abs() < 1e-9 {
+                return None;
+            }
+            let x = (n[1].cross(n[2]) * d[0] + n[2].cross(n[0]) * d[1] + n[0].cross(n[1]) * d[2]) / det;
+            x.is_finite().then_some(WorkShape::Point(x))
+        }
+        WorkGeometry::PointCurveCentre { curve } => {
+            let sketch = doc.get(curve.sketch)?;
+            let frame = sketch_frame(doc, sketch)?;
+            let world = |p: [f64; 3]| frame.translation + frame.rotation * DVec3::from_array(p);
+            match sketch.curves.get(&curve.curve)?.geom {
+                gc_sketch::CurveGeom::Circle { c, .. } | gc_sketch::CurveGeom::Ellipse { c, .. } => {
+                    Some(WorkShape::Point(world(sketch.pos(c)?)))
+                }
+                gc_sketch::CurveGeom::Arc { c, s, e } => {
+                    if sketch.is_spatial() {
+                        let arc = gc_sketch::Arc3::new(sketch.pos(c)?, sketch.pos(s)?, sketch.pos(e)?)?;
+                        Some(WorkShape::Point(world(arc.centre)))
+                    } else {
+                        Some(WorkShape::Point(world(sketch.pos(c)?)))
+                    }
+                }
+                gc_sketch::CurveGeom::Line { .. } | gc_sketch::CurveGeom::Spline { .. } => None,
+            }
+        }
     }
+}
+
+/// A plane's frame at `origin` with X along `x` (made square to `z`) and normal `z`; `None` when they are
+/// parallel or zero.
+fn frame_of(origin: DVec3, x: DVec3, z: DVec3) -> Option<DPose3> {
+    let z = z.try_normalize()?;
+    let x = (x - z * x.dot(z)).try_normalize()?;
+    let rotation = DQuat::from_mat3(&gc_math::DMat3::from_cols(x, z.cross(x), z)).normalize();
+    (origin.is_finite() && rotation.is_finite()).then(|| DPose3::from_parts(origin, rotation))
+}
+
+/// A line as a point on it and its unit direction.
+fn line(doc: &Document, line: LineRef, depth: usize) -> Option<(DVec3, DVec3)> {
+    let unit = |axis: OriginAxis| match axis {
+        OriginAxis::X => DVec3::X,
+        OriginAxis::Y => DVec3::Y,
+        OriginAxis::Z => DVec3::Z,
+    };
+    match line {
+        LineRef::Sketch(curve) => {
+            let (a, b) = line_points(doc, curve)?;
+            Some((a, (b - a).try_normalize()?))
+        }
+        LineRef::Work(id) => match shape(doc, id, depth + 1)? {
+            WorkShape::Axis { point, direction } => Some((point, direction)),
+            WorkShape::Plane(_) | WorkShape::Point(_) => None,
+        },
+        LineRef::Origin(axis) => Some((DVec3::ZERO, unit(axis))),
+        LineRef::Component(occurrence, axis) => {
+            let origin = doc.component_origin(occurrence)?;
+            Some((origin.point(), origin.pose.rotation * unit(axis)))
+        }
+    }
+}
+
+/// Where a world point lies on a planar sketch's arc, circle, ellipse or spline: the curve's unit
+/// tangent there and the sketch's normal (square to it), in the world. `None` when the point is not on
+/// the curve (within a micrometre) or the curve is a line.
+fn curve_tangent(doc: &Document, curve: crate::design::CurveRef, at: DVec3) -> Option<(DVec3, DVec3)> {
+    const ON: f64 = 1e-6;
+    let sketch = doc.get(curve.sketch)?;
+    if sketch.is_spatial() {
+        return None;
+    }
+    let frame = sketch_frame(doc, sketch)?;
+    let local = frame.rotation.inverse() * (at - frame.translation);
+    if local.z.abs() > ON {
+        return None;
+    }
+    let p = [local.x, local.y];
+    let xy = |q: gc_core::Id<gc_sketch::SkPoint>| sketch.pos(q).map(|v| [v[0], v[1]]);
+    let dist = |a: [f64; 2], b: [f64; 2]| gc_math::fm::hypot(a[0] - b[0], a[1] - b[1]);
+    let tangent: [f64; 2] = match sketch.curves.get(&curve.curve)?.geom {
+        gc_sketch::CurveGeom::Circle { c, .. } | gc_sketch::CurveGeom::Arc { c, .. } => {
+            let c = xy(c)?;
+            let r = sketch.round(curve.curve)?.1;
+            if (dist(c, p) - r).abs() > ON {
+                return None;
+            }
+            [-(p[1] - c[1]), p[0] - c[0]]
+        }
+        gc_sketch::CurveGeom::Ellipse { c, major, minor, .. } => {
+            let (c, m) = (xy(c)?, xy(major)?);
+            let a = dist(c, m);
+            if !(a > 1e-12 && minor > 1e-12) {
+                return None;
+            }
+            let u = [(m[0] - c[0]) / a, (m[1] - c[1]) / a];
+            let t = gc_sketch::ellipse_param(c, m, minor, p);
+            let (sin, cos) = gc_math::fm::sin_cos(t);
+            let on = [c[0] + a * cos * u[0] - minor * sin * u[1], c[1] + a * cos * u[1] + minor * sin * u[0]];
+            if dist(on, p) > ON {
+                return None;
+            }
+            [-a * sin * u[0] - minor * cos * u[1], -a * sin * u[1] + minor * cos * u[0]]
+        }
+        gc_sketch::CurveGeom::Spline { .. } => {
+            let points = sketch.spline_outline(&sketch.curves.get(&curve.curve)?.geom, 64)?;
+            let mut best: Option<(f64, [f64; 2])> = None;
+            for w in points.windows(2) {
+                let d = [w[1][0] - w[0][0], w[1][1] - w[0][1]];
+                let l2 = d[0] * d[0] + d[1] * d[1];
+                if l2 <= 0.0 {
+                    continue;
+                }
+                let f = (((p[0] - w[0][0]) * d[0] + (p[1] - w[0][1]) * d[1]) / l2).clamp(0.0, 1.0);
+                let gap = dist([w[0][0] + f * d[0], w[0][1] + f * d[1]], p);
+                if best.is_none_or(|(g, _)| gap < g) {
+                    best = Some((gap, d));
+                }
+            }
+            let (gap, d) = best?;
+            // The drawn polyline cuts corners by far less than this at its spacing.
+            if gap > 1e-4 {
+                return None;
+            }
+            d
+        }
+        gc_sketch::CurveGeom::Line { .. } => return None,
+    };
+    let t = frame.rotation * DVec3::new(tangent[0], tangent[1], 0.0);
+    Some((t.try_normalize()?, frame.rotation * DVec3::Z))
 }
 
 fn sketch_frame(doc: &Document, sketch: &gc_sketch::Sketch) -> Option<DPose3> {

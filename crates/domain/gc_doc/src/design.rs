@@ -50,6 +50,31 @@ pub enum PointRef {
     Component(Occurrence),
 }
 
+/// One of the three origin axes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OriginAxis {
+    /// X.
+    X,
+    /// Y.
+    Y,
+    /// Z.
+    Z,
+}
+
+/// A straight line a work feature is built on: a sketch line, a work axis, or an origin axis (of the
+/// assembly or of a component).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum LineRef {
+    /// A sketch line (follows the sketch).
+    Sketch(CurveRef),
+    /// A work axis.
+    Work(Id<WorkFeature>),
+    /// An origin axis of the assembly.
+    Origin(OriginAxis),
+    /// An origin axis of a component (it follows the component).
+    Component(Occurrence, OriginAxis),
+}
+
 /// How a work feature is defined.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum WorkGeometry {
@@ -105,6 +130,75 @@ pub enum WorkGeometry {
         /// Where.
         at: PointRef,
     },
+    /// Parallel to Plane Through Point: a plane parallel to `base` through a point; its frame is the
+    /// base's, moved (To Create Work Features, GUID-38A9748E-FA2D-44D3-928C-DFE1326A9385).
+    PlaneParallelThrough {
+        /// The plane it is parallel to.
+        base: PlaneRef,
+        /// The point it passes through.
+        through: PointRef,
+    },
+    /// Midplane Between Two Planes: "the middle of two … planes … Select two parallel … work planes. The
+    /// new work plane … has the same outward normal of the first selected plane."
+    PlaneMidplane {
+        /// The two parallel planes.
+        planes: [PlaneRef; 2],
+    },
+    /// Angle to Plane Around Edge: through a line parallel to `base`, turned by `angle` (radians) about
+    /// the line from the base's direction (0 = parallel to the base, π/2 = square to it).
+    PlaneAngleToPlane {
+        /// The plane the angle is measured from.
+        base: PlaneRef,
+        /// The line it turns about (parallel to the base).
+        line: LineRef,
+        /// The angle, radians.
+        angle: f64,
+    },
+    /// A plane through a line and a point not on it (the Plane command with an edge and a point).
+    PlaneLineAndPoint {
+        /// The line.
+        line: LineRef,
+        /// The point.
+        through: PointRef,
+    },
+    /// Normal to Axis Through Point: square to a line, through a point; its X axis points from where the
+    /// line meets it towards the point (any square direction when the point is on the line).
+    PlaneNormalToLine {
+        /// The line.
+        line: LineRef,
+        /// The point.
+        through: PointRef,
+    },
+    /// Normal to Curve at Point: square to a sketch curve (arc, circle, ellipse or spline) where a point
+    /// on it lies; the plane passes through the point.
+    PlaneNormalToCurve {
+        /// The curve.
+        curve: CurveRef,
+        /// A point on the curve.
+        at: PointRef,
+    },
+    /// Intersection of Two Lines: where two lines meet (they must cross, within a micrometre).
+    PointLinesIntersection {
+        /// The lines.
+        lines: [LineRef; 2],
+    },
+    /// Intersection of Plane/Surface and Line: where a line passes through a plane (not parallel to it).
+    PointPlaneLine {
+        /// The plane.
+        plane: PlaneRef,
+        /// The line.
+        line: LineRef,
+    },
+    /// Intersection of Three Planes: where three planes meet (no two parallel, not through one line).
+    PointThreePlanes {
+        /// The planes.
+        planes: [PlaneRef; 3],
+    },
+    /// The centre of a sketch circle, arc, ellipse or elliptical arc.
+    PointCurveCentre {
+        /// The curve.
+        curve: CurveRef,
+    },
 }
 
 /// A curve of a sketch, as a work feature's reference.
@@ -119,30 +213,111 @@ pub struct CurveRef {
 impl WorkGeometry {
     /// True for a plane.
     pub fn is_plane(&self) -> bool {
-        matches!(self, Self::PlaneOffset { .. } | Self::PlaneThroughPoints { .. })
+        matches!(
+            self,
+            Self::PlaneOffset { .. }
+                | Self::PlaneThroughPoints { .. }
+                | Self::PlaneParallelThrough { .. }
+                | Self::PlaneMidplane { .. }
+                | Self::PlaneAngleToPlane { .. }
+                | Self::PlaneLineAndPoint { .. }
+                | Self::PlaneNormalToLine { .. }
+                | Self::PlaneNormalToCurve { .. }
+        )
     }
 
     /// True for a point.
     pub fn is_point(&self) -> bool {
-        matches!(self, Self::Point { .. })
+        matches!(
+            self,
+            Self::Point { .. }
+                | Self::PointLinesIntersection { .. }
+                | Self::PointPlaneLine { .. }
+                | Self::PointThreePlanes { .. }
+                | Self::PointCurveCentre { .. }
+        )
+    }
+
+    /// True for an axis.
+    pub fn is_axis(&self) -> bool {
+        !self.is_plane() && !self.is_point()
     }
 
     fn planes(&self) -> Vec<PlaneRef> {
         match self {
-            Self::PlaneOffset { base, .. } => vec![*base],
-            Self::AxisNormalToPlane { plane, .. } => vec![*plane],
-            Self::AxisPlanesIntersection { planes } => planes.to_vec(),
-            _ => Vec::new(),
+            Self::PlaneOffset { base, .. }
+            | Self::PlaneParallelThrough { base, .. }
+            | Self::PlaneAngleToPlane { base, .. } => vec![*base],
+            Self::AxisNormalToPlane { plane, .. } | Self::PointPlaneLine { plane, .. } => vec![*plane],
+            Self::AxisPlanesIntersection { planes } | Self::PlaneMidplane { planes } => planes.to_vec(),
+            Self::PointThreePlanes { planes } => planes.to_vec(),
+            Self::PlaneThroughPoints { .. }
+            | Self::AxisThroughPoints { .. }
+            | Self::AxisOnLine { .. }
+            | Self::AxisParallelThrough { .. }
+            | Self::AxisThroughCircle { .. }
+            | Self::Point { .. }
+            | Self::PlaneLineAndPoint { .. }
+            | Self::PlaneNormalToLine { .. }
+            | Self::PlaneNormalToCurve { .. }
+            | Self::PointLinesIntersection { .. }
+            | Self::PointCurveCentre { .. } => Vec::new(),
         }
     }
 
-    /// The sketch curves it is built on.
-    pub fn curves(&self) -> Vec<CurveRef> {
+    /// The lines it is built on.
+    pub fn lines(&self) -> Vec<LineRef> {
         match self {
-            Self::AxisOnLine { line } | Self::AxisParallelThrough { line, .. } => vec![*line],
-            Self::AxisThroughCircle { curve } => vec![*curve],
-            _ => Vec::new(),
+            Self::PlaneAngleToPlane { line, .. }
+            | Self::PlaneLineAndPoint { line, .. }
+            | Self::PlaneNormalToLine { line, .. }
+            | Self::PointPlaneLine { line, .. } => vec![*line],
+            Self::PointLinesIntersection { lines } => lines.to_vec(),
+            Self::PlaneOffset { .. }
+            | Self::PlaneThroughPoints { .. }
+            | Self::AxisThroughPoints { .. }
+            | Self::AxisNormalToPlane { .. }
+            | Self::AxisOnLine { .. }
+            | Self::AxisParallelThrough { .. }
+            | Self::AxisPlanesIntersection { .. }
+            | Self::AxisThroughCircle { .. }
+            | Self::Point { .. }
+            | Self::PlaneParallelThrough { .. }
+            | Self::PlaneMidplane { .. }
+            | Self::PlaneNormalToCurve { .. }
+            | Self::PointThreePlanes { .. }
+            | Self::PointCurveCentre { .. } => Vec::new(),
         }
+    }
+
+    /// The sketch curves it is built on (sketch lines among its lines too).
+    pub fn curves(&self) -> Vec<CurveRef> {
+        let mut out = match self {
+            Self::AxisOnLine { line } | Self::AxisParallelThrough { line, .. } => vec![*line],
+            Self::AxisThroughCircle { curve }
+            | Self::PlaneNormalToCurve { curve, .. }
+            | Self::PointCurveCentre { curve } => vec![*curve],
+            Self::PlaneOffset { .. }
+            | Self::PlaneThroughPoints { .. }
+            | Self::AxisThroughPoints { .. }
+            | Self::AxisNormalToPlane { .. }
+            | Self::AxisPlanesIntersection { .. }
+            | Self::Point { .. }
+            | Self::PlaneParallelThrough { .. }
+            | Self::PlaneMidplane { .. }
+            | Self::PlaneAngleToPlane { .. }
+            | Self::PlaneLineAndPoint { .. }
+            | Self::PlaneNormalToLine { .. }
+            | Self::PointLinesIntersection { .. }
+            | Self::PointPlaneLine { .. }
+            | Self::PointThreePlanes { .. } => Vec::new(),
+        };
+        for line in self.lines() {
+            if let LineRef::Sketch(curve) = line {
+                out.push(curve);
+            }
+        }
+        out
     }
 
     /// The sketch points it is built on.
@@ -160,14 +335,22 @@ impl WorkGeometry {
         match self {
             Self::PlaneThroughPoints { points } => points.to_vec(),
             Self::AxisThroughPoints { points } => points.to_vec(),
-            Self::AxisNormalToPlane { through, .. } | Self::AxisParallelThrough { through, .. } => {
-                vec![*through]
-            }
-            Self::Point { at } => vec![*at],
+            Self::AxisNormalToPlane { through, .. }
+            | Self::AxisParallelThrough { through, .. }
+            | Self::PlaneParallelThrough { through, .. }
+            | Self::PlaneLineAndPoint { through, .. }
+            | Self::PlaneNormalToLine { through, .. } => vec![*through],
+            Self::Point { at } | Self::PlaneNormalToCurve { at, .. } => vec![*at],
             Self::PlaneOffset { .. }
             | Self::AxisOnLine { .. }
             | Self::AxisPlanesIntersection { .. }
-            | Self::AxisThroughCircle { .. } => Vec::new(),
+            | Self::AxisThroughCircle { .. }
+            | Self::PlaneMidplane { .. }
+            | Self::PlaneAngleToPlane { .. }
+            | Self::PointLinesIntersection { .. }
+            | Self::PointPlaneLine { .. }
+            | Self::PointThreePlanes { .. }
+            | Self::PointCurveCentre { .. } => Vec::new(),
         }
     }
 
@@ -178,7 +361,8 @@ impl WorkGeometry {
             .iter()
             .all(|p| !matches!(p, PointRef::Fixed(v) if v.iter().any(|x| !x.is_finite())));
         let distance_ok = !matches!(self, Self::PlaneOffset { distance, .. } if !distance.is_finite());
-        fixed_ok && distance_ok
+        let angle_ok = !matches!(self, Self::PlaneAngleToPlane { angle, .. } if !angle.is_finite());
+        fixed_ok && distance_ok && angle_ok
     }
 }
 
@@ -210,6 +394,13 @@ impl Entity for WorkFeature {
         }
         for curve in self.geometry.curves() {
             out.push(curve.sketch.erase());
+        }
+        for line in self.geometry.lines() {
+            match line {
+                LineRef::Work(id) => out.push(id.erase()),
+                LineRef::Component(occurrence, _) => out.push(occurrence.owner()),
+                LineRef::Sketch(_) | LineRef::Origin(_) => {}
+            }
         }
         for point in self.geometry.points() {
             match point {
