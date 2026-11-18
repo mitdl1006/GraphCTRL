@@ -1231,6 +1231,7 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
             if !settings.is_valid() {
                 return Err(EditError::BadValue);
             }
+            crate::command::keep_sizes(txn, (settings.length(), settings.angle()))?;
             set_timeline(txn, |t| t.settings = *settings)?;
             Ok((Vec::new(), "Document Settings"))
         }

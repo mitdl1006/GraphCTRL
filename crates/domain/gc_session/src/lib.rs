@@ -108,6 +108,8 @@ pub struct Session {
     editing: editing::EditStack,
     /// What the last opened file had that could not be used and was dropped.
     load_warnings: Vec<String>,
+    /// Snap to grid (an application option): free cursor positions go to the document's snap spacing.
+    snap_to_grid: bool,
 }
 
 /// The browser's Representations folder.
@@ -163,6 +165,7 @@ impl Session {
             spatial: spatial::SpatialState::default(),
             editing: editing::EditStack::default(),
             load_warnings: Vec::new(),
+            snap_to_grid: false,
         }
     }
 
@@ -1359,12 +1362,50 @@ impl Session {
         self.execute(&Command::Sketch { sketch, op })
     }
 
+    /// Snap to grid on or off (Sketch tab of Application Options; the spacing is the document's Snap Spacing).
+    pub fn set_snap_to_grid(&mut self, on: bool) {
+        self.snap_to_grid = on;
+    }
+
+    /// True when Snap to grid is on.
+    pub fn snap_to_grid(&self) -> bool {
+        self.snap_to_grid
+    }
+
+    /// A tool event as the settings shape it: with constraint inference off (Document Settings), drawing
+    /// tools neither snap nor infer, as with Ctrl held; with Snap to grid on, an unsnapped cursor position
+    /// goes to the nearest grid point of the document's snap spacing.
+    fn with_settings(&self, event: ToolEvent) -> ToolEvent {
+        let settings = self.doc.settings();
+        let drawing = self.tool.kind() != ToolKind::Select;
+        let infer_off = drawing && !settings.infer_constraints;
+        let grid = |pos: [f64; 2], free: bool| -> [f64; 2] {
+            if !(self.snap_to_grid && drawing) || free {
+                return pos;
+            }
+            let [sx, sy] = settings.snap_spacing;
+            [(pos[0] / sx).round() * sx, (pos[1] / sy).round() * sy]
+        };
+        match event {
+            ToolEvent::Move { pos, px, suppress_snap } => ToolEvent::Move {
+                pos: grid(pos, suppress_snap),
+                px,
+                suppress_snap: suppress_snap || infer_off,
+            },
+            ToolEvent::Click { pos, px, modifier } if drawing => {
+                ToolEvent::Click { pos: grid(pos, modifier), px, modifier: modifier || infer_off }
+            }
+            other => other,
+        }
+    }
+
     /// Feeds an input event to the current tool and carries out what the tool asks for.
     pub fn tool_event(&mut self, event: ToolEvent) {
         // Escape first drops a 3D line in progress.
         if matches!(event, ToolEvent::Key(gc_tools::Key::Escape)) && self.spatial.drop_line() {
             return;
         }
+        let event = self.with_settings(event);
         let Some(sketch) = self.active.and_then(|id| self.doc.get(id)) else { return };
         // A typed box is evaluated here, with the document's parameters (Inventor: a value, a unit, an
         // expression or a parameter name).
