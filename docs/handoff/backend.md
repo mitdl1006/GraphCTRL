@@ -71,6 +71,21 @@ To Work with Sketch Dimensions GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185.
 | Flip Direction 대상의 "line to an arc (the arc itself)"·"between 2 arcs" 거리 | 없음 | 선-호·호-호 거리 치수 |
 | 구동 치수 토글 | 있음(`SketchOp::SetDriving`) | — |
 
+## 2026-11-18 — 원-타원·타원-타원 Tangent(리드 다음 ③)
+
+근거: GUID-A85A7A30-7D81-4C75-8769-CAD034EEA930(Tangent: "click the first curve … Click the second curve").
+
+- `GeoConstraint::Tangent`가 타원 + 원(호)과 타원 + 타원을 받는다.
+- 닫힌 식이 없어서 풀이에 숨은 접점 P(매개변수 2개)를 넣는다. 자유도 −1.
+  - 원-타원: P가 원 위·타원 위, 그리고 P의 타원 법선이 원 중심을 지난다(솔버 `TangentCircleEllipse`, 새 행 `EllipseNormalThrough`).
+  - 타원-타원: P가 두 타원 위, 법선이 평행(`TangentEllipseEllipse`, 행 `EllipseNormals`).
+  - P는 바인딩마다 지금 모양에서 "타원 위에서 상대 곡선에 가장 가까운 점"으로 시작한다(`bind.rs::contact_start`). 그래서 바깥·안쪽 접촉은 지금 놓인 쪽을 따른다.
+- 접선 도구가 타원 + 원/타원 클릭을 받는다.
+- 기울기 검사에 새 행 2개를 넣었다.
+- 차이: 접점이 문서에 저장되지 않고 매번 가장 가까운 점에서 다시 시작한다. 크게 끌면 다른 접촉 쪽으로 넘어갈 수 있다.
+- 테스트: `gc_session/tests/ellipse_round_tangent.rs`(원 바깥·안쪽, 두 타원, 도구, 저장·불러오기).
+- QA 브랜치 영향: 없음(새 솔버 변형; QA 테스트에 원-타원 접선 거부 단언 없음).
+
 ## 2026-11-18 — iProperties 기초(리드 다음 ②)
 
 근거:

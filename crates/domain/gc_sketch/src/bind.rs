@@ -15,6 +15,38 @@ pub(crate) struct Binding {
     pub radii: BTreeMap<Id<Curve>, ParamId>,
     /// For each line with a Fix constraint: the line where it lies now, as two held points it keeps to.
     fixed_lines: BTreeMap<Id<Curve>, Line2>,
+    /// For each tangent between an ellipse and a circle or another ellipse: the point where they touch,
+    /// an extra point of the solve.
+    contacts: BTreeMap<(Id<Curve>, Id<Curve>), P2>,
+}
+
+/// Where an ellipse and a circle (or arc) or another ellipse start out touching: the point of the ellipse
+/// (the first one, for two) nearest to the other curve; `None` for another pair.
+fn contact_start(sketch: &Sketch, a: Id<Curve>, b: Id<Curve>) -> Option<[f64; 2]> {
+    let xy = |p: Id<SkPoint>| sketch.pos(p).map(|q| [q[0], q[1]]);
+    let (e, other) = if sketch.ellipse(a).is_some() {
+        (a, b)
+    } else if sketch.ellipse(b).is_some() {
+        (b, a)
+    } else {
+        return None;
+    };
+    // How far a point is from the other curve.
+    let gap: Box<dyn Fn([f64; 2]) -> f64> = if let Some((c, r)) = sketch.round(other) {
+        let c = xy(c)?;
+        Box::new(move |p: [f64; 2]| (gc_math::fm::hypot(p[0] - c[0], p[1] - c[1]) - r).abs())
+    } else if let Some((c, m, minor)) = sketch.ellipse(other) {
+        let (c, m) = (xy(c)?, xy(m)?);
+        let outline = crate::model::ellipse_points(c, m, minor, None, 720)?.0;
+        Box::new(move |p: [f64; 2]| {
+            outline.iter().map(|q| gc_math::fm::hypot(p[0] - q[0], p[1] - q[1])).fold(f64::INFINITY, f64::min)
+        })
+    } else {
+        return None;
+    };
+    let (c, m, minor) = sketch.ellipse(e)?;
+    let points = crate::model::ellipse_points(xy(c)?, xy(m)?, minor, None, 720)?.0;
+    points.into_iter().min_by(|p, q| gap(*p).total_cmp(&gap(*q)))
 }
 
 /// The solver id of a sketch item: its document-wide raw id. Blame from the solver maps straight back.
@@ -99,6 +131,28 @@ impl Binding {
         b: Id<Curve>,
         side: f64,
     ) -> Result<Option<Constraint>, SketchError> {
+        // An ellipse with a circle or another ellipse: through their touching point.
+        if let Some(p) = self.contacts.get(&(a, b)).copied() {
+            let ellipse_of = |curve: Id<Curve>| -> Result<(P2, P2, ParamId), SketchError> {
+                let (c, major, _) = sketch.ellipse(curve).ok_or(SketchError::WrongCurveKind)?;
+                let minor = *self.radii.get(&curve).ok_or(SketchError::WrongCurveKind)?;
+                Ok((self.p2(c)?, self.p2(major)?, minor))
+            };
+            return Ok(Some(match (sketch.ellipse(a).is_some(), sketch.ellipse(b).is_some()) {
+                (true, true) => {
+                    Constraint::TangentEllipseEllipse { p, first: ellipse_of(a)?, second: ellipse_of(b)? }
+                }
+                (true, false) => {
+                    let (c, major, minor) = ellipse_of(a)?;
+                    Constraint::TangentCircleEllipse { p, round: self.round(sketch, b)?, c, major, minor }
+                }
+                (false, true) => {
+                    let (c, major, minor) = ellipse_of(b)?;
+                    Constraint::TangentCircleEllipse { p, round: self.round(sketch, a)?, c, major, minor }
+                }
+                (false, false) => return Ok(None),
+            }));
+        }
         let (line_id, e) = if sketch.line(a).is_some() && sketch.ellipse(b).is_some() {
             (a, b)
         } else if sketch.line(b).is_some() && sketch.ellipse(a).is_some() {
@@ -225,6 +279,14 @@ impl Binding {
     /// What a constraint needs in the system before it is lowered: a fixed line's held copy (two points
     /// held where the line's ends are now).
     pub fn prepare(&mut self, sketch: &Sketch, c: &GeoConstraint) -> Result<(), SketchError> {
+        if let GeoConstraint::Tangent { a, b, .. } = *c
+            && !sketch.is_spatial()
+            && !self.contacts.contains_key(&(a, b))
+            && let Some(at) = contact_start(sketch, a, b)
+        {
+            let p = self.sys.add_point2(at[0], at[1]);
+            self.contacts.insert((a, b), p);
+        }
         if let GeoConstraint::FixCurve(curve) = *c
             && !sketch.is_spatial()
             && !self.fixed_lines.contains_key(&curve)
@@ -477,6 +539,7 @@ impl Sketch {
             points: BTreeMap::new(),
             radii: BTreeMap::new(),
             fixed_lines: BTreeMap::new(),
+            contacts: BTreeMap::new(),
         };
         let spatial = self.is_spatial();
         for (id, point) in &self.points {
