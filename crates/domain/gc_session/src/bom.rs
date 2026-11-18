@@ -185,7 +185,9 @@ impl Session {
             TreeKey::Component(occurrence) => self.properties(Some(occurrence)).part_number,
             TreeKey::Subassembly(_) => String::new(),
         };
-        if own.is_empty() { row.name.clone() } else { own }
+        // Spaces typed after a part number do not make another part ("BOLT " is "BOLT"); letter case does.
+        let own = own.trim_end();
+        if own.is_empty() { row.name.clone() } else { own.to_owned() }
     }
 
     fn bom_row(&self, line: Line, item: String, level: u32) -> BomRow {
@@ -242,8 +244,10 @@ pub fn structure_name(structure: BomStructure) -> &'static str {
 }
 
 /// A CSV field, quoted when it holds a comma, quote or line break. A field a spreadsheet would read as a
-/// formula (starting with `=`, `+`, `-`, `@`) gets a leading apostrophe.
+/// formula (starting with `=`, `+`, `-`, `@`, a tab or a carriage return: the characters OWASP lists for
+/// CSV injection) gets a leading apostrophe.
 fn csv_field(text: &str) -> String {
-    let text = if text.starts_with(['=', '+', '-', '@']) { format!("'{text}") } else { text.to_owned() };
+    let formula = text.starts_with(['=', '+', '-', '@', '\t', '\r']);
+    let text = if formula { format!("'{text}") } else { text.to_owned() };
     if text.contains([',', '"', '\n', '\r']) { format!("\"{}\"", text.replace('"', "\"\"")) } else { text }
 }

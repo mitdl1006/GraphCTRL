@@ -129,6 +129,14 @@ struct FileV1 {
     relationships: BTreeMap<Id<gc_doc::Relationship>, gc_doc::Relationship>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     roles: BTreeMap<Id<gc_doc::SketchRole>, gc_doc::SketchRole>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    object_types: BTreeMap<Id<gc_doc::ObjectType>, gc_doc::ObjectType>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    objects: BTreeMap<Id<gc_doc::WorkObject>, gc_doc::WorkObject>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    state_vars: BTreeMap<Id<gc_doc::StateVar>, gc_doc::StateVar>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    tasks: BTreeMap<Id<gc_doc::Task>, gc_doc::Task>,
 }
 
 /// A loaded document.
@@ -197,6 +205,10 @@ pub fn to_text(doc: &Document) -> Result<String, PersistError> {
         timelines: doc.timeline().map(|(id, t)| (id, t.clone())).into_iter().collect(),
         relationships: doc.relationships().iter().map(|(id, r)| (id, r.clone())).collect(),
         roles: doc.roles().iter().map(|(id, r)| (id, r.clone())).collect(),
+        object_types: doc.object_types().iter().map(|(id, x)| (id, x.clone())).collect(),
+        objects: doc.objects().iter().map(|(id, x)| (id, x.clone())).collect(),
+        state_vars: doc.state_vars().iter().map(|(id, x)| (id, x.clone())).collect(),
+        tasks: doc.tasks().iter().map(|(id, x)| (id, x.clone())).collect(),
     };
     let mut text = serde_json::to_string_pretty(&file)?;
     text.push('\n');
@@ -275,6 +287,10 @@ pub fn from_text(text: &str) -> Result<Loaded, PersistError> {
         timelines,
         relationships: file.relationships,
         roles: file.roles,
+        object_types: file.object_types,
+        objects: file.objects,
+        state_vars: file.state_vars,
+        tasks: file.tasks,
     })?;
     let needs_repair = doc
         .sketches()

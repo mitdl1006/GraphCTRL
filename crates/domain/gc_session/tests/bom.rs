@@ -172,3 +172,23 @@ fn csv_export_quotes_fields_and_unknown_rows_are_refused() {
     let gone = TreeKey::Subassembly(gc_doc::SubassemblyId(99));
     assert!(s.set_bom_structure(gone, BomStructure::Phantom).is_err());
 }
+
+/// QA (2026-11-18): cells starting with a tab or a carriage return are formula starts too (OWASP's CSV
+/// injection list), and spaces after a part number do not make another part while letter case does.
+#[test]
+fn csv_guards_tab_and_carriage_return_and_trailing_spaces_merge_part_numbers() {
+    let mut s = Session::new();
+    body(&mut s, 0.0, "\t=1+2", "\r=1+2");
+    let csv = s.bom_csv(BomView::PartsOnly);
+    let row = csv.split("\r\n").nth(1).unwrap();
+    assert!(!row.contains(",\t=") && !row.contains("\"\t=") && !row.contains(",\r="), "{row:?}");
+    assert!(row.contains("'\t=1+2") && row.contains("'\r=1+2"), "{row:?}");
+
+    let mut s = Session::new();
+    body(&mut s, 0.0, "BOLT", "");
+    body(&mut s, 1.0, "BOLT ", "");
+    body(&mut s, 2.0, "bolt", "");
+    let parts: Vec<(String, u32)> =
+        s.bill_of_materials(BomView::PartsOnly).into_iter().map(|r| (r.part_number, r.quantity)).collect();
+    assert_eq!(parts, vec![("BOLT".to_owned(), 2), ("bolt".to_owned(), 1)]);
+}

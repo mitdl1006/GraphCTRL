@@ -26,6 +26,7 @@ mod project;
 mod role;
 mod sketch_pick;
 mod spatial;
+mod work;
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
