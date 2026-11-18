@@ -464,8 +464,8 @@ fn scaling_an_ellipse_scales_both_radii() {
 
 // ---- Operations that refuse ellipses ----
 
-/// Trim, Split, Extend, Offset and Fillet do not cut or offset ellipses (the backend says so): each is refused
-/// with no trace, never a crash and never a half-cut curve.
+/// Split, Offset and Fillet do not cut or offset ellipses (the backend says so): each is refused with no
+/// trace; Trim and Extend are supported since the elliptical arcs and are covered in qa_ellipse_cut.rs.
 #[test]
 fn trim_split_extend_offset_and_fillet_refuse_ellipses() {
     let (mut s, k) = setup();
@@ -485,9 +485,10 @@ fn trim_split_extend_offset_and_fillet_refuse_ellipses() {
         .unwrap();
         curve_of(&created)
     };
-    refused(&mut s, k, "trim", SketchOp::Trim { curve: e, at: [0.0, 0.02] });
+    // Trim and Extend of ellipses and elliptical arcs came later (see qa_ellipse_cut.rs): refused or sane.
+    refused_or_sane(&mut s, k, "trim", SketchOp::Trim { curve: e, at: [0.0, 0.02] });
     refused(&mut s, k, "split", SketchOp::Split { curve: e, at: [0.0, 0.02] });
-    refused(&mut s, k, "extend", SketchOp::Extend { curve: e, at: [0.04, 0.0] });
+    refused_or_sane(&mut s, k, "extend", SketchOp::Extend { curve: e, at: [0.04, 0.0] });
     // Trimming the line where it crosses the ellipse is fine, and leaves the ellipse whole.
     refused_or_sane(
         &mut s,
