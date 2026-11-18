@@ -54,6 +54,21 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 관계 사슬 성능(KNOWN_ISSUES "컴포넌트 사슬 관계 추가가 급격히 느려짐")
+
+- `solve_relationships_holding`은 섬마다 먼저 **단계 풀이**(`staged`)를 한다. 고정 컴포넌트에서 너비 우선으로 한 컴포넌트씩 놓는다.
+  고정 컴포넌트가 없는 섬은 첫 컴포넌트를 세워 둔다. 각 단계는 이미 놓인 컴포넌트와의 관계만 6변수로 푼다.
+  이미 만족하면 건너뛴다(이전 해를 초기값으로 씀).
+  끝나고 섬의 관계가 하나라도 안 맞으면(루프, 나중 컴포넌트가 있어야 정해지는 경우, 충돌) 시작 자세로 되돌린다.
+  그다음 예전처럼 섬 전체를 푼다. 진단(`sick`, `conflicting_relationships`)은 그대로다.
+- 섬 전체 풀이(`least_squares_on`)를 희소하게 바꿨다.
+  - 야코비안: 움직인 컴포넌트에 닿는 관계만 다시 계산한다.
+  - 정규 행렬: 블록 조립, 너비 우선 순서의 envelope(skyline) 저장, envelope Cholesky(`envelope_solve`)로 푼다(예전: 밀집 가우스 소거).
+  - 멈춤: 비용 감소가 1e-9 비율보다 작은 단계가 3번 이어지면 멈춘다(충돌로 0이 아닌 최소에 머문 경우).
+- 측정(QA `relationship_build_times`, 디버그): 30개 사슬 426 ms → 0.8 ms.
+  새 테스트 `gc_session/tests/relationship_chain.rs`(접지된 바탕 위에 Mate·Rigid를 번갈아 건 100개 사슬, 1 s 상한, 디버그에서 통과).
+  그 사슬 끝에 충돌 관계를 넣으면: 릴리스에서 거부 48 s → 54 ms, 진단 106 ms.
+
 ## 2026-11-18 — QA 버그 3건(작업 축, qa_joint_assemble_axes.rs)
 
 - `CellOp::AddWorkFeature`·`SetWorkFeature`는 넣은 뒤 `work_shape`가 `None`이면 `BadValue`로 거부한다.
