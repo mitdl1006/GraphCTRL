@@ -1194,7 +1194,7 @@ fn measured(term: &Term, poses: &[DPose3]) -> Option<f64> {
 }
 
 /// The kind's value: an offset or an angle; `None` for kinds without one.
-fn value_of(kind: &RelationKind) -> Option<f64> {
+pub(crate) fn value_of(kind: &RelationKind) -> Option<f64> {
     match *kind {
         RelationKind::Mate { offset, .. }
         | RelationKind::Flush { offset }
@@ -1206,7 +1206,7 @@ fn value_of(kind: &RelationKind) -> Option<f64> {
 }
 
 /// The kind with another value (offset or angle).
-fn with_value(kind: &RelationKind, value: f64) -> RelationKind {
+pub(crate) fn with_value(kind: &RelationKind, value: f64) -> RelationKind {
     match *kind {
         RelationKind::Mate { sense, .. } => RelationKind::Mate { offset: value, sense },
         RelationKind::Flush { .. } => RelationKind::Flush { offset: value },

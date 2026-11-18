@@ -1007,7 +1007,7 @@ fn field_unit(kind: &DimKind) -> Unit {
 
 /// Evaluates a field: a bare number in a length field (`Unit::Mm`) or an angle field (`Unit::Deg`) means the
 /// document's length or angle unit (Document Settings, Units tab).
-fn evaluate(source: &str, scope: &dyn Scope, unit: Unit) -> Result<f64, EditError> {
+pub(crate) fn evaluate(source: &str, scope: &dyn Scope, unit: Unit) -> Result<f64, EditError> {
     let unit = match (unit, scope.default_units()) {
         (Unit::Mm, Some((length, _))) => length,
         (Unit::Deg, Some((_, angle))) => angle,
@@ -1080,11 +1080,11 @@ pub(crate) fn keep_sizes(txn: &mut Txn<'_>, new: (Unit, Unit)) -> Result<(), Edi
     for (sketch_id, id, text, value) in rewrites {
         txn.modify(sketch_id, |s: &mut Sketch, _| s.set_dimension(id, &text, value))??;
     }
-    Ok(())
+    crate::relparam::keep_sizes(txn, &after)
 }
 
 /// The parameters and dimensions that expressions can name, with the document's units.
-struct DocScope {
+pub(crate) struct DocScope {
     params: BTreeMap<String, Quantity>,
     units: (Unit, Unit),
 }
@@ -1099,7 +1099,7 @@ impl Scope for DocScope {
     }
 }
 
-fn scope_of(doc: &Document) -> DocScope {
+pub(crate) fn scope_of(doc: &Document) -> DocScope {
     let settings = doc.settings();
     DocScope { params: params_of(doc), units: (settings.length(), settings.angle()) }
 }
@@ -1132,25 +1132,41 @@ fn params_of(doc: &Document) -> BTreeMap<String, Quantity> {
             scope.entry(dimension.name.clone()).or_insert(quantity);
         }
     }
+    // Constraint parameters: the offset or angle of each assembly constraint.
+    for (_, param, angle) in doc.relation_params() {
+        let quantity = if angle { Quantity::angle(param.value) } else { Quantity::length(param.value) };
+        scope.entry(param.name.clone()).or_insert(quantity);
+    }
     scope
 }
 
 /// Splits `NAME = expression` (Inventor: typing `HGHT = 5mm` in a dimension names its parameter HGHT):
 /// the name and the expression; `None` when the text is a plain expression.
-fn named_source(source: &str) -> Option<(String, String)> {
+pub(crate) fn named_source(source: &str) -> Option<(String, String)> {
     let (name, rest) = source.split_once('=')?;
     let name = name.trim();
     gc_expr::is_valid_param_name(name).then(|| (name.to_owned(), rest.trim().to_owned()))
 }
 
 /// True when `name` is free for a parameter or dimension (other than `except`).
-fn name_free(doc: &Document, name: &str, except: Option<(Id<Sketch>, Id<Dimension>)>) -> bool {
+pub(crate) fn name_free(doc: &Document, name: &str, except: Option<(Id<Sketch>, Id<Dimension>)>) -> bool {
     let param = doc.params().iter().any(|(_, p)| p.name == name);
     let dimension = doc
         .sketches()
         .iter()
         .any(|(sid, s)| s.dimensions.iter().any(|(did, d)| d.name == name && Some((sid, *did)) != except));
-    !param && !dimension
+    !param && !dimension && !crate::relparam::name_taken(doc, name, None)
+}
+
+/// The highest `N` among the names `dN` in use by dimensions, parameters and constraint parameters.
+pub(crate) fn highest_default_name(doc: &Document) -> Option<u64> {
+    doc.sketches()
+        .iter()
+        .flat_map(|(_, s)| s.dimensions.values().map(|d| d.name.clone()).collect::<Vec<_>>())
+        .chain(doc.params().iter().map(|(_, p)| p.name.clone()))
+        .chain(doc.relation_params().into_iter().map(|(_, p, _)| p.name.clone()))
+        .filter_map(|n| n.strip_prefix('d').and_then(|k| k.parse::<u64>().ok()))
+        .max()
 }
 
 /// Gives every unnamed dimension the next free model parameter name `dN` (above the highest in use).
@@ -1166,13 +1182,7 @@ fn name_dimensions(txn: &mut Txn<'_>) -> Result<(), EditError> {
     if unnamed.is_empty() {
         return Ok(());
     }
-    let highest = doc
-        .sketches()
-        .iter()
-        .flat_map(|(_, s)| s.dimensions.values().map(|d| d.name.clone()).collect::<Vec<_>>())
-        .chain(doc.params().iter().map(|(_, p)| p.name.clone()))
-        .filter_map(|n| n.strip_prefix('d').and_then(|k| k.parse::<u64>().ok()))
-        .max();
+    let highest = highest_default_name(doc);
     for (next, (sketch, dimension)) in (highest.map_or(0, |h| h + 1)..).zip(unnamed) {
         let name = format!("d{next}");
         txn.modify(sketch, |s: &mut Sketch, _| {
@@ -1214,19 +1224,22 @@ pub(crate) fn rename_in(source: &str, old: &str, new: &str) -> Option<String> {
     Some(out)
 }
 
-fn names_in(source: &str) -> BTreeSet<String> {
+pub(crate) fn names_in(source: &str) -> BTreeSet<String> {
     gc_expr::parse(source).map(|e| e.names().into_iter().map(str::to_owned).collect()).unwrap_or_default()
 }
 
 /// Re-evaluates every parameter in dependency order, then every driving dimension, and lets the sketches
 /// follow. Any failure fails the whole command.
-fn propagate(txn: &mut Txn<'_>) -> Result<(), EditError> {
+pub(crate) fn propagate(txn: &mut Txn<'_>) -> Result<(), EditError> {
     /// Something whose value comes from an expression.
     #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
     enum Node {
         Param(Id<Param>),
         Dimension(Id<Sketch>, Id<Dimension>),
+        Relation(Id<crate::relate::Relationship>),
     }
+    let protected = txn.doc().protected_freedom();
+    let mut moved = false;
     let doc = txn.doc();
     let mut by_name: BTreeMap<String, Node> = BTreeMap::new();
     let mut sources: Vec<(Node, String)> = Vec::new();
@@ -1241,6 +1254,10 @@ fn propagate(txn: &mut Txn<'_>) -> Result<(), EditError> {
             }
             sources.push((Node::Dimension(sid, *did), d.source.clone()));
         }
+    }
+    for (id, p, _) in doc.relation_params() {
+        by_name.entry(p.name.clone()).or_insert(Node::Relation(id));
+        sources.push((Node::Relation(id), p.source.clone()));
     }
     let deps: BTreeMap<Node, BTreeSet<Node>> = sources
         .iter()
@@ -1271,7 +1288,18 @@ fn propagate(txn: &mut Txn<'_>) -> Result<(), EditError> {
                     txn.modify(sketch_id, |s: &mut Sketch, _| s.set_dimension(id, &source, value))??;
                 }
             }
+            Node::Relation(id) => {
+                if let Some(value) = crate::relparam::reevaluated(txn.doc(), id)? {
+                    crate::relparam::write_value(txn, id, value)?;
+                    moved = true;
+                }
+            }
         }
+    }
+    // Constraints whose values followed are solved again; an assembly that cannot follow refuses.
+    if moved {
+        crate::cell::settle(txn)?;
+        crate::cell::check_protected(txn, &protected)?;
     }
     Ok(())
 }
@@ -1345,7 +1373,7 @@ fn infer(sketch: &mut Sketch, ids: &mut IdAlloc, constraint: GeoConstraint, crea
 }
 
 /// A value rounded to 6 significant decimals for writing into a dimension's source text.
-fn round_for_display(value: f64) -> f64 {
+pub(crate) fn round_for_display(value: f64) -> f64 {
     (value * 1e6).round() / 1e6
 }
 
@@ -3257,6 +3285,7 @@ pub(crate) fn run(txn: &mut Txn<'_>, command: &Command) -> Result<(Vec<Created>,
             let dimension_has_it =
                 txn.doc().sketches().iter().any(|(_, s)| s.dimensions.values().any(|d| d.name == name));
             let taken = dimension_has_it
+                || crate::relparam::name_taken(txn.doc(), &name, None)
                 || txn.doc().params().iter().any(|(other, p)| other != *id && p.name == name);
             if taken || !gc_expr::is_valid_param_name(&name) {
                 return Err(EditError::BadName(name));
@@ -3286,6 +3315,7 @@ pub(crate) fn run(txn: &mut Txn<'_>, command: &Command) -> Result<(Vec<Created>,
                     }
                 })?;
             }
+            crate::relparam::rewrite(txn, &old, &name)?;
             txn.modify(*id, |p: &mut Param, _| p.name.clone_from(&name))?;
             propagate(txn)?;
             Ok((Vec::new(), "Rename parameter"))
@@ -3300,7 +3330,9 @@ pub(crate) fn run(txn: &mut Txn<'_>, command: &Command) -> Result<(Vec<Created>,
             let used_by_dimension = txn.doc().sketches().iter().any(|(_, s)| {
                 s.dimensions.values().any(|d| d.driving && names_in(&d.source).contains(&name))
             });
-            if used_by_param || used_by_dimension {
+            let used_by_constraint =
+                txn.doc().relation_params().iter().any(|(_, p, _)| names_in(&p.source).contains(&name));
+            if used_by_param || used_by_dimension || used_by_constraint {
                 return Err(EditError::InUse);
             }
             txn.remove(*id)?;
@@ -3444,6 +3476,7 @@ pub fn apply(doc: &mut Document, command: &Command) -> Result<Applied, EditError
     crate::role::prune(&mut txn)?;
     crate::tree::prune_states(&mut txn)?;
     name_dimensions(&mut txn)?;
+    crate::relparam::sync(&mut txn)?;
     let (delta, changed) = txn.commit()?;
     Ok(Applied { delta, changed, created, label })
 }
@@ -3480,7 +3513,7 @@ fn rename_dimension(
 }
 
 /// Renames references to `old` in every parameter's and dimension's expression.
-fn rewrite_references(txn: &mut Txn<'_>, old: &str, new: &str) -> Result<(), EditError> {
+pub(crate) fn rewrite_references(txn: &mut Txn<'_>, old: &str, new: &str) -> Result<(), EditError> {
     let params: Vec<(Id<Param>, String)> = txn
         .doc()
         .params()
@@ -3506,5 +3539,5 @@ fn rewrite_references(txn: &mut Txn<'_>, old: &str, new: &str) -> Result<(), Edi
             }
         })?;
     }
-    Ok(())
+    crate::relparam::rewrite(txn, old, new)
 }

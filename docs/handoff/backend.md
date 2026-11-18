@@ -124,6 +124,27 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 구속 값 = 모델 매개변수(어셈블리 대조 목록 3)
+
+근거: About Parameters in Models(`GUID-8E5C63EA-0540-4EBE-9B17-B8159C7FE40C`) — "Model parameters are created automatically when you define a sketch dimension …, add an assembly constraint …. default names, such as d0, d1, d2 … You can enter expressions in edit boxes that define the parameter names and values." To Work with Parameters in Models(`GUID-595F9D8E-9EEA-4446-91AB-830E5BAE548E`) — "If you entered a dimension or other value in an edit box, the value is listed here." Edit assembly constraints(`GUID-36315745-5FE6-4277-9F00-E410B962D83F`) — 브라우저 아래 편집 상자에서 오프셋·각도만 고침.
+
+- 모델(`gc_doc/src/relparam.rs`): `Components.relation_params: BTreeMap<Id<Relationship>, RelationParam { name, source, value }>`(serde default; `Relationship`·`RelationKind`는 그대로). 값이 있는 구속(Mate/Flush/Tangent/Insert 오프셋, Angle 각도)만 가진다. 조인트·Symmetry는 없음.
+- 자동: 명령이 끝날 때 값 있는 구속에 다음 빈 `dN`(스케치 치수·사용자 매개변수와 같은 번호 공간, 이름 충돌 검사도 공통)과 소스 텍스트(`"12.5 mm"`, 문서 단위)를 준다. `SetRelationship`으로 숫자를 직접 바꾸면 소스가 그 숫자로 다시 써진다. 구속이 지워지면 매개변수도 지워지고, 그 이름을 쓰던 식에는 마지막 값이 `(10 mm)`처럼 들어간다(거부하지 않음).
+- 프런트용 API(추가만):
+
+| 무엇 | 호출 |
+|---|---|
+| 값 상자에 입력(숫자·단위·식·`이름 = 식`) | `Command::Cell(CellOp::SetRelationValue { id, source })` — 실패: `EditError::Expr{start,end}`(식 오류), `Cycle`, `BadValue`(값 없는 종류), `Unsolvable`, `Protected` |
+| 매개변수 이름 바꾸기 | `CellOp::RenameRelationParam { id, name }` — `BadName`(형식·중복) |
+| 한 구속의 매개변수 | `doc.relation_param(id) -> Option<&RelationParam>` |
+| 매개변수 표 행 | `doc.relation_params() -> Vec<(Id<Relationship>, &RelationParam, bool /*각도*/)>` — 값은 SI(m, rad) |
+
+- 따라가기: 구속 식이 매개변수·치수·다른 구속 이름을 쓰면 `SetParam`/치수 변경 때 구속 값이 바뀌고 어셈블리를 다시 푼다(한 실행 취소 단계; 안 풀리거나 Protect를 어기면 명령 전체 거부). 매개변수·치수 식에서 구속 이름을 쓸 수 있다. `RenameParam`·치수 이름 변경은 구속 식도 고친다. 구속이 쓰는 매개변수의 `DeleteParam`은 `InUse`.
+- 단위 변경(`SetDocSettings`): 단위 없는 숫자 소스는 옛 단위를 붙여 크기를 유지한다(치수와 같은 규칙).
+- 한계: Limits(최대·최소·Resting)는 매개변수가 아니다. Drive는 문서를 바꾸지 않으므로 매개변수와 무관. 위치 표현의 구속 값 오버라이드는 항목 9에서.
+- 파일: 구속이 있는 문서는 첫 명령 때 타임라인에 `relation_params`가 생긴다(옛 파일은 그대로 열림).
+- 테스트: `gc_doc/tests/relation_params.rs`.
+
 ## 2026-11-18 — 스케줄 우회 기록과 결정적 장면
 
 - `Schedule.detours: Vec<Detour { task, robot, around }>` — 움직이는 로봇을 기다리지 않고 돌아간 작업.
