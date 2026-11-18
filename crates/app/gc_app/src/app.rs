@@ -1508,6 +1508,10 @@ impl eframe::App for GraphCtrlApp {
         if self.measure.open {
             self.measure.window(&ctx, &self.session, lang);
         }
+        // A path made by Create Path in the view becomes the one the panel works on.
+        if let Some(path) = self.viewport.take_route_made() {
+            self.cell.path = Some(path);
+        }
         // The browser row under the pointer is boxed in the view, from the next frame on.
         if !self.left_open {
             self.params.hovered = None;
