@@ -3,6 +3,7 @@
 mod cell;
 mod pose;
 mod role;
+mod work;
 
 use egui::{RichText, Ui};
 use gc_core::Id;
@@ -18,6 +19,7 @@ use gc_ui::panel::TreeRow;
 pub use cell::{CellUi, cell, problem_text, status_text};
 pub use pose::{PoseCalc, RotationInput, pose_calculator};
 pub use role::role_properties;
+pub use work::{WorkItem, WorkUi, work_browser};
 
 /// What the user asked for in the browser.
 #[derive(Clone, Debug, PartialEq)]
@@ -63,6 +65,8 @@ pub enum BrowserAction {
     SuppressRelationship(gc_core::Id<gc_doc::Relationship>, bool),
     /// Select a sketch role (a waypoint or a path of a sketch), or none; the view marks it.
     SelectRole(Option<Id<gc_doc::SketchRole>>),
+    /// Change the work model (object types, objects, state variables, tasks).
+    Work(gc_doc::WorkOp),
     /// Change the browser's user-defined folders.
     Folder(gc_doc::FolderOp),
     /// Isolate these components (Inventor: Isolate; a subassembly is given as its members).
@@ -113,6 +117,8 @@ pub struct ParamsUi {
     /// The component row the pointer is over this frame: the view shows its bounding box (Inventor 2026
     /// help, assembly parity notes: hovering a browser node shows its bounding box in the graphics).
     pub hovered: Option<gc_core::AnyId>,
+    /// What the work node of the browser shows selected, and its rename.
+    pub work: work::WorkUi,
     /// The rows marked with Ctrl+click (for moving several into a folder or subassembly at once).
     pub marked: Vec<gc_doc::TreeKey>,
     /// The sketch role selected in the browser.
@@ -519,6 +525,9 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
     }
     if let Some(command) = params(ui, session, lang, state) {
         action = Some(BrowserAction::Edit(Box::new(command)));
+    }
+    if let Some(work) = work::work_browser(ui, session, lang, &mut state.work) {
+        action = Some(work);
     }
     let row = |name: &str, item| (name.to_owned(), name.to_owned(), item);
     browser_section(
@@ -1285,7 +1294,7 @@ fn robot_links(
 
 /// A small dot at the right of a row: filled (fully constrained), hollow (can still move) or a dash
 /// (not satisfied), as Inventor marks components and constraints.
-fn status_dot(ui: &Ui, row: egui::Rect, full: Option<bool>, sick: bool) {
+pub(crate) fn status_dot(ui: &Ui, row: egui::Rect, full: Option<bool>, sick: bool) {
     let at = egui::pos2(row.right() - 34.0, row.center().y);
     let painter = ui.painter();
     if sick {

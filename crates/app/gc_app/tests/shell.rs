@@ -6510,3 +6510,58 @@ fn dragging_a_browser_row_onto_a_folder_moves_it_in() {
     harness.run_steps(4);
     assert_eq!(harness.state().session.folders()[0].members.len(), 2, "the dragged row is in the folder");
 }
+
+/// The work node of the browser (plan 9.4): groups for object types, objects, variables and tasks; a group's
+/// menu makes a new item, a row renames and deletes it.
+#[test]
+fn the_browser_work_node_makes_and_deletes_tasks() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let left = |h: &egui_kittest::Harness<'_, GraphCtrlApp>, label: &str| {
+        h.get_all_by_label(label)
+            .find(|n| n.rect().min.x < 300.0)
+            .unwrap_or_else(|| panic!("no {label}"))
+            .rect()
+            .center()
+    };
+    // The work node opens.
+    let at = left(&harness, "작업");
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run_steps(2);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+    harness.run_steps(3);
+    // A new task through the task group's menu.
+    let at = left(&harness, "작업 목록");
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run_steps(2);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+    harness.run_steps(3);
+    harness.get_by_label("새로 만들기").click();
+    harness.run_steps(3);
+    assert_eq!(harness.state().session.doc().tasks().len(), 1);
+    let name = harness.state().session.doc().tasks().iter().next().unwrap().1.name.clone();
+    // (The row and its delete button carry the name.)
+    assert!(harness.get_all_by_label_contains(&name).count() >= 1);
+    // Deleted again.
+    let id = harness.state().session.tasks()[0];
+    harness.state_mut().session.edit_work(gc_doc::WorkOp::DeleteTask(id)).unwrap();
+    harness.run_steps(2);
+    assert!(harness.state().session.doc().tasks().is_empty());
+}

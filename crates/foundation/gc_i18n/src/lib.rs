@@ -397,6 +397,18 @@ messages! {
     /// Button beside a browser item: delete it. `{0}` is the item's name.
     CmdDeleteItem => ("{0} 삭제", "Delete {0}"),
     /// Browser node: named parameters.
+    WorkTitle => ("작업", "Work"),
+    WorkObjectTypes => ("객체 유형", "Object Types"),
+    WorkObjects => ("작업 객체", "Work Objects"),
+    WorkVars => ("변수", "Variables"),
+    WorkTasks => ("작업 목록", "Tasks"),
+    WorkNew => ("새로 만들기", "New"),
+    WorkTypeBase => ("유형", "Type"),
+    WorkObjectBase => ("객체", "Object"),
+    WorkVarBase => ("변수", "Var"),
+    WorkTaskBase => ("작업", "Task"),
+    WorkStateBase1 => ("상태1", "State1"),
+    WorkStateBase2 => ("상태2", "State2"),
     BrowserParams => ("파라미터", "Parameters"),
     /// Parameter editor: name field hint.
     ParamName => ("이름", "name"),
