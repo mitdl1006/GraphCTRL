@@ -285,6 +285,151 @@ pub fn cylindrical_region_in(
     Some(CylinderRegion { triangles, centre, axis, radius, length: high - low })
 }
 
+/// A conical region of a mesh, in the mesh's frame.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ConeRegion {
+    /// The triangles of the region.
+    pub triangles: Vec<u32>,
+    /// The point the cone's surface lines meet in (it may lie outside the region: a truncated cone).
+    pub apex: DVec3,
+    /// The unit axis direction, from the apex towards the region.
+    pub axis: DVec3,
+    /// The angle between the axis and the surface, radians (between 0 and a quarter turn).
+    pub half_angle: f64,
+    /// Where the region begins and ends, measured from the apex along the axis.
+    pub span: (f64, f64),
+}
+
+/// The conical surface around `triangle`, when there is one: triangles reached across edges where the
+/// surface bends by less than `bend` (radians) are fitted with an axis (the direction all their normals
+/// make the same angle with) and an apex (the point all their planes pass through); the fit must hold
+/// within `tolerance`. `None` for flat, cylindrical or irregular surfaces.
+pub fn conical_region(mesh: &MeshData, triangle: u32, bend: f64, tolerance: f64) -> Option<ConeRegion> {
+    conical_region_in(mesh, &Adjacency::of(mesh), triangle, bend, tolerance)
+}
+
+/// [`conical_region`] with the mesh's adjacency already built.
+pub fn conical_region_in(
+    mesh: &MeshData,
+    adjacency: &Adjacency,
+    triangle: u32,
+    bend: f64,
+    tolerance: f64,
+) -> Option<ConeRegion> {
+    let positions = mesh.positions();
+    let indices = mesh.indices();
+    let count = indices.len() / 3;
+    if triangle as usize >= count {
+        return None;
+    }
+    let corners = |t: usize| -> Option<[DVec3; 3]> {
+        let at = |k: usize| indices.get(3 * t + k).and_then(|i| positions.get(*i as usize)).copied();
+        Some([corner(at(0)?), corner(at(1)?), corner(at(2)?)])
+    };
+    let normal_of = |t: usize| corners(t).and_then(|[a, b, c]| (b - a).cross(c - a).try_normalize());
+    let first = normal_of(triangle as usize)?;
+    let cos_bend = gc_math::fm::cos(bend);
+    let mut region = BTreeSet::from([triangle as usize]);
+    let mut todo = vec![triangle as usize];
+    while let Some(t) = todo.pop() {
+        let Some(n) = normal_of(t) else { continue };
+        for &next in adjacency.of_triangle(t) {
+            let next = next as usize;
+            if !region.contains(&next) && normal_of(next).is_some_and(|m| m.dot(n) >= cos_bend) {
+                region.insert(next);
+                todo.push(next);
+            }
+        }
+    }
+    let faces: Vec<(DVec3, DVec3)> =
+        region.iter().filter_map(|t| Some((normal_of(*t)?, corners(*t)?[0]))).collect();
+    if faces.len() < 3 {
+        return None;
+    }
+    // The normals of a cone all make the same angle with its axis: their tips lie in one plane square
+    // to it. The axis is square to every difference of normals.
+    let differences: Vec<DVec3> =
+        faces.iter().map(|(n, _)| *n - first).filter(|d| d.length() > 1e-9).collect();
+    let mut sum = DVec3::ZERO;
+    for pair in differences.windows(2) {
+        let c = pair[0].cross(pair[1]);
+        sum += if c.dot(sum) < 0.0 { -c } else { c };
+    }
+    let mut axis = sum.try_normalize()?;
+    #[allow(clippy::cast_precision_loss, reason = "triangle counts are small")]
+    let mut lean = faces.iter().map(|(n, _)| n.dot(axis)).sum::<f64>() / faces.len() as f64;
+    // Outward normals lean back towards the apex.
+    if lean > 0.0 {
+        axis = -axis;
+        lean = -lean;
+    }
+    let slack = tolerance.max(0.02);
+    // Nearly square to the axis is a cylinder, nearly along it a flat face.
+    if lean.abs() < slack
+        || lean.abs() > 1.0 - slack
+        || faces.iter().any(|(n, _)| (n.dot(axis) - lean).abs() > slack)
+    {
+        return None;
+    }
+    // The apex lies in every triangle's plane: least squares over n·(apex − p) = 0.
+    let mut m = [[0.0_f64; 3]; 3];
+    let mut rhs = [0.0_f64; 3];
+    for (n, p) in &faces {
+        let n = n.to_array();
+        let reach = DVec3::from_array(n).dot(*p);
+        for row in 0..3 {
+            for col in 0..3 {
+                m[row][col] += n[row] * n[col];
+            }
+            rhs[row] += n[row] * reach;
+        }
+    }
+    let det3 = |m: [[f64; 3]; 3]| {
+        m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+            + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
+    };
+    let d = det3(m);
+    if d.abs() < 1e-18 {
+        return None;
+    }
+    let with = |col: usize| {
+        let mut k = m;
+        for row in 0..3 {
+            k[row][col] = rhs[row];
+        }
+        det3(k) / d
+    };
+    let apex = DVec3::new(with(0), with(1), with(2));
+    let points: Vec<DVec3> = region.iter().filter_map(|t| corners(*t)).flatten().collect();
+    let along: Vec<f64> = points.iter().map(|p| (*p - apex).dot(axis)).collect();
+    let low = along.iter().copied().fold(f64::INFINITY, f64::min);
+    let high = along.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let size = high.abs().max(low.abs());
+    if !apex.is_finite() || low < -tolerance * size || size <= 0.0 {
+        return None;
+    }
+    // The angle of the surface itself, from the corners (flat facets lean a little less than the cone
+    // they are cut from): every corner's distance from the axis grows with its height in one ratio.
+    let ratios: Vec<f64> = points
+        .iter()
+        .zip(&along)
+        .filter(|(_, h)| **h > 1e-9 * size)
+        .map(|(p, h)| ((*p - apex) - axis * *h).length() / *h)
+        .collect();
+    if ratios.is_empty() {
+        return None;
+    }
+    #[allow(clippy::cast_precision_loss, reason = "corner counts are small")]
+    let slope = ratios.iter().sum::<f64>() / ratios.len() as f64;
+    if !(slope.is_finite() && slope > 0.0) || ratios.iter().any(|r| (r - slope).abs() > tolerance.max(1e-6)) {
+        return None;
+    }
+    let half_angle = gc_math::fm::atan2(slope, 1.0);
+    #[allow(clippy::cast_possible_truncation, reason = "triangle indices fit u32")]
+    let triangles = region.into_iter().map(|t| t as u32).collect();
+    Some(ConeRegion { triangles, apex, axis, half_angle, span: (low, high) })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -324,5 +469,39 @@ mod tests {
         // A box face is not a cylinder.
         let cube = crate::test_util::cube([0.0; 3], 1.0);
         assert!(cylindrical_region(&cube, 0, 20f64.to_radians(), 0.01).is_none());
+    }
+
+    /// A truncated cone: radius 1 at z = 0, radius 0.5 at z = 1, so the apex is at z = 2 and the surface
+    /// makes atan(0.5) with the axis.
+    fn frustum(segments: u32) -> MeshData {
+        let mut positions = Vec::new();
+        for k in 0..segments {
+            let turn = std::f32::consts::TAU * k as f32 / segments as f32;
+            let (s, c) = turn.sin_cos();
+            positions.push([c, s, 0.0]);
+            positions.push([0.5 * c, 0.5 * s, 1.0]);
+        }
+        let mut indices = Vec::new();
+        for k in 0..segments {
+            let (a, b) = (2 * k, 2 * k + 1);
+            let (c, d) = (2 * ((k + 1) % segments), 2 * ((k + 1) % segments) + 1);
+            indices.extend([a, c, b, b, c, d]);
+        }
+        MeshData::new(positions, indices).unwrap()
+    }
+
+    #[test]
+    fn a_frustum_side_is_a_cone_and_a_cylinder_or_a_cube_is_not() {
+        let mesh = frustum(48);
+        let cone = conical_region(&mesh, 0, 0.3, 1e-3).unwrap();
+        assert_eq!(cone.triangles.len(), 96);
+        assert!((cone.apex - DVec3::new(0.0, 0.0, 2.0)).length() < 1e-3, "{:?}", cone.apex);
+        assert!((cone.axis - DVec3::new(0.0, 0.0, -1.0)).length() < 1e-6, "{:?}", cone.axis);
+        assert!((cone.half_angle - gc_math::fm::atan2(0.5, 1.0)).abs() < 1e-6, "{}", cone.half_angle);
+        assert!((cone.span.0 - 1.0).abs() < 1e-3 && (cone.span.1 - 2.0).abs() < 1e-3);
+        assert!(cylindrical_region(&mesh, 0, 0.3, 1e-3).is_none());
+        let cube = crate::test_util::cube([0.0; 3], 2.0);
+        assert!((0..12).all(|t| conical_region(&cube, t, 0.3, 1e-3).is_none()));
+        assert!(conical_region(&mesh, u32::MAX, 0.3, 1e-3).is_none());
     }
 }

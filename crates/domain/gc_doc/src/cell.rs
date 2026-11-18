@@ -544,6 +544,23 @@ pub enum CellOp {
         /// Ground New Components.
         ground: bool,
     },
+    /// [`CellOp::MirrorComponents`] with the mirror images of some bodies' shapes: the copy of a body
+    /// listed in `mirrored` takes that solid (a mesh reflected in the body's own frame across the plane
+    /// that [`crate::Document::mirror_axis`] names), so that it is a true mirror image and not the
+    /// same shape turned round (Inventor 2026 help, Mirror Components: Reference,
+    /// GUID-7B19CA69-8D14-40DA-9543-115A8AFE6336, status Mirror: "Creates a mirrored component").
+    MirrorComponentsWith {
+        /// The components (bodies, robots, assemblies).
+        items: Vec<AnyId>,
+        /// The mirror plane.
+        plane: crate::relate::Selection,
+        /// Mirror Relationships.
+        relationships: bool,
+        /// Ground New Components.
+        ground: bool,
+        /// Bodies among `items` with the solid their mirror image takes.
+        mirrored: Vec<(Id<Body>, Solid)>,
+    },
     /// Copies components, moved by `offset` (a world transform); relationships between them copied when
     /// asked.
     CopyComponents {
@@ -987,6 +1004,13 @@ pub(crate) fn set_timeline(
             t.components.joint_conditions.keys().copied().filter(|id| txn.doc().get(*id).is_none()).collect()
         })
         .unwrap_or_default();
+    let stale_motion: Vec<Id<crate::relate::Relationship>> = txn
+        .doc()
+        .timeline()
+        .map(|(_, t)| {
+            t.components.motion_refs.keys().copied().filter(|id| txn.doc().get(*id).is_none()).collect()
+        })
+        .unwrap_or_default();
     // Error marks of relationships that no longer exist go as well.
     let lost: Vec<Id<crate::relate::Relationship>> = txn
         .doc()
@@ -1037,6 +1061,7 @@ pub(crate) fn set_timeline(
         }
         t.components.joint_conditions.retain(|id, _| !dropped.contains(id));
         t.components.sick_relationships.retain(|id| !lost.contains(id));
+        t.components.motion_refs.retain(|id, _| !stale_motion.contains(id));
         edit(t);
     };
     match existing {
@@ -1196,7 +1221,64 @@ fn target_ok(txn: &Txn<'_>, robot: Id<Robot>, target: &WaypointTarget) -> Result
     Ok(())
 }
 
+/// Deleting a component deletes the relationships placed on it with it (as Inventor does; one undo step
+/// brings both back). Not found stated in the 2026 help pages read: done on the lead's observation.
+fn drop_relationships_of(txn: &mut Txn<'_>, item: AnyId) -> Result<(), EditError> {
+    let gone: Vec<Id<crate::relate::Relationship>> =
+        txn.doc().relationships().iter().filter(|(_, r)| r.references(item)).map(|(id, _)| id).collect();
+    for id in gone {
+        txn.remove(id)?;
+    }
+    Ok(())
+}
+
+/// After a relationship went: one accepted with an error that can now be satisfied loses its mark at
+/// once (and is solved with the rest).
+fn recheck_errors(txn: &mut Txn<'_>) -> Result<(), EditError> {
+    if txn.doc().sick_relationships().is_empty() { Ok(()) } else { settle(txn) }
+}
+
+/// True for the edits that are only possible while the Primary positional representation is active
+/// (Inventor 2026 help, Positional representations in assemblies,
+/// GUID-C728DFAC-1B45-4879-A004-45A8DC991954): adding, deleting or reordering components, restructuring
+/// the assembly, changing the count of a pattern, creating or deleting work features.
+fn needs_primary(doc: &crate::Document, op: &CellOp) -> bool {
+    use crate::subassembly::SubassemblyOp;
+    match op {
+        CellOp::AddBody(_)
+        | CellOp::AddRobot { .. }
+        | CellOp::AddAssembly { .. }
+        | CellOp::MirrorComponents { .. }
+        | CellOp::MirrorComponentsWith { .. }
+        | CellOp::CopyComponents { .. }
+        | CellOp::ReplaceComponents { .. }
+        | CellOp::AddPattern { .. }
+        | CellOp::RestorePatternElement { .. }
+        | CellOp::DeleteBody(_)
+        | CellOp::DeleteRobot(_)
+        | CellOp::DeleteAssembly(_)
+        | CellOp::DeletePattern { .. }
+        | CellOp::MoveInTree { .. }
+        | CellOp::AddWorkFeature { .. }
+        | CellOp::DeleteWorkFeature(_) => true,
+        CellOp::Subassembly(op) => matches!(
+            op,
+            SubassemblyOp::Demote { .. }
+                | SubassemblyOp::Move { .. }
+                | SubassemblyOp::Dissolve(_)
+                | SubassemblyOp::Paste { .. }
+        ),
+        CellOp::SetPattern { index, layout } => {
+            doc.patterns().get(*index).is_some_and(|p| p.layout.count() != layout.count())
+        }
+        _ => false,
+    }
+}
+
 pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'static str), EditError> {
+    if txn.doc().active_position().is_some() && needs_primary(txn.doc(), op) {
+        return Err(EditError::PrimaryOnly);
+    }
     match op {
         CellOp::AddRole(_)
         | CellOp::SetRole { .. }
@@ -1293,7 +1375,9 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
         }
         CellOp::DeleteBody(id) => {
             crate::subassembly::delete_owned_sketches(txn, id.erase())?;
+            drop_relationships_of(txn, id.erase())?;
             txn.remove(*id)?;
+            recheck_errors(txn)?;
             Ok((Vec::new(), "Delete body"))
         }
         CellOp::AddRobot(robot) => {
@@ -1373,7 +1457,9 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
                 return Err(EditError::InUse);
             }
             crate::subassembly::delete_owned_sketches(txn, id.erase())?;
+            drop_relationships_of(txn, id.erase())?;
             txn.remove(*id)?;
+            recheck_errors(txn)?;
             Ok((Vec::new(), "Delete robot"))
         }
         CellOp::AddFrame(frame) => {
@@ -1564,7 +1650,9 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
         }
         CellOp::DeleteAssembly(id) => {
             crate::subassembly::delete_owned_sketches(txn, id.erase())?;
+            drop_relationships_of(txn, id.erase())?;
             txn.remove(*id)?;
+            recheck_errors(txn)?;
             Ok((Vec::new(), "Delete assembly"))
         }
         CellOp::AddRelationship(relationship) => {
@@ -1599,6 +1687,7 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
         }
         CellOp::DeleteRelationship(id) => {
             txn.remove(*id)?;
+            recheck_errors(txn)?;
             Ok((Vec::new(), "Delete constraint"))
         }
         CellOp::AddPattern { name, parents, layout } => crate::pattern::add(txn, name, parents, layout),
@@ -1622,8 +1711,11 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
         CellOp::DeleteRepresentation { view, position } => {
             crate::representation::delete(txn, *view, *position)
         }
+        CellOp::MirrorComponentsWith { items, plane, relationships, ground, mirrored } => {
+            crate::replicate::mirror(txn, items, plane, *relationships, *ground, mirrored)
+        }
         CellOp::MirrorComponents { items, plane, relationships, ground } => {
-            crate::replicate::mirror(txn, items, plane, *relationships, *ground)
+            crate::replicate::mirror(txn, items, plane, *relationships, *ground, &[])
         }
         CellOp::CopyComponents { items, offset, relationships, ground } => {
             crate::replicate::copy(txn, items, offset, *relationships, *ground)

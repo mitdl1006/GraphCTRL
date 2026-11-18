@@ -109,6 +109,7 @@ impl Session {
                     Geometry::Cylinder { point, direction, radius } => {
                         line(at(point), turn(direction), eye, Some(radius))
                     }
+                    Geometry::Cone { apex, direction, .. } => line(at(apex), turn(direction), eye, None),
                     Geometry::Frame { origin, z, .. } => face(at(origin), turn(z), eye, None),
                     Geometry::Point(_) | Geometry::Sphere { .. } => None,
                 }

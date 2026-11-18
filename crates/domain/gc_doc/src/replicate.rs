@@ -40,6 +40,13 @@ pub enum Replacement {
     /// An imported assembly takes this file's part tree; its placement and look are kept, the name and
     /// file are the new ones.
     Assembly(Assembly),
+    /// A robot takes this robot's description (URDF, files, chain, links, name, acceleration limit). It
+    /// stays where it stood ("The origin of the replacement component is coincident with the origin of
+    /// the replaced component") and keeps its tool, tool centre point, look, waypoints and paths.
+    /// Relationships on links are carried over to the links of the same name; the rest are suppressed
+    /// ("some relationships may not survive and must be reapplied"). Refused when the robot has
+    /// waypoints given as joint values and the new robot has another number of joints.
+    Robot(Box<Robot>),
 }
 
 /// What happened to the relationships of a mirror, copy or replace.
@@ -227,6 +234,9 @@ fn map_selection(
         Geometry::Cylinder { point, direction, radius } => {
             Geometry::Cylinder { point: p(point), direction: d(direction), radius }
         }
+        Geometry::Cone { apex, direction, half_angle } => {
+            Geometry::Cone { apex: p(apex), direction: d(direction), half_angle }
+        }
         Geometry::Sphere { centre, radius } => Geometry::Sphere { centre: p(centre), radius },
     };
     Some(Selection { occurrence, geometry })
@@ -366,14 +376,38 @@ fn check_items(doc: &Document, items: &[AnyId]) -> Result<(), EditError> {
 }
 
 /// Mirrors components across a plane (a planar face, work plane or origin plane on any component).
+impl Document {
+    /// The axis of a component's own frame (0 = X, 1 = Y, 2 = Z) that Mirror Components takes as its
+    /// plane of symmetry for this mirror plane: the copy stands as if the component were reflected
+    /// across the mirror plane and then across that plane of its own. A shape reflected along this axis
+    /// in the component's frame makes the copy a true mirror image. `None` when the component or the
+    /// plane does not resolve.
+    pub fn mirror_axis(&self, item: AnyId, plane: &Selection) -> Option<usize> {
+        let (point, normal) = self.selection_axis(plane)?;
+        let pose = self.owner_pose(item)?;
+        (point.is_finite() && normal.is_finite()).then(|| mirrored(&pose, &Mirror { point, normal }).1)
+    }
+
+    /// Where a component at `pose` stands mirrored across a plane (as Mirror Components places a reused
+    /// component); `None` when the plane no longer resolves.
+    pub(crate) fn mirrored_pose(&self, plane: &Selection, pose: &DPose3) -> Option<DPose3> {
+        let (point, normal) = self.selection_axis(plane)?;
+        (point.is_finite() && normal.is_finite()).then(|| mirrored(pose, &Mirror { point, normal }).0)
+    }
+}
+
 pub(crate) fn mirror(
     txn: &mut Txn<'_>,
     items: &[AnyId],
     plane: &Selection,
     relationships: bool,
     ground: bool,
+    shapes: &[(Id<Body>, Solid)],
 ) -> Result<(Vec<Created>, &'static str), EditError> {
     check_items(txn.doc(), items)?;
+    if shapes.iter().any(|(body, solid)| !solid.is_valid() || !items.contains(&body.erase())) {
+        return Err(EditError::BadValue);
+    }
     if !matches!(plane.geometry, Geometry::Plane { .. }) || !plane.geometry.is_finite() {
         return Err(EditError::BadValue);
     }
@@ -388,6 +422,11 @@ pub(crate) fn mirror(
         let pose = txn.doc().owner_pose(*item).ok_or(EditError::BadValue)?;
         let (at, axis) = mirrored(&pose, &mirror);
         let copy = instance(txn, *item, &at, &mut created)?;
+        // A true mirror image: the copy takes the reflected shape.
+        if let Some((_, solid)) = shapes.iter().find(|(body, _)| body.erase() == *item) {
+            let solid = solid.clone();
+            txn.modify(Id::<Body>::from_raw(copy.raw), |b: &mut Body, _| b.solid = solid)?;
+        }
         copy_states(txn, *item, copy, ground)?;
         copies.push((*item, copy, Mapping { flipped: Some(axis) }));
     }
@@ -600,6 +639,81 @@ pub(crate) fn replace(
                 }
                 // Part states (hidden, suppressed, …) of parts that are gone are dropped when the
                 // timeline is next written; positions of the rest are kept by index.
+            }
+            (Kind::RobotInstance, Replacement::Robot(new)) => {
+                let id = Id::<Robot>::from_raw(item.raw);
+                let old = txn.doc().get(id).ok_or(EditError::BadValue)?.clone();
+                let dof = new.joints.len();
+                if new.urdf.is_empty()
+                    || !(new.max_acc.is_finite() && new.max_acc > 0.0)
+                    || new.joints.iter().any(|q| !q.is_finite())
+                {
+                    return Err(EditError::BadValue);
+                }
+                // Joint targets belong to the old arm: they carry over only to one with as many joints.
+                let stranded = txn.doc().waypoints().iter().any(|(_, w)| {
+                    w.robot == id
+                        && matches!(&w.target, crate::cell::WaypointTarget::Joints(q) if q.len() != dof)
+                });
+                if stranded {
+                    return Err(EditError::InUse);
+                }
+                let named = |name: &str| new.links.iter().any(|l| l.name == name);
+                let remap = |index: u32| -> Option<u32> {
+                    let name = &old.links.get(index as usize)?.name;
+                    u32::try_from(new.links.iter().position(|l| &l.name == name)?).ok()
+                };
+                let joints = if old.joints.len() == dof { old.joints.clone() } else { new.joints.clone() };
+                let acm: Vec<crate::cell::AcmOverride> =
+                    old.acm_overrides.iter().filter(|o| named(&o.a) && named(&o.b)).cloned().collect();
+                txn.modify(id, |r: &mut Robot, _| {
+                    r.name.clone_from(&new.name);
+                    r.urdf.clone_from(&new.urdf);
+                    r.resource_dir.clone_from(&new.resource_dir);
+                    r.base_link.clone_from(&new.base_link);
+                    r.tip_link.clone_from(&new.tip_link);
+                    r.links.clone_from(&new.links);
+                    r.max_acc = new.max_acc;
+                    r.joints = joints;
+                    r.acm_overrides = acm;
+                })?;
+                for (rid, relationship) in &relationships {
+                    let mut moved = relationship.clone();
+                    let mut gone = false;
+                    let mut fix = |s: &mut Selection| {
+                        if let Occurrence::Link { robot, index } = s.occurrence
+                            && robot == id
+                        {
+                            match remap(index) {
+                                Some(new) => s.occurrence = Occurrence::Link { robot, index: new },
+                                None => gone = true,
+                            }
+                        }
+                    };
+                    fix(&mut moved.first);
+                    fix(&mut moved.second);
+                    match &mut moved.kind {
+                        RelationKind::Symmetry { plane: s }
+                        | RelationKind::Angle { solution: AngleSolution::Explicit(s), .. } => fix(s),
+                        _ => {}
+                    }
+                    if gone {
+                        lost.push(*rid);
+                    } else if moved != *relationship {
+                        txn.modify(*rid, |r: &mut Relationship, _| *r = moved.clone())?;
+                    }
+                }
+                // Shown, hidden and enabled states are kept per link index: those of this robot's
+                // links start afresh.
+                crate::cell::set_timeline(txn, |t| {
+                    let of_robot =
+                        |o: &Occurrence| matches!(o, Occurrence::Link { robot, .. } if *robot == id);
+                    let c = &mut t.components;
+                    for list in [&mut c.hidden, &mut c.disabled, &mut c.suppressed, &mut c.dof_shown] {
+                        list.retain(|o| !of_robot(o));
+                    }
+                    c.origins_shown.retain(|(o, _)| !of_robot(o));
+                })?;
             }
             _ => return Err(EditError::BadValue),
         }

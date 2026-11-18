@@ -58,12 +58,18 @@ fn copy(from: &Path, to: &Path) -> Result<(), PersistError> {
     Ok(())
 }
 
+/// The folder next to a project file that holds the files it refers to: `<name>_files`.
+pub(crate) fn files_dir(path: &Path) -> PathBuf {
+    let base = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
+    let stem = path.file_stem().map_or_else(|| "project".to_owned(), |s| safe_name(&s.to_string_lossy()));
+    base.join(format!("{stem}_files"))
+}
+
 impl Session {
     /// The document as it is written to `path`: with its files inside the project and relative paths.
     pub(crate) fn packed_for(&self, path: &Path) -> Result<Document, PersistError> {
         let base = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
-        let stem = path.file_stem().map_or_else(|| "project".to_owned(), |s| safe_name(&s.to_string_lossy()));
-        let files = base.join(format!("{stem}_files"));
+        let files = files_dir(path);
         let mut ops = Vec::new();
         let mut taken = std::collections::BTreeSet::new();
 

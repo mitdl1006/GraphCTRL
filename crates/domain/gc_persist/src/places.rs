@@ -21,6 +21,20 @@ pub fn settings_dir() -> Option<PathBuf> {
     }
 }
 
+/// Where the application keeps files it can make again: `%LOCALAPPDATA%\GraphCTRL\cache` on Windows,
+/// `$XDG_CACHE_HOME/graphctrl` or `~/.cache/graphctrl` elsewhere. `None` when the system does not say
+/// where that is.
+pub fn cache_dir() -> Option<PathBuf> {
+    let var = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty()).map(PathBuf::from);
+    if cfg!(windows) {
+        var("LOCALAPPDATA").map(|dir| dir.join("GraphCTRL").join("cache"))
+    } else {
+        var("XDG_CACHE_HOME")
+            .or_else(|| var("HOME").map(|home| home.join(".cache")))
+            .map(|dir| dir.join("graphctrl"))
+    }
+}
+
 fn io(path: &Path) -> impl FnOnce(std::io::Error) -> PersistError + '_ {
     move |source| PersistError::Io { path: path.to_path_buf(), source }
 }

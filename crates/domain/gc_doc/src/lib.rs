@@ -65,7 +65,7 @@ pub use relate::{
     JointCondition, JointRange, Limits, LockedPose, RelationBand, RelationKind, RelationStatus, Relationship,
     Selection, Unsolved, is_joint_kind, possible_relations, takes_limits,
 };
-pub use relparam::RelationParam;
+pub use relparam::{ParamDim, RelationParam};
 pub use replicate::Replacement;
 pub use representation::{PositionalRepresentation, Representations, ViewRepresentation};
 pub use role::{AimReference, PathMotion, PathTravel, RoleKind, SketchRole, ToolAim};
