@@ -119,6 +119,7 @@ fn a_screw_driving_task_is_defined_on_the_structure() {
     assert_eq!(refused(&mut s, &|t| t.effects[0].value = "녹음".into()), EditError::BadValue);
     assert_eq!(refused(&mut s, &|t| t.effects[1].value = "many".into()), EditError::BadValue);
     assert_eq!(refused(&mut s, &|t| t.robots = RobotChoice::Only(Vec::new())), EditError::BadValue);
+    assert_eq!(refused(&mut s, &|t| t.robots = RobotChoice::When("  ".into())), EditError::BadValue);
     assert!(matches!(refused(&mut s, &|t| t.precondition = "count <".into()), EditError::Expr { .. }));
     let home = s.add_waypoint(robot, WaypointTarget::Joints(vec![0.0; 6])).unwrap();
     assert_eq!(

@@ -11,7 +11,7 @@ use gc_core::Id;
 use gc_doc::{EffectTarget, Robot, StateValue, Task};
 use gc_expr::{CondScope, CondValue, Condition};
 
-use crate::Session;
+use crate::cell::Planning;
 
 /// A task given to a robot for a stretch of time.
 #[derive(Clone, Debug, PartialEq)]
@@ -68,10 +68,10 @@ impl World {
     }
 }
 
-impl Session {
+impl Planning<'_> {
     /// The states the document starts with.
     fn starting_world(&self) -> World {
-        let doc = self.doc();
+        let doc = self.doc;
         World {
             variables: doc
                 .state_vars()
@@ -84,7 +84,7 @@ impl Session {
 
     /// Changes the states as a finished task says.
     fn apply_effects(&self, world: &mut World, task: &Task) {
-        let doc = self.doc();
+        let doc = self.doc;
         for effect in &task.effects {
             match effect.target {
                 EffectTarget::Object(object) => {
@@ -109,9 +109,9 @@ impl Session {
     }
 
     /// Works out who does what when (see the module's description). Suppressed tasks are left out.
-    /// Planning every bid takes a moment in a cell with many tasks and robots.
-    pub fn schedule(&self) -> Schedule {
-        let doc = self.doc();
+    /// Stops early, with what it has, when the job is cancelled.
+    pub(crate) fn schedule(&self) -> Schedule {
+        let doc = self.doc;
         let mut world = self.starting_world();
         let mut pending: Vec<Id<Task>> =
             doc.tasks().iter().map(|(id, _)| id).filter(|id| !doc.is_inactive(id.erase())).collect();
@@ -137,6 +137,9 @@ impl Session {
         let mut reasons: BTreeMap<Id<Task>, String> = BTreeMap::new();
         let mut now = 0.0_f64;
         loop {
+            if self.control.cancelled() {
+                break;
+            }
             let mut index = 0;
             while index < pending.len() {
                 let id = pending[index];
@@ -230,7 +233,7 @@ impl Session {
         world: &World,
         mut tool: Option<String>,
     ) -> Result<ToolOutcome, String> {
-        let doc = self.doc();
+        let doc = self.doc;
         let mut objects: Vec<(String, String)> = Vec::new();
         if doc.tool_kits().is_empty() {
             return Ok((tool, objects));
@@ -268,11 +271,11 @@ impl Session {
 
     /// [`Session::task_robots`] for the states of a schedule in progress.
     fn task_robots_in(&self, task: Id<Task>, world: &World) -> Vec<Id<Robot>> {
-        match self.doc().get(task).map(|t| (&t.location, &t.robots)) {
+        match self.doc.get(task).map(|t| (&t.location, &t.robots)) {
             Some((gc_doc::Location::Robot(_), _)) | None => self.task_robots(task),
             Some((_, gc_doc::RobotChoice::When(condition))) if !world.holds(condition) => Vec::new(),
             Some((_, gc_doc::RobotChoice::When(_))) => {
-                let doc = self.doc();
+                let doc = self.doc;
                 doc.robots()
                     .iter()
                     .map(|(id, _)| id)
