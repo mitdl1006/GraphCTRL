@@ -726,6 +726,13 @@ messages! {
     /// Ribbon: the Constrain command; the dialog's title.
     ConstrainTitle => ("구속", "Constrain"),
     /// Constrain dialog: the Mate type.
+    ConstrainMotion => ("모션 (Motion)", "Motion"),
+    ConstrainRotation => ("회전 (Rotation)", "Rotation"),
+    ConstrainRotationTranslation => ("회전-이동 (Rotation-Translation)", "Rotation-Translation"),
+    ConstrainForward => ("정방향 (Forward)", "Forward"),
+    ConstrainReverse => ("역방향 (Reverse)", "Reverse"),
+    ConstrainRatio => ("비율", "Ratio"),
+    ConstrainDistance => ("거리", "Distance"),
     ConstrainAngle => ("각도", "Angle"),
     ConstrainTangent => ("접선", "Tangent"),
     ConstrainSymmetry => ("대칭", "Symmetry"),
@@ -901,6 +908,19 @@ messages! {
     /// Constraint error dialog: delete the relationship in the way.
     ConflictAccept => ("그대로 받기 (Accept)", "Accept the relationship"),
     RecoverIsolateFailed => ("복구: 관련된 실패 분리 (Isolate Related Failed)", "Recover: Isolate Related Failed"),
+    DiagnoseTitle => ("구속 충돌 분석 (Conflict Analysis)", "Relationship Conflict Analysis"),
+    DiagnoseRelationships => ("관계", "Relationships"),
+    DiagnoseComponents => ("컴포넌트(고정 상태 바꾸기)", "Components (toggle grounding)"),
+    DiagnoseKeep => ("유지 (Keep)", "Keep"),
+    DiagnoseBreak => ("끊기 (Break)", "Break"),
+    DiagnoseGrounded => ("고정 상태 반전", "grounding turned round"),
+    DiagnoseCheck => ("확인 (Check)", "Check"),
+    DiagnoseSolved => ("충돌 없음", "No conflicts"),
+    DiagnoseConflicts => ("아직 충돌이 있습니다", "Still conflicting"),
+    DiagnoseNotChecked => ("확인하지 않음", "Not checked"),
+    DiagnoseSuppressBroken => ("끊은 관계 억제", "Suppress broken relationships"),
+    DiagnoseDeleteBroken => ("끊은 관계 삭제", "Delete broken relationships"),
+    CmdDiagnose => ("진단 (Diagnose)", "Diagnose"),
     ConflictDelete => ("삭제", "Delete"),
     /// Pattern dialog: the Assemble tab command and the dialog's title.
     PatternTitle => ("패턴", "Pattern"),

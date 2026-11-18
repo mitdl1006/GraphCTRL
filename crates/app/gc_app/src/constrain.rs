@@ -16,6 +16,9 @@ pub(crate) enum Type {
     Tangent,
     Insert,
     Symmetry,
+    /// Motion: Rotation or Rotation-Translation (Inventor 2026 help, Place Motion constraints between assembly
+    /// components, GUID-493DEAF8-D124-47BE-AFF2-B0535E9005C5).
+    Motion,
 }
 
 /// The solutions of an Angle constraint (Inventor 2026 help, To Place Angle Constraints in Assemblies,
@@ -36,6 +39,9 @@ pub(crate) struct Constrain {
     /// The third selection: an Angle's Explicit Reference Vector, or the plane of a Symmetry.
     third: Option<Selection>,
     solution: Solution,
+    /// Motion: Rotation-Translation (else Rotation), and the Reverse direction.
+    translation: bool,
+    reverse: bool,
     /// Tangent: the first inside the second.
     inside: bool,
     /// The selection the next pick fills: 0 first, 1 second, 2 third.
@@ -64,6 +70,8 @@ impl Default for Constrain {
             second: None,
             third: None,
             solution: Solution::Directed,
+            translation: false,
+            reverse: false,
             inside: false,
             slot: 0,
             offset: "0".to_owned(),
@@ -107,6 +115,14 @@ impl Constrain {
                 }
             }
             _ => self.third = Some(selection),
+        }
+        // Motion: the ratio or distance the two selections suggest (cylinders give their radii or circumference).
+        if self.kind == Type::Motion
+            && let (Some(first), Some(second)) = (&self.first, &self.second)
+            && let Some(default) = gc_doc::Document::motion_default(first, second, self.translation)
+        {
+            self.offset =
+                if self.translation { format!("{:.3}", default * 1000.0) } else { format!("{default:.4}") };
         }
         if self.predict
             && let (Some(first), Some(second)) = (&self.first, &self.second)
@@ -167,6 +183,9 @@ impl Constrain {
         // (metres, radians). Symmetry has no value.
         let value = if self.kind == Type::Symmetry {
             0.0
+        } else if self.kind == Type::Motion && !self.translation {
+            // A ratio has no unit (and, until the backend gives it a parameter, no expression).
+            self.offset.trim().parse::<f64>().ok().filter(|v| v.is_finite() && *v != 0.0)?
         } else {
             gc_doc::evaluate_value(session.doc(), &self.offset, self.unit())?
         };
@@ -184,6 +203,10 @@ impl Constrain {
                 },
             },
             Type::Symmetry => RelationKind::Symmetry { plane: self.third? },
+            Type::Motion if self.translation => {
+                RelationKind::RotationTranslation { distance: value, reverse: self.reverse }
+            }
+            Type::Motion => RelationKind::Rotation { ratio: value, reverse: self.reverse },
         };
         let name = if self.name.trim().is_empty() {
             let word = match self.kind {
@@ -193,6 +216,7 @@ impl Constrain {
                 Type::Angle => "Angle",
                 Type::Tangent => "Tangent",
                 Type::Symmetry => "Symmetry",
+                Type::Motion => "Motion",
             };
             format!("{word}:{}", session.relationships().len() + 1)
         } else {
@@ -251,6 +275,7 @@ impl Constrain {
                         (Type::Tangent, tr!(lang, ConstrainTangent)),
                         (Type::Insert, tr!(lang, ConstrainInsert)),
                         (Type::Symmetry, tr!(lang, ConstrainSymmetry)),
+                        (Type::Motion, tr!(lang, ConstrainMotion)),
                     ] {
                         if ui.selectable_label(self.kind == kind, name).clicked() {
                             self.kind = kind;
@@ -305,6 +330,20 @@ impl Constrain {
                 if self.kind == Type::Insert {
                     ui.checkbox(&mut self.aligned, tr!(lang, ConstrainAligned));
                 }
+                if self.kind == Type::Motion {
+                    ui.horizontal(|ui| {
+                        ui.selectable_value(&mut self.translation, false, tr!(lang, ConstrainRotation));
+                        ui.selectable_value(
+                            &mut self.translation,
+                            true,
+                            tr!(lang, ConstrainRotationTranslation),
+                        );
+                    });
+                    ui.horizontal(|ui| {
+                        ui.selectable_value(&mut self.reverse, false, tr!(lang, ConstrainForward));
+                        ui.selectable_value(&mut self.reverse, true, tr!(lang, ConstrainReverse));
+                    });
+                }
                 if self.kind == Type::Tangent {
                     ui.horizontal(|ui| {
                         ui.selectable_value(&mut self.inside, true, tr!(lang, ConstrainInside));
@@ -330,16 +369,28 @@ impl Constrain {
                 if self.kind != Type::Symmetry {
                     ui.horizontal(|ui| {
                         let angle = self.kind == Type::Angle;
+                        let ratio = self.kind == Type::Motion && !self.translation;
                         let label = ui.label(if angle {
                             tr!(lang, ConstrainAngleValue)
+                        } else if ratio {
+                            tr!(lang, ConstrainRatio)
+                        } else if self.kind == Type::Motion {
+                            tr!(lang, ConstrainDistance)
                         } else {
                             tr!(lang, ConstrainOffset)
                         });
                         let field = ui.add(egui::TextEdit::singleline(&mut self.offset).desired_width(80.0));
                         field.labelled_by(label.id);
-                        ui.label(if angle { "deg" } else { "mm" });
+                        if !ratio {
+                            ui.label(if angle { "deg" } else { "mm" });
+                        }
                     });
-                    if gc_doc::evaluate_value(session.doc(), &self.offset, self.unit()).is_none() {
+                    let valid = if self.kind == Type::Motion && !self.translation {
+                        self.offset.trim().parse::<f64>().is_ok_and(|v| v.is_finite() && v != 0.0)
+                    } else {
+                        gc_doc::evaluate_value(session.doc(), &self.offset, self.unit()).is_some()
+                    };
+                    if !valid {
                         ui.colored_label(ui.visuals().error_fg_color, tr!(lang, ErrExpression));
                     }
                 }
@@ -395,7 +446,7 @@ impl Constrain {
             if crate::conflict::try_add(session, relationship, &mut self.conflict) {
                 // An expression is kept as typed: the constraint's model parameter takes it (Inventor 2026 help,
                 // About Parameters in Models, GUID-8E5C63EA-0540-4EBE-9B17-B8159C7FE40C).
-                if self.kind != Type::Symmetry
+                if !matches!(self.kind, Type::Symmetry | Type::Motion)
                     && self.offset.trim().parse::<f64>().is_err()
                     && let Some(id) = session.relationships().last().map(|(id, _)| *id)
                 {
@@ -739,5 +790,33 @@ mod tests {
         assert!(matches!(dialog.relationship(&session).map(|r| r.kind), Some(RelationKind::Symmetry { .. })));
         dialog.third = None;
         assert!(dialog.relationship(&session).is_none(), "a symmetry needs its plane");
+    }
+    /// Motion: a ratio for Rotation, a distance for Rotation-Translation, Reverse for the other way
+    /// (Inventor 2026 help, GUID-493DEAF8-D124-47BE-AFF2-B0535E9005C5).
+    #[test]
+    fn motion_takes_a_ratio_or_a_distance_and_a_direction() {
+        let mut session = Session::new();
+        let solid = Solid::Box { size: [0.05; 3] };
+        let a = session.add_body(solid.clone(), Placement::default()).unwrap().erase();
+        let b = session.add_body(solid, Placement { xyz: [0.2, 0.0, 0.0], rpy: [0.0; 3] }).unwrap().erase();
+        let mut dialog = Constrain::default();
+        dialog.start();
+        dialog.kind = Type::Motion;
+        pick(&session, &mut dialog, a, OriginPlane::Xy);
+        pick(&session, &mut dialog, b, OriginPlane::Xy);
+        dialog.offset = "4".to_owned();
+        dialog.reverse = true;
+        assert!(matches!(
+            dialog.relationship(&session).map(|r| r.kind),
+            Some(RelationKind::Rotation { ratio, reverse: true }) if (ratio - 4.0).abs() < 1e-12
+        ));
+        dialog.offset = "0".to_owned();
+        assert!(dialog.relationship(&session).is_none(), "a ratio of zero is refused");
+        dialog.translation = true;
+        dialog.offset = "20".to_owned();
+        assert!(matches!(
+            dialog.relationship(&session).map(|r| r.kind),
+            Some(RelationKind::RotationTranslation { distance, .. }) if (distance - 0.02).abs() < 1e-12
+        ));
     }
 }

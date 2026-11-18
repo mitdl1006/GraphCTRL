@@ -7428,3 +7428,59 @@ fn a_failed_relationship_offers_recover_in_its_menu() {
     harness.run_steps(3);
     assert!(harness.state().session.is_isolated());
 }
+
+/// Diagnose opens the Relationship Conflict Analysis (Inventor 2026 help, GUID-528B2CD0-93FD-45BC-AB69-6C5A559BB8E8):
+/// Check says there is still a conflict until the failed relationship is set to Break.
+#[test]
+fn the_conflict_analysis_checks_with_a_relationship_broken() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.05, 0.05, 0.05] };
+    let app = harness.state_mut();
+    let fixed = app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    let moving =
+        app.session.add_body(solid, gc_doc::Placement { xyz: [0.0, 0.0, 0.2], rpy: [0.0; 3] }).unwrap();
+    let plane = gc_doc::Geometry::origin(gc_doc::OriginElement::Plane(gc_doc::OriginPlane::Xy));
+    let select = |body: gc_core::Id<gc_doc::Body>| gc_doc::Selection {
+        occurrence: gc_doc::Occurrence::Item(body.erase()),
+        geometry: plane,
+    };
+    let mate = |name: &str, offset: f64| {
+        gc_doc::Relationship::new(
+            name,
+            gc_doc::RelationKind::Mate { offset, sense: gc_doc::AxisSense::Opposed },
+            select(moving),
+            select(fixed),
+        )
+    };
+    app.session.add_relationship(mate("Mate:1", 0.0)).unwrap();
+    app.session.accept_relationship(mate("Mate:2", 0.1)).unwrap();
+    harness.run_steps(2);
+    let at = harness.get_by_label("Mate:2").rect().center();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run_steps(2);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+    harness.run_steps(3);
+    harness.get_by_label("진단 (Diagnose)").click();
+    harness.run_steps(3);
+    harness.get_by_label("구속 충돌 분석 (Conflict Analysis)");
+    harness.get_by_label("확인 (Check)").click();
+    harness.run_steps(2);
+    harness.get_by_label("아직 충돌이 있습니다");
+    // Breaking the failed relationship (the first in the list) resolves it.
+    harness.get_all_by_label("끊기 (Break)").next().unwrap().click();
+    harness.run_steps(2);
+    harness.get_by_label("확인 (Check)").click();
+    harness.run_steps(2);
+    harness.get_by_label("충돌 없음");
+}

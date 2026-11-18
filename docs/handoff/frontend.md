@@ -581,6 +581,15 @@
 - 하지 않은 것: Conflict Analysis 대화상자(Keep/Break·Check = `conflict_check`), Isolate and Edit·Diagnose.
 - 테스트: `a_failed_relationship_offers_recover_in_its_menu`.
 
+## Motion 구속·Conflict Analysis (백엔드 ac7e63f·9c7e8b8)
+
+근거(원문, curl): Place Motion constraints between assembly components GUID-493DEAF8-D124-47BE-AFF2-B0535E9005C5, Place Constraint Reference - Motion Tab GUID-0293C151-565F-4980-AA95-DD76C54AB538, Relationship Conflict Analysis Reference GUID-528B2CD0-93FD-45BC-AB69-6C5A559BB8E8.
+
+- Constrain 대화상자 "모션 (Motion)" 탭: 회전(Rotation: 비율, 단위 없음) / 회전-이동(Rotation-Translation: 거리 mm), 정방향·역방향, 두 선택이 되면 `Document::motion_default`로 값을 채운다. 비율은 0 불가. 한계 없음. 비율·거리 식 입력은 백엔드에 구속 값 매개변수(dN)가 아직 없어 숫자(거리는 단위·식 평가)만 받는다.
+- Conflict Analysis 대화상자(`diagnose.rs`): 실패한(sick) 구속의 우클릭 "진단 (Diagnose)" → 관련 구속 각각 유지/끊기, 관련 컴포넌트의 고정 상태 반전 체크, 확인(`conflict_check`)의 결과("충돌 없음/아직 충돌이 있습니다"), "끊은 관계 억제/삭제". 
+- 하지 않은 것: 원문의 폴더 트리·상태 기호 순환·"Isolate connected components"·"충돌하는 관계만 표시", Place/Edit 오류 대화상자의 "Diagnose" 단추(브라우저 메뉴로만 연다).
+- 테스트: `constrain.rs`의 `motion_takes_a_ratio_or_a_distance_and_a_direction`, 셸의 `the_conflict_analysis_checks_with_a_relationship_broken`.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

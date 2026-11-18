@@ -341,6 +341,7 @@ pub struct GraphCtrlApp {
     right_open: bool,
     /// The status bar is shown (View tab, Windows panel, User Interface).
     show_status: bool,
+    diagnose: crate::diagnose::Diagnose,
     ground_root: crate::productivity::GroundRoot,
     /// Place at Component Origin: the view is waiting for the component to place on.
     place_origin_picking: bool,
@@ -459,6 +460,7 @@ impl GraphCtrlApp {
             left_open: !saved.browser_closed,
             right_open: !saved.properties_closed,
             show_status: !saved.hide_status_bar,
+            diagnose: crate::diagnose::Diagnose::default(),
             ground_root: crate::productivity::GroundRoot::default(),
             place_origin_picking: false,
             place_origin_request: None,
@@ -1795,6 +1797,7 @@ impl eframe::App for GraphCtrlApp {
                         Some(BrowserAction::PlaceAtOrigin(target)) => {
                             self.place_origin_request = Some(target)
                         }
+                        Some(BrowserAction::Diagnose(id)) => self.diagnose.start(&self.session, id),
                         Some(BrowserAction::IsolateRelatedFailed(id)) => {
                             let (_, keep) = self.session.related_failed(id);
                             drop(self.session.isolate(&keep));
@@ -2038,6 +2041,9 @@ impl eframe::App for GraphCtrlApp {
         }
         if self.replicate.open {
             self.replicate.window(&ctx, &mut self.session, lang);
+        }
+        if self.diagnose.open {
+            self.diagnose.window(&ctx, &mut self.session, lang);
         }
         if self.ground_root.open
             && let Some(error) = self.ground_root.window(&ctx, &mut self.session, lang)
