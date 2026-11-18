@@ -54,6 +54,15 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 치수 상자의 `이름 = 값`을 한 단계로(프론트엔드 요청)
+
+- `Command::Sequence(Vec<Command>)`: 명령 여러 개를 한 트랜잭션에서 차례로 실행한다. 실행 취소 한 단계이고,
+  하나라도 거부되면 전체를 거부한다. 레이블은 마지막 명령의 것이다. 빈 목록은 `BadValue`.
+- `session.edit_dimension_with_param(dim, name, value)`: 사용자 매개변수 `name = value`를 만든다(각도 치수면 deg, 아니면 mm).
+  그리고 치수 식을 `name`으로 바꾼다. 실행 취소 한 단계다. 이름이 틀리거나, 이미 있거나, 값이 틀리면 아무것도 남지 않는다.
+- 근거: To Work with Sketch Dimensions(GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185)의 "enter HGHT = 5mm".
+- 테스트: `gc_session/tests/dimension_param.rs`.
+
 ## 2026-11-18 — 관계에 어셈블리 작업 피처(프론트엔드 요청)
 
 근거: To Place Mate or Flush Constraints in Assemblies(GUID-0F500089-4F69-41C5-AFE8-B58AC9E8E15E)의 "Select the first point, curve, face, or work feature".

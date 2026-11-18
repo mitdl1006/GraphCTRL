@@ -1517,4 +1517,29 @@ impl Session {
     pub fn edit_dimension(&mut self, id: Id<Dimension>, source: &str) -> Result<(), EditError> {
         self.sketch_op(SketchOp::SetDimension { id, source: source.to_owned() }).map(|_| ())
     }
+
+    /// The dimension edit box's `name = value`: adds the user parameter `name` with the expression `value`
+    /// (in degrees for an angle dimension, millimetres otherwise) and makes the dimension use it, as one
+    /// undo step. Refused whole (nothing added) when either part is refused.
+    pub fn edit_dimension_with_param(
+        &mut self,
+        id: Id<Dimension>,
+        name: &str,
+        value: &str,
+    ) -> Result<(), EditError> {
+        let Some(sketch) = self.active else { return Err(EditError::BadValue) };
+        let kind = self
+            .doc
+            .get(sketch)
+            .and_then(|s| s.dimensions.get(&id))
+            .map(|d| d.kind)
+            .ok_or(EditError::BadValue)?;
+        let angle = matches!(kind, gc_sketch::DimKind::Angle { .. });
+        let name = name.trim().to_owned();
+        let commands = vec![
+            Command::AddParam { name: name.clone(), source: value.to_owned(), angle },
+            Command::Sketch { sketch, op: SketchOp::SetDimension { id, source: name } },
+        ];
+        self.execute(&Command::Sequence(commands)).map(|_| ())
+    }
 }
