@@ -135,3 +135,38 @@ fn auto_bend_places_a_bend_at_each_corner_as_lines_are_drawn() {
     s.spatial_click([0.3, 0.2, 0.1], None, None);
     assert_eq!(arcs(&s), 2);
 }
+
+/// Equal (GUID-4F861674-F74C-474E-869A-4C190ED6EC4B): "If selected, the Equal option constrains successively
+/// placed bends of the same radius" — the later bends follow the first one's dimension.
+#[test]
+fn equal_bends_follow_the_first_bend() {
+    let mut s = Session::new();
+    let k = s.create_sketch_3d().unwrap();
+    let (p1, p2) = ([0.2, 0.0, 0.0], [0.2, 0.2, 0.1]);
+    let l1 = line(&mut s, k, [0.0, 0.0, 0.0], p1);
+    let l2 = line(&mut s, k, p1, p2);
+    let l3 = line(&mut s, k, p2, [0.0, 0.3, 0.2]);
+    let made = run(&mut s, k, SketchOp::Bend { lines: [l1, l2], radius: "20 mm".into() }).unwrap();
+    let first = made.iter().find_map(|c| if let Created::Curve(id) = c { Some(*id) } else { None }).unwrap();
+    let dim =
+        made.iter().find_map(|c| if let Created::Dimension(id) = c { Some(*id) } else { None }).unwrap();
+    let steps = s.history().undo_depth();
+    let made = run(&mut s, k, SketchOp::BendEqual { lines: [l2, l3], to: first }).unwrap();
+    assert_eq!(s.history().undo_depth(), steps + 1);
+    let second = made.iter().find_map(|c| if let Created::Curve(id) = c { Some(*id) } else { None }).unwrap();
+    // No dimension of its own: an Equal constraint.
+    assert!(!made.iter().any(|c| matches!(c, Created::Dimension(_))));
+    let radius = |s: &Session, arc| s.active_sketch().unwrap().1.round(arc).unwrap().1;
+    assert!((radius(&s, second) - 0.02).abs() < 1e-9);
+    let sk = s.active_sketch().unwrap().1;
+    assert!(sk.constraints.values().any(|c| *c == gc_sketch::GeoConstraint::Equal(second, first)));
+    // Changing the first bend's radius changes both.
+    run(&mut s, k, SketchOp::SetDimension { id: dim, source: "30 mm".into() }).unwrap();
+    assert!((radius(&s, first) - 0.03).abs() < 1e-7, "{}", radius(&s, first));
+    assert!((radius(&s, second) - 0.03).abs() < 1e-7, "{}", radius(&s, second));
+    // Not an arc to equal: refused, nothing changed.
+    let l4 = line(&mut s, k, [0.0, 0.3, 0.2], [0.0, 0.5, 0.0]);
+    let with_l4 = s.doc().clone();
+    assert!(run(&mut s, k, SketchOp::BendEqual { lines: [l3, l4], to: l1 }).is_err());
+    assert_eq!(s.doc(), &with_l4);
+}

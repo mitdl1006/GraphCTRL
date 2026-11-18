@@ -533,6 +533,16 @@ pub enum SketchOp {
         /// The radius as typed, e.g. `"20 mm"`.
         radius: String,
     },
+    /// A Bend placed with the Bend dialog's Equal option on (GUID-4F861674-F74C-474E-869A-4C190ED6EC4B: "If
+    /// selected, the Equal option constrains successively placed bends of the same radius"): the bend takes the
+    /// radius of the arc `to` (the first bend placed in the dialog) and an Equal constraint to it instead of a
+    /// dimension. Refused when `to` is not an arc or circle of the sketch.
+    BendEqual {
+        /// The two lines.
+        lines: [Id<Curve>; 2],
+        /// The bend it equals.
+        to: Id<Curve>,
+    },
     /// Move, Copy or Rotate the curves (Inventor 2026 help, To Copy, Move, or Rotate 2D Sketch Geometry,
     /// GUID-F8114270-18F7-4C7A-947E-AC489EDACFA9). `copy` makes moved copies (with the constraints among
     /// them) and leaves the originals; otherwise the curves themselves move, and with `relax` constraints
@@ -3131,6 +3141,17 @@ fn sketch_op(
                 sketch.round(arc).and_then(|(c, _)| sketch.pos(c)).map_or([0.0; 2], |c| [c[0], c[1]]);
             let result = sketch.try_add_dimension(ids, DimKind::Radius(arc), radius, value, text_pos)?;
             created.push(Created::Dimension(added(result)?));
+            "Bend"
+        }
+        SketchOp::BendEqual { lines, to } => {
+            if lines.contains(to) {
+                return Err(SketchError::InvalidValue.into());
+            }
+            let (_, value) = sketch.round(*to).ok_or(SketchError::WrongCurveKind)?;
+            let cut = sketch.bend(ids, *lines, value)?;
+            push_cut(&mut created, &cut);
+            let arc = *cut.curves.first().ok_or(SketchError::InvalidValue)?;
+            require(sketch, ids, GeoConstraint::Equal(arc, *to), &mut created)?;
             "Bend"
         }
         SketchOp::Fillet { lines, radius } => {
