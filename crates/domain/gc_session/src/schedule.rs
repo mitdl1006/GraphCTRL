@@ -3,7 +3,12 @@
 //! holds are taken by priority (higher first), then in the order they were made; each goes to the idle
 //! robot that would finish it soonest from where that robot then is (its bid: the planned time of the
 //! task's motions plus its waits). When a task ends, its effects change the states, which can make other
-//! tasks ready. Robots do not avoid each other yet: each is planned against the cell as it stands.
+//! tasks ready.
+//!
+//! Robots keep clear of each other: a robot that stands idle is an obstacle where it stands for the one
+//! being planned, and a planned motion is checked, every 50 ms of it, against the robots that are moving
+//! at that time. A motion that would come too close waits: the task stays ready and is tried again when
+//! the next task ends. (Checked at those moments, not in between; the padding covers the rest.)
 
 use std::collections::BTreeMap;
 
@@ -37,7 +42,43 @@ pub struct Schedule {
     pub blocked: Vec<(Id<Task>, String)>,
     /// The planned motions of each assignment, in the same order.
     pub plans: Vec<crate::TaskPlan>,
+    /// Tasks that had to wait for a moving robot to be out of the way before they could start.
+    pub waits: Vec<Wait>,
+    /// Moves that take an idle robot to its park pose because it stood in the way of a task that was
+    /// ready (`gc_doc::WorkOp::SetRobotPark`; without a park pose, where the document has the robot).
+    pub parks: Vec<ParkMove>,
+    /// True when the schedule was cut off at [`MAX_ASSIGNMENTS`] (tasks that repeat without end).
+    pub cut_short: bool,
 }
+
+/// A robot moving out of the way.
+#[derive(Clone, Debug)]
+pub struct ParkMove {
+    /// The robot.
+    pub robot: Id<Robot>,
+    /// When it starts, seconds.
+    pub start: f64,
+    /// When it is parked.
+    pub end: f64,
+    /// The motion.
+    pub plan: crate::TaskPlan,
+}
+
+/// A task that was ready but had to wait for another robot's motion.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Wait {
+    /// The task.
+    pub task: Id<Task>,
+    /// The robot that did it in the end.
+    pub robot: Id<Robot>,
+    /// How long it waited, seconds.
+    pub seconds: f64,
+    /// The robot that was in the way.
+    pub cause: Id<Robot>,
+}
+
+/// The most assignments a schedule holds: where tasks that repeat without end are cut off.
+pub const MAX_ASSIGNMENTS: usize = 1000;
 
 impl PartialEq for Schedule {
     fn eq(&self, other: &Self) -> bool {
@@ -50,27 +91,36 @@ impl Schedule {
     /// is doing, or standing where its last task left it. `None` before its first task (it is where the
     /// document has it) and for a robot without tasks.
     pub fn joints_at(&self, robot: Id<Robot>, time: f64) -> Option<Vec<f64>> {
-        let (assignment, plan) = self
+        // Its tasks and its moves out of the way: the one that started last by then.
+        let tasks = self
             .assignments
             .iter()
             .zip(&self.plans)
-            .filter(|(a, _)| a.robot == robot && a.start <= time)
-            .max_by(|(a, _), (b, _)| a.start.total_cmp(&b.start))?;
-        Some(plan.sample(time - assignment.start))
+            .filter(|(a, _)| a.robot == robot)
+            .map(|(a, p)| (a.start, p));
+        let parks = self.parks.iter().filter(|p| p.robot == robot).map(|p| (p.start, &p.plan));
+        let (start, plan) =
+            tasks.chain(parks).filter(|(start, _)| *start <= time).max_by(|a, b| a.0.total_cmp(&b.0))?;
+        Some(plan.sample(time - start))
     }
 
-    /// Every robot that has tasks, with its joint values at `time` ([`Schedule::joints_at`]; before its
+    /// Every robot that has tasks or moves out of the way, with its joint values at `time` ([`Schedule::joints_at`]; before its
     /// first task, where that task starts from).
     pub fn robots_at(&self, time: f64) -> Vec<(Id<Robot>, Vec<f64>)> {
-        let mut robots: Vec<Id<Robot>> = self.assignments.iter().map(|a| a.robot).collect();
+        let mut robots: Vec<Id<Robot>> =
+            self.assignments.iter().map(|a| a.robot).chain(self.parks.iter().map(|p| p.robot)).collect();
         robots.sort();
         robots.dedup();
         robots
             .into_iter()
             .filter_map(|robot| {
                 let first = || {
-                    let (_, plan) =
-                        self.assignments.iter().zip(&self.plans).find(|(a, _)| a.robot == robot)?;
+                    let tasks = self.assignments.iter().zip(&self.plans).filter(|(a, _)| a.robot == robot);
+                    let parks = self.parks.iter().filter(|p| p.robot == robot).map(|p| (p.start, &p.plan));
+                    let (_, plan) = tasks
+                        .map(|(a, plan)| (a.start, plan))
+                        .chain(parks)
+                        .min_by(|a, b| a.0.total_cmp(&b.0))?;
                     Some(plan.start.clone())
                 };
                 Some((robot, self.joints_at(robot, time).or_else(first)?))
@@ -80,8 +130,35 @@ impl Schedule {
 
     /// When the last task ends.
     pub fn makespan(&self) -> f64 {
-        self.assignments.iter().map(|a| a.end).fold(0.0, f64::max)
+        self.assignments.iter().map(|a| a.end).chain(self.parks.iter().map(|p| p.end)).fold(0.0, f64::max)
     }
+}
+
+/// True when a robot's planned motion, started at `start`, comes closer than the padding to another robot
+/// that is where `other_at` says at each moment (checked every 50 ms). Unknown shapes count as crossing.
+fn crosses(
+    scene: Option<&gc_motion::RobotScene>,
+    plan: &crate::TaskPlan,
+    start: f64,
+    other: Option<&gc_motion::RobotScene>,
+    other_at: &dyn Fn(f64) -> Option<Vec<f64>>,
+) -> bool {
+    const STEP: f64 = 0.05;
+    let (Some(scene), Some(other)) = (scene, other) else { return true };
+    let duration = plan.duration();
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "a count of 50 ms steps")]
+    let steps = (duration / STEP).ceil().clamp(1.0, 100_000.0) as usize;
+    (0..=steps).any(|k| {
+        #[allow(clippy::cast_precision_loss, reason = "a count of 50 ms steps")]
+        let t = (k as f64 * STEP).min(duration);
+        let Some(theirs) = other_at(start + t) else { return true };
+        let mine = scene.geometry(&plan.sample(t));
+        match mine.closest(&other.geometry(&theirs)) {
+            Ok(Some(closest)) => closest.distance < crate::PADDING,
+            Ok(None) => false,
+            Err(_) => true,
+        }
+    })
 }
 
 /// A tool's state after a task's tool actions, and the states they leave their objects in.
@@ -138,7 +215,17 @@ impl Planning<'_> {
                     let text = effect.value.trim();
                     let value = match &var.value {
                         StateValue::Bool(_) => Some(CondValue::Bool(text == "true")),
-                        StateValue::Int(_) | StateValue::Real(_) => text.parse().ok().map(CondValue::Number),
+                        // A number worked out from the numeric states as they are now (`count + 1`).
+                        StateValue::Int(_) | StateValue::Real(_) => {
+                            let numbers = |name: &str| match world.variables.get(name) {
+                                Some(CondValue::Number(value)) => Some(*value),
+                                _ => None,
+                            };
+                            let whole = matches!(var.value, StateValue::Int(_));
+                            gc_doc::effect_number(text, &numbers)
+                                .ok()
+                                .map(|value| CondValue::Number(if whole { value.round() } else { value }))
+                        }
                         StateValue::Enum { .. } => Some(CondValue::Name(text.to_owned())),
                     };
                     if let Some(value) = value {
@@ -163,7 +250,11 @@ impl Planning<'_> {
             doc.robots().iter().map(|(id, r)| (id, (r.joints.clone(), 0.0))).collect();
         // Bids already worked out: a task for a robot from given joint values.
         type Bid = Result<crate::TaskPlan, String>;
-        type BidKey = (Id<Task>, Id<Robot>, Vec<u64>);
+        type BidKey = (Id<Task>, Id<Robot>, Vec<u64>, Vec<(Id<Robot>, Vec<u64>)>);
+        // Each robot's own scene, for standing in another's way and for checking two motions.
+        let scenes: BTreeMap<Id<Robot>, gc_motion::RobotScene> =
+            doc.robots().iter().filter_map(|(id, _)| Some((id, self.scene_of(id).ok()?))).collect();
+        let bits = |joints: &[f64]| joints.iter().map(|q| q.to_bits()).collect::<Vec<u64>>();
         let mut bids: BTreeMap<BidKey, Bid> = BTreeMap::new();
         // The state of each robot's tool, and what the tool actions of a running task do to their objects
         // when it ends.
@@ -173,12 +264,18 @@ impl Planning<'_> {
             .map(|(id, _)| (id, doc.robot_tool_kit(id).and_then(|(_, state)| state)))
             .collect();
         let mut changes: BTreeMap<Id<Task>, Vec<(String, String)>> = BTreeMap::new();
+        // How often each task has been done, and since when (and for whom) a ready task has been waiting.
+        let mut done: BTreeMap<Id<Task>, u32> = BTreeMap::new();
+        let mut waiting: BTreeMap<Id<Task>, (f64, Id<Robot>)> = BTreeMap::new();
+        // Where robots have already been sent away from: each place once.
+        let mut moved_away: std::collections::BTreeSet<(Id<Robot>, Vec<u64>)> =
+            std::collections::BTreeSet::new();
         let mut running: Vec<Assignment> = Vec::new();
         let mut out = Schedule::default();
         let mut reasons: BTreeMap<Id<Task>, String> = BTreeMap::new();
         let mut now = 0.0_f64;
         loop {
-            if self.control.cancelled() {
+            if self.control.cancelled() || out.cut_short {
                 break;
             }
             let mut index = 0;
@@ -205,8 +302,42 @@ impl Planning<'_> {
                         reasons.entry(id).or_insert_with(|| "its robots are busy".to_owned());
                         continue;
                     }
-                    let key = (id, robot, joints.iter().map(|q| q.to_bits()).collect());
-                    let bid = bids.entry(key).or_insert_with(|| self.task_plan_from(id, robot, joints));
+                    // The robots that stand idle are in the way where they stand.
+                    let parked: Vec<(Id<Robot>, &Vec<f64>)> = robots
+                        .iter()
+                        .filter(|(other, (_, free))| **other != robot && *free <= now)
+                        .map(|(other, (at, _))| (*other, at))
+                        .collect();
+                    let key =
+                        (id, robot, bits(joints), parked.iter().map(|(o, at)| (*o, bits(at))).collect());
+                    let bid = bids.entry(key).or_insert_with(|| {
+                        let others: Vec<gc_motion::Obstacle> = parked
+                            .iter()
+                            .filter_map(|(other, at)| {
+                                let name = doc.get(*other).map(|r| r.name.clone())?;
+                                Some(scenes.get(other)?.as_obstacles(at, &name))
+                            })
+                            .flatten()
+                            .collect();
+                        self.task_plan_among(id, robot, joints, &others)
+                    });
+                    // The robots that are moving must be clear of this motion all the way.
+                    if let Ok(plan) = bid.as_ref() {
+                        let moving: Vec<Id<Robot>> = robots
+                            .iter()
+                            .filter(|(other, (_, free))| **other != robot && *free > now)
+                            .map(|(other, _)| *other)
+                            .collect();
+                        if let Some(other) = moving.into_iter().find(|other| {
+                            let at = |time: f64| out.joints_at(*other, time);
+                            crosses(scenes.get(&robot), plan, now, scenes.get(other), &at)
+                        }) {
+                            let name = doc.get(other).map(|r| r.name.clone()).unwrap_or_default();
+                            reasons.insert(id, format!("it waits for {name} to be out of the way"));
+                            waiting.entry(id).or_insert((now, other));
+                            continue;
+                        }
+                    }
                     // Its tool must be in a state to do the task's tool actions.
                     let tool = tools.get(&robot).cloned().flatten();
                     let outcome = match self.tool_outcome(task, robot, &world, tool) {
@@ -235,16 +366,56 @@ impl Planning<'_> {
                         out.plans.push(plan);
                         tools.insert(robot, tool);
                         changes.insert(id, objects);
+                        if let Some((since, cause)) = waiting.remove(&id) {
+                            out.waits.push(Wait { task: id, robot, seconds: now - since, cause });
+                        }
                         running.push(assignment.clone());
                         out.assignments.push(assignment);
                         reasons.remove(&id);
                         pending.remove(index);
+                        if out.assignments.len() >= MAX_ASSIGNMENTS {
+                            out.cut_short = true;
+                        }
                     }
                     None => index += 1,
                 }
             }
-            // On to the moment the next task ends; its effects may make others ready.
-            let Some(next) = running.iter().map(|a| a.end).min_by(f64::total_cmp) else { break };
+            // On to the moment the next task ends (its effects may make others ready) or a robot is parked.
+            let ends =
+                running.iter().map(|a| a.end).chain(out.parks.iter().map(|p| p.end).filter(|e| *e > now));
+            let Some(next) = ends.min_by(f64::total_cmp) else {
+                // Nothing moves and nothing more can start. A ready task may be held up by a robot that
+                // stands in the way with nothing to do: one such robot goes to its park pose, and the
+                // tasks are tried again while it moves and when it is there.
+                let ready = pending.iter().any(|id| {
+                    !done.contains_key(id) && doc.get(*id).is_some_and(|t| world.holds(&t.precondition))
+                });
+                let parked = ready
+                    .then(|| {
+                        robots.iter().find_map(|(robot, (at, _))| {
+                            let park = doc.robot_park(*robot)?;
+                            if bits(at) == bits(&park) || !moved_away.insert((*robot, bits(at))) {
+                                return None;
+                            }
+                            let others: Vec<gc_motion::Obstacle> = robots
+                                .iter()
+                                .filter(|(other, _)| *other != robot)
+                                .filter_map(|(other, (stands, _))| {
+                                    let name = doc.get(*other).map(|r| r.name.clone())?;
+                                    Some(scenes.get(other)?.as_obstacles(stands, &name))
+                                })
+                                .flatten()
+                                .collect();
+                            self.park_plan(*robot, at, &park, &others).ok()
+                        })
+                    })
+                    .flatten();
+                let Some(plan) = parked else { break };
+                let end = now + plan.duration();
+                robots.insert(plan.robot, (plan.end.clone(), end));
+                out.parks.push(ParkMove { robot: plan.robot, start: now, end, plan });
+                continue;
+            };
             now = next;
             let (ended, still): (Vec<Assignment>, Vec<Assignment>) =
                 running.into_iter().partition(|a| a.end <= now);
@@ -255,10 +426,26 @@ impl Planning<'_> {
                 if let Some(task) = doc.get(assignment.task) {
                     self.apply_effects(&mut world, task);
                 }
+                // A task that repeats goes back among those to do, in its place by priority.
+                let times = done.entry(assignment.task).or_insert(0);
+                *times += 1;
+                let again = match doc.task_repeat(assignment.task) {
+                    None => false,
+                    Some(0) => true,
+                    Some(most) => *times < most,
+                };
+                if again {
+                    let rank =
+                        |id: &Id<Task>| (std::cmp::Reverse(doc.get(*id).map_or(0, |t| t.priority)), *id);
+                    let at = pending.partition_point(|other| rank(other) < rank(&assignment.task));
+                    pending.insert(at, assignment.task);
+                }
             }
         }
+        // What was never done is blocked (a repeating task that was done and is not ready again is not).
         out.blocked = pending
             .into_iter()
+            .filter(|id| !done.contains_key(id) && !running.iter().any(|a| a.task == *id))
             .map(|id| (id, reasons.remove(&id).unwrap_or_else(|| "it cannot be done".to_owned())))
             .collect();
         out

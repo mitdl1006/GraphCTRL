@@ -130,6 +130,9 @@ pub struct RobotScene {
     contacts: Vec<Contact>,
     /// Link pairs excluded from checking by default, and why.
     exclusions: Vec<(BodyId, BodyId, PairReason)>,
+    /// The robot's own collision shapes: the link that carries each and the shape in that link's frame
+    /// (the tool's on the tip link).
+    shapes: Vec<(usize, DPose3, ShapeDesc)>,
 }
 
 /// Why a pair of robot links is or is not checked by default.
@@ -183,6 +186,8 @@ impl RobotScene {
         let mut missing = Vec::new();
         let mut link_bodies = Vec::with_capacity(model.links.len());
         let mut link_radius = Vec::with_capacity(model.links.len());
+        let mut own_shapes: Vec<(usize, DPose3, ShapeDesc)> =
+            tool.iter().map(|(pose, shape)| (tip_link, *pose, shape.clone())).collect();
         for (index, link) in model.links.iter().enumerate() {
             let mut shapes = Vec::new();
             for geometry in &link.collisions {
@@ -225,6 +230,7 @@ impl RobotScene {
                     .map(|(pose, shape)| pose.translation.length() + shape.radius())
                     .fold(0.0, f64::max),
             );
+            own_shapes.extend(shapes.iter().map(|(pose, shape)| (index, *pose, shape.clone())));
             link_bodies.push(if shapes.is_empty() {
                 None
             } else {
@@ -327,6 +333,7 @@ impl RobotScene {
             contacts: Vec::new(),
             exclusions,
             tool_body,
+            shapes: own_shapes,
         };
         // Links that touch in the zero configuration are designed to: they are not checked either.
         scene.place(&vec![0.0; scene.chain.dof()]);
@@ -467,6 +474,22 @@ impl RobotScene {
         self.place_in(&mut world, q);
         let bodies: Vec<BodyId> = self.link_bodies.iter().flatten().copied().chain(self.tool_body).collect();
         world.geometry(&bodies)
+    }
+
+    /// The robot standing at `q` as obstacles for another robot's scene: one per collision shape of its
+    /// links and its tool, named `name`.
+    pub fn as_obstacles(&self, q: &[f64], name: &str) -> Vec<Obstacle> {
+        let poses = self.link_poses(q);
+        self.shapes
+            .iter()
+            .filter_map(|(link, local, shape)| {
+                Some(Obstacle {
+                    name: name.to_owned(),
+                    pose: *poses.get(*link)? * *local,
+                    shape: shape.clone(),
+                })
+            })
+            .collect()
     }
 
     /// The distance robot links keep from obstacles.

@@ -3065,6 +3065,72 @@ impl Planning<'_> {
         robot_id: Id<Robot>,
         start: &[f64],
     ) -> Result<TaskPlan, String> {
+        self.task_plan_among(task_id, robot_id, start, &self.others_standing(robot_id))
+    }
+
+    /// A joint move of a robot from `start` to its park pose, with `others` in the way.
+    pub(crate) fn park_plan(
+        &self,
+        robot_id: Id<Robot>,
+        start: &[f64],
+        park: &[f64],
+        others: &[Obstacle],
+    ) -> Result<TaskPlan, String> {
+        let robot = self.doc.get(robot_id).ok_or("the robot no longer exists")?;
+        let loaded = self.robots.get(&robot_id).ok_or("the robot description could not be read")?;
+        let mut obstacles = self.equipment.clone();
+        if let Ok(list) = &mut obstacles {
+            list.extend_from_slice(others);
+        }
+        let scene = robot_scene(self.doc, loaded, self.meshes, robot, &obstacles)?;
+        let step = Step {
+            name: format!("{} (park)", robot.name),
+            goal: Goal::Joints(park.to_vec()),
+            travel: Travel::Free,
+            tcp_speed: None,
+            contacts: Vec::new(),
+        };
+        let how = (PLANNERS[0].1, 1, 4, None);
+        let segments = run_steps(loaded, robot, &scene, vec![step], start.to_vec(), how, None, self.control)?;
+        Ok(TaskPlan {
+            robot: robot_id,
+            segments,
+            waiting: 0.0,
+            end: park.to_vec(),
+            start: start.to_vec(),
+            pauses: Vec::new(),
+        })
+    }
+
+    /// The other robots where the document has them, as obstacles for `robot` (suppressed ones and those
+    /// whose shapes are not known are left out).
+    pub(crate) fn others_standing(&self, robot: Id<Robot>) -> Vec<Obstacle> {
+        self.doc
+            .robots()
+            .iter()
+            .filter(|(other, _)| *other != robot && !self.doc.is_component_suppressed(other.erase()))
+            .filter_map(|(other, data)| {
+                Some(self.scene_of(other).ok()?.as_obstacles(&data.joints, &data.name))
+            })
+            .flatten()
+            .collect()
+    }
+
+    /// The planning scene of a robot in the cell as it stands (other robots are not in it).
+    pub(crate) fn scene_of(&self, robot_id: Id<Robot>) -> Result<RobotScene, String> {
+        let robot = self.doc.get(robot_id).ok_or("the robot no longer exists")?;
+        let loaded = self.robots.get(&robot_id).ok_or("the robot description could not be read")?;
+        robot_scene(self.doc, loaded, self.meshes, robot, &self.equipment)
+    }
+
+    /// [`Planning::task_plan_from`] with more obstacles in the way: other robots where they stand.
+    pub(crate) fn task_plan_among(
+        &self,
+        task_id: Id<gc_doc::Task>,
+        robot_id: Id<Robot>,
+        start: &[f64],
+        others: &[Obstacle],
+    ) -> Result<TaskPlan, String> {
         use gc_doc::{Location, MoveTarget, RobotChoice};
         let doc = self.doc;
         let task = doc.get(task_id).ok_or("the task no longer exists")?;
@@ -3146,7 +3212,11 @@ impl Planning<'_> {
                 }
             });
         }
-        let scene = robot_scene(doc, loaded, self.meshes, robot, &self.equipment)?;
+        let mut obstacles = self.equipment.clone();
+        if let Ok(list) = &mut obstacles {
+            list.extend_from_slice(others);
+        }
+        let scene = robot_scene(doc, loaded, self.meshes, robot, &obstacles)?;
         let how = (PLANNERS[0].1, 1, 4, None);
         let segments = run_steps(loaded, robot, &scene, steps, start.to_vec(), how, None, self.control)?;
         let end = segments.last().and_then(|s| s.path.last()).map_or_else(|| start.to_vec(), Vec::clone);

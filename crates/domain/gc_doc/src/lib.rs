@@ -74,5 +74,5 @@ pub use tree::ComponentNode;
 pub use txn::{DocError, Txn};
 pub use work::{
     Effect, EffectTarget, Location, MoveTarget, ObjectType, RobotChoice, StateValue, StateVar, Step, Task,
-    WorkObject, WorkOp,
+    WorkObject, WorkOp, effect_number,
 };

@@ -110,17 +110,14 @@ fn a_task_is_planned_for_the_robot_asked_with_its_tool_and_the_sketch_as_it_is()
     assert!(near(*after.segments[0].tip_path.last().unwrap(), [-0.1, 0.0, 0.6], 1e-4));
     assert!(s.undo());
 
-    // The bids: both robots may do it, the faster first, each with the time its own plan takes; and from
-    // where a robot already stands on the point it takes only the wait.
+    // The bids: both robots may do it; each is planned with the other standing where it is, so the right
+    // one cannot get to the point in front of the left one. Those that can come first, the faster first.
     let candidates = s.task_candidates(touch);
     assert_eq!(candidates.len(), 2);
-    let times: Vec<f64> = candidates.iter().map(|c| *c.time.as_ref().unwrap()).collect();
-    assert!(times[0] <= times[1], "{times:?}");
-    for candidate in &candidates {
-        let own = s.task_plan(touch, candidate.robot).unwrap().duration();
-        assert_eq!(candidate.time, Ok(own));
-    }
-    assert!(candidates.iter().any(|c| c.robot == left) && candidates.iter().any(|c| c.robot == right));
+    assert_eq!(candidates[0].robot, left);
+    assert_eq!(candidates[0].time, Ok(s.task_plan(touch, left).unwrap().duration()));
+    let why = candidates[1].time.as_ref().unwrap_err();
+    assert!(why.contains("Left"), "{why}");
     let again = s.task_plan_from(touch, left, &with_tool.end).unwrap();
     assert!(again.duration() < 1.5 + 0.05, "{}", again.duration());
 
@@ -181,11 +178,12 @@ fn ready_tasks_go_to_the_idle_robot_that_finishes_soonest_and_effects_ready_the_
     let touch = add(&mut s, task("Touch right", roles[1]));
     let never = add(&mut s, Task { precondition: "B.state == done".into(), ..task("Never", roles[0]) });
 
-    // The bids for the first task, from where the robots stand.
-    let bids = s.task_candidates(fasten);
-    let (first, other) = (bids[0].robot, if bids[0].robot == left { right } else { left });
     let revision = s.doc().revision();
     let schedule = s.schedule();
+    // Whichever robot bid lower got the first task (each bid is planned with the other robot standing
+    // where it is).
+    let first = schedule.assignments[0].robot;
+    let other = if first == left { right } else { left };
     assert_eq!(s.doc().revision(), revision, "nothing is run or edited");
     assert_eq!(schedule, s.schedule(), "the same every time");
     let of = |task: Id<Task>| schedule.assignments.iter().find(|x| x.task == task).unwrap();
@@ -195,7 +193,6 @@ fn ready_tasks_go_to_the_idle_robot_that_finishes_soonest_and_effects_ready_the_
     assert_eq!(schedule.assignments[0].task, fasten);
     assert_eq!((of(fasten).robot, of(fasten).start), (first, 0.0));
     assert_eq!((of(touch).robot, of(touch).start), (other, 0.0));
-    assert_eq!(of(fasten).end, *bids[0].time.as_ref().unwrap());
     assert!(of(fasten).end - of(fasten).start > 2.0, "the wait is part of it");
     // Inspect starts when Fasten ends (its effect), with a robot that is idle then.
     assert_eq!(of(inspect).start, of(fasten).end);
@@ -293,4 +290,126 @@ fn a_schedule_is_played_back_with_every_robot_where_it_is_at_that_moment() {
     assert_eq!(s.doc().revision(), revision);
     s.set_schedule_playback(None);
     assert_eq!(s.robot_joints(left), Some(home));
+}
+
+#[test]
+fn robots_keep_clear_of_each_other_and_the_one_in_the_way_is_waited_for() {
+    let Cell { mut s, left, right, sketch, points, roles } = cell();
+    // Both robots are to touch the same point, between them.
+    let between = SketchOp::SetCoords { points: vec![(points[0], [0.35, 0.5, 0.0])], radii: Vec::new() };
+    s.execute(&Command::Sketch { sketch, op: between }).unwrap();
+    let only = |name: &str, robot: Id<Robot>, priority: i32| Task {
+        robots: RobotChoice::Only(vec![robot]),
+        priority,
+        ..task(name, roles[0])
+    };
+    let first = add(&mut s, only("Left touches", left, 2));
+    let second = add(&mut s, only("Right touches", right, 1));
+    // On their own, each can.
+    assert!(s.task_plan(first, left).is_ok() && s.task_plan(second, right).is_ok());
+
+    // Left goes first and then stands on the point with nothing to do: it is sent back to where it
+    // stood (its park pose by default), and right goes once it is out of the way.
+    let schedule = s.schedule();
+    assert!(schedule.blocked.is_empty(), "{:?}", schedule.blocked);
+    assert_eq!((schedule.assignments[0].task, schedule.assignments[0].robot), (first, left));
+    assert_eq!(schedule.parks.len(), 1);
+    let park = &schedule.parks[0];
+    assert_eq!((park.robot, park.start), (left, schedule.assignments[0].end));
+    assert_eq!(park.plan.end, s.doc().get(left).unwrap().joints);
+    let right_goes = schedule.assignments.iter().find(|x| x.task == second).unwrap();
+    assert!(right_goes.start >= park.start && right_goes.robot == right);
+    assert_eq!(schedule.joints_at(left, park.end + 1.0), Some(park.plan.end.clone()));
+    assert!(schedule.makespan() >= park.end);
+    // A park pose of its own: saved, one undo step, the right number of joints.
+    use gc_doc::EditError;
+    assert_eq!(
+        s.edit_work(WorkOp::SetRobotPark { robot: left, joints: Some(vec![0.0; 2]) }),
+        Err(EditError::BadValue)
+    );
+    let elsewhere = vec![1.2, -0.3, 0.6, 0.0, 0.6, 0.0];
+    let depth = s.history().undo_depth();
+    s.edit_work(WorkOp::SetRobotPark { robot: left, joints: Some(elsewhere.clone()) }).unwrap();
+    assert_eq!(s.history().undo_depth(), depth + 1);
+    assert_eq!(s.doc().robot_park(left), Some(elsewhere.clone()));
+    assert_eq!(s.schedule().parks[0].plan.end, elsewhere);
+    s.edit_work(WorkOp::SetRobotPark { robot: left, joints: None }).unwrap();
+
+    // With a task that takes left back to where it started, right waits for it and then goes.
+    let home = s.add_waypoint_here(left).unwrap();
+    let away = add(
+        &mut s,
+        Task {
+            location: Location::Robot(left),
+            steps: vec![Step::MoveJ(MoveTarget::Waypoint(home))],
+            ..task("Left away", roles[0])
+        },
+    );
+    let schedule = s.schedule();
+    assert!(schedule.blocked.is_empty(), "{:?}", schedule.blocked);
+    let of = |task: Id<Task>| schedule.assignments.iter().find(|x| x.task == task).unwrap();
+    assert_eq!((of(first).start, of(away).start), (0.0, of(first).end));
+    assert_eq!(of(second).start, of(away).end, "right starts when left is out of the way");
+    // The wait is on record: right was ready from the start and waited for left.
+    assert_eq!(schedule.waits.len(), 1);
+    let wait = &schedule.waits[0];
+    assert_eq!((wait.task, wait.robot, wait.cause), (second, right, left));
+    assert_eq!(wait.seconds, of(second).start);
+    assert_eq!(of(second).robot, right);
+}
+
+#[test]
+fn a_task_repeats_while_its_condition_holds_and_counts_with_an_expression() {
+    use gc_doc::{EditError, StateValue, StateVar};
+    let Cell { mut s, roles, .. } = cell();
+    let count = s
+        .edit_work(WorkOp::AddStateVar(StateVar { name: "count".into(), value: StateValue::Int(0) }))
+        .unwrap()
+        .unwrap()
+        .downcast()
+        .unwrap();
+    let counting = |value: &str| Task {
+        precondition: "count < 3".into(),
+        effects: vec![Effect { target: EffectTarget::Var(count), value: value.into() }],
+        ..task("Count", roles[0])
+    };
+    // The value is an expression over the numeric states; mistakes are refused with their place.
+    assert!(matches!(
+        s.edit_work(WorkOp::AddTask(counting("count +"))),
+        Err(EditError::Expr { start: 7, .. })
+    ));
+    assert!(matches!(
+        s.edit_work(WorkOp::AddTask(counting("apples + 1"))),
+        Err(EditError::Expr { start: 0, .. })
+    ));
+    let id = add(&mut s, counting("count + 1"));
+
+    // Done once it stops there: the condition still holds but the task is not repeated.
+    assert_eq!(s.schedule().assignments.len(), 1);
+    // Repeated: three times, until the count it raises makes its condition false. One undo step; saved.
+    let depth = s.history().undo_depth();
+    s.edit_work(WorkOp::SetTaskRepeat { task: id, times: Some(0) }).unwrap();
+    assert_eq!(s.history().undo_depth(), depth + 1);
+    assert_eq!(s.doc().task_repeat(id), Some(0));
+    let schedule = s.schedule();
+    assert_eq!(schedule.assignments.len(), 3);
+    assert!(schedule.blocked.is_empty() && !schedule.cut_short);
+    assert!(schedule.assignments.windows(2).all(|w| w[0].end <= w[1].start), "one after the other");
+    // At most twice.
+    s.edit_work(WorkOp::SetTaskRepeat { task: id, times: Some(2) }).unwrap();
+    assert_eq!(s.schedule().assignments.len(), 2);
+    let text = gc_persist::to_text(s.doc()).unwrap();
+    assert_eq!(gc_persist::from_text(&text).unwrap().doc.task_repeat(id), Some(2));
+    // Renaming the variable is followed by the expression.
+    s.execute(&Command::Rename { item: gc_core::Id::<StateVar>::erase(count), name: "n".into() }).unwrap();
+    let stored = s.doc().get(id).unwrap();
+    assert_eq!((stored.precondition.as_str(), stored.effects[0].value.as_str()), ("n < 3", "n + 1"));
+    assert_eq!(s.schedule().assignments.len(), 2);
+
+    // A task that repeats without end is cut off.
+    let forever = add(&mut s, Task { steps: vec![Step::Wait { seconds: 1.0 }], ..task("Forever", roles[0]) });
+    s.edit_work(WorkOp::SetTaskRepeat { task: forever, times: Some(0) }).unwrap();
+    let schedule = s.schedule();
+    assert!(schedule.cut_short);
+    assert_eq!(schedule.assignments.len(), gc_session::MAX_ASSIGNMENTS);
 }
