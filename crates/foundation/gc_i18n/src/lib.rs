@@ -726,6 +726,17 @@ messages! {
     /// Ribbon: the Constrain command; the dialog's title.
     ConstrainTitle => ("구속", "Constrain"),
     /// Constrain dialog: the Mate type.
+    ConstrainAngle => ("각도", "Angle"),
+    ConstrainTangent => ("접선", "Tangent"),
+    ConstrainSymmetry => ("대칭", "Symmetry"),
+    ConstrainSymmetryPlane => ("대칭 평면", "Symmetry plane"),
+    ConstrainThird => ("세 번째 선택", "Third selection"),
+    ConstrainDirected => ("방향 각도", "Directed Angle"),
+    ConstrainUndirectedAngle => ("방향 없는 각도", "Undirected Angle"),
+    ConstrainExplicit => ("명시 기준 벡터", "Explicit Reference Vector"),
+    ConstrainInside => ("안쪽", "Inside"),
+    ConstrainOutside => ("바깥쪽", "Outside"),
+    ConstrainAngleValue => ("각도 값", "Angle"),
     ConstrainMate => ("맞춤", "Mate"),
     /// Constrain dialog: the Flush type.
     ConstrainFlush => ("플러시", "Flush"),

@@ -553,6 +553,16 @@
 - 하지 않은 것: 회전 기호 손잡이(안쪽=임의, 위·아래=수평축, 좌·우=수직축, 테두리=화면 평면; 지금은 화면 기준 드래그), 드래그 중 고무줄, 브라우저에서 어긋남을 오류와 구별해 표시.
 - 테스트: `update_brings_a_free_moved_component_back_to_its_relationships`.
 
+## Constrain 대화상자: Angle·Tangent·Symmetry
+
+근거(원문, curl): To Place Angle Constraints in Assemblies GUID-AD4679FD-EE9B-47C0-9E32-04B990BDD29E(Directed / Undirected / Explicit Reference Vector, 세 번째 선택은 "면·선형 모서리·작업 평면·작업 축, 가능하면 고정 컴포넌트에서", 한계는 Directed에 없음).
+
+- 종류 탭: 맞춤·플러시·각도·접선·삽입·대칭. 각도: 값(deg, 식·매개변수 이름 가능)과 해법 3개, Explicit이면 세 번째 선택 줄이 생기고 다음 뷰 선택이 거기 들어간다. 접선: 오프셋 + 안쪽/바깥쪽. 대칭: 세 번째 선택 = 대칭 평면, 값 칸 없음.
+- 한계(Maximum/Minimum/Resting)는 맞춤·플러시·삽입에만 보인다(각도 한계는 원문 규칙이 복잡해 아직 안 함).
+- 예측(Predict)은 각도·접선도 채운다.
+- 테스트: `constrain.rs`의 `angle_tangent_and_symmetry_are_described_by_the_dialog`(필드→`Relationship`). 뷰에서 고르는 흐름은 UI 테스트 없음.
+- 한국어: 각도/접선/대칭/방향 각도/방향 없는 각도/명시 기준 벡터(영어 원문 병기 필요하면 말해 주세요).
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹
