@@ -3004,6 +3004,40 @@ pub struct TaskPlan {
     pub start: Vec<f64>,
     /// Where it stands still (waits, tool actions): after how many of the motions, and for how long.
     pub pauses: Vec<(usize, f64)>,
+    /// The task as commands for the robot, in order (what a robot program is written from).
+    pub program: Vec<ProgramStep>,
+}
+
+/// One command of a planned task.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ProgramStep {
+    /// Joint moves through these joint values, as planned (the last is where the motion stops).
+    Joints(Vec<Vec<f64>>),
+    /// The tool centre point in straight lines through these world poses (the last is where it stops).
+    Linear {
+        /// The poses of the tool centre point in the world.
+        poses: Vec<DPose3>,
+        /// The fastest the tool tip may go, m/s; `None` for the default.
+        speed: Option<f64>,
+    },
+    /// Stand still for this many seconds.
+    Pause(f64),
+    /// Set an output signal.
+    Output {
+        /// The signal's name.
+        name: String,
+        /// On or off.
+        value: bool,
+    },
+    /// A tool action, by name.
+    Action(String),
+    /// Wait for signals.
+    WaitFor {
+        /// The condition as written.
+        condition: String,
+        /// Give up after this many seconds.
+        timeout: f64,
+    },
 }
 
 impl TaskPlan {
@@ -3065,7 +3099,58 @@ impl Planning<'_> {
         robot_id: Id<Robot>,
         start: &[f64],
     ) -> Result<TaskPlan, String> {
-        self.task_plan_among(task_id, robot_id, start, &[])
+        self.task_plan_among(task_id, robot_id, start, &self.others_standing(robot_id))
+    }
+
+    /// A joint move of a robot from `start` to its park pose, with `others` in the way.
+    pub(crate) fn park_plan(
+        &self,
+        robot_id: Id<Robot>,
+        start: &[f64],
+        park: &[f64],
+        others: &[Obstacle],
+    ) -> Result<TaskPlan, String> {
+        let robot = self.doc.get(robot_id).ok_or("the robot no longer exists")?;
+        let loaded = self.robots.get(&robot_id).ok_or("the robot description could not be read")?;
+        let mut obstacles = self.equipment.clone();
+        if let Ok(list) = &mut obstacles {
+            list.extend_from_slice(others);
+        }
+        let scene = robot_scene(self.doc, loaded, self.meshes, robot, &obstacles)?;
+        let step = Step {
+            name: format!("{} (park)", robot.name),
+            goal: Goal::Joints(park.to_vec()),
+            travel: Travel::Free,
+            tcp_speed: None,
+            contacts: Vec::new(),
+        };
+        let how = (PLANNERS[0].1, 1, 4, None);
+        let segments = run_steps(loaded, robot, &scene, vec![step], start.to_vec(), how, None, self.control)?;
+        let program =
+            segments.iter().map(|s| ProgramStep::Joints(s.path.iter().skip(1).cloned().collect())).collect();
+        Ok(TaskPlan {
+            robot: robot_id,
+            segments,
+            waiting: 0.0,
+            end: park.to_vec(),
+            start: start.to_vec(),
+            pauses: Vec::new(),
+            program,
+        })
+    }
+
+    /// The other robots where the document has them, as obstacles for `robot` (suppressed ones and those
+    /// whose shapes are not known are left out).
+    pub(crate) fn others_standing(&self, robot: Id<Robot>) -> Vec<Obstacle> {
+        self.doc
+            .robots()
+            .iter()
+            .filter(|(other, _)| *other != robot && !self.doc.is_component_suppressed(other.erase()))
+            .filter_map(|(other, data)| {
+                Some(self.scene_of(other).ok()?.as_obstacles(&data.joints, &data.name))
+            })
+            .flatten()
+            .collect()
     }
 
     /// The planning scene of a robot in the cell as it stands (other robots are not in it).
@@ -3107,6 +3192,8 @@ impl Planning<'_> {
         let mut waiting = 0.0;
         // Where the robot stands still: after how many motions, and for how long.
         let mut pauses: Vec<(usize, f64)> = Vec::new();
+        // What is done between the motions, for the program: after how many motions, and what.
+        let mut between: Vec<(usize, ProgramStep)> = Vec::new();
         let free = |name: &str, goal: Goal, travel: Travel| Step {
             name: name.to_owned(),
             goal,
@@ -3125,6 +3212,7 @@ impl Planning<'_> {
                 gc_doc::Step::Wait { seconds } => {
                     waiting += seconds;
                     pauses.push((steps.len(), *seconds));
+                    between.push((steps.len(), ProgramStep::Pause(*seconds)));
                     continue;
                 }
                 gc_doc::Step::ToolAction { action, target } => {
@@ -3140,15 +3228,21 @@ impl Planning<'_> {
                         waiting += found.duration;
                         pauses.push((steps.len(), found.duration));
                     }
+                    between.push((steps.len(), ProgramStep::Action(action.clone())));
                     continue;
                 }
-                gc_doc::Step::SetIo { name, .. } => {
+                gc_doc::Step::SetIo { name, value } => {
                     if !doc.tool_kits().is_empty() && !kit.is_some_and(|k| k.has_output(name)) {
                         return Err(format!("{}: its tool has no output signal `{name}`", robot.name));
                     }
+                    between.push((steps.len(), ProgramStep::Output { name: name.clone(), value: *value }));
                     continue;
                 }
-                gc_doc::Step::WaitIo { .. } => continue,
+                gc_doc::Step::WaitIo { condition, timeout } => {
+                    let wait = ProgramStep::WaitFor { condition: condition.clone(), timeout: *timeout };
+                    between.push((steps.len(), wait));
+                    continue;
+                }
             };
             steps.push(match target {
                 MoveTarget::Role(role) => {
@@ -3170,9 +3264,29 @@ impl Planning<'_> {
         }
         let scene = robot_scene(doc, loaded, self.meshes, robot, &obstacles)?;
         let how = (PLANNERS[0].1, 1, 4, None);
+        // How each motion is to be commanded: by joints as planned, or the tool along poses.
+        let shapes: Vec<Option<(Vec<DPose3>, Option<f64>)>> = steps
+            .iter()
+            .map(|step| match (&step.travel, &step.goal) {
+                (Travel::Linear, Goal::Pose(pose)) => Some((vec![*pose], step.tcp_speed)),
+                (Travel::Along(via), Goal::Pose(pose)) => {
+                    Some((via.iter().chain(std::iter::once(pose)).copied().collect(), step.tcp_speed))
+                }
+                _ => None,
+            })
+            .collect();
         let segments = run_steps(loaded, robot, &scene, steps, start.to_vec(), how, None, self.control)?;
         let end = segments.last().and_then(|s| s.path.last()).map_or_else(|| start.to_vec(), Vec::clone);
-        Ok(TaskPlan { robot: robot_id, segments, waiting, end, start: start.to_vec(), pauses })
+        let mut program = Vec::new();
+        for index in 0..=segments.len() {
+            program.extend(between.iter().filter(|(after, _)| *after == index).map(|(_, step)| step.clone()));
+            let (Some(segment), Some(shape)) = (segments.get(index), shapes.get(index)) else { continue };
+            program.push(match shape {
+                Some((poses, speed)) => ProgramStep::Linear { poses: poses.clone(), speed: *speed },
+                None => ProgramStep::Joints(segment.path.iter().skip(1).cloned().collect()),
+            });
+        }
+        Ok(TaskPlan { robot: robot_id, segments, waiting, end, start: start.to_vec(), pauses, program })
     }
 
     /// The robots a task may be given to as the states stand: the robot it is located at, the ones it

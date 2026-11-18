@@ -342,6 +342,22 @@ pub enum WorkOp {
     },
     /// Deletes a task.
     DeleteTask(Id<Task>),
+    /// How many times a task is done: `None` for once (the default), `Some(0)` for as often as its
+    /// precondition comes to hold, `Some(n)` for up to `n` times.
+    SetTaskRepeat {
+        /// The task.
+        task: Id<Task>,
+        /// How many times at most.
+        times: Option<u32>,
+    },
+    /// Where a robot goes to be out of the way of the others (its park pose), as joint values; `None`
+    /// for where the document has it standing.
+    SetRobotPark {
+        /// The robot.
+        robot: Id<Robot>,
+        /// One value per joint of its planning chain.
+        joints: Option<Vec<f64>>,
+    },
     /// Adds a tool kit.
     AddToolKit(crate::toolkit::ToolKit),
     /// Replaces a tool kit. With the same number of actions (signals), one whose name changed is renamed
@@ -526,15 +542,63 @@ fn var_ok(doc: &Document, var: &StateVar, except: Option<Id<StateVar>>) -> Resul
     }
 }
 
-/// True when `text` is a value a variable of this kind can take.
-fn value_fits(kind: &StateValue, text: &str) -> bool {
-    let text = text.trim();
-    match kind {
-        StateValue::Bool(_) => matches!(text, "true" | "false"),
-        StateValue::Int(_) => text.parse::<i64>().is_ok(),
-        StateValue::Real(_) => text.parse::<f64>().is_ok_and(f64::is_finite),
-        StateValue::Enum { choices, .. } => choices.iter().any(|c| c == text),
+/// The number an effect gives a numeric state variable: `text` is an expression over numbers and the
+/// numeric state variables (`count + 1`), which `lookup` gives the values of. The error says where it is
+/// wrong (bytes of `text`).
+pub fn effect_number(text: &str, lookup: &dyn Fn(&str) -> Option<f64>) -> Result<f64, EditError> {
+    struct Numbers<'a>(&'a dyn Fn(&str) -> Option<f64>);
+    impl gc_expr::Scope for Numbers<'_> {
+        fn lookup(&self, name: &str) -> Option<gc_expr::Quantity> {
+            (self.0)(name).map(gc_expr::Quantity::scalar)
+        }
     }
+    let wrong = |message: String, span: Span| EditError::Expr { message, start: span.start, end: span.end };
+    let expr = gc_expr::parse(text).map_err(|e| wrong(e.kind.to_string(), e.span))?;
+    let value = expr
+        .eval_as(&Numbers(lookup), gc_expr::Unit::Scalar)
+        .map_err(|e| wrong(e.kind.to_string(), e.span))?;
+    if value.is_finite() { Ok(value) } else { Err(wrong("this is not a number".to_owned(), expr.span())) }
+}
+
+impl Document {
+    /// The starting value of a numeric state variable (whole numbers and numbers).
+    fn number_of(&self, name: &str) -> Option<f64> {
+        match self.variable(name)? {
+            CondValue::Number(value) => Some(value),
+            CondValue::Bool(_) | CondValue::Name(_) => None,
+        }
+    }
+
+    /// Where a robot goes to be out of the way: its park pose, or without one where the document has it
+    /// standing. `None` for a robot that does not exist.
+    pub fn robot_park(&self, robot: Id<Robot>) -> Option<Vec<f64>> {
+        let data = self.get(robot)?;
+        let stored = self.timeline().and_then(|(_, t)| {
+            t.components.parks.iter().find(|(id, q)| *id == robot && q.len() == data.joints.len())
+        });
+        Some(stored.map_or_else(|| data.joints.clone(), |(_, q)| q.clone()))
+    }
+
+    /// How many times a task is done at most: `None` for once, `Some(0)` for as often as its precondition
+    /// comes to hold, `Some(n)` for up to `n` times.
+    pub fn task_repeat(&self, task: Id<Task>) -> Option<u32> {
+        let (_, timeline) = self.timeline()?;
+        self.get(task)?;
+        timeline.components.task_repeats.iter().find(|(id, _)| *id == task).map(|(_, times)| *times)
+    }
+}
+
+/// Checks the value an effect gives a variable of this kind.
+fn value_fits(doc: &Document, kind: &StateValue, text: &str) -> Result<(), EditError> {
+    let fits = match kind {
+        StateValue::Bool(_) => matches!(text.trim(), "true" | "false"),
+        // A number, or an expression over the numeric state variables.
+        StateValue::Int(_) | StateValue::Real(_) => {
+            return effect_number(text, &|name| doc.number_of(name)).map(|_| ());
+        }
+        StateValue::Enum { choices, .. } => choices.iter().any(|c| c == text.trim()),
+    };
+    if fits { Ok(()) } else { Err(EditError::BadValue) }
 }
 
 fn task_ok(doc: &Document, task: &Task) -> Result<(), EditError> {
@@ -577,7 +641,11 @@ fn task_ok(doc: &Document, task: &Task) -> Result<(), EditError> {
                 .get(object)
                 .and_then(|o| doc.get(o.ty))
                 .is_some_and(|ty| ty.states.contains(&effect.value)),
-            EffectTarget::Var(var) => doc.get(var).is_some_and(|v| value_fits(&v.value, &effect.value)),
+            EffectTarget::Var(var) => {
+                let var = doc.get(var).ok_or(EditError::BadValue)?;
+                value_fits(doc, &var.value, &effect.value)?;
+                true
+            }
         };
         if !fine {
             return Err(EditError::BadValue);
@@ -801,6 +869,34 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &WorkOp) -> Result<(Vec<Created>, &'sta
             txn.modify(*id, |v: &mut StateVar, _| v.clone_from(var))?;
             if old != var.name {
                 rewrite_conditions(txn, &|_, parsed, source| parsed.renamed(source, false, &old, &var.name))?;
+                // Effects that work a number out from it follow too.
+                let tasks: Vec<Id<Task>> = txn.doc().tasks().iter().map(|(id, _)| id).collect();
+                for task in tasks {
+                    let numeric: Vec<bool> = txn
+                        .doc()
+                        .get(task)
+                        .map(|t| {
+                            t.effects
+                                .iter()
+                                .map(|e| match e.target {
+                                    EffectTarget::Var(v) => txn.doc().get(v).is_some_and(|v| {
+                                        matches!(v.value, StateValue::Int(_) | StateValue::Real(_))
+                                    }),
+                                    EffectTarget::Object(_) => false,
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    txn.modify(task, |t: &mut Task, _| {
+                        for (effect, numeric) in t.effects.iter_mut().zip(&numeric) {
+                            if *numeric
+                                && let Some(new) = crate::command::rename_in(&effect.value, &old, &var.name)
+                            {
+                                effect.value = new;
+                            }
+                        }
+                    })?;
+                }
             }
             (Vec::new(), "Edit state")
         }
@@ -830,6 +926,28 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &WorkOp) -> Result<(Vec<Created>, &'sta
         WorkOp::DeleteTask(id) => {
             txn.remove(*id)?;
             (Vec::new(), "Delete task")
+        }
+        WorkOp::SetTaskRepeat { task, times } => {
+            txn.doc().get(*task).ok_or(EditError::BadValue)?;
+            let doc_tasks: Vec<Id<Task>> = txn.doc().tasks().iter().map(|(id, _)| id).collect();
+            crate::cell::set_timeline(txn, |t| {
+                // Tasks that are gone drop out here too.
+                t.components.task_repeats.retain(|(id, _)| *id != *task && doc_tasks.contains(id));
+                t.components.task_repeats.extend(times.map(|times| (*task, times)));
+            })?;
+            (Vec::new(), "Repeat task")
+        }
+        WorkOp::SetRobotPark { robot, joints } => {
+            let dof = txn.doc().get(*robot).ok_or(EditError::BadValue)?.joints.len();
+            if joints.as_ref().is_some_and(|q| q.len() != dof || q.iter().any(|v| !v.is_finite())) {
+                return Err(EditError::BadValue);
+            }
+            let robots: Vec<Id<Robot>> = txn.doc().robots().iter().map(|(id, _)| id).collect();
+            crate::cell::set_timeline(txn, |t| {
+                t.components.parks.retain(|(id, _)| *id != *robot && robots.contains(id));
+                t.components.parks.extend(joints.clone().map(|q| (*robot, q)));
+            })?;
+            (Vec::new(), "Park pose")
         }
         WorkOp::AddToolKit(_)
         | WorkOp::SetToolKit { .. }

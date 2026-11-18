@@ -124,6 +124,40 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — URScript 프로그램 생성 (PLAN 9.6, 오프라인 텍스트만)
+
+근거: `docs/research/robotics-domain.md`의 URScript 절(SI 단위, `movej` 기본 a = 1.4 rad/s²·v = 1.05 rad/s, `movel` 기본 a = 1.2 m/s²·v = 0.25 m/s, 자세 `p[x, y, z, rx, ry, rz]` 회전벡터), `m2-references.md`. **URSim·실제 로봇으로 실행해 본 적 없다**(이 환경에 URSim 없음). 전송·RTDE·Dashboard는 없다.
+
+- `session.task_urscript(task, robot) -> Result<String, String>`: 그 로봇으로 작업을 계획해 `def <작업 이름>(): … end` 텍스트로. 문서 불변.
+- `session.schedule_urscript(&Schedule) -> Vec<(Id<Robot>, String)>`: 할 일이 있는 로봇마다 프로그램 하나(`def <로봇 이름>()`). 작업·비키기 이동을 시작 순서로 잇고 사이의 쉬는 시간은 `sleep`. 로봇 간 동기화는 시간뿐이다.
+- 변환 규칙(`gc_session/src/urscript.rs`):
+  - 머리: `set_tcp(p[…])`(로봇 TCP), 이어서 계획 시작 관절값으로 `movej`.
+  - 자유 이동(MoveJ, 경로 역할 접근, 비키기): 계획이 찾은 관절 경유점 그대로 `movej([q…], a=1.4, v=1.05, r=…)` — 시뮬레이션과 같은 팔 자세·우회로. 중간 경유점 `r=0.01`, 마지막 `r=0`.
+  - 직선·곡선(MoveL, Linear/Follow 역할): `movel(p[…], a=1.2, v=<역할 속도 또는 0.25>, r=…)`, 자세는 **로봇 베이스 좌표계**(`robot_base_frame`의 역변환 적용). 곡선 표본은 `r=0.001`, 마지막 `r=0`.
+  - `Wait` → `sleep(s)`. `SetIo` → `set_digital_out(pin, True/False)`(핀은 로봇 툴 종류의 출력 신호; 없으면 주석). `ToolAction` → 주석 + 신호 set + 확인 입력을 `timeout`까지 기다리는 `while`(확인이 없으면 `sleep(duration)`). `WaitIo` → `# TODO wait for: …` 주석(신호 모델 없음).
+  - 이름의 식별자 밖 글자는 `_`.
+- `TaskPlan.program: Vec<ProgramStep>`(새 필드): 계획된 작업을 명령 순서로 본 것 — `Joints`, `Linear { poses, speed }`, `Pause`, `Output`, `Action`, `WaitFor`. 다른 내보내기(다른 제조사, 온라인 실행)가 여기서 출발할 수 있다.
+- 한계: 블렌드 반지름은 고정값(계획의 블렌드와 같지 않다 → 실제 경로가 시뮬레이션과 조금 다르고, 충돌 보증은 시뮬레이션 궤적에만 해당), 툴 플랜지 IO(`set_tool_digital_out`)·아날로그 미구분, 속도·가속도는 URScript 기본값(로봇별 한계·문서의 가속 프로파일 미반영), `movep`/`movec` 미사용.
+- 테스트: `gc_session/tests/urscript.rs`(명령 순서, 숫자, 베이스 좌표계, 핀).
+
+## 2026-11-18 — 교착 해소: 막는 로봇을 대기 자세로
+
+- 대기 자세: `WorkOp::SetRobotPark { robot, joints: Option<Vec<f64>> }`(관절 수가 다르면 `BadValue`), `doc().robot_park(robot)` — 지정이 없으면 문서의 관절 자세(시작 자세). `Robot` 구조체는 그대로이고 `Components.parks`에 저장.
+- 스케줄: 아무것도 움직이지 않고 더 줄 작업도 없는데 **아직 한 번도 못 한 준비된 작업**이 남아 있으면, 대기 자세에 있지 않은 쉬는 로봇 하나(로봇 추가 순서)를 대기 자세로 보낸다(다른 로봇은 서 있는 장애물). 그동안과 도착 후 작업을 다시 본다. 같은 자리에서 같은 로봇을 두 번 보내지 않으므로 끝난다.
+- 결과: `Schedule.parks: Vec<ParkMove { robot, start, end, plan }>`. `joints_at`·`robots_at`·`makespan`·재생(`set_schedule_playback`)에 포함된다. 프론트는 간트에 "비키기" 막대로 그리면 된다.
+- 한계: 실제로 길을 막는 로봇인지 따지지 않고 대기 자세에 없는 첫 로봇부터 보낸다(불필요한 이동이 있을 수 있음). 대기 자세로 가는 길도 막혀 있으면 그 로봇은 건너뛴다. 두 로봇이 서로의 대기 자세를 막는 경우는 풀지 못한다.
+- 테스트: `task_schedule.rs::robots_keep_clear_of_each_other_…`.
+
+## 2026-11-18 — 숫자 효과 식, 작업 반복, 대기 기록, 개별 계획에도 다른 로봇
+
+- **숫자 변수 효과는 식**: `Effect.value`가 Int·Real 변수 대상이면 수치 식이다(`count + 1`, `2 * n`; 기존 `gc_expr::parse`). 이름은 숫자 상태 변수. 틀리면 `EditError::Expr { message, start, end }`(전에는 `BadValue`). 스케줄에서는 그 시점의 상태 값으로 계산하고 Int는 반올림한다. 변수 이름을 바꾸면 식도 따라 바뀐다. 한계: 공백이 든 변수 이름은 식에서 쓸 수 없다(조건식의 따옴표 문법이 수치 식에는 없다) — 그런 이름으로 바꾸려 하면 식이 깨지므로 `InUse`로 거부된다.
+  - `gc_doc::effect_number(text, &lookup) -> Result<f64, EditError>`: 입력 칸 검증에 쓸 수 있다.
+- **작업 반복**: `WorkOp::SetTaskRepeat { task, times: Option<u32> }` — `None` 한 번(기본), `Some(0)` 전제조건이 참이 될 때마다, `Some(n)` 최대 n번. `doc().task_repeat(task)`. `Task` 구조체는 안 건드렸다(다른 브랜치에 리터럴이 많다) → `Components.task_repeats`에 저장.
+  - 스케줄: 끝난 작업이 반복 대상이면 우선순위 자리에 다시 넣는다. 전체 할당 `MAX_ASSIGNMENTS`(1000)에서 끊고 `Schedule.cut_short = true`.
+  - 한 번 이상 한 반복 작업은 더 못 해도 `blocked`에 넣지 않는다.
+- **대기 기록**: `Schedule.waits: Vec<Wait { task, robot, seconds, cause }>` — 움직이는 로봇 때문에 미뤄졌다가 시작한 작업.
+- **개별 계획에도 다른 로봇**: `task_plan`·`task_plan_from`·`task_candidates`가 다른 로봇(억제 제외)을 문서의 관절 자세로 서 있는 장애물로 넣는다 → 스케줄의 첫 라운드와 같은 기준. 다른 로봇이 목표 앞에 서 있으면 이유에 그 로봇 이름이 나온다. 기존 경로 계획(`plan`)은 그대로(다른 로봇 안 봄).
+
 ## 2026-11-18 — 스케줄에서 로봇 간 회피 (PLAN 9.3·9.5)
 
 - **쉬는 로봇 = 정지 장애물**: 입찰을 계획할 때 그 시점에 쉬고 있는 다른 로봇을 서 있는 자세 그대로 장애물로 넣는다(`RobotScene::as_obstacles(q, name)`를 `gc_motion`에 추가, `Planning::task_plan_among`). 그래서 스케줄의 입찰은 `task_candidates`(다른 로봇을 안 넣음)와 다를 수 있다.

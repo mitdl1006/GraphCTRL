@@ -117,7 +117,11 @@ fn a_screw_driving_task_is_defined_on_the_structure() {
     assert_eq!(refused(&mut s, &|t| t.steps[0] = Step::MoveJ(MoveTarget::Role(seam))), EditError::BadValue);
     assert_eq!(refused(&mut s, &|t| t.steps[2] = Step::FollowPath(at_hole)), EditError::BadValue);
     assert_eq!(refused(&mut s, &|t| t.effects[0].value = "녹음".into()), EditError::BadValue);
-    assert_eq!(refused(&mut s, &|t| t.effects[1].value = "many".into()), EditError::BadValue);
+    // A number's value is an expression: what it cannot read is pointed at.
+    assert!(matches!(
+        refused(&mut s, &|t| t.effects[1].value = "many".into()),
+        EditError::Expr { start: 0, end: 4, .. }
+    ));
     assert_eq!(refused(&mut s, &|t| t.robots = RobotChoice::Only(Vec::new())), EditError::BadValue);
     assert_eq!(refused(&mut s, &|t| t.robots = RobotChoice::When("  ".into())), EditError::BadValue);
     assert!(matches!(refused(&mut s, &|t| t.precondition = "count <".into()), EditError::Expr { .. }));
