@@ -521,3 +521,35 @@ fn trim_highlights_the_piece_that_would_go() {
         image.save(out.join("review-57-trim-preview.png")).unwrap();
     }
 }
+
+/// The Spline (Interpolation) tool is in the Line split button; clicks place fit points, Enter finishes
+/// (backend: spline_tool.rs); the curve is drawn through the points. The screenshot is the evidence.
+#[test]
+fn the_spline_tool_is_in_the_line_split_button_and_draws_a_curve() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("XY 스케치").click();
+    harness.run();
+    pick_variant(&mut harness, "선", "스플라인(보간)");
+    assert_eq!(harness.state().session.tool(), ToolKind::Spline);
+    let app = harness.state_mut();
+    for p in [mm(-60.0, 0.0), mm(-20.0, 40.0), mm(20.0, -30.0), mm(60.0, 20.0)] {
+        click(app, p, false);
+    }
+    app.session.tool_event(ToolEvent::Key(gc_tools::Key::Enter));
+    harness.run_steps(3);
+    let (_, sketch) = harness.state().session.active_sketch().unwrap();
+    assert!(
+        sketch.curves.values().any(|c| matches!(c.geom, gc_sketch::CurveGeom::Spline { .. })),
+        "a spline was made"
+    );
+    if gpu {
+        let image = harness.render().unwrap();
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        image.save(out.join("review-60-spline.png")).unwrap();
+    }
+}

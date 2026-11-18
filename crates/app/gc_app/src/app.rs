@@ -588,6 +588,10 @@ impl GraphCtrlApp {
                     Ok(()) => {
                         let named = project.map(|p| p.display().to_string()).unwrap_or_default();
                         self.notice = Some(tr!(lang, FileRecovered, named));
+                        let warnings = self.session.load_warnings();
+                        if !warnings.is_empty() {
+                            self.notice = Some(tr!(lang, FileWarnings, warnings.len(), warnings.join("; ")));
+                        }
                         self.autosaved = true;
                     }
                     Err(error) => self.notice = Some(tr!(lang, FileError, error)),
@@ -643,6 +647,12 @@ impl GraphCtrlApp {
                         self.tab = Tab::Model;
                         self.notice = (!needs_repair.is_empty())
                             .then(|| tr!(lang, FileNeedsRepair, needs_repair.len()));
+                        // What the file had that could not be used (a damaged joint range, ...) was left
+                        // out; the status bar says so.
+                        let warnings = self.session.load_warnings();
+                        if !warnings.is_empty() {
+                            self.notice = Some(tr!(lang, FileWarnings, warnings.len(), warnings.join("; ")));
+                        }
                         self.remember(&path);
                     }
                     Err(error) => self.notice = Some(tr!(lang, FileError, error)),
