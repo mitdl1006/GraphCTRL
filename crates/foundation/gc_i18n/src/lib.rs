@@ -792,6 +792,14 @@ messages! {
     ReplicateDone => ("완료했습니다.", "Done."),
     /// Mirror, copy and replace dialog: relationships that could not be kept. `{0}` lists them.
     ReplicateSuppressed => ("억제된 관계(다시 적용하세요): {0}", "Suppressed relationships (apply again): {0}"),
+    /// Browser, Representations folder: the view representations.
+    RepViews => ("뷰 표현", "View representation"),
+    /// Browser, Representations folder: the positional representations.
+    RepPositions => ("위치 표현", "Positional representation"),
+    /// Browser, Representations folder: creates one. `{0}` is the kind.
+    RepNew => ("새 {0}", "New {0}"),
+    /// Browser menu: makes a representation the active one.
+    CmdActivate => ("활성화", "Activate"),
     /// Plan card: what the checks guarantee. `{0}` padding mm, `{1}` step mm, `{2}` step degrees, `{3}` clearance mm.
     PlanGuarantee => ("패딩 {0} mm, 검사 간격 {1} mm·{2}°에서 볼록 충돌 모델이 장애물과 {3} mm 이상 떨어짐", "Padding {0} mm; with check steps of {1} mm and {2} degrees the convex collision model stays at least {3} mm from obstacles"),
     /// Plan card: the guarantee holds only at the checked states.

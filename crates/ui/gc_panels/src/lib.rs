@@ -254,17 +254,7 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
                     }
                 });
             }
-            let row = TreeRow {
-                icon: Icon::Path,
-                text: tr!(lang, BrowserRepresentations),
-                selected: false,
-                visible: None,
-                delete: None,
-                edit: None,
-                focus: false,
-                dim: false,
-            };
-            gc_ui::panel::tree_row(ui, row);
+            representations(ui, session, lang, &mut action);
             egui::CollapsingHeader::new(tr!(lang, BrowserOrigin)).default_open(false).show(ui, |ui| {
                 for (_, frame) in
                     session.doc().frames().iter().filter(|(_, f)| f.kind == FrameKind::OriginPlane)
@@ -342,6 +332,92 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
         .collect();
     browser_section(ui, session, lang, state, selected, &mut action, Some(tr!(lang, BrowserPaths)), paths);
     action
+}
+
+/// The Representations folder: view representations and positional ones ([Primary] first). A click
+/// activates one; the menu creates, activates and deletes. Inventor 2026 help: About View Representations
+/// (GUID-9A49CDC1-4DC7-4462-81D7-E18B8339DE0F), To Create, Edit, or Copy Positional Representations
+/// (GUID-34C28C35-45CA-4476-9336-30146F7C9471).
+fn representations(ui: &mut Ui, session: &Session, lang: Lang, action: &mut Option<BrowserAction>) {
+    use gc_doc::{CellOp, Command};
+    let folder = session.representation_folder();
+    let edit = |op: CellOp| Some(BrowserAction::Edit(Box::new(Command::Cell(op))));
+    egui::CollapsingHeader::new(tr!(lang, BrowserRepresentations)).default_open(false).show(ui, |ui| {
+        ui.spacing_mut().item_spacing.y = 1.0;
+        for (is_view, title, nodes) in
+            [(true, tr!(lang, RepViews), &folder.views), (false, tr!(lang, RepPositions), &folder.positions)]
+        {
+            egui::CollapsingHeader::new(title).id_salt(("gc_rep_folder", is_view)).default_open(true).show(
+                ui,
+                |ui| {
+                    for (index, node) in nodes.iter().enumerate() {
+                        // [Primary] is the first position and has no index of its own.
+                        let position = index.checked_sub(1);
+                        let delete = tr!(lang, CmdDeleteItem, node.name);
+                        let primary = !is_view && index == 0;
+                        let text = if node.active { format!("● {}", node.name) } else { node.name.clone() };
+                        let row = TreeRow {
+                            icon: Icon::View,
+                            text: &text,
+                            selected: node.active,
+                            visible: None,
+                            delete: (!primary).then_some(delete.as_str()),
+                            edit: None,
+                            focus: false,
+                            dim: false,
+                        };
+                        let result = gc_ui::panel::tree_row(ui, row);
+                        let activate = if is_view {
+                            CellOp::ActivateViewRepresentation(index)
+                        } else {
+                            CellOp::ActivatePositionalRepresentation(position)
+                        };
+                        let remove = if is_view {
+                            CellOp::DeleteRepresentation { view: Some(index), position: None }
+                        } else {
+                            CellOp::DeleteRepresentation { view: None, position }
+                        };
+                        if result.row.clicked() && !node.active {
+                            *action = edit(activate.clone());
+                        }
+                        result.row.context_menu(|ui| {
+                            if ui
+                                .add_enabled(!node.active, egui::Button::new(tr!(lang, CmdActivate)))
+                                .clicked()
+                            {
+                                *action = edit(activate.clone());
+                                ui.close();
+                            }
+                            if ui.add_enabled(!primary, egui::Button::new(delete.as_str())).clicked() {
+                                *action = edit(remove.clone());
+                                ui.close();
+                            }
+                        });
+                        if result.deleted {
+                            *action = edit(remove);
+                        }
+                    }
+                    // New: a view representation keeps what is shown now; a positional one starts as a
+                    // copy of [Primary].
+                    // [Primary] is not counted among the positions that were made.
+                    let (word, count) = if is_view {
+                        ("View", nodes.len())
+                    } else {
+                        ("Position", nodes.len().saturating_sub(1))
+                    };
+                    let label = tr!(lang, RepNew, title);
+                    if ui.small_button(label).clicked() {
+                        let name = format!("{word}:{}", count + 1);
+                        *action = edit(if is_view {
+                            CellOp::AddViewRepresentation { name, camera: None, section: None }
+                        } else {
+                            CellOp::AddPositionalRepresentation(name)
+                        });
+                    }
+                },
+            );
+        }
+    });
 }
 
 /// A group of rows of the browser tree (components, frames, waypoints, paths): a folder with `title`, or
