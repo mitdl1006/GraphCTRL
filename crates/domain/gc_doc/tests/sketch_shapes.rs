@@ -899,3 +899,89 @@ fn split_cuts_at_the_nearest_crossing_and_chamfers_bevel_corners() {
     let (c, q) = (bench.sketch().pos(corner).unwrap(), bench.sketch().pos(q).unwrap());
     assert!((((q[0] - c[0]).powi(2) + (q[1] - c[1]).powi(2)).sqrt() - 0.02).abs() < 1e-7);
 }
+
+/// Move, Copy and Rotate (To Copy, Move, or Rotate 2D Sketch Geometry,
+/// GUID-F8114270-18F7-4C7A-947E-AC489EDACFA9), with the More options at Never (refused when held) or
+/// Always (constraints to other geometry break, dimensions to it take their new values).
+#[test]
+fn move_copy_and_rotate_selected_geometry() {
+    use gc_doc::{EndSnap, Motion};
+    let rectangle = |bench: &mut Bench| -> Vec<Id<Curve>> {
+        Bench::curves(
+            &bench
+                .op(SketchOp::AddRectangle { a: [0.0, 0.0], b: [0.02, 0.01], snap_a: EndSnap::default() })
+                .unwrap(),
+        )
+    };
+    let corner = |bench: &Bench, lines: &[Id<Curve>]| {
+        let (a, _) = bench.sketch().line(lines[0]).unwrap();
+        bench.sketch().pos(a).unwrap()
+    };
+    // A free rectangle moves as a whole.
+    let mut bench = Bench::new();
+    let lines = rectangle(&mut bench);
+    let by = Motion::Translate { by: [0.05, 0.03] };
+    bench.op(SketchOp::Transform { curves: lines.clone(), motion: by, copy: false, relax: false }).unwrap();
+    let c = corner(&bench, &lines);
+    assert!((c[0] - 0.05).abs() < 1e-9 && (c[1] - 0.03).abs() < 1e-9, "{c:?}");
+
+    // Held by a dimension to a line elsewhere: refused at Never, done at Always with the dimension updated.
+    let other = add_line(&mut bench, [0.0, -0.05], [0.1, -0.05]);
+    let (p, _) = bench.sketch().line(other).unwrap();
+    let held = bench.sketch().line(lines[0]).unwrap().0;
+    bench.op(SketchOp::AddConstraint(GeoConstraint::Fix(p))).unwrap();
+    bench
+        .op(SketchOp::AddConstraint(GeoConstraint::Horizontal(p, bench.sketch().line(other).unwrap().1)))
+        .unwrap();
+    let created = bench
+        .op(SketchOp::AddDimension {
+            kind: gc_sketch::DimKind::Distance { p, q: held },
+            source: bench
+                .sketch()
+                .measure(&gc_sketch::DimKind::Distance { p, q: held })
+                .map(|v| format!("{} mm", v * 1e3))
+                .unwrap(),
+            text_pos: [0.0; 2],
+        })
+        .unwrap();
+    let dim = dimensions(&created)[0];
+    let step = Motion::Translate { by: [0.01, 0.0] };
+    assert!(
+        bench
+            .op(SketchOp::Transform { curves: lines.clone(), motion: step, copy: false, relax: false })
+            .is_err()
+    );
+    bench.op(SketchOp::Transform { curves: lines.clone(), motion: step, copy: false, relax: true }).unwrap();
+    let c = corner(&bench, &lines);
+    assert!((c[0] - 0.06).abs() < 1e-9, "{c:?}");
+    let value = bench.sketch().dimensions[&dim].value;
+    let measured = bench.sketch().measure(&bench.sketch().dimensions[&dim].kind).unwrap();
+    assert!((value - measured).abs() < 1e-9, "the dimension took the new distance");
+
+    // Rotate: the rectangle's horizontals and verticals hold it at Never; at Always it turns.
+    let mut bench = Bench::new();
+    let lines = rectangle(&mut bench);
+    let turn = Motion::Rotate { centre: [0.0, 0.0], angle: 30f64.to_radians() };
+    assert!(
+        bench
+            .op(SketchOp::Transform { curves: lines.clone(), motion: turn, copy: false, relax: false })
+            .is_err()
+    );
+    bench.op(SketchOp::Transform { curves: lines.clone(), motion: turn, copy: false, relax: true }).unwrap();
+    let (a, b) = bench.sketch().line(lines[0]).unwrap();
+    let (a, b) = (bench.sketch().pos(a).unwrap(), bench.sketch().pos(b).unwrap());
+    let angle = (b[1] - a[1]).atan2(b[0] - a[0]).to_degrees();
+    assert!((angle - 30.0).abs() < 1e-6, "{angle}");
+
+    // Copy: the originals stay; the copy is a rectangle of its own (same freedom as the original).
+    let mut bench = Bench::new();
+    let lines = rectangle(&mut bench);
+    let dof = bench.dof();
+    let created = bench
+        .op(SketchOp::Transform { curves: lines.clone(), motion: by, copy: true, relax: false })
+        .unwrap();
+    assert_eq!(Bench::curves(&created).len(), 4);
+    assert_eq!(bench.dof(), dof * 2, "the copy keeps the rectangle's own constraints");
+    let c = corner(&bench, &lines);
+    assert!(c[0].abs() < 1e-12, "the original did not move");
+}

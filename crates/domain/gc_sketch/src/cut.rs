@@ -776,6 +776,28 @@ struct Fillet {
     lines: [Id<Curve>; 2],
 }
 
+/// A constraint with its points and curves renamed (a copy's constraints).
+pub(crate) fn rename(
+    c: &GeoConstraint,
+    point: impl Fn(Id<SkPoint>) -> Id<SkPoint>,
+    curve: impl Fn(Id<Curve>) -> Id<Curve>,
+) -> GeoConstraint {
+    match map_constraint(c, &point) {
+        GeoConstraint::PointOnCurve(p, k) => GeoConstraint::PointOnCurve(p, curve(k)),
+        GeoConstraint::Midpoint(p, k) => GeoConstraint::Midpoint(p, curve(k)),
+        GeoConstraint::Symmetric { p, q, axis } => GeoConstraint::Symmetric { p, q, axis: curve(axis) },
+        GeoConstraint::Parallel(a, b) => GeoConstraint::Parallel(curve(a), curve(b)),
+        GeoConstraint::Perpendicular(a, b) => GeoConstraint::Perpendicular(curve(a), curve(b)),
+        GeoConstraint::Collinear(a, b) => GeoConstraint::Collinear(curve(a), curve(b)),
+        GeoConstraint::Equal(a, b) => GeoConstraint::Equal(curve(a), curve(b)),
+        GeoConstraint::Concentric(a, b) => GeoConstraint::Concentric(curve(a), curve(b)),
+        GeoConstraint::Tangent { a, b, side, external } => {
+            GeoConstraint::Tangent { a: curve(a), b: curve(b), side, external }
+        }
+        other => other,
+    }
+}
+
 /// A constraint with its points renamed.
 fn map_constraint(c: &GeoConstraint, f: impl Fn(Id<SkPoint>) -> Id<SkPoint>) -> GeoConstraint {
     match *c {

@@ -1059,6 +1059,17 @@ messages! {
     ChamferDistance2 => ("거리 2", "Distance 2"),
     ChamferAngle => ("각도", "Angle"),
     ChamferCreateDimensions => ("치수 만들기", "Create Dimensions"),
+    PromptMoveBase => ("기준점을 클릭하십시오(선택한 형상)", "Click the base point (of the selection)"),
+    PromptMoveEnd => ("끝점을 클릭하십시오", "Click the end point"),
+    PromptRotateCentre => ("회전 중심점을 클릭하십시오(선택한 형상)", "Click the centre point (of the selection)"),
+    PromptRotateEnd => ("끝점을 클릭하거나 각도를 입력하십시오", "Click the end point, or type the angle"),
+    ToolMove => ("이동", "Move"),
+    ToolCopy => ("복사", "Copy"),
+    ToolRotate => ("회전", "Rotate"),
+    /// Move / Copy / Rotate dialog.
+    TransformSelection => ("선택: 곡선 {0}개(명령 전에 고르기)", "Selection: {0} curves (pick before the command)"),
+    TransformCopy => ("복사본으로", "Copy"),
+    TransformRelax => ("구속 풀기(치수 다시 계산·구속 끊기)", "Relax (recompute dimensions, break constraints)"),
     HudY => ("Y", "Y"),
     /// Ribbon group (Inventor: Pattern panel).
     GroupPattern => ("패턴", "Pattern"),

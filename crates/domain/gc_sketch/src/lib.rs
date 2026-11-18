@@ -19,6 +19,7 @@ mod drag;
 mod edit;
 mod model;
 mod pattern;
+mod transform;
 
 pub use arc3::Arc3;
 pub use cut::{CutResult, Piece};
@@ -29,3 +30,4 @@ pub use model::{
     Curve, CurveGeom, DimKind, Dimension, ExternalRef, GeoConstraint, PointKind, SkPoint, Sketch, Space,
 };
 pub use pattern::{PatternCopy, PatternDefinition, PatternDirection, PatternStep, SketchPattern};
+pub use transform::{CopyResult, copied_items};

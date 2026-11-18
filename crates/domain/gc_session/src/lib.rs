@@ -79,6 +79,9 @@ pub struct Session {
     /// Where the history stood when the sketch being edited was entered (or before it was created), with
     /// the history's trim count then: what Cancel Sketch goes back to.
     sketch_mark: Option<(usize, u64)>,
+    /// The Move and Rotate dialogs' Copy box, and their More options (relax: Always; otherwise Never).
+    transform_copy: bool,
+    transform_relax: bool,
     drag: Option<SketchDrag>,
     report: Option<SketchReport>,
     request: Option<ValueRequest>,
@@ -129,6 +132,8 @@ impl Session {
             picked: Vec::new(),
             pick_target: None,
             sketch_mark: None,
+            transform_copy: false,
+            transform_relax: false,
             drag: None,
             report: None,
             request: None,
@@ -276,10 +281,48 @@ impl Session {
 
     /// What the tool draws on top of the sketch.
     pub fn preview(&self) -> Preview {
-        match self.active_sketch() {
-            Some((_, sketch)) => self.tool.preview(sketch),
-            None => Preview::default(),
+        let Some((_, sketch)) = self.active_sketch() else { return Preview::default() };
+        let mut preview = self.tool.preview(sketch);
+        // Move, Copy, Rotate: the selection where it would go.
+        if let Some(motion) = self.tool.transform_preview() {
+            let at = |p| sketch.pos(p).map(|q| motion.place(q)).map(|q| [q[0], q[1]]);
+            for curve in self.selected_curves() {
+                match sketch.curves.get(&curve).map(|c| c.geom) {
+                    Some(gc_sketch::CurveGeom::Line { a, b }) => {
+                        if let (Some(a), Some(b)) = (at(a), at(b)) {
+                            preview.lines.push((a, b));
+                        }
+                    }
+                    Some(gc_sketch::CurveGeom::Circle { c, r }) => {
+                        if let Some(c) = at(c) {
+                            preview.circles.push((c, r));
+                        }
+                    }
+                    Some(gc_sketch::CurveGeom::Arc { c, s, e }) => {
+                        if let (Some(c), Some(s), Some(e)) = (at(c), at(s), at(e)) {
+                            let angle = |p: [f64; 2]| gc_math::fm::atan2(p[1] - c[1], p[0] - c[0]);
+                            let r = gc_math::fm::hypot(s[0] - c[0], s[1] - c[1]);
+                            let sweep = (angle(e) - angle(s)).rem_euclid(std::f64::consts::TAU);
+                            preview.arcs.push((c, r, angle(s), sweep));
+                        }
+                    }
+                    None => {}
+                }
+            }
         }
+        preview
+    }
+
+    /// The Move and Rotate dialogs: Copy (move a copy) and relax (the More options at Always: constraints
+    /// to other geometry break, dimensions to it take their new values; otherwise Never).
+    pub fn transform_options(&self) -> (bool, bool) {
+        (self.transform_copy, self.transform_relax)
+    }
+
+    /// Sets the Move and Rotate dialogs' Copy and relax options.
+    pub fn set_transform_options(&mut self, copy: bool, relax: bool) {
+        self.transform_copy = copy;
+        self.transform_relax = relax;
     }
 
     /// The input boxes the heads-up display should show for the tool now (empty: no display). Values
@@ -1223,6 +1266,18 @@ impl Session {
                 self.request = Some(ValueRequest { kind, measured, text_pos });
             }
             ToolOutput::Finish => self.set_tool(ToolKind::Select),
+            ToolOutput::Transform(motion) => {
+                let curves = self.selected_curves();
+                if curves.is_empty() {
+                    self.last_error = Some(gc_sketch::SketchError::InvalidValue.into());
+                    return;
+                }
+                let copy = self.tool.kind() == ToolKind::Copy || self.transform_copy;
+                let op = SketchOp::Transform { curves, motion, copy, relax: self.transform_relax };
+                // A refusal (held by constraints) shows in the status bar. The selection stays, for more
+                // copies of it.
+                drop(self.sketch_op(op));
+            }
         }
     }
 

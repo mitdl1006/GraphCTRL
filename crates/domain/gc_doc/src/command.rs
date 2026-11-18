@@ -72,6 +72,38 @@ pub enum ArcSlotKind {
     CenterPoint,
 }
 
+/// How Move, Copy and Rotate take geometry (Inventor 2026 help, To Copy, Move, or Rotate 2D Sketch
+/// Geometry, GUID-F8114270-18F7-4C7A-947E-AC489EDACFA9).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum Motion {
+    /// From the base point to the end point.
+    Translate {
+        /// Displacement, metres.
+        by: [f64; 2],
+    },
+    /// About the centre point.
+    Rotate {
+        /// Centre.
+        centre: [f64; 2],
+        /// Angle, radians, counter-clockwise.
+        angle: f64,
+    },
+}
+
+impl Motion {
+    /// Where the motion takes a point.
+    pub fn place(&self, p: [f64; 3]) -> [f64; 3] {
+        match *self {
+            Motion::Translate { by } => [p[0] + by[0], p[1] + by[1], p[2]],
+            Motion::Rotate { centre, angle } => {
+                let (sin, cos) = (gc_math::fm::sin(angle), gc_math::fm::cos(angle));
+                let (x, y) = (p[0] - centre[0], p[1] - centre[1]);
+                [centre[0] + cos * x - sin * y, centre[1] + sin * x + cos * y, p[2]]
+            }
+        }
+    }
+}
+
 /// The 2D Chamfer dialog's types; sizes are expressions (millimetres, degrees by default).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ChamferKind {
@@ -383,6 +415,21 @@ pub enum SketchOp {
         lines: [(Id<Curve>, [f64; 2]); 2],
         /// The radius as typed, e.g. `"5 mm"`.
         radius: String,
+    },
+    /// Move, Copy or Rotate the curves (Inventor 2026 help, To Copy, Move, or Rotate 2D Sketch Geometry,
+    /// GUID-F8114270-18F7-4C7A-947E-AC489EDACFA9). `copy` makes moved copies (with the constraints among
+    /// them) and leaves the originals; otherwise the curves themselves move, and with `relax` constraints
+    /// tying them elsewhere break and such dimensions take their new values (the More options at Always;
+    /// without it, at Never, a move the sketch cannot take is refused).
+    Transform {
+        /// The curves.
+        curves: Vec<Id<Curve>>,
+        /// How.
+        motion: Motion,
+        /// Copy instead of move.
+        copy: bool,
+        /// Break and recompute what holds the curves back.
+        relax: bool,
     },
     /// Split (Inventor 2026 help, To Split, Trim, or Extend Curves, GUID-DD00037F-6BBA-4B95-AA90-4F99DCEB667D):
     /// cuts a line or arc in two at its crossing with another curve nearest `at`.
@@ -2327,6 +2374,27 @@ fn sketch_op(
         SketchOp::Trim { curve, at } => {
             push_cut(&mut created, &sketch.trim(ids, *curve, *at)?);
             "Trim"
+        }
+        SketchOp::Transform { curves, motion, copy, relax } => {
+            let place = |p: [f64; 3]| motion.place(p);
+            let fine = match *motion {
+                Motion::Translate { by } => by.iter().all(|v| v.is_finite()),
+                Motion::Rotate { centre, angle } => centre.iter().all(|v| v.is_finite()) && angle.is_finite(),
+            };
+            if !fine {
+                return Err(SketchError::InvalidValue.into());
+            }
+            if *copy {
+                let result = sketch.copy_placed(ids, curves, &place)?;
+                created.extend(result.points.iter().map(|p| Created::Point(*p)));
+                created.extend(result.curves.iter().map(|c| Created::Curve(*c)));
+                created.extend(result.constraints.iter().map(|c| Created::Constraint(*c)));
+                "Copy"
+            } else {
+                let turned = matches!(motion, Motion::Rotate { .. });
+                sketch.move_placed(ids, curves, &place, turned, *relax)?;
+                if turned { "Rotate" } else { "Move" }
+            }
         }
         SketchOp::Split { curve, at } => {
             push_cut(&mut created, &sketch.split_at(ids, *curve, *at)?);

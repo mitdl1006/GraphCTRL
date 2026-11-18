@@ -32,7 +32,7 @@ pub use cell::{
     Solid, Tool, Waypoint, WaypointTarget, WorkFrame,
 };
 pub use command::{
-    Applied, ArcSlotKind, ChamferKind, Command, Created, DimSlot, EditError, EndSnap, SketchOp,
+    Applied, ArcSlotKind, ChamferKind, Command, Created, DimSlot, EditError, EndSnap, Motion, SketchOp,
     SketchPatternDirection, SlotKind, TangentArc, apply, preview_sketch_op, tangent_arc,
 };
 pub use design::{

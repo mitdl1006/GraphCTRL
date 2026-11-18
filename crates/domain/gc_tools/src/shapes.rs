@@ -44,6 +44,9 @@ pub(super) fn is_shape_tool(kind: ToolKind) -> bool {
             | ToolKind::TangentCircle
             | ToolKind::Split
             | ToolKind::Chamfer
+            | ToolKind::Move
+            | ToolKind::Copy
+            | ToolKind::Rotate
     )
 }
 
@@ -207,6 +210,10 @@ impl Tool {
             ToolKind::CenterRectangle3 => Prompt::CenterRectWidth,
             ToolKind::TangentCircle => Prompt::TangentCircleLine,
             ToolKind::Split => Prompt::SplitPick,
+            ToolKind::Move | ToolKind::Copy if self.anchor.is_none() => Prompt::MoveBase,
+            ToolKind::Move | ToolKind::Copy => Prompt::MoveEnd,
+            ToolKind::Rotate if self.anchor.is_none() => Prompt::RotateCentre,
+            ToolKind::Rotate => Prompt::RotateEnd,
             ToolKind::Chamfer if self.fillet_first.is_none() => Prompt::ChamferFirst,
             ToolKind::Chamfer => Prompt::ChamferSecond,
             ToolKind::Offset if self.offset_pick.is_none() => Prompt::OffsetPick,
@@ -307,6 +314,31 @@ impl Tool {
         }
     }
 
+    /// Move, Copy, Rotate: the motion the base (or centre) point and `end` give. A typed Rotate angle wins
+    /// over the end point's.
+    pub fn transform_motion(&self, end: [f64; 2]) -> Option<gc_doc::Motion> {
+        let base = self.anchor?;
+        match self.kind {
+            ToolKind::Move | ToolKind::Copy => {
+                Some(gc_doc::Motion::Translate { by: [end[0] - base[0], end[1] - base[1]] })
+            }
+            ToolKind::Rotate => {
+                let angle = match self.locked_value(HudField::Angle) {
+                    Some(angle) => angle,
+                    None if distance(base, end) > 1e-12 => fm::atan2(end[1] - base[1], end[0] - base[0]),
+                    None => return None,
+                };
+                Some(gc_doc::Motion::Rotate { centre: base, angle })
+            }
+            _ => None,
+        }
+    }
+
+    /// The motion the cursor gives now (for the preview).
+    pub fn transform_preview(&self) -> Option<gc_doc::Motion> {
+        self.transform_motion(self.cursor.map(|c| c.pos)?)
+    }
+
     fn chamfer_op(&self, second: (gc_core::Id<gc_sketch::Curve>, [f64; 2])) -> Option<SketchOp> {
         let first = self.fillet_first?;
         (first.0 != second.0).then(|| SketchOp::Chamfer {
@@ -381,6 +413,12 @@ impl Tool {
         };
         match self.kind {
             ToolKind::Point => vec![slot(HudField::X, cursor[0]), slot(HudField::Y, cursor[1])],
+            ToolKind::Rotate => match self.anchor {
+                Some(c) if distance(c, cursor) > 1e-12 => {
+                    vec![slot(HudField::Angle, fm::atan2(cursor[1] - c[1], cursor[0] - c[0]))]
+                }
+                _ => Vec::new(),
+            },
             ToolKind::Slot(_) => match (self.anchor, self.second) {
                 (Some(a), Some(b)) => vec![slot(HudField::Width, slot_width(a, b.pos, cursor))],
                 _ => Vec::new(),
@@ -534,6 +572,16 @@ impl Tool {
                     })]);
                 }
                 Vec::new()
+            }
+            ToolKind::Move | ToolKind::Copy | ToolKind::Rotate => {
+                let here = self.place(sketch, pos, px, None, modifier).pos;
+                if self.anchor.is_none() {
+                    self.anchor = Some(here);
+                    return Some(Vec::new());
+                }
+                let out = self.transform_motion(here).map(ToolOutput::Transform);
+                self.reset();
+                out.into_iter().collect()
             }
             ToolKind::Split => {
                 let Some((curve, _)) = nearest_curve(sketch, pos, px, &[]) else { return Some(Vec::new()) };

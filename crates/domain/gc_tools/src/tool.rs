@@ -216,6 +216,12 @@ pub enum ToolKind {
     Split,
     /// 2D Chamfer: two lines, the corner bevelled with the Chamfer dialog's values.
     Chamfer,
+    /// Move the selection: base point, then end point.
+    Move,
+    /// Copy the selection: base point, then end point.
+    Copy,
+    /// Rotate the selection: centre point, then end point (or a typed angle).
+    Rotate,
     /// Offset curves (whole loops by default): pick one, then where the offset goes.
     Offset,
 }
@@ -225,6 +231,8 @@ pub enum ToolKind {
 pub enum ToolOutput {
     /// Apply this edit to the sketch.
     Edit(SketchOp),
+    /// Move, Copy or Rotate what is selected (the session knows the selection and the dialog's options).
+    Transform(gc_doc::Motion),
     /// Select `item` (or clear the selection); with `extend`, toggle it in the current selection.
     Select {
         /// What was clicked.
@@ -310,6 +318,10 @@ pub enum Prompt {
     SplitPick,
     ChamferFirst,
     ChamferSecond,
+    MoveBase,
+    MoveEnd,
+    RotateCentre,
+    RotateEnd,
     /// A sketch dialog's Geometry selector is active.
     PickGeometry,
     /// A sketch dialog's line selector is active.
@@ -697,7 +709,10 @@ impl Tool {
                 | ToolKind::CenterRectangle3
                 | ToolKind::TangentCircle
                 | ToolKind::Split
-                | ToolKind::Chamfer,
+                | ToolKind::Chamfer
+                | ToolKind::Move
+                | ToolKind::Copy
+                | ToolKind::Rotate,
                 _,
             ) => self.shape_prompt(),
         }
@@ -1050,6 +1065,9 @@ impl Tool {
                         | ToolKind::TangentCircle
                         | ToolKind::Split
                         | ToolKind::Chamfer
+                        | ToolKind::Move
+                        | ToolKind::Copy
+                        | ToolKind::Rotate
                 );
                 self.hover = matches!(
                     self.kind,
@@ -1058,6 +1076,9 @@ impl Tool {
                         | ToolKind::Fillet
                         | ToolKind::Split
                         | ToolKind::Chamfer
+                        | ToolKind::Move
+                        | ToolKind::Copy
+                        | ToolKind::Rotate
                 )
                 .then(|| nearest_curve(sketch, pos, px, &[]))
                 .flatten();
@@ -1304,7 +1325,10 @@ impl Tool {
             | ToolKind::CenterRectangle3
             | ToolKind::TangentCircle
             | ToolKind::Split
-            | ToolKind::Chamfer => Vec::new(),
+            | ToolKind::Chamfer
+            | ToolKind::Move
+            | ToolKind::Copy
+            | ToolKind::Rotate => Vec::new(),
             ToolKind::Select => vec![ToolOutput::Select { item: pick(sketch, pos, px), extend: modifier }],
             ToolKind::Line => {
                 let here = self.place(sketch, pos, px, self.anchor, modifier);

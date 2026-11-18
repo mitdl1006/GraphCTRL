@@ -25,6 +25,13 @@ use gc_session::{Session, SketchPick};
 use gc_sketch::{Curve, Item, PatternDefinition, SkPoint, SketchPattern};
 use gc_tools::ToolKind;
 
+/// A sketch command's window: at the right, below the ribbon, so that it covers neither the ribbon nor
+/// the middle of the sketch.
+fn sketch_window(title: &str, ctx: &egui::Context) -> egui::Window<'static> {
+    let at = ctx.content_rect().right_top() + egui::vec2(-340.0, 150.0);
+    egui::Window::new(title.to_owned()).default_pos(at)
+}
+
 /// Which dialog.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Kind {
@@ -277,7 +284,7 @@ impl SketchDialog {
         let mut open = true;
         let mut done = false;
         let state = |set: bool| if set { tr!(lang, DialogPicked) } else { tr!(lang, DialogNotPicked) };
-        egui::Window::new(title).open(&mut open).resizable(false).show(ctx, |ui| {
+        sketch_window(title, ctx).open(&mut open).resizable(false).show(ctx, |ui| {
             ui.weak(tr!(lang, DialogSelectorHint));
             self.selector(ui, session, Field::Geometry, tr!(lang, DialogGeometry, self.geometry.len()));
             match self.kind {
@@ -371,7 +378,7 @@ pub(crate) fn polygon_window(ctx: &egui::Context, session: &mut Session, lang: L
     let (mut sides, mut circumscribed) = session.polygon_settings();
     let mut open = true;
     let mut done = false;
-    egui::Window::new(tr!(lang, SkPolygonTitle)).open(&mut open).resizable(false).show(ctx, |ui| {
+    sketch_window(tr!(lang, SkPolygonTitle), ctx).open(&mut open).resizable(false).show(ctx, |ui| {
         ui.horizontal(|ui| {
             ui.radio_value(&mut circumscribed, false, tr!(lang, PolygonInscribed));
             ui.radio_value(&mut circumscribed, true, tr!(lang, PolygonCircumscribed));
@@ -391,7 +398,7 @@ pub(crate) fn polygon_window(ctx: &egui::Context, session: &mut Session, lang: L
 /// The Offset tool's options while it runs.
 pub(crate) fn offset_window(ctx: &egui::Context, session: &mut Session, lang: Lang) {
     let (mut loop_select, mut constrain) = session.offset_options();
-    egui::Window::new(tr!(lang, SkOffsetTitle)).resizable(false).show(ctx, |ui| {
+    sketch_window(tr!(lang, SkOffsetTitle), ctx).resizable(false).show(ctx, |ui| {
         ui.checkbox(&mut loop_select, tr!(lang, OffsetLoopSelect));
         ui.checkbox(&mut constrain, tr!(lang, OffsetConstrain));
     });
@@ -409,7 +416,7 @@ pub(crate) fn chamfer_window(ctx: &egui::Context, session: &mut Session, lang: L
     let (mut kind, mut dimensions) = session.chamfer_options();
     let mut open = true;
     let mut done = false;
-    egui::Window::new(tr!(lang, ChamferTitle)).open(&mut open).resizable(false).show(ctx, |ui| {
+    sketch_window(tr!(lang, ChamferTitle), ctx).open(&mut open).resizable(false).show(ctx, |ui| {
         ui.checkbox(&mut dimensions, tr!(lang, ChamferCreateDimensions));
         let first = |kind: &ChamferKind| match kind {
             ChamferKind::Equal(d) | ChamferKind::Unequal(d, _) => d.clone(),
@@ -451,6 +458,36 @@ pub(crate) fn chamfer_window(ctx: &egui::Context, session: &mut Session, lang: L
     });
     if (kind.clone(), dimensions) != session.chamfer_options() {
         session.set_chamfer_options(kind, dimensions);
+    }
+    if !open || done {
+        session.set_tool(ToolKind::Select);
+    }
+}
+
+/// The Move, Copy and Rotate dialogs while their tool runs (Inventor 2026 help, To Copy, Move, or Rotate 2D
+/// Sketch Geometry, GUID-F8114270-18F7-4C7A-947E-AC489EDACFA9): Copy (Move and Rotate), the More options
+/// as one relax box (Always or Never), Done. The selection is what was selected before the command
+/// (Inventor's dialog also has a Select mode; here the clicks set the base point straight away).
+pub(crate) fn transform_window(ctx: &egui::Context, session: &mut Session, lang: Lang) {
+    let tool = session.tool();
+    let title = match tool {
+        ToolKind::Copy => tr!(lang, ToolCopy),
+        ToolKind::Rotate => tr!(lang, ToolRotate),
+        _ => tr!(lang, ToolMove),
+    };
+    let (mut copy, mut relax) = session.transform_options();
+    let mut open = true;
+    let mut done = false;
+    sketch_window(title, ctx).open(&mut open).resizable(false).show(ctx, |ui| {
+        ui.label(tr!(lang, TransformSelection, session.selected_curves().len()));
+        if tool != ToolKind::Copy {
+            ui.checkbox(&mut copy, tr!(lang, TransformCopy));
+        }
+        ui.checkbox(&mut relax, tr!(lang, TransformRelax));
+        done = ui.button(tr!(lang, DialogDone)).clicked();
+    });
+    if (copy, relax) != session.transform_options() {
+        session.set_transform_options(copy, relax);
     }
     if !open || done {
         session.set_tool(ToolKind::Select);

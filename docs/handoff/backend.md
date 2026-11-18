@@ -15,7 +15,7 @@
 | 3 | ~~Cancel Sketch~~ **완료** | 스케치 32 (P2) | — | 아래 작업 기록 |
 | 4 | ~~Tangent Circle·Midpoint Line·중심 사각형 2종~~ **완료** | 44, 46, 57 (P2) | — | 아래 작업 기록 |
 | 5 | ~~Chamfer·Split~~ **완료** | 65, 81 (P2) | — | 아래 작업 기록 |
-| 6 | Move·Copy·Rotate(스케치) / Scale·Stretch | 76–78 (P2) / 83–84 (P3) | 드래그만 | 선택 형상 변환 명령(치수 완화 옵션 포함) |
+| 6 | ~~Move·Copy·Rotate~~ **완료** / Scale·Stretch | 76–78 (P2) / 83–84 (P3) | Scale·Stretch 남음 | 아래 작업 기록 |
 | 7 | Auto-project(모서리 자동 투영) | 68 (P2) | 없음 | 그리기 중 모델 모서리 스냅 → 투영 |
 | 8 | Automatic Dimensions and Constraints | 126 (P2) | 없음 | 남은 자유도를 치수로 채우기 |
 | 9 | 치수 방향 뒤집기(Flip) | 124 (P3) | 확인 필요 | |
@@ -53,6 +53,33 @@
 | 모션(오래된 남은 일) | 맨 아래 "남은 일(백엔드)" 절 그대로 |
 
 # 작업 기록(최신 순)
+
+## 2026-11-18 — 스케치 이동·복사·회전(우선순위 표 6)
+
+- **원문**: To Copy, Move, or Rotate 2D Sketch Geometry `GUID-F8114270-18F7-4C7A-947E-AC489EDACFA9.htm`.
+  - 선택 → 기준점(회전은 중심점) → 끝점 순서. 미리보기가 있고, 회전 각도는 직접 입력할 수 있다.
+  - 이동·회전에는 Copy 체크가 있다.
+  - More에서 치수 완화(Never/If No Equation/Always/Prompt)와 구속 끊기(Never/Always/Prompt)를 고른다.
+- **gc_sketch `transform.rs`**:
+  - `copy_placed`: 곡선·점과 그 안끼리의 구속(고정 제외)을 복사한다. 돌린 복사본에 맞지 않는 수평·수직은 빠진다.
+  - `move_placed`: 선택한 점을 목표 위치에 임시 고정한 채 풀고, 이어진 것이 따라오게 한다. 풀리지 않으면 거부한다.
+  - relax: 선택과 바깥을 잇는 구속을 끊고(회전이면 선택 안의 수평·수직도), 선택과 바깥을 잇는 치수는 이동 후 잰 값으로 다시 쓴다(식 → 값).
+- **gc_doc**: `Motion::{Translate{by}, Rotate{centre, angle}}`(`place`), `SketchOp::Transform{curves, motion, copy, relax}`.
+- **도구**:
+  - `ToolKind::{Move, Copy, Rotate}`는 두 번 클릭 후 `ToolOutput::Transform(motion)`을 낸다. 회전은 HUD 각도 입력이 이긴다.
+  - 세션이 현재 선택한 곡선과 창 옵션(`transform_options`: Copy, relax)으로 명령을 만든다.
+  - 미리보기: 세션 `preview()`가 선택을 옮긴 자리에 그린다.
+- **UI**:
+  - '이동'·'복사'·'회전' 창: 선택 수, 복사본으로(이동·회전), 구속 풀기, 완료.
+  - 스케치 명령 창들은 이제 오른쪽 리본 아래에 처음 뜬다(리본을 가리지 않게).
+  - 리본 '수정' 패널: 간격띄우기·분할·이동 / 모따기·복사·회전.
+  - 작성 패널의 슬롯(중심 대 중심)은 작은 버튼 3×2 묶음으로 옮겼다. 1280 px에서 마무리·취소까지 1230에서 끝난다.
+- **원문과 다른 점**:
+  - 창에 선택 모드가 없다. 명령 전에 고르고, 창은 선택 수만 보여 준다.
+  - More는 상자 하나(Always/Never). If No Equation·Prompt는 없다.
+  - Precise Input, Optimize for Single Selection, Clipboard 붙여넣기, Backspace 되돌리기는 없다.
+  - 기준점의 축 스냅(Ctrl로 끄기)은 일반 스냅 그대로다.
+- **테스트**: `gc_doc/tests/sketch_shapes.rs` move_copy_and_rotate…(이동·Never 거부·Always 치수 갱신·회전·복사 자유도), 세션 move_copy_and_rotate_tools…, 앱 kittest move_copy_and_rotate_on_the_ribbon….
 
 ## 2026-11-18 — 분할(Split)·2D 모따기(Chamfer)(우선순위 표 5)
 

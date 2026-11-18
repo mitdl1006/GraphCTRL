@@ -387,3 +387,21 @@ fn split_and_chamfer_on_the_ribbon_and_the_chamfer_dialog() {
     harness.run();
     assert_eq!(harness.state().session.tool(), ToolKind::Select, "OK leaves the tool");
 }
+
+#[test]
+fn move_copy_and_rotate_on_the_ribbon_open_their_dialogs() {
+    let mut harness = sketching();
+    for (label, kind) in [("이동", ToolKind::Move), ("복사", ToolKind::Copy), ("회전", ToolKind::Rotate)]
+    {
+        harness.get_by_label(label).click();
+        harness.run();
+        assert_eq!(harness.state().session.tool(), kind);
+        harness.get_by_label("선택: 곡선 0개(명령 전에 고르기)");
+    }
+    harness.get_by_label("구속 풀기(치수 다시 계산·구속 끊기)").click();
+    harness.run();
+    assert!(harness.state().session.transform_options().1);
+    harness.get_by_label("완료").click();
+    harness.run();
+    assert_eq!(harness.state().session.tool(), ToolKind::Select);
+}

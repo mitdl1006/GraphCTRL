@@ -187,14 +187,6 @@ pub(crate) fn show(
                     // GUID-D4A4288F-32F1-4E23-A382-930EBA152E87; To Create 2D Shape Geometry,
                     // GUID-D489CE6D-7299-4211-A43A-F3580A4BA357): 2D sketches.
                     if !spatial {
-                        for (kind, icon, label) in
-                            [(ToolKind::Slot(SlotKind::CenterToCenter), Icon::Slot, Msg::ToolSlot)]
-                        {
-                            if ribbon_button(ui, icon, label.text(lang), current == kind, sketching).clicked()
-                            {
-                                session.set_tool(kind);
-                            }
-                        }
                         // Midpoint Line, Tangent Circle and the center rectangles as small icons, two rows
                         // (To Create Lines, Arcs, and Bends, GUID-4F861674-F74C-474E-869A-4C190ED6EC4B; To Create
                         // 2D Shape Geometry, GUID-D489CE6D-7299-4211-A43A-F3580A4BA357).
@@ -234,27 +226,32 @@ pub(crate) fn show(
                             }
                         });
                         ui.vertical(|ui| {
-                            // The other slots as small icons: two rows, the Center Point toggle (Format panel) last.
+                            // The slots as small icons: two rows, the Center Point toggle (Format panel) last.
                             let slots = [
-                                (ToolKind::Slot(SlotKind::Overall), "(=)", Msg::ToolSlotOverall),
-                                (ToolKind::Slot(SlotKind::CenterPoint), "(+)", Msg::ToolSlotCenterPoint),
+                                (ToolKind::Slot(SlotKind::CenterToCenter), Icon::Slot, Msg::ToolSlot),
+                                (ToolKind::Slot(SlotKind::Overall), Icon::Text("(=)"), Msg::ToolSlotOverall),
+                                (
+                                    ToolKind::Slot(SlotKind::CenterPoint),
+                                    Icon::Text("(+)"),
+                                    Msg::ToolSlotCenterPoint,
+                                ),
                                 (
                                     ToolKind::ArcSlot(ArcSlotKind::ThreePoint),
-                                    "(~)",
+                                    Icon::Text("(~)"),
                                     Msg::ToolSlotThreePointArc,
                                 ),
                                 (
                                     ToolKind::ArcSlot(ArcSlotKind::CenterPoint),
-                                    "(c)",
+                                    Icon::Text("(c)"),
                                     Msg::ToolSlotCenterPointArc,
                                 ),
                             ];
                             for (row, slots) in slots.chunks(3).enumerate() {
                                 ui.horizontal(|ui| {
-                                    for (kind, symbol, label) in slots.iter().copied() {
+                                    for (kind, icon, label) in slots.iter().copied() {
                                         let button = gc_ui::ribbon_small_button(
                                             ui,
-                                            Icon::Text(symbol),
+                                            icon,
                                             label.text(lang),
                                             current == kind,
                                             sketching,
@@ -310,16 +307,22 @@ pub(crate) fn show(
                             }
                         });
                     });
-                    // Inventor's Modify panel: Offset, Split; Chamfer next to them (Create panel in Inventor; small
-                    // icons in two rows to keep the tab within 1280 px).
+                    // Inventor's Modify panel: Offset, Split, Move, Copy, Rotate (To Copy, Move, or Rotate 2D
+                    // Sketch Geometry, GUID-F8114270-18F7-4C7A-947E-AC489EDACFA9); Chamfer next to them (Create
+                    // panel in Inventor; small icons in two rows to keep the tab within 1280 px).
                     ribbon_group(ui, tr!(lang, GroupModify), |ui| {
                         ui.vertical(|ui| {
                             let rows = [
                                 vec![
                                     (ToolKind::Offset, Icon::Offset, Msg::ToolOffset),
                                     (ToolKind::Split, Icon::Text("-|-"), Msg::ToolSplit),
+                                    (ToolKind::Move, Icon::Text("->"), Msg::ToolMove),
                                 ],
-                                vec![(ToolKind::Chamfer, Icon::Text("/_"), Msg::ToolChamfer)],
+                                vec![
+                                    (ToolKind::Chamfer, Icon::Text("/_"), Msg::ToolChamfer),
+                                    (ToolKind::Copy, Icon::Text("+>"), Msg::ToolCopy),
+                                    (ToolKind::Rotate, Icon::Text("@"), Msg::ToolRotate),
+                                ],
                             ];
                             for row in rows {
                                 ui.horizontal(|ui| {
