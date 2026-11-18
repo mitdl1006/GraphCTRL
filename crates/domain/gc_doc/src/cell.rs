@@ -394,6 +394,14 @@ pub enum CellOp {
         /// The new iProperties.
         properties: crate::iproperties::IProperties,
     },
+    /// The BOM Structure of a component or subassembly (About the BOM Structure,
+    /// GUID-A0A95805-CBF6-4524-8314-4AC8B53C19CF). Refused for a row that is not in the tree.
+    SetBomStructure {
+        /// The component or subassembly.
+        key: crate::subassembly::TreeKey,
+        /// Its structure.
+        structure: crate::iproperties::BomStructure,
+    },
     /// Document Settings (To Change Document Settings, GUID-FB49837F-7832-4713-928E-1CEDBDB0C3BD): replaces
     /// the settings saved with the document. Refused when they are not valid (`DocSettings::is_valid`).
     SetDocSettings(crate::settings::DocSettings),
@@ -852,8 +860,17 @@ pub(crate) fn set_timeline(
                 .collect()
         })
         .unwrap_or_default();
+    // BOM Structures of rows that are gone.
+    let unlisted: Vec<crate::subassembly::TreeKey> = txn
+        .doc()
+        .timeline()
+        .map(|(_, t)| {
+            t.components.bom.iter().map(|(k, _)| *k).filter(|k| !txn.doc().has_tree_row(*k)).collect()
+        })
+        .unwrap_or_default();
     let edit = |t: &mut crate::design::Timeline| {
         t.components.sketch_owners.retain(|(s, _)| !orphaned.contains(s));
+        t.components.bom.retain(|(k, _)| !unlisted.contains(k));
         if !gone.is_empty() {
             let c = &mut t.components;
             for list in [&mut c.grounded, &mut c.disabled, &mut c.hidden, &mut c.suppressed] {
@@ -1226,6 +1243,18 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
                 }
             })?;
             Ok((Vec::new(), "iProperties"))
+        }
+        CellOp::SetBomStructure { key, structure } => {
+            if !txn.doc().has_tree_row(*key) {
+                return Err(EditError::BadValue);
+            }
+            set_timeline(txn, |t| {
+                t.components.bom.retain(|(k, _)| k != key);
+                if *structure != crate::iproperties::BomStructure::Normal {
+                    t.components.bom.push((*key, *structure));
+                }
+            })?;
+            Ok((Vec::new(), "BOM Structure"))
         }
         CellOp::SetDocSettings(settings) => {
             if !settings.is_valid() {

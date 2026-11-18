@@ -3,6 +3,75 @@
 브랜치 `claude/ur-robot-control-simulator-jsmhze-backend`. 아래 "현황"이 요약, 그 다음 "작업 기록"이 최신 순 상세(근거 링크·API·차이).
 인벤터 원문은 `https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-….htm`.
 
+## 인수인계 (2026-11-18, 이전 백엔드 세션 → 새 백엔드 세션)
+
+### 지금 상태
+
+- 진행 중인 작업 없음. WIP 없음. 마지막 커밋은 0f749eb다.
+- 리드 브랜치 77b81f9를 병합했다(5dd4a32). 병합 후 workspace check와 clippy가 통과했다.
+- 리드 지시 ①②③을 모두 끝내고 푸시했다.
+  - ① 문서 설정: a9a0473.
+  - ② BOM 기초: 94c69ad.
+  - ③ Bend Equal: 5df259d.
+- 0f749eb: Tangent·Smooth에서 같은 곡선 쌍을 거부한다(QA `qa_sketch_new_curves` "ellipse with itself").
+
+### 최근 API (자세한 것은 아래 각 절)
+
+- **BOM** (GUID-A0A95805):
+  - `session.bill_of_materials(BomView::{Structured, PartsOnly}) -> Vec<BomRow { item, level, part_number, description, quantity, structure, keys }>`
+  - `session.bom_csv(view)`
+  - `session.bom_structure(TreeKey)`, `session.set_bom_structure(TreeKey, BomStructure)`
+  - `gc_session::structure_name`
+  - 저장: `CellOp::SetBomStructure`, `Components.bom`
+  - Reference는 `physical_properties(None)` 질량·부피에서도 빠진다.
+- **Bend Equal** (GUID-4F861674): `SketchOp::BendEqual { lines, to }`. 첫 굽힘 호와 Equal로 묶이고 치수는 붙지 않는다. 프론트 대화상자 배선은 아직 안 됐다.
+- **iProperties**:
+  - `session.properties(target)`, `set_properties`, `part_number`, `physical_properties`
+  - `CellOp::SetProperties`
+- **문서 설정**:
+  - `session.doc_settings()`, `set_doc_settings(DocSettings)`(`CellOp::SetDocSettings`)
+  - `DocSettings::{format_length, format_angle, dimension_text, auto_bend_text}`
+  - `session.set_snap_to_grid(bool)`, `snap_to_grid()`
+  - `set_auto_bend(bool)`, `auto_bend() -> bool`. 리드가 이 bool 시그니처에 맞췄으니 바꾸지 말 것.
+
+### 보류 목록
+
+- `DocSettings.persist_constraints`: 저장만 되고 동작에는 반영되지 않는다. 꺼도 추론된 구속이 남는다.
+- 도구 미리보기 내부 숫자: 아직 mm 고정이다(문서 단위 미반영).
+- 격자 그리기, 입력 상자의 식/값 표시(`input_as_expression`): 프론트 몫.
+- BOM 남은 것:
+  - 문서 설정 Bill of Materials 탭(기본 BOM 구조)
+  - 단위(Base Quantity)
+  - 열 사용자 정의
+  - First Level 보기(지금 구조 보기는 All Levels만)
+- Bend Equal 프론트 배선(Equal 체크, 기본 켬).
+- 이 파일 아래 "남은 백엔드 일 — 우선순위" 표의 나머지.
+
+### 알려진 함정
+
+- 공용 타입·시그니처를 바꾸기 전에는 다음 세 브랜치를 `git grep`한다.
+  - `origin/claude/ur-robot-control-simulator-jsmhze-qa`
+  - `origin/...-frontend`
+  - 리드 브랜치 `origin/claude/ur-robot-control-simulator-jsmhze`
+  - 깨지는 곳이 있으면 필드 추가 대신 새 variant나 새 함수로 비켜 간다(예: `Bend` 대신 `BendEqual`).
+  - 영향은 handoff와 리드 메시지에 적는다.
+- 리드가 이미 맞춘 API는 되돌리지 않는다. `set_auto_bend`를 `Option<String>`으로 되돌렸다가 다시 고친 적이 있다.
+- 리드 브랜치 병합은 컴파일될 때만 한다. 리드가 수정을 푸시했다고 알린 뒤에 한다.
+- clippy가 f64의 `hypot`/`acos`/`tan`/`sin`/`atan2`를 금지한다(테스트에서도). `gc_math::fm::*`를 쓴다.
+- `type_complexity` 경고는 타입 별칭으로 푼다.
+- 테스트나 빌드가 도는 중에 파일을 고치면 결과가 거짓으로 실패한다.
+- 인벤터 동작은 먼저 원문을 curl로 받는다(scratchpad `help/`, `python3 -I`로 파싱). 원문 대조를 handoff에 쓰고 시작한다. 커밋에 GUID를 남긴다.
+- `try_add`는 새로 퇴화하는 후보를 Conflicting으로 거부한다. 테스트에서 구속 순서를 바꾸면 결과가 달라질 수 있다.
+
+### 축소 검사 절차 (리드 지시, 전체 gate 대신)
+
+1. `cargo fmt --all`
+2. `cargo clippy -p <바뀐 크레이트> --all-targets --locked -- -D warnings`
+3. `cargo test -p <바뀐 크레이트와 그 직접 사용자> --locked`
+4. 공용 타입이 바뀌었으면 `cargo check --workspace --all-targets --locked`
+
+전체 `cargo xtask gate`는 리드가 병합할 때 돌린다.
+
 ## 남은 백엔드 일 — 우선순위(리드 ②, 2026-11-18)
 
 `docs/ux/inventor-sketch-parity.md`·`inventor-assembly-parity.md`에서 "없음/신규/남음"이고 담당에 BE가 있는 행을 코드(`ToolKind`·`SketchOp`·`CellOp`)와 맞춰
@@ -53,6 +122,52 @@
 | 모션(오래된 남은 일) | 맨 아래 "남은 일(백엔드)" 절 그대로 |
 
 # 작업 기록(최신 순)
+
+## 2026-11-18 — Bend Equal 옵션(리드 ③)
+
+원문: To Create Lines, Arcs, and Bends, GUID-4F861674-F74C-474E-869A-4C190ED6EC4B — "(Optional) Deselect Equal to prevent automatic
+constraints. If selected, the Equal option constrains successively placed bends of the same radius."
+
+- 새 연산 `SketchOp::BendEqual { lines, to }`:
+  - 반지름은 호 `to`(대화상자에서 처음 놓은 굽힘)의 반지름을 쓴다.
+  - 치수 대신 `Equal(새 호, to)` 구속을 건다. 첫 굽힘의 치수를 바꾸면 둘 다 따라간다.
+  - 실행 취소 한 단계. `to`가 호·원이 아니면 거부한다.
+- `SketchOp::Bend`에 필드를 더하지 않은 이유: 뷰포트(`gc_viewport/src/lib.rs`)와 QA 테스트가 리터럴로 쓴다.
+- 프론트 배선:
+  - Bend 대화상자의 Equal 체크(기본 켬)를 둔다.
+  - 켜져 있고 반지름 칸이 바뀌지 않았으면 두 번째부터 `BendEqual { lines, to: 첫 굽힘 호 }`를 보낸다.
+  - 꺼져 있거나 반지름을 바꿨으면 지금처럼 `Bend`를 보낸다. 반지름을 바꿨으면 그 굽힘이 새 기준이 된다.
+  - 첫 굽힘 호는 `Bend` 결과 `Created::Curve`의 첫 항목이다.
+- Auto-Bend(선 그리기 중 자동 굽힘)는 원문에 Equal 언급이 없어 그대로 둔다(굽힘마다 치수).
+
+## 2026-11-18 — BOM 기초(리드 ②)
+
+원문: About the BOM Structure, GUID-A0A95805-CBF6-4524-8314-4AC8B53C19CF.
+
+| 원문 | 구현 |
+|---|---|
+| Normal: "numbered and included in quantity calculations" | 기본값. 항목 번호, 수량 |
+| Phantom: 행 아님, 자식은 상위로 올라가 수량이 곱해지고 같은 항목과 합쳐짐, 질량에는 포함 | 자식을 부모 수준으로 올려 부품 번호로 합침 |
+| Reference: BOM에서 자식과 함께 무시, 질량·부피에서 제외 | 두 보기에서 빠짐. 문서 전체 `physical_properties(None)`에서도 제외 |
+| Purchased: 하나의 줄. 구조 보기에는 Normal 자식이 나오고 부품 전용에서는 자식이 숨음 | 그대로 |
+| Inseparable: 부품 전용에서 부품처럼 취급, Normal·Inseparable 자식은 숨고 Purchased 자식은 나옴 | 그대로 |
+| 기본 BOM 구조는 문서 설정 Bill of Materials 탭 | 미구현. 컴포넌트마다 Normal이 기본 |
+
+- 같은 부품 번호는 한 줄로 합치고 수량을 더한다. 같은 파일은 같은 부품 번호라는 인벤터 동작을 따른 것이다.
+  - 부품 번호가 비어 있으면 이름을 쓴다(iProperties 원문).
+  - 하위 어셈블리는 iProperties가 없어 이름이 부품 번호다.
+- 구조 보기는 모든 수준(All Levels)을 보이고 항목 번호는 "1", "1.2" 꼴이다.
+  - 합쳐진 줄의 자식은 첫 인스턴스 기준이다(단위당 수량).
+- 부품 전용 보기에는 자식이 없는 컴포넌트와 Purchased·Inseparable 어셈블리가 나온다. 일반 어셈블리는 나오지 않는다.
+- 다르게 한 점: 단위(Base Quantity "Each")와 열 사용자 정의는 없다. CSV 열은 Item, Part Number, Quantity, Description, BOM Structure 고정이다.
+- 프론트용 API:
+  - `session.bill_of_materials(BomView::{Structured, PartsOnly}) -> Vec<BomRow { item, level, part_number, description, quantity, structure, keys }>`
+  - `session.bom_csv(view) -> String`: RFC 4180, CRLF. 수식처럼 보이는 값(`= + - @`로 시작)은 앞에 `'`를 붙인다.
+  - `session.bom_structure(TreeKey)`, `session.set_bom_structure(TreeKey, BomStructure)`: 실행 취소 한 단계. 트리에 없는 행은 거부한다.
+  - `gc_session::structure_name(BomStructure)`: 표시 이름.
+  - 저장: `Components.bom`(Normal이 아닌 것만). 사라진 행의 값은 정리된다.
+  - 공용 타입 영향: `CellOp::SetBomStructure` 추가, `Components.bom` 필드 추가(serde default). 리드·QA·프론트 브랜치에서
+    `CellOp`를 빠짐없이 매치하거나 `Components { .. }` 리터럴을 쓰는 곳은 없다(grep 확인).
 
 ## 2026-11-18 — 2D 구속·치수 원문 대조(리드 다음 ①, 시작 전)
 

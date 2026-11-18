@@ -13,6 +13,7 @@
 
 mod assembly;
 mod autoproject;
+mod bom;
 mod cell;
 mod design;
 mod editing;
@@ -29,6 +30,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 pub use assembly::{AssemblyReader, Imported, Importer, ShownAssemblyPart};
+pub use bom::{BomRow, BomView, structure_name};
 pub use cell::{
     CellItem, CompareRow, ContactStop, Ghost, LoadedRobot, MeshRef, PADDING, PLANNERS, PlanStatus,
     PlannedPath, Reference, Resources, Shown, ShownPart,

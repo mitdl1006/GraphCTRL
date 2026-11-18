@@ -715,6 +715,9 @@ pub struct Components {
     /// The iProperties of components (Summary, Project, density).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub properties: Vec<(Occurrence, crate::iproperties::IProperties)>,
+    /// BOM Structure of components and subassemblies that are not Normal.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bom: Vec<(crate::subassembly::TreeKey, crate::iproperties::BomStructure)>,
 }
 
 fn is_zero(n: &u32) -> bool {
@@ -770,6 +773,7 @@ impl Components {
             && self.sketch_owners.is_empty()
             && self.next_subassembly == 0
             && self.properties.is_empty()
+            && self.bom.is_empty()
     }
 }
 
