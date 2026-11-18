@@ -124,6 +124,21 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — Motion 구속의 비·거리도 모델 매개변수 (리드 요청)
+
+- `relation_params` 대상에 `Rotation.ratio`(단위 없음)와 `RotationTranslation.distance`(길이)를 넣었다. `SetRelationValue`로 편집한다(`teeth = 36 / 12`, `teeth * 8 mm`). 비율 칸에 길이를 넣으면 `EditError::Expr`(차원 불일치), 0이면 `BadValue`.
+- `RelationParam`에 `dim: ParamDim { Length, Angle, Ratio }` 추가(serde default Length). 매개변수 표에서 단위를 정할 때 쓴다. `relation_params()`의 bool은 그대로 "각도인가"다(비율은 false이므로 `param.dim == ParamDim::Ratio`를 따로 본다).
+- 식에서 쓰이던 구속이 지워지면 값이 대신 들어가는데, 비율은 단위 없이 `(4)`로 들어간다.
+- 테스트: `gc_doc/tests/relation_params.rs::motion_ratio_and_distance_are_parameters`.
+
+## 2026-11-18 — 간섭 분석 옵션: Treat subassemblies as components
+
+근거: To Analyze Interference Among Components(`GUID-80DED0A6-AC65-4C7C-AD85-0144EE6DAB5B`) — "Select Treat subassemblies as components to treat sub-assemblies as single components and ignore the interferences within the sub-assemblies."
+
+- `session.interference_with(&set1, &set2, InterferenceOptions { subassemblies_as_components })` — 켜면 같은 최상위 서브어셈블리에 든 컴포넌트끼리의 간섭은 보고하지 않는다(중첩된 서브어셈블리도 맨 위 것 기준). 기존 `interference(...)`는 옵션 꺼짐과 같다(변화 없음).
+- 원문의 나머지: 나사산 정밀 분석·Content Center·AnyCAD 필터는 해당 없음(나사산·콘텐츠 센터 없음). 무시/무시 해제, "이 값보다 작은 부피 모두 무시", 합계 부피, 복사·인쇄는 결과 목록에 대한 화면 동작이라 프런트 몫이다(행마다 `overlap.volume`이 있다).
+- 테스트: `gc_session/tests/measure.rs::interference_within_a_subassembly_is_left_out_when_it_counts_as_one_component`.
+
 ## 2026-11-18 — Planar 조인트 (**원문 미확인, 일반 정의**)
 
 - 리드 지시: 도움말에서 한 번 더 찾고(조인트·관계·자유도 관련 35쪽을 다시 받아 "Planar joint"/"joint types"/"Gap" 검색 — 없음), 없으면 일반 정의로 구현하고 "원문 미확인"으로 표시.

@@ -1140,8 +1140,12 @@ fn params_of(doc: &Document) -> BTreeMap<String, Quantity> {
         }
     }
     // Constraint parameters: the offset or angle of each assembly constraint.
-    for (_, param, angle) in doc.relation_params() {
-        let quantity = if angle { Quantity::angle(param.value) } else { Quantity::length(param.value) };
+    for (_, param, _) in doc.relation_params() {
+        let quantity = match param.dim {
+            crate::relparam::ParamDim::Angle => Quantity::angle(param.value),
+            crate::relparam::ParamDim::Length => Quantity::length(param.value),
+            crate::relparam::ParamDim::Ratio => Quantity::scalar(param.value),
+        };
         scope.entry(param.name.clone()).or_insert(quantity);
     }
     scope

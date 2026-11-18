@@ -49,7 +49,8 @@ use gc_sketch::{Curve, DimKind, Dimension, FrameOutcome, Item, SkPoint, SketchDr
 use gc_tools::{Preview, Prompt, Tool, ToolEvent, ToolKind, ToolOutput};
 pub use look::{LookItem, LookTarget};
 pub use measure::{
-    Feature, FeaturePair, InterferenceRow, ItemMeasure, PairMeasure, angle_at, measure_features,
+    Feature, FeaturePair, InterferenceOptions, InterferenceRow, ItemMeasure, PairMeasure, angle_at,
+    measure_features,
 };
 pub use physical::PhysicalProperties;
 pub use schedule::{Assignment, Detour, MAX_ASSIGNMENTS, ParkMove, Schedule, Wait};
