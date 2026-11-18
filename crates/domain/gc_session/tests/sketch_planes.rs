@@ -218,3 +218,55 @@ fn every_component_has_an_origin_and_a_sketch_on_its_plane_moves_with_it() {
     assert!(reopened.origin_visible(table, OriginElement::Axis(2)));
     assert!(!reopened.origin_visible(table, OriginElement::Plane(OriginPlane::Yz)));
 }
+
+/// Autoproject edges for sketch creation (Inventor 2026 help, Sketch Tab Reference,
+/// GUID-1898C432-CFD2-46F1-8BAE-631392DFBF1D; About Projecting Sketch Geometry,
+/// GUID-B61431DA-FABC-41EE-945C-6E54B4806582): a sketch on a face takes the face's edges.
+#[test]
+fn a_sketch_on_a_face_takes_the_face_outline() {
+    // A square top of two triangles, and a side triangle going down from one edge.
+    let mesh = || {
+        gc_mesh::MeshData::new(
+            vec![[0.0; 3], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]],
+            vec![0, 1, 2, 0, 2, 3, 0, 4, 1],
+        )
+        .unwrap()
+    };
+    let assembly = || gc_doc::Assembly {
+        name: "Plate".into(),
+        file: "plate.glb".into(),
+        placement: Placement::default(),
+        parts: vec![gc_doc::AssemblyPart {
+            name: "Plate".into(),
+            parent: None,
+            matrix: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]],
+            meshes: vec![0],
+        }],
+        meshes: vec![gc_doc::AssemblyMesh { name: "Plate".into(), color: [1.0; 4], triangles: 3 }],
+        look: Default::default(),
+    };
+    let mut session = Session::new();
+    let id = session.add_assembly(assembly(), vec![mesh()]).unwrap();
+    session.create_sketch_on_face(id, 0, 0, 0).unwrap();
+    let (_, sketch) = session.active_sketch().unwrap();
+    let lines: Vec<f64> = sketch
+        .curves
+        .keys()
+        .filter_map(|c| sketch.line(*c))
+        .map(|(a, b)| {
+            let (a, b) = (sketch.pos(a).unwrap(), sketch.pos(b).unwrap());
+            ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt()
+        })
+        .collect();
+    assert_eq!(lines.len(), 4, "the square's four sides, not its diagonal or the side face: {lines:?}");
+    assert!(lines.iter().all(|l| (l - 1.0).abs() < 1e-9));
+    // Cancel Sketch takes the sketch and its outline back together.
+    let sketches = session.doc().sketches().len();
+    assert!(session.cancel_sketch());
+    assert_eq!(session.doc().sketches().len(), sketches - 1);
+
+    // With the option off, the sketch starts empty.
+    session.set_autoproject_face_edges(false);
+    session.create_sketch_on_face(id, 0, 0, 0).unwrap();
+    assert!(session.active_sketch().unwrap().1.curves.is_empty());
+}

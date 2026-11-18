@@ -16,7 +16,7 @@
 | 4 | ~~Tangent Circle·Midpoint Line·중심 사각형 2종~~ **완료** | 44, 46, 57 (P2) | — | 아래 작업 기록 |
 | 5 | ~~Chamfer·Split~~ **완료** | 65, 81 (P2) | — | 아래 작업 기록 |
 | 6 | ~~Move·Copy·Rotate~~ **완료** / Scale·Stretch | 76–78 (P2) / 83–84 (P3) | Scale·Stretch 남음 | 아래 작업 기록 |
-| 7 | Auto-project(모서리 자동 투영) | 68 (P2) | 없음 | 그리기 중 모델 모서리 스냅 → 투영 |
+| 7 | Auto-project — **면 스케치의 면 윤곽 자동 투영 완료** / 그리기 중 문질러 투영 남음 | 68 (P2) | 문질러 투영(rubbing)은 뷰포트 스냅 작업 | 아래 작업 기록 |
 | 8 | Automatic Dimensions and Constraints | 126 (P2) | 없음 | 남은 자유도를 치수로 채우기 |
 | 9 | 치수 방향 뒤집기(Flip) | 124 (P3) | 확인 필요 | |
 | 10 | 타원·스플라인(+ Smooth G2) | 60, 61, 108 (P3) | `CurveGeom`에 없음 | 새 곡선 종류 — 영향 큼 |
@@ -53,6 +53,23 @@
 | 모션(오래된 남은 일) | 맨 아래 "남은 일(백엔드)" 절 그대로 |
 
 # 작업 기록(최신 순)
+
+## 2026-11-18 — 면 위 스케치에서 면 모서리 자동 투영(우선순위 표 7 일부)
+
+- **원문**:
+  - Sketch Tab Reference(Application Options) `GUID-1898C432-CFD2-46F1-8BAE-631392DFBF1D.htm`: "Autoproject edges for sketch creation and edit".
+  - About Projecting Sketch Geometry `GUID-B61431DA-FABC-41EE-945C-6E54B4806582.htm`: 모델의 평면 면에 스케치를 만들면 면의 모든 모서리가 참조로 들어온다.
+- **세션**:
+  - `create_sketch_on_face`가 스케치를 만든 뒤, 고른 삼각형과 같은 평면에서 이웃으로 이어진 삼각형 영역의 윤곽을 `ProjectedLines`(고정 선)로 넣는다. 윤곽은 영역 안에서 한 번만 쓰인 모서리이고, 곧은 줄은 이어 붙인다.
+  - 메시는 꼭짓점이 겹쳐 있을 수 있어 나노미터로 반올림해 맞춘다.
+  - 옵션: `autoproject_face_edges()/set_autoproject_face_edges(on)`, 기본 켬. 응용 프로그램 옵션 화면은 FE.
+  - 윤곽은 별도 실행 취소 단계다. Cancel Sketch는 스케치와 함께 되돌린다.
+- **원문과 다른 점**:
+  - 원문은 자동 투영 참조를 지울 수 없다. 여기서는 고정 선이라 지울 수 있다.
+  - 원본이 바뀌어도 따라가지 않는다(Project Cut Edges와 같은 스냅샷).
+  - 편집할 때(enter_sketch) 다시 투영하지 않는다.
+  - "Autoproject edges during curve creation"(선을 문질러 투영)은 아직 없다.
+- **테스트**: `gc_session/tests/sketch_planes.rs` a_sketch_on_a_face_takes_the_face_outline(정사각형 면 = 선 4개, 대각선·옆면 제외, 취소, 옵션 끔).
 
 ## 2026-11-18 — 스케치 이동·복사·회전(우선순위 표 6)
 
