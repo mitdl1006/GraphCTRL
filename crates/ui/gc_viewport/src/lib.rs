@@ -11,6 +11,7 @@ mod hud;
 mod origin;
 mod paint;
 mod radial;
+mod repr;
 mod section;
 mod target;
 
@@ -31,6 +32,7 @@ pub use freemove::FreeTool;
 pub use origin::ALL as ORIGIN_ELEMENTS;
 pub use paint::{format_angle, format_length};
 pub use radial::ViewportRequest;
+pub use repr::{camera_from_json, camera_to_json, section_from_json, section_to_json};
 pub use section::{Section, SectionKind, SectionPlane};
 pub use target::Background;
 

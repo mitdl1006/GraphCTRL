@@ -64,6 +64,9 @@
 
 - 브라우저 표현 폴더(리드 큐 ②): 정적이던 "표현" 행을 폴더로 교체 — "뷰 표현"과 "위치 표현"([Primary] 먼저) 하위 폴더, 활성인 것은 ●와 선택 색, 클릭 = 활성화(`ActivateViewRepresentation`/`ActivatePositionalRepresentation`), 우클릭 활성화·삭제([Primary]는 삭제 불가), "새 뷰 표현"/"새 위치 표현"(`AddViewRepresentation`은 지금의 가시성 저장, 위치는 Primary 복사). 근거: About View Representations(GUID-9A49CDC1-4DC7-4462-81D7-E18B8339DE0F), To Create, Edit, or Copy Positional Representations(GUID-34C28C35-45CA-4476-9336-30146F7C9471)는 백엔드 handoff에 적힌 요약만 따름(원문 직접 읽지 않음). 미구현: 이름 바꾸기(F2는 `Rename`이 표현에 안 통함), 뷰 표현에 카메라·단면 저장(`camera`/`section` 문자열 형식 미정 — 지금은 None), 위치 표현의 재정의 편집(구동 값·억제 기록), 표현 복사, Model State. 리본 아이콘은 새 벡터 아이콘으로(패턴 = RectPattern, 미러 = Mirror, 복사 = Cuboid). 스크린샷 `docs/evidence/img/review-45-representations.png`, 테스트 `the_representations_folder_creates_activates_and_deletes`.
 
+- 뷰 표현의 카메라·단면 저장(리드 결정): `gc_viewport/src/repr.rs`가 카메라(pivot[3], rotation xyzw[4], distance, fov_y, ortho)와 단면(kind, planes[[축, 오프셋, 뒤집힘]])을 JSON 문자열로 쓰고 읽음(`camera_to_json/from_json`, `section_to_json/from_json`). 새 의존성(serde_json)을 못 쓰므로 평평한 객체만 직접 쓰고 파싱 — 형식은 유효한 JSON이라 나중에 바꿔도 호환. 새 뷰 표현은 지금 카메라·단면을 저장(`BrowserAction::NewView`), 활성화하면 가시성과 함께 카메라·단면을 복원(`ActivateView`; 파싱 실패하면 현재 뷰 유지, 저장된 카메라가 있는 표현은 단면이 없으면 단면도 해제). 미구현: 단면 편집 중 상태 저장, 표현 갱신(Set) 버튼. 테스트 `repr::tests`, `a_view_representation_restores_the_camera_and_the_section`.
+- 3D 스케치 리본 확인(리드 요청): 구속 13개가 두 줄이 된 3D 스케치 탭이 1280 px에서 "스케치 마무리"를 창 안에 둠을 `the_3d_sketch_ribbon_keeps_finish_sketch_on_screen`로 확인(스크린샷 `docs/evidence/img/review-46-3d-sketch-ribbon.png`).
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹
