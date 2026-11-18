@@ -204,6 +204,10 @@ pub enum GeoConstraint {
     },
     /// A point stays where it is.
     Fix(Id<SkPoint>),
+    /// Smooth (G2) (To Apply Geometric Constraints, GUID-A85A7A30-7D81-4C75-8769-CAD034EEA930): a spline
+    /// (first) runs on from the curve attached to its end point (second) with the same direction and
+    /// curvature there. It shapes the spline and is not solved.
+    Smooth(Id<Curve>, Id<Curve>),
     /// A curve stays where it is (To Apply Geometric Constraints, GUID-A85A7A30-7D81-4C75-8769-CAD034EEA930):
     /// "Lines are fixed in position and angle but endpoints can move to shorten or lengthen the line.
     /// Circles and arcs have fixed center point and radius. Arc and line endpoints are free to move …
@@ -427,7 +431,8 @@ impl Sketch {
         if spline_closed(points) {
             return Some(closed_spline_points(&fit[..fit.len() - 1], per_span));
         }
-        Some(spline_points(&fit, per_span))
+        // Tangent and Smooth ends shape it (in the sketch plane).
+        Some(self.shaped_outline(geom, per_span)?.into_iter().map(|p| [p[0], p[1]]).collect())
     }
 
     /// Points along a spline in space (a 3D sketch's, or a 2D one's with z = 0), closed or open, through
@@ -439,7 +444,17 @@ impl Sketch {
         if spline_closed(points) {
             return Some(closed_spline_points3(&fit[..fit.len() - 1], per_span));
         }
-        Some(spline_points3(&fit, per_span))
+        self.shaped_outline(geom, per_span)
+    }
+
+    /// An open spline's points with its ends shaped by its Tangent and Smooth constraints.
+    fn shaped_outline(&self, geom: &CurveGeom, per_span: usize) -> Option<Vec<[f64; 3]>> {
+        let CurveGeom::Spline { points } = geom else { return None };
+        let fit: Option<Vec<[f64; 3]>> = points.iter().map(|p| self.pos(*p)).collect();
+        let fit = fit?;
+        let id = self.curves.iter().find(|(_, c)| &c.geom == geom).map(|(id, _)| *id);
+        let (start, end) = id.map(|id| self.spline_ends(id)).unwrap_or_default();
+        Some(crate::spline_ends::shaped_spline_points3(&fit, per_span, start, end))
     }
 
     /// [`Sketch::ellipse_outline`] for a curve's shape (`None` when it is not an ellipse).
@@ -513,7 +528,8 @@ impl Sketch {
             | GeoConstraint::Collinear(a, b)
             | GeoConstraint::Tangent { a, b, .. }
             | GeoConstraint::Equal(a, b)
-            | GeoConstraint::Concentric(a, b) => vec![a, b],
+            | GeoConstraint::Concentric(a, b)
+            | GeoConstraint::Smooth(a, b) => vec![a, b],
             GeoConstraint::Symmetric { axis, .. } => vec![axis],
             GeoConstraint::FixCurve(curve) => vec![curve],
             _ => Vec::new(),
