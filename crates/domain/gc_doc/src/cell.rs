@@ -999,6 +999,7 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
             Ok((Vec::new(), "Edit body"))
         }
         CellOp::DeleteBody(id) => {
+            crate::subassembly::delete_owned_sketches(txn, id.erase())?;
             txn.remove(*id)?;
             Ok((Vec::new(), "Delete body"))
         }
@@ -1078,6 +1079,7 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
             if used {
                 return Err(EditError::InUse);
             }
+            crate::subassembly::delete_owned_sketches(txn, id.erase())?;
             txn.remove(*id)?;
             Ok((Vec::new(), "Delete robot"))
         }
@@ -1220,6 +1222,7 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
             Ok((Vec::new(), "Change look"))
         }
         CellOp::DeleteAssembly(id) => {
+            crate::subassembly::delete_owned_sketches(txn, id.erase())?;
             txn.remove(*id)?;
             Ok((Vec::new(), "Delete assembly"))
         }
