@@ -124,6 +124,23 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — Free Move / Free Rotate와 Update (대조 목록 5)
+
+근거: Move assembly components(`GUID-9796C22B-23C1-4D69-BC2E-54056E46F255`) — "A component with no relationships remains in the new location …", "A component snaps back to the position defined by its relationships to other components when you update the assembly", "The Free Move command displays component relationships as an elastic band". Rotate assembly components(`GUID-7EAE9DFD-899A-4FD1-B63F-92DD41D0A916`) — "When you click Update, a component snaps back to its constrained or connected position. An grounded component and components with no relationships relocates to the new position. Any components related to a grounded component snap into their connected or constrained positions in the new location."
+
+| 무엇 | 호출 |
+|---|---|
+| 놓기(이동·회전 공통) | `session.free_move(item, Placement)` = `CellOp::FreeMove { item, placement }` — 바디·로봇·가져온 어셈블리. 관계를 풀지 않고 그 자리에 둔다(고정 컴포넌트도). 실행 취소 1단계. 숫자가 아니거나 컴포넌트가 아니면 `BadValue` |
+| Update | `session.update_assembly()` = `CellOp::UpdateAssembly` — 관계를 다시 푼다. 고정된 것은 놓인 자리에 남고 묶인 것이 따라온다. 실행 취소 1단계 |
+| Update 필요? | `session.needs_update()` |
+| 고무줄 | `session.relationship_bands() -> Vec<RelationBand { id, ends: [DVec3; 2] (월드), satisfied }>` — 억제된 관계는 빠진다 |
+| 선택의 월드 위치 | `doc.selection_point(&selection)` |
+
+- 기존 배치 명령(SetBody·PlaceRobot·PlaceAssembly, 기즈모)은 그대로 즉시 다시 푼다. Free Move로 놓은 뒤에도 관계를 푸는 다른 명령(관계 추가·수정, 배치 명령, 매개변수 변경으로 구속 값이 바뀔 때)이 실행되면 같이 제자리로 돌아간다.
+- 놓인 동안 `relationship_status`는 `Sick`으로 나온다(안 맞는 상태). 브라우저에서 오류로 보이지 않게 하려면 `needs_update()`일 때 표시를 달리하면 된다 — 항목 8(구속 상태)에서 상태를 나눌 예정.
+- 회전 기호의 손잡이(안쪽=임의, 위·아래=수평축, 좌·우=수직축, 테두리=화면 평면)는 뷰 계산이라 프런트 몫이다. 결과 자세를 `free_move`로 넘기면 된다.
+- 테스트: `gc_doc/tests/relate.rs::free_move_drops_a_component_until_the_assembly_is_updated`.
+
 ## 2026-11-18 — 조인트 원점: Align 1/2 · Invert alignment · Offset Origin · Between Two Faces (대조 목록 4+7 중 원문에 있는 부분)
 
 근거: To Define and Manage Joint Relationships(`GUID-21DC3336-5C51-42C1-90FB-4299CD66E0C6`) — "select Align 1 and pick … A planar face, point, or edge on the moving component. A work plane/work axis/work point …", "If Align 1 is point selection …, Align 2 must also be point selection", "To change the alignment direction, select Invert alignment", "Between Two Faces … virtual midpoint between two faces, by selecting two faces and one point", "Offset Origin".

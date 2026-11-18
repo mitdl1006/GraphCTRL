@@ -62,8 +62,8 @@ pub use placement::{ComponentOrigin, WorkShape};
 pub use project::ProjectSource;
 pub use relate::{
     AngleSolution, AssembleSolution, AxisSense, ComponentStatus, Dof, DofAxis, DofSymbol, Geometry,
-    JointCondition, JointRange, Limits, LockedPose, RelationKind, RelationStatus, Relationship, Selection,
-    Unsolved, is_joint_kind, possible_relations, takes_limits,
+    JointCondition, JointRange, Limits, LockedPose, RelationBand, RelationKind, RelationStatus, Relationship,
+    Selection, Unsolved, is_joint_kind, possible_relations, takes_limits,
 };
 pub use relparam::RelationParam;
 pub use replicate::Replacement;
