@@ -530,6 +530,17 @@ impl Document {
             .unwrap_or_default()
     }
 
+    /// The Bill of Materials settings.
+    pub fn bom_settings(&self) -> crate::iproperties::BomSettings {
+        self.timeline().map(|(_, t)| t.components.bom_settings.clone()).unwrap_or_default()
+    }
+
+    /// The Static Quantity entered for the BOM row that starts with this component, if any.
+    pub fn bom_static_quantity(&self, key: crate::subassembly::TreeKey) -> Option<u32> {
+        self.timeline()
+            .and_then(|(_, t)| t.components.bom_quantities.iter().find(|(k, _)| *k == key).map(|(_, q)| *q))
+    }
+
     /// The Document Settings (the defaults for a document that has none saved).
     pub fn settings(&self) -> crate::settings::DocSettings {
         self.timeline().map(|(_, t)| t.settings).unwrap_or_default()

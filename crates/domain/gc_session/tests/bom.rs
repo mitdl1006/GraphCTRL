@@ -193,26 +193,69 @@ fn csv_guards_tab_and_carriage_return_and_trailing_spaces_merge_part_numbers() {
     assert_eq!(parts, vec![("BOLT".to_owned(), 2), ("bolt".to_owned(), 1)]);
 }
 
-/// Suppressed components take no part in the bill of materials (Inventor 2026 help, Suppress elements
-/// in assembly patterns, GUID-FDD20E41-93A5-479D-B547-BA9956E9966B: "Suppressed pattern elements are also
-/// excluded from a bill of materials").
+/// "A suppressed component does not participate in the Bill of Materials and appears as a 0 QTY … To
+/// remove 0 QTY items from the BOM display, click BOM Settings and enable Hide Suppressed components in
+/// BOM" (Inventor 2026 help, To Work with Bill of Materials, GUID-7A1FC6F1-8833-4A76-9E2B-AA6FE5FDF223).
 #[test]
-fn suppressed_components_are_left_out() {
+fn suppressed_components_count_nothing_and_can_be_hidden() {
     let (mut s, _, _, [a, _, _, d, _]) = cell();
-    let bolts = |s: &Session| {
+    let row = |s: &Session, part: &str| {
         s.bill_of_materials(BomView::PartsOnly)
             .into_iter()
-            .find(|r| r.part_number == "BOLT")
-            .unwrap()
-            .quantity
+            .find(|r| r.part_number == part)
+            .map(|r| r.quantity)
     };
-    assert_eq!(bolts(&s), 2);
+    assert_eq!(row(&s, "BOLT"), Some(2));
     s.set_component(Occurrence::Item(a.erase()), gc_doc::ComponentFlag::Suppressed, true).unwrap();
     s.set_component(Occurrence::Item(d.erase()), gc_doc::ComponentFlag::Suppressed, true).unwrap();
-    assert_eq!(bolts(&s), 1);
-    for view in [BomView::PartsOnly, BomView::Structured] {
-        assert!(s.bill_of_materials(view).iter().all(|r| r.part_number != "MOTOR"), "{view:?}");
-    }
+    // One bolt left; the motor, the only one, shows with quantity 0.
+    assert_eq!((row(&s, "BOLT"), row(&s, "MOTOR")), (Some(1), Some(0)));
+    // Hidden with the BOM setting, in both views.
+    let hide = gc_doc::BomSettings { hide_suppressed: true, ..gc_doc::BomSettings::default() };
+    s.set_bom_settings(hide).unwrap();
+    assert_eq!((row(&s, "BOLT"), row(&s, "MOTOR")), (Some(1), None));
+    assert!(s.bill_of_materials(BomView::Structured).iter().all(|r| r.part_number != "MOTOR"));
     s.set_component(Occurrence::Item(a.erase()), gc_doc::ComponentFlag::Suppressed, false).unwrap();
-    assert_eq!(bolts(&s), 2);
+    assert_eq!(row(&s, "BOLT"), Some(2));
+}
+
+/// Row merge on part number, its exclude list, Varies and Static Quantity (Part Number Row Merge
+/// Settings, GUID-EBBCAEA4-B876-4B39-8D33-F3DC9E18E620; To Work with Bill of Materials,
+/// GUID-7A1FC6F1-8833-4A76-9E2B-AA6FE5FDF223; About BOM Quantity, GUID-37BA8DB6-E39C-4C96-AAF1-E7B342F20D0E).
+#[test]
+fn rows_merge_on_part_number_unless_told_otherwise() {
+    let (mut s, _, _, [_, b, _, _, _]) = cell();
+    let bolts = |s: &Session| -> Vec<(u32, String, bool)> {
+        s.bill_of_materials(BomView::PartsOnly)
+            .into_iter()
+            .filter(|r| r.part_number == "BOLT")
+            .map(|r| (r.quantity, r.description, r.static_quantity))
+            .collect()
+    };
+    assert_eq!(bolts(&s), [(2, "M8 bolt".to_owned(), false)]);
+    // Properties that do not match are reported as Varies.
+    let longer =
+        IProperties { part_number: "BOLT".into(), description: "M8 x 40".into(), ..IProperties::default() };
+    s.set_properties(Some(Occurrence::Item(b.erase())), longer).unwrap();
+    assert_eq!(bolts(&s), [(2, "Varies".to_owned(), false)]);
+    // A Static Quantity stands for the counted one until it is taken back.
+    let depth = s.history().undo_depth();
+    s.set_bom_quantity(key(b), Some(12)).unwrap();
+    assert_eq!(s.history().undo_depth(), depth + 1);
+    assert_eq!(bolts(&s), [(12, "Varies".to_owned(), true)]);
+    s.set_bom_quantity(key(b), None).unwrap();
+    assert_eq!(bolts(&s)[0].0, 2);
+    // Excluded from merging, or merging off: one row each.
+    let excluded =
+        gc_doc::BomSettings { merge_excluded: vec!["BOLT".into()], ..gc_doc::BomSettings::default() };
+    s.set_bom_settings(excluded).unwrap();
+    assert_eq!(bolts(&s), [(1, "M8 bolt".to_owned(), false), (1, "M8 x 40".to_owned(), false)]);
+    let off = gc_doc::BomSettings { merge_part_numbers: false, ..gc_doc::BomSettings::default() };
+    s.set_bom_settings(off).unwrap();
+    assert_eq!(bolts(&s).len(), 2);
+    // The settings are saved with the document; a row that is not there takes no quantity.
+    let text = gc_persist::to_text(s.doc()).unwrap();
+    assert!(!gc_persist::from_text(&text).unwrap().doc.bom_settings().merge_part_numbers);
+    let ghost = key(Id::<Body>::from_raw(std::num::NonZeroU64::new(9999).unwrap()));
+    assert!(s.set_bom_quantity(ghost, Some(1)).is_err());
 }

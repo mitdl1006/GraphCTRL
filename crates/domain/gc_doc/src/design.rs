@@ -750,6 +750,13 @@ pub struct Components {
     /// BOM Structure of components and subassemblies that are not Normal.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bom: Vec<(crate::subassembly::TreeKey, crate::iproperties::BomStructure)>,
+    /// The Bill of Materials settings.
+    #[serde(default, skip_serializing_if = "crate::iproperties::BomSettings::is_default")]
+    pub bom_settings: crate::iproperties::BomSettings,
+    /// Static Quantity: quantities entered by hand for BOM rows (About BOM Quantity,
+    /// GUID-37BA8DB6-E39C-4C96-AAF1-E7B342F20D0E), by the row's first component.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bom_quantities: Vec<(crate::subassembly::TreeKey, u32)>,
 }
 
 fn is_zero(n: &u32) -> bool {
@@ -809,6 +816,8 @@ impl Components {
             && self.next_subassembly == 0
             && self.properties.is_empty()
             && self.bom.is_empty()
+            && self.bom_settings.is_default()
+            && self.bom_quantities.is_empty()
     }
 }
 
