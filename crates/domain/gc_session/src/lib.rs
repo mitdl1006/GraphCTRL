@@ -12,6 +12,7 @@
 #![cfg_attr(test, allow(clippy::float_cmp, reason = "tests compare exactly representable values"))]
 
 mod assembly;
+mod autoproject;
 mod cell;
 mod design;
 pub mod library;
@@ -82,6 +83,8 @@ pub struct Session {
     /// The Move and Rotate dialogs' Copy box, and their More options (relax: Always; otherwise Never).
     transform_copy: bool,
     transform_relax: bool,
+    /// Autoproject edges for sketch creation (a sketch on a face takes the face's outline).
+    autoproject_edges: bool,
     drag: Option<SketchDrag>,
     report: Option<SketchReport>,
     request: Option<ValueRequest>,
@@ -134,6 +137,7 @@ impl Session {
             sketch_mark: None,
             transform_copy: false,
             transform_relax: false,
+            autoproject_edges: true,
             drag: None,
             report: None,
             request: None,
@@ -962,7 +966,9 @@ impl Session {
 
     /// Creates a 2D sketch on the plane of a triangle of an imported part (a picked face) and starts
     /// editing it: origin at the triangle's centre, normal out of its front side, X along its first
-    /// edge. The sketch follows the assembly when it is moved.
+    /// edge. The sketch follows the assembly when it is moved. With Autoproject edges on (the default),
+    /// the face's outline comes into the sketch as fixed lines (a step of its own, which Cancel Sketch
+    /// takes back with the sketch).
     pub fn create_sketch_on_face(
         &mut self,
         assembly: Id<gc_doc::Assembly>,
@@ -971,7 +977,11 @@ impl Session {
         triangle: usize,
     ) -> Result<Id<Sketch>, EditError> {
         let source = self.face_source(assembly, part, mesh, triangle).ok_or(EditError::BadValue)?;
-        self.create_sketch_on(source)
+        let sketch = self.create_sketch_on(source)?;
+        if self.autoproject_edges {
+            self.project_face_outline(sketch, assembly, mesh, triangle);
+        }
+        Ok(sketch)
     }
 
     fn face_source(
