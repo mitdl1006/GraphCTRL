@@ -604,6 +604,9 @@ impl Sketch {
     }
 
     fn trim_span(&self, curve: Id<Curve>, at: [f64; 2]) -> Option<Span> {
+        if self.closed_spline(curve) {
+            return None;
+        }
         let shape = self.track(curve)?;
         let t = shape.param(at);
         let end = shape.span();
@@ -867,6 +870,9 @@ impl Sketch {
 
     /// The piece an extend at `at` would add to `curve`.
     pub fn extend_preview(&self, curve: Id<Curve>, at: [f64; 2]) -> Option<Piece> {
+        if let Some((_, from, target)) = self.spline_extend_target(curve, at) {
+            return Some(Piece::Segment(from, target.pos));
+        }
         let shape = self.shape(curve)?;
         let (_, _, target, at_last) = self.extend_target(curve, at)?;
         Some(match shape {
@@ -885,6 +891,9 @@ impl Sketch {
         curve: Id<Curve>,
         at: [f64; 2],
     ) -> Result<CutResult, SketchError> {
+        if let Some((at_last, _, target)) = self.spline_extend_target(curve, at) {
+            return self.extend_spline(alloc, curve, at_last, target);
+        }
         let (end, other, target, _) = self.extend_target(curve, at).ok_or(SketchError::InvalidValue)?;
         let joined = self
             .constraints
@@ -1011,6 +1020,9 @@ impl Sketch {
     }
 
     fn split_cut(&self, curve: Id<Curve>, at: [f64; 2]) -> Option<Cut> {
+        if self.closed_spline(curve) {
+            return None;
+        }
         let shape = self.track(curve)?;
         if let Track::Shape(Shape::Round(_, _, None)) = shape {
             return None;
@@ -1133,6 +1145,136 @@ impl Sketch {
         Ok(())
     }
 
+    fn closed_spline(&self, curve: Id<Curve>) -> bool {
+        matches!(self.curves.get(&curve).map(|c| &c.geom), Some(CurveGeom::Spline { points }) if crate::model::spline_closed(points))
+    }
+
+    /// Which end of an open spline an extend at `at` lengthens (true: the last), where that end is, and the
+    /// first curve met going straight on from it along the spline's direction there.
+    fn spline_extend_target(&self, curve: Id<Curve>, at: [f64; 2]) -> Option<(bool, [f64; 2], Cut)> {
+        let CurveGeom::Spline { points } = &self.curves.get(&curve)?.geom else { return None };
+        if crate::model::spline_closed(points) {
+            return None;
+        }
+        let Track::Poly(poly) = self.track(curve)? else { return None };
+        let n = poly.0.len();
+        if n < 2 {
+            return None;
+        }
+        let at_last = poly.param(at) > poly.span() / 2.0;
+        let (end, before) = if at_last { (poly.0[n - 1], poly.0[n - 2]) } else { (poly.0[0], poly.0[1]) };
+        let ray = Shape::Segment(end, [2.0 * end[0] - before[0], 2.0 * end[1] - before[1]]);
+        let mut best: Option<Cut> = None;
+        for (id, _) in self.curves.iter().filter(|(id, _)| **id != curve) {
+            let Some(other) = self.track(*id) else { continue };
+            for (t, pos) in Track::Shape(ray).crossings(&other, true) {
+                if t > EPS && best.is_none_or(|b| t < b.t) {
+                    best = Some(Cut { t, pos, by: *id });
+                }
+            }
+        }
+        best.map(|cut| (at_last, end, cut))
+    }
+
+    /// Extends a spline by a new end fit point where its straight continuation meets `target`, tied there.
+    /// The old end stays a fit point; an end joined to other geometry is refused.
+    fn extend_spline(
+        &mut self,
+        alloc: &mut IdAlloc,
+        curve: Id<Curve>,
+        at_last: bool,
+        target: Cut,
+    ) -> Result<CutResult, SketchError> {
+        let Some(CurveGeom::Spline { points }) = self.curves.get(&curve).map(|c| c.geom.clone()) else {
+            return Err(SketchError::InvalidValue);
+        };
+        let end =
+            if at_last { points.last() } else { points.first() }.copied().ok_or(SketchError::InvalidValue)?;
+        let joined = self
+            .constraints
+            .values()
+            .any(|c| matches!(*c, GeoConstraint::Coincident(p, q) if p == end || q == end));
+        if joined {
+            return Err(SketchError::InvalidValue);
+        }
+        let new = self.add_point(alloc, [target.pos[0], target.pos[1], 0.0]);
+        let mut points = points;
+        if at_last {
+            points.push(new);
+        } else {
+            points.insert(0, new);
+        }
+        if let Some(c) = self.curves.get_mut(&curve) {
+            c.geom = CurveGeom::Spline { points };
+        }
+        let mut result = CutResult::default();
+        self.attach(alloc, new, target.pos, target.by, &mut result);
+        Ok(result)
+    }
+
+    /// Close Curve (To Create, Lock Spline Length, and Edit Splines: "To close a curve, right-click the
+    /// starting point and choose Close Curve"): an open spline of three or more fit points runs on from its
+    /// last point smoothly back round to its first.
+    pub fn close_spline(&mut self, curve: Id<Curve>) -> Result<(), SketchError> {
+        if self.is_spatial() {
+            return Err(SketchError::WrongSpace);
+        }
+        let Some(CurveGeom::Spline { points }) = self.curves.get(&curve).map(|c| c.geom.clone()) else {
+            return Err(SketchError::InvalidValue);
+        };
+        let (Some(first), Some(last)) = (points.first().copied(), points.last().copied()) else {
+            return Err(SketchError::InvalidValue);
+        };
+        let apart = self.xy(first).zip(self.xy(last)).is_some_and(|(a, b)| dist(a, b) > 1e-9);
+        if points.len() < 3 || crate::model::spline_closed(&points) || !apart {
+            return Err(SketchError::InvalidValue);
+        }
+        let mut points = points;
+        points.push(first);
+        if let Some(c) = self.curves.get_mut(&curve) {
+            c.geom = CurveGeom::Spline { points };
+        }
+        Ok(())
+    }
+
+    /// Insert Point ("right-click the spline and choose Insert Point. Then click the curve to add one or
+    /// more points"): a new fit point on the spline nearest `at`, between the fit points around it. The
+    /// curve keeps nearly its shape (it is fitted again through one more point).
+    pub fn insert_spline_point(
+        &mut self,
+        alloc: &mut IdAlloc,
+        curve: Id<Curve>,
+        at: [f64; 2],
+    ) -> Result<Id<SkPoint>, SketchError> {
+        let Some(CurveGeom::Spline { points }) = self.curves.get(&curve).map(|c| c.geom.clone()) else {
+            return Err(SketchError::InvalidValue);
+        };
+        if !at.iter().all(|v| v.is_finite()) {
+            return Err(SketchError::InvalidValue);
+        }
+        let Some(Track::Poly(poly)) = self.track(curve) else { return Err(SketchError::InvalidValue) };
+        let t = poly.param(at);
+        let pos = poly.at(t);
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "a parameter on the polyline"
+        )]
+        let span = ((t.max(0.0) / SPLINE_STEPS as f64).floor() as usize).min(points.len().saturating_sub(2));
+        let (before, after) = (points[span], points[span + 1]);
+        let clear = |p: Id<SkPoint>| self.xy(p).is_some_and(|q| dist(q, pos) > 1e-9);
+        if !(clear(before) && clear(after)) {
+            return Err(SketchError::InvalidValue);
+        }
+        let new = self.add_point(alloc, [pos[0], pos[1], 0.0]);
+        let mut points = points;
+        points.insert(span + 1, new);
+        if let Some(c) = self.curves.get_mut(&curve) {
+            c.geom = CurveGeom::Spline { points };
+        }
+        Ok(new)
+    }
+
     /// Splits a spline at one of its inner fit points: the spline ends there and a new spline (returned)
     /// carries on from there through the rest of the fit points. The two share the point.
     pub fn split_spline(
@@ -1143,6 +1285,9 @@ impl Sketch {
     ) -> Result<Id<Curve>, SketchError> {
         let found = self.curves.get(&curve).ok_or(SketchError::MissingCurve)?;
         let CurveGeom::Spline { points } = &found.geom else { return Err(SketchError::InvalidValue) };
+        if crate::model::spline_closed(points) {
+            return Err(SketchError::InvalidValue);
+        }
         let construction = found.construction;
         let k = points.iter().position(|p| *p == point).ok_or(SketchError::InvalidValue)?;
         if k == 0 || k + 1 >= points.len() {

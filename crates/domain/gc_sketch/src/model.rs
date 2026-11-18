@@ -141,9 +141,22 @@ impl Curve {
             CurveGeom::Arc { c, s, e } => vec![c, s, e],
             CurveGeom::Ellipse { c, major, arc: None, .. } => vec![c, major],
             CurveGeom::Ellipse { c, major, arc: Some((s, e)), .. } => vec![c, major, s, e],
-            CurveGeom::Spline { ref points } => points.clone(),
+            CurveGeom::Spline { ref points } => {
+                // A closed spline lists its first point again at the end.
+                let mut unique = points.clone();
+                if spline_closed(points) {
+                    unique.pop();
+                }
+                unique
+            }
         }
     }
+}
+
+/// True for the fit points of a closed spline (Close Curve): its first point again at the end, with at
+/// least three different points.
+pub fn spline_closed<T: PartialEq>(points: &[T]) -> bool {
+    points.len() >= 4 && points.first() == points.last()
 }
 
 /// A geometric constraint.
@@ -384,7 +397,11 @@ impl Sketch {
     pub fn spline_outline(&self, geom: &CurveGeom, per_span: usize) -> Option<Vec<[f64; 2]>> {
         let CurveGeom::Spline { points } = geom else { return None };
         let fit: Option<Vec<[f64; 2]>> = points.iter().map(|p| self.pos(*p).map(|q| [q[0], q[1]])).collect();
-        Some(spline_points(&fit?, per_span))
+        let fit = fit?;
+        if spline_closed(points) {
+            return Some(closed_spline_points(&fit[..fit.len() - 1], per_span));
+        }
+        Some(spline_points(&fit, per_span))
     }
 
     /// [`Sketch::ellipse_outline`] for a curve's shape (`None` when it is not an ellipse).
@@ -526,6 +543,22 @@ pub fn ellipse_points(
             ((0..=segments).map(|k| at(start + sweep * k as f64 / n)).collect(), false)
         }
     })
+}
+
+/// Points along the closed interpolation spline through `fit` (each point once, three or more): `per_span`
+/// steps between neighbours and from the last back to the first, which ends the list again. Worked out
+/// as the open spline through the points with three more wrapped round on each side, of which the middle
+/// is kept: smooth all round, the wrapped ends' influence having died away.
+pub fn closed_spline_points(fit: &[[f64; 2]], per_span: usize) -> Vec<[f64; 2]> {
+    const PAD: usize = 3;
+    let n = fit.len();
+    if n < 3 || per_span == 0 {
+        return spline_points(fit, per_span);
+    }
+    let padded: Vec<[f64; 2]> = (0..n + 2 * PAD + 1).map(|j| fit[(j + n * PAD - PAD) % n]).collect();
+    let all = spline_points(&padded, per_span);
+    let (from, to) = (PAD * per_span, (PAD + n) * per_span);
+    all.get(from..=to).map_or_else(|| fit.to_vec(), <[[f64; 2]]>::to_vec)
 }
 
 /// Points along the interpolation spline through `fit` (a natural cubic through each fit point, spaced by

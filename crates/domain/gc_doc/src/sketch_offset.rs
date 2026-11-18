@@ -326,15 +326,25 @@ fn offset_free(
             CurveGeom::Ellipse { c, major, minor: b2, arc }
         }
         CurveGeom::Spline { points } => {
-            let fit: Vec<P> = points.iter().map(|p| xy(sketch, *p)).collect::<Result<_, _>>()?;
+            let closed = gc_sketch::spline_closed(&points);
+            let mut fit: Vec<P> = points.iter().map(|p| xy(sketch, *p)).collect::<Result<_, _>>()?;
+            if closed {
+                fit.pop();
+            }
             const PER: usize = 16;
-            let samples = gc_sketch::spline_points(&fit, PER);
+            let samples = if closed {
+                gc_sketch::closed_spline_points(&fit, PER)
+            } else {
+                gc_sketch::spline_points(&fit, PER)
+            };
             let last = samples.len().saturating_sub(1);
             let mut moved: Vec<P> = Vec::with_capacity(fit.len());
             for (k, p) in fit.iter().enumerate() {
                 let i = (k * PER).min(last);
-                let (before, after) = (samples.get(i.saturating_sub(1)), samples.get((i + 1).min(last)));
-                let (Some(before), Some(after)) = (before, after) else {
+                // Round a closed spline, the point before the first is the one before the end.
+                let before = if i == 0 && closed { last.saturating_sub(1) } else { i.saturating_sub(1) };
+                let (Some(before), Some(after)) = (samples.get(before), samples.get((i + 1).min(last)))
+                else {
                     return Err(SketchError::InvalidValue.into());
                 };
                 let t = unit(sub(*after, *before)).ok_or(SketchError::InvalidValue)?;
@@ -343,7 +353,12 @@ fn offset_free(
             if moved.windows(2).any(|w| norm(sub(w[1], w[0])) <= TOL) {
                 return Err(SketchError::InvalidValue.into());
             }
-            CurveGeom::Spline { points: moved.into_iter().map(|q| point(sketch, ids, q, created)).collect() }
+            let mut ids: Vec<Id<SkPoint>> =
+                moved.into_iter().map(|q| point(sketch, ids, q, created)).collect();
+            if closed && let Some(first) = ids.first().copied() {
+                ids.push(first);
+            }
+            CurveGeom::Spline { points: ids }
         }
         CurveGeom::Line { .. } | CurveGeom::Circle { .. } | CurveGeom::Arc { .. } => {
             return Err(SketchError::InvalidValue.into());
