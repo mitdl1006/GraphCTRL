@@ -311,6 +311,7 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
             sketch_row(ui, session, lang, state, &mut action, id);
         }
     });
+    work_features(ui, session, lang, &mut action);
     if let Some(command) = params(ui, session, lang, state) {
         action = Some(BrowserAction::Edit(Box::new(command)));
     }
@@ -431,6 +432,45 @@ fn representations(ui: &mut Ui, session: &Session, lang: Lang, action: &mut Opti
                     }
                 },
             );
+        }
+    });
+}
+
+/// The work features of the browser: each with a visibility check box and a delete button.
+fn work_features(ui: &mut Ui, session: &Session, lang: Lang, action: &mut Option<BrowserAction>) {
+    use gc_doc::{CellOp, Command};
+    let doc = session.doc();
+    if doc.work_features().iter().next().is_none() {
+        return;
+    }
+    egui::CollapsingHeader::new(tr!(lang, BrowserWorkFeatures)).default_open(true).show(ui, |ui| {
+        ui.spacing_mut().item_spacing.y = 1.0;
+        for (id, feature) in doc.work_features().iter() {
+            let mut visible = feature.visible;
+            let delete = tr!(lang, CmdDeleteItem, feature.name);
+            let show = tr!(lang, ShowItem, feature.name);
+            let row = TreeRow {
+                icon: Icon::Frame,
+                text: &feature.name,
+                selected: false,
+                visible: Some((&mut visible, show.as_str())),
+                delete: Some(&delete),
+                edit: None,
+                focus: false,
+                dim: false,
+            };
+            let result = gc_ui::panel::tree_row(ui, row);
+            if result.toggled {
+                let mut changed = feature.clone();
+                changed.visible = visible;
+                *action = Some(BrowserAction::Edit(Box::new(Command::Cell(CellOp::SetWorkFeature {
+                    id,
+                    feature: changed,
+                }))));
+            }
+            if result.deleted {
+                *action = Some(BrowserAction::Edit(Box::new(Command::Cell(CellOp::DeleteWorkFeature(id)))));
+            }
         }
     });
 }
