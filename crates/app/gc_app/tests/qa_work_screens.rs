@@ -345,7 +345,6 @@ fn the_task_editor_offers_only_steps_that_fit_and_edits_one_step_at_a_time() {
 /// integer, real or choice variable refuses it (the model checks the value by kind), so with no work object and an
 /// integer variable first in the list the effect can never be added from the editor.
 #[test]
-#[ignore = "BUG: Add effect uses the value \"true\" for any variable, refused for an integer/real/choice variable (owner: frontend, gc_panels work.rs)"]
 fn add_effect_works_for_an_integer_variable() {
     let mut h = harness();
     h.state_mut()

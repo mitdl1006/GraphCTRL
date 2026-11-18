@@ -462,6 +462,8 @@ messages! {
     WorkCandidates => ("후보 로봇 계산", "Work out the candidate robots"),
     WorkNoCandidates => ("이 작업을 할 수 있는 로봇이 없습니다.", "No robot may do this task."),
     ScheduleTitle => ("스케줄", "Schedule"),
+    ScheduleWorking => ("계산 중…", "Working it out…"),
+    ScheduleStale => ("문서가 바뀌었습니다 — 다시 계산하십시오", "The document changed — work it out again"),
     ScheduleCompute => ("스케줄 계산", "Work out the schedule"),
     ScheduleMakespan => ("전체 시간: {0} s", "Makespan: {0} s"),
     ScheduleNotYet => ("스케줄을 아직 계산하지 않았습니다.", "The schedule has not been worked out yet."),

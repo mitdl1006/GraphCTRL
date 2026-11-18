@@ -1450,7 +1450,7 @@ impl eframe::App for GraphCtrlApp {
                             self.schedule_open = false;
                         }
                     });
-                    gc_panels::schedule_panel(ui, &self.session, lang, &mut self.schedule);
+                    gc_panels::schedule_panel(ui, &mut self.session, lang, &mut self.schedule);
                 });
             });
         }

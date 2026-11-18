@@ -6686,4 +6686,17 @@ fn the_schedule_panel_works_out_the_schedule_and_lists_blocked_tasks() {
     // No robot in the cell: the task cannot be given to any.
     harness.get_by_label("하지 못하는 작업");
     harness.get_by_label("Orphan");
+    // The document changes: the result stays on screen, marked as out of date.
+    let second = gc_doc::Task {
+        name: "Second".into(),
+        location: gc_doc::Location::None,
+        precondition: String::new(),
+        steps: vec![gc_doc::Step::Wait { seconds: 1.0 }],
+        effects: Vec::new(),
+        robots: gc_doc::RobotChoice::Any,
+        priority: 0,
+    };
+    harness.state_mut().session.edit_work(gc_doc::WorkOp::AddTask(second)).unwrap();
+    harness.run_steps(3);
+    harness.get_by_label("문서가 바뀌었습니다 — 다시 계산하십시오");
 }

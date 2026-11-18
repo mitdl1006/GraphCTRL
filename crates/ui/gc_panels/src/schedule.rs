@@ -1,38 +1,80 @@
 //! The schedule panel (plan 9.4/9.5): a Gantt chart with one row per robot (a bar for each task it is given,
-//! from `start` to `end`), the makespan, and the tasks that are never done with why. It is worked out when asked
-//! (`Session::schedule` plans every bid and is not instant), and shown until the next time.
+//! from `start` to `end`) on a time scale, the makespan, and the tasks that are never done with why. It is worked
+//! out on a worker thread when asked (`Session::request_schedule`); while that runs the panel says so, and a
+//! result for an older document is shown faded.
 
 use egui::{Align2, FontId, Rect, Sense, Stroke, Ui, pos2, vec2};
 use gc_i18n::{Lang, tr};
-use gc_session::{Schedule, Session};
+use gc_session::Session;
 use gc_ui::colors;
 
-/// The schedule shown last.
+/// What the panel keeps between frames (the result itself lives in the session).
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct ScheduleUi {
-    /// The result, when it was worked out.
-    pub result: Option<Schedule>,
+pub struct ScheduleUi {}
+
+/// A time step of 1, 2 or 5 times a power of ten that puts about six ticks along `end` seconds.
+fn tick_step(end: f64) -> f64 {
+    let wanted = end / 6.0;
+    let decade = gc_math::fm::powf(10.0, wanted.log10().floor());
+    [1.0, 2.0, 5.0, 10.0].into_iter().map(|m| m * decade).find(|s| *s >= wanted).unwrap_or(10.0 * decade)
 }
 
-/// The panel: a button to work the schedule out, then the chart and the blocked tasks.
-pub fn schedule_panel(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ScheduleUi) {
+/// The panel: a button to ask for the schedule, then the chart and the blocked tasks.
+pub fn schedule_panel(ui: &mut Ui, session: &mut Session, lang: Lang, _state: &mut ScheduleUi) {
+    let pending = session.schedule_pending();
     ui.horizontal(|ui| {
-        if ui.button(tr!(lang, ScheduleCompute)).clicked() {
-            state.result = Some(session.schedule());
+        if ui.add_enabled(!pending, egui::Button::new(tr!(lang, ScheduleCompute))).clicked() {
+            session.request_schedule();
         }
-        if let Some(schedule) = &state.result {
+        if pending {
+            ui.spinner();
+            ui.label(tr!(lang, ScheduleWorking));
+            ui.ctx().request_repaint();
+        }
+        if let Some((schedule, current)) = session.schedule_result() {
             ui.label(tr!(lang, ScheduleMakespan, format!("{:.1}", schedule.makespan())));
+            if !current {
+                ui.colored_label(colors::ERROR, tr!(lang, ScheduleStale));
+            }
         }
     });
-    let Some(schedule) = &state.result else {
-        ui.weak(tr!(lang, ScheduleNotYet));
+    let Some((schedule, current)) = session.schedule_result().map(|(s, c)| (s.clone(), c)) else {
+        if !pending {
+            ui.weak(tr!(lang, ScheduleNotYet));
+        }
         return;
     };
+    let fade = if current { 1.0 } else { 0.4 };
     let doc = session.doc();
     // One row per robot of the cell, in the order they were added.
     let robots: Vec<(gc_core::Id<gc_doc::Robot>, String)> =
         doc.robots().iter().map(|(id, r)| (id, r.name.clone())).collect();
     let end = schedule.makespan().max(1e-6);
+    // The time scale: ticks and seconds above the rows.
+    {
+        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 16.0), Sense::hover());
+        let painter = ui.painter_at(rect);
+        let step = tick_step(end);
+        let track_left = rect.left() + 110.0;
+        let track_width = (ui.available_width() - 110.0 - 12.0).max(120.0);
+        let mut t = 0.0;
+        while t <= end + 1e-9 {
+            #[allow(clippy::cast_possible_truncation, reason = "screen coordinates fit f32")]
+            let x = track_left + (t / end) as f32 * track_width;
+            painter.line_segment(
+                [pos2(x, rect.bottom() - 4.0), pos2(x, rect.bottom())],
+                Stroke::new(1.0, colors::muted()),
+            );
+            painter.text(
+                pos2(x, rect.top()),
+                Align2::CENTER_TOP,
+                format!("{t:.0}"),
+                FontId::proportional(10.0),
+                colors::muted(),
+            );
+            t += step;
+        }
+    }
     let label_width = 110.0;
     let row_height = 26.0;
     let width = (ui.available_width() - label_width - 12.0).max(120.0);
@@ -58,8 +100,13 @@ pub fn schedule_panel(ui: &mut Ui, session: &Session, lang: Lang, state: &mut Sc
                 track.left() + (assignment.end / end) as f32 * track.width(),
             );
             let bar = Rect::from_min_max(pos2(x0, track.top()), pos2(x1.max(x0 + 2.0), track.bottom()));
-            painter.rect_filled(bar, 3.0, colors::ACCENT.gamma_multiply(0.75));
-            painter.rect_stroke(bar, 3.0, Stroke::new(1.0, colors::ACCENT), egui::StrokeKind::Inside);
+            painter.rect_filled(bar, 3.0, colors::ACCENT.gamma_multiply(0.75 * fade));
+            painter.rect_stroke(
+                bar,
+                3.0,
+                Stroke::new(1.0, colors::ACCENT.gamma_multiply(fade)),
+                egui::StrokeKind::Inside,
+            );
             let task_name =
                 doc.get(assignment.task).map_or_else(String::new, |t: &gc_doc::Task| t.name.clone());
             painter.text(
@@ -67,7 +114,7 @@ pub fn schedule_panel(ui: &mut Ui, session: &Session, lang: Lang, state: &mut Sc
                 Align2::LEFT_CENTER,
                 &task_name,
                 FontId::proportional(11.0),
-                egui::Color32::WHITE,
+                egui::Color32::WHITE.gamma_multiply(fade),
             );
             // The times, on the bar when the pointer is over it.
             let response =

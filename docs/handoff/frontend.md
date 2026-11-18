@@ -429,6 +429,12 @@
 - 알려진 차이: 간트는 시간 눈금 없음, 작업 스레드 계산 아님(동기, 큰 셀에서는 눌렀을 때 멈출 수 있음), 신호·동작을 실제 로봇에 보내는 UI 없음.
 - 테스트: `a_tool_kind_is_edited_and_fitted_to_a_robot`, `the_schedule_panel_works_out_the_schedule_and_lists_blocked_tasks`(shell).
 
+### 스케줄 패널: 작업 스레드, 시간 눈금; 효과 추가 기본값 수정
+
+- 스케줄 패널이 `request_schedule`/`schedule_result`/`schedule_pending`을 쓴다(결과는 세션이 들고 있음): 계산 중에는 단추를 끄고 스피너와 "계산 중…", 문서가 바뀐 뒤의 결과는 흐리게 그리고 "문서가 바뀌었습니다 — 다시 계산하십시오". 간트 위에 초 눈금(1-2-5 간격).
+- QA 버그: 작업 편집기 "효과 추가"가 변수에 항상 `true`를 넣었다 → 변수 종류별 기본값(참/거짓=true, 정수=0, 실수=0.0, 열거=첫 선택지). QA `add_effect_works_for_an_integer_variable`의 `#[ignore]`를 풀었다.
+- 테스트: shell `the_schedule_panel_…`에 "오래된 결과" 단언 추가, qa_work_screens 7개 통과.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

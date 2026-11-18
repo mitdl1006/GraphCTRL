@@ -753,7 +753,13 @@ fn task_properties(ui: &mut Ui, session: &mut Session, lang: Lang, id: Id<Task>)
                 .get(*o)
                 .and_then(|object| session.doc().get(object.ty).and_then(|t| t.states.first().cloned()))
                 .unwrap_or_default(),
-            EffectTarget::Var(_) => "true".to_owned(),
+            // A variable takes a value of its own kind: yes for a yes/no, zero for a number, the first choice.
+            EffectTarget::Var(v) => match session.doc().get(*v).map(|var| &var.value) {
+                Some(StateValue::Int(_)) => "0".to_owned(),
+                Some(StateValue::Real(_)) => "0.0".to_owned(),
+                Some(StateValue::Enum { choices, .. }) => choices.first().cloned().unwrap_or_default(),
+                Some(StateValue::Bool(_)) | None => "true".to_owned(),
+            },
         };
         next.effects.push(Effect { target: *target, value });
         changed = true;
