@@ -89,6 +89,30 @@ pub struct SketchRole {
     /// How the tool is held.
     #[serde(default)]
     pub aim: ToolAim,
+    /// More about how a path is travelled (unused for a waypoint).
+    #[serde(default, skip_serializing_if = "PathTravel::is_default")]
+    pub travel: PathTravel,
+}
+
+/// More about how a path role is travelled.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PathTravel {
+    /// The tool turns with the path: its X axis points the way it travels (the travel direction seen in
+    /// the plane the attitude is measured from), instead of keeping one attitude all the way. Roll, pitch
+    /// and yaw of the aim come on top. Joint moves keep the one attitude.
+    #[serde(default)]
+    pub tangent: bool,
+    /// For a closed path (a circle, a whole ellipse, a closed spline, a closed loop of curves): a point of
+    /// the sketch; travel starts and ends at the place of the path nearest to it (for a loop of curves:
+    /// the nearest joint between two curves). `None` starts where the curve itself starts.
+    #[serde(default)]
+    pub start: Option<Id<SkPoint>>,
+}
+
+impl PathTravel {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 impl SketchRole {
@@ -152,20 +176,33 @@ impl Document {
         ))
     }
 
+    /// The world rotation of what an aim is measured from.
+    fn aim_base(&self, sketch: Id<Sketch>, aim: &ToolAim) -> Option<DQuat> {
+        match aim.reference {
+            AimReference::SketchPlane => Some(self.sketch_pose(self.get(sketch)?)?.rotation),
+            AimReference::Frame(frame) => Some(self.work_frame_pose_of(self.get(frame)?)?.rotation),
+        }
+    }
+
     /// The world attitude of the tool for elements of `sketch` held as `aim` says.
     pub fn aim_rotation(&self, sketch: Id<Sketch>, aim: &ToolAim) -> Option<DQuat> {
-        let base = match aim.reference {
-            AimReference::SketchPlane => self.sketch_pose(self.get(sketch)?)?.rotation,
-            AimReference::Frame(frame) => self.work_frame_pose_of(self.get(frame)?)?.rotation,
-        };
+        Some(aimed(self.aim_base(sketch, aim)?, aim))
+    }
+}
+
+/// The tool's attitude against the Z axis of `base`, turned by the aim's angles.
+fn aimed(base: DQuat, aim: &ToolAim) -> DQuat {
+    {
         let against = base * DQuat::from_rotation_x(std::f64::consts::PI);
         // Untouched angles leave the attitude exactly as it is without them.
         if aim.rpy.iter().all(|v| v.abs() == 0.0) {
-            return Some(against);
+            return against;
         }
-        Some((against * gc_math::quat_from_rpy(aim.rpy[0], aim.rpy[1], aim.rpy[2])).normalize())
+        (against * gc_math::quat_from_rpy(aim.rpy[0], aim.rpy[1], aim.rpy[2])).normalize()
     }
+}
 
+impl Document {
     /// The waypoint role of a sketch point, if it has one.
     pub fn waypoint_role(&self, sketch: Id<Sketch>, point: Id<SkPoint>) -> Option<Id<SketchRole>> {
         self.roles()
@@ -213,12 +250,24 @@ impl Document {
 
     /// A path role's curves as the tool travels them: for each curve, world points along it from where
     /// the tool enters it to where it leaves (two for a line), each curve starting where the one before
-    /// ended. `None` for a waypoint role, a missing curve, or curves that no longer join into a chain.
+    /// ended. A closed path starts where its `travel.start` says. `None` for a waypoint role, a missing
+    /// curve, or curves that no longer join into a chain.
     pub fn role_runs(&self, role: Id<SketchRole>) -> Option<Vec<Vec<DVec3>>> {
         let role = self.get(role)?;
         let RoleKind::Path { curves, reversed, .. } = &role.kind else { return None };
         let sketch = self.get(role.sketch)?;
         let frame = self.sketch_pose(sketch)?;
+        let world = |p: [f64; 3]| frame.translation + frame.rotation * DVec3::from_array(p);
+        let from = role.travel.start.and_then(|point| sketch.pos(point));
+        // One closed curve: round it from the start point.
+        if let [only] = curves.as_slice()
+            && let Some(mut round) = sketch.curve_loop(*only, from)
+        {
+            if *reversed {
+                round.reverse();
+            }
+            return Some(vec![round.into_iter().map(world).collect()]);
+        }
         let mut chain = sketch.chain(curves)?;
         if *reversed {
             chain.reverse();
@@ -230,13 +279,77 @@ impl Document {
             if flipped {
                 run.reverse();
             }
-            runs.push(
-                run.into_iter()
-                    .map(|p| frame.translation + frame.rotation * DVec3::from_array(p))
-                    .collect::<Vec<DVec3>>(),
-            );
+            runs.push(run.into_iter().map(world).collect::<Vec<DVec3>>());
+        }
+        // A closed loop of curves starts at the joint nearest the start point.
+        let closed = match (runs.first().and_then(|r| r.first()), runs.last().and_then(|r| r.last())) {
+            (Some(first), Some(last)) => runs.len() > 1 && (*first - *last).length() <= 1e-7,
+            _ => false,
+        };
+        if let (true, Some(from)) = (closed, from.map(world)) {
+            let nearest = runs
+                .iter()
+                .enumerate()
+                .filter_map(|(index, run)| Some((index, (*run.first()? - from).length())))
+                .min_by(|a, b| a.1.total_cmp(&b.1))
+                .map_or(0, |(index, _)| index);
+            runs.rotate_left(nearest);
         }
         Some(runs)
+    }
+
+    /// A path role as tool poses: [`Document::role_runs`] with the tool's attitude at every point. For
+    /// linear and joint moves each curve is its two ends. With `travel.tangent` the tool's X axis points
+    /// along the travel (along the chord for linear moves; joint moves keep one attitude), so where two
+    /// curves meet at a corner the pose at the end of one and at the start of the next differ in attitude.
+    pub fn role_poses(&self, id: Id<SketchRole>) -> Option<Vec<Vec<DPose3>>> {
+        let role = self.get(id)?;
+        let RoleKind::Path { motion, .. } = &role.kind else { return None };
+        let mut runs = self.role_runs(id)?;
+        if *motion != PathMotion::Follow {
+            for run in &mut runs {
+                *run = vec![*run.first()?, *run.last()?];
+            }
+        }
+        let base = self.aim_base(role.sketch, &role.aim)?;
+        let fixed = aimed(base, &role.aim);
+        if !role.travel.tangent || *motion == PathMotion::Joint {
+            return Some(
+                runs.iter().map(|run| run.iter().map(|p| DPose3::from_parts(*p, fixed)).collect()).collect(),
+            );
+        }
+        let normal = base * DVec3::Z;
+        // The last direction found: kept where the path stands still or runs along the normal.
+        let mut x = base * DVec3::X;
+        let mut out = Vec::with_capacity(runs.len());
+        for run in &runs {
+            let mut poses = Vec::with_capacity(run.len());
+            for (index, point) in run.iter().enumerate() {
+                // The direction of travel there: across the neighbours; at the ends of an open curve a
+                // one-sided estimate of the same order, at the seam of a closed one across the seam.
+                let last = run.len() - 1;
+                let closed = last >= 3 && (run[0] - run[last]).length() <= 1e-9;
+                let along = if index > 0 && index < last {
+                    run[index + 1] - run[index - 1]
+                } else if closed {
+                    run[1] - run[last - 1]
+                } else if last >= 2 && index == 0 {
+                    (run[1] - run[0]) * 4.0 - (run[2] - run[0])
+                } else if last >= 2 {
+                    (run[last] - run[last - 1]) * 4.0 - (run[last] - run[last - 2])
+                } else {
+                    run[last] - run[0]
+                };
+                if let Some(flat) = (along - normal * along.dot(normal)).try_normalize() {
+                    x = flat;
+                }
+                let turned =
+                    DQuat::from_mat3(&gc_math::DMat3::from_cols(x, normal.cross(x), normal)).normalize();
+                poses.push(DPose3::from_parts(*point, aimed(turned, &role.aim)));
+            }
+            out.push(poses);
+        }
+        Some(out)
     }
 
     /// The world attitude of the tool along a path role (the same all the way), or at a waypoint role.
@@ -265,6 +378,9 @@ fn checked(
     if let AimReference::Frame(frame) = role.aim.reference
         && doc.get(frame).is_none()
     {
+        return Err(EditError::BadValue);
+    }
+    if role.travel.start.is_some_and(|point| !sketch.points.contains_key(&point)) {
         return Err(EditError::BadValue);
     }
     let others = || doc.roles().iter().filter(|(id, r)| Some(*id) != except && r.sketch == role.sketch);

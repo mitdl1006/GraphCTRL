@@ -91,12 +91,92 @@ impl Sketch {
         }
     }
 
+    /// Points round a closed curve (a circle, a whole ellipse, a closed spline), in sketch coordinates,
+    /// counter-clockwise for a circle or ellipse and as drawn for a spline, ending on the first point
+    /// again. It starts at the point of the curve nearest to `from` (for a spline: the nearest of its
+    /// points here); without `from`, at the circle's +X point, the ellipse's major axis end, the spline's
+    /// first fit point. `None` for an open, missing or degenerate curve.
+    pub fn curve_loop(&self, curve: Id<Curve>, from: Option<[f64; 3]>) -> Option<Vec<[f64; 3]>> {
+        const STEPS: usize = 120;
+        let geom = &self.curves.get(&curve)?.geom;
+        // A point at parameter `t` of a full turn, from the start parameter on.
+        #[allow(clippy::cast_precision_loss, reason = "a hundred steps")]
+        let turn = |start: f64, at: &dyn Fn(f64) -> [f64; 3]| -> Vec<[f64; 3]> {
+            let mut points: Vec<[f64; 3]> =
+                (0..STEPS).map(|k| at(start + std::f64::consts::TAU * k as f64 / STEPS as f64)).collect();
+            points.extend(points.first().copied());
+            points
+        };
+        match geom {
+            CurveGeom::Circle { c, r } => {
+                let c = self.pos(*c)?;
+                if !(r.is_finite() && *r > 1e-12) {
+                    return None;
+                }
+                let start = from.map_or(0.0, |p| gc_math::fm::atan2(p[1] - c[1], p[0] - c[0]));
+                Some(turn(start, &|t| {
+                    let (sin, cos) = gc_math::fm::sin_cos(t);
+                    [c[0] + r * cos, c[1] + r * sin, c[2]]
+                }))
+            }
+            CurveGeom::Ellipse { c, major, minor, arc: None } => {
+                let (c, m) = (self.pos(*c)?, self.pos(*major)?);
+                let (dx, dy) = (m[0] - c[0], m[1] - c[1]);
+                let a = gc_math::fm::hypot(dx, dy);
+                if !(a > 1e-12 && minor.is_finite() && minor.abs() > 1e-12) {
+                    return None;
+                }
+                let (ux, uy) = (dx / a, dy / a);
+                let start = from
+                    .map_or(0.0, |p| crate::ellipse_param([c[0], c[1]], [m[0], m[1]], *minor, [p[0], p[1]]));
+                Some(turn(start, &|t| {
+                    let (sin, cos) = gc_math::fm::sin_cos(t);
+                    [c[0] + a * cos * ux - minor * sin * uy, c[1] + a * cos * uy + minor * sin * ux, c[2]]
+                }))
+            }
+            CurveGeom::Spline { points } if spline_closed(points) => {
+                let mut round = self.spline_outline3(geom, 16)?;
+                if round.len() < 4 {
+                    return None;
+                }
+                if let Some(p) = from {
+                    // The outline ends on its first point: turn the loop so that it starts nearest `from`.
+                    round.pop();
+                    let far = |q: &[f64; 3]| (0..3).map(|k| (q[k] - p[k]) * (q[k] - p[k])).sum::<f64>();
+                    let nearest = round
+                        .iter()
+                        .enumerate()
+                        .min_by(|(_, a), (_, b)| far(a).total_cmp(&far(b)))
+                        .map_or(0, |(index, _)| index);
+                    round.rotate_left(nearest);
+                    round.extend(round.first().copied());
+                }
+                Some(round)
+            }
+            CurveGeom::Line { .. }
+            | CurveGeom::Arc { .. }
+            | CurveGeom::Ellipse { arc: Some(_), .. }
+            | CurveGeom::Spline { .. } => None,
+        }
+    }
+
+    /// True for a circle, a whole ellipse or a closed spline that can be travelled ([`Sketch::curve_loop`]).
+    pub fn is_loop(&self, curve: Id<Curve>) -> bool {
+        self.curve_loop(curve, None).is_some()
+    }
+
     /// Arranges open curves into one chain joined end to end (ends within a tenth of a micrometre): each
     /// curve with whether it is travelled against its stored direction. The chain starts at the free end
     /// of the curve that comes first in `curves` (for a closed loop: at the first curve's first end, going
     /// along it). `None` when a curve is closed, missing or listed twice, when three curves meet at one
-    /// place, or when the curves do not all connect.
+    /// place, or when the curves do not all connect. One closed curve on its own ([`Sketch::is_loop`]) is a
+    /// chain too.
     pub fn chain(&self, curves: &[Id<Curve>]) -> Option<Vec<(Id<Curve>, bool)>> {
+        if let [only] = curves
+            && self.is_loop(*only)
+        {
+            return Some(vec![(*only, false)]);
+        }
         struct Link {
             id: Id<Curve>,
             ends: [[f64; 3]; 2],
@@ -151,15 +231,18 @@ impl Sketch {
 
     /// The chain a curve belongs to: the curve and every open curve joined to it end to end, as far as
     /// the ends are joined to exactly one other curve (a branch or a free end stops it). Curves in `skip`
-    /// are left out and stop the chain. In chain order ([`Sketch::chain`]); empty for a closed or missing
-    /// curve.
+    /// are left out and stop the chain. In chain order ([`Sketch::chain`]). A closed curve (a circle, a
+    /// whole ellipse, a closed spline) is a chain on its own; empty for a missing curve.
     pub fn chain_at(&self, curve: Id<Curve>, skip: &[Id<Curve>]) -> Vec<Id<Curve>> {
         let ends = |id: Id<Curve>| -> Option<[[f64; 3]; 2]> {
             let (a, b) = self.curve_ends(id)?;
             Some([self.pos(a)?, self.pos(b)?])
         };
-        if ends(curve).is_none() || skip.contains(&curve) {
+        if skip.contains(&curve) {
             return Vec::new();
+        }
+        if ends(curve).is_none() {
+            return if self.is_loop(curve) { vec![curve] } else { Vec::new() };
         }
         // The open curves with an end at a place, whatever their role.
         let meeting = |place: [f64; 3]| -> Vec<Id<Curve>> {
