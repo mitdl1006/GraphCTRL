@@ -63,6 +63,10 @@ pub enum BrowserAction {
     SuppressRelationship(gc_core::Id<gc_doc::Relationship>, bool),
     /// Select a sketch role (a waypoint or a path of a sketch), or none; the view marks it.
     SelectRole(Option<Id<gc_doc::SketchRole>>),
+    /// Isolate these components (Inventor: Isolate; a subassembly is given as its members).
+    Isolate(Vec<gc_doc::Occurrence>),
+    /// Undo Isolate: show again what Isolate hid.
+    UndoIsolate,
     /// Open the iProperties dialog of a component.
     Properties(gc_doc::Occurrence),
     /// Zoom the graphics window to a component (Find in Window).
@@ -265,6 +269,10 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
             let mut edit = !state.no_edit_values;
             ui.checkbox(&mut state.hide_work_features, tr!(lang, BrowserHideWork));
             ui.checkbox(&mut state.hide_fully_constrained, tr!(lang, BrowserHideConstrained));
+            if session.is_isolated() && ui.button(tr!(lang, CmdUndoIsolate)).clicked() {
+                action = Some(BrowserAction::UndoIsolate);
+                ui.close();
+            }
             ui.checkbox(&mut state.show_children_only, tr!(lang, BrowserChildrenOnly));
             ui.checkbox(&mut state.only_suppressed, tr!(lang, BrowserOnlySuppressed));
             ui.checkbox(&mut state.hide_warnings, tr!(lang, BrowserHideWarnings));
@@ -761,6 +769,19 @@ fn role_row(
     });
 }
 
+/// The components inside a tree row, at any depth (the row itself when it is a component).
+fn members_of(rows: &[gc_doc::TreeRow], key: gc_doc::TreeKey) -> Vec<gc_doc::Occurrence> {
+    let mut found = Vec::new();
+    let mut stack = vec![key];
+    while let Some(next) = stack.pop() {
+        if let gc_doc::TreeKey::Component(occurrence) = next {
+            found.push(occurrence);
+        }
+        stack.extend(rows.iter().filter(|r| r.parent == Some(next)).map(|r| r.key));
+    }
+    found
+}
+
 /// The components of the browser as the assembly tree: subassemblies are folders (the one being edited in
 /// place is marked), the components below them are rows of their own. Double-click edits in place; the menus
 /// demote, move, dissolve and rename. Inventor 2026 help: Create Subassemblies in Place
@@ -839,6 +860,11 @@ fn component_rows(
                     *action = Some(BrowserAction::EditComponent(row.key));
                 }
                 header.context_menu(|ui| {
+                    // Isolate: the members of the subassembly stay, everything else is hidden.
+                    if ui.button(tr!(lang, CmdIsolate)).clicked() {
+                        *action = Some(BrowserAction::Isolate(members_of(rows, row.key)));
+                        ui.close();
+                    }
                     if ui.button(tr!(lang, CmdEditInPlace)).clicked() {
                         *action = Some(BrowserAction::EditComponent(row.key));
                         ui.close();
@@ -1394,6 +1420,10 @@ fn node_row(
             && ui.button(tr!(lang, CmdFindInWindow)).clicked()
         {
             *action = Some(BrowserAction::FindInWindow(node.any));
+            ui.close();
+        }
+        if groundable && ui.button(tr!(lang, CmdIsolate)).clicked() {
+            *action = Some(BrowserAction::Isolate(vec![occurrence]));
             ui.close();
         }
         if groundable && ui.button(tr!(lang, CmdIProperties)).clicked() {

@@ -76,6 +76,10 @@ pub(crate) enum Cmd {
     InsertSplinePoint(gc_core::Id<gc_sketch::Curve>),
     /// Close Curve: an open spline of three or more fit points closes.
     CloseSpline(gc_core::Id<gc_sketch::Curve>),
+    /// Isolate the component: everything else is hidden.
+    Isolate(Occurrence),
+    /// Undo Isolate.
+    UndoIsolate,
     /// Make a sketch point a waypoint of the robot work.
     AssignWaypoint(gc_core::Id<gc_doc::Sketch>, gc_core::Id<gc_sketch::SkPoint>),
     /// Make the chain of curves around a curve a path of the robot work.
@@ -132,6 +136,7 @@ impl Set {
         item: Option<CellItem>,
         origin: Option<(Occurrence, OriginElement)>,
         unit: Option<(gc_doc::SubassemblyId, bool)>,
+        isolated: bool,
     ) -> Self {
         let mut radial = vec![None; 8];
         radial[0] = Some(Cmd::Constrain);
@@ -154,6 +159,14 @@ impl Set {
         // Right-clicking a placed subassembly offers Flexible (GUID-30817F08-A5C2-44B7-B237-4791ACA3F854).
         if let Some((id, flexible)) = unit {
             overflow.push(Cmd::Flexible(id, !flexible));
+        }
+        // Isolate (GUID-36AE9264-912D-4D3C-BB24-7EC16FA8777E): the component under the cursor stays alone;
+        // while something is isolated, Undo Isolate brings the rest back.
+        if let Some(any) = item.and_then(crate::grip::component_of) {
+            overflow.push(Cmd::Isolate(Occurrence::Item(any)));
+        }
+        if isolated {
+            overflow.push(Cmd::UndoIsolate);
         }
         overflow.push(Cmd::SelectOther);
         overflow.push(Cmd::LookAt);
@@ -197,6 +210,8 @@ impl Cmd {
             Self::Flexible(_, becomes) => {
                 format!("{}{}", if becomes { "" } else { "✓ " }, tr!(lang, CmdFlexible))
             }
+            Self::Isolate(_) => tr!(lang, CmdIsolate).to_owned(),
+            Self::UndoIsolate => tr!(lang, CmdUndoIsolate).to_owned(),
             Self::AssignWaypoint(..) => tr!(lang, CmdAssignWaypoint).to_owned(),
             Self::AssignPath(..) => tr!(lang, CmdAssignPath).to_owned(),
             Self::Home => tr!(lang, NavHome).to_owned(),
@@ -266,6 +281,9 @@ pub(crate) fn run(cmd: Cmd, session: &mut Session) -> Effect {
                 drop(session.assign_roles(sketch, &[], &chain));
             }
         }
+        // A refusal is explained in the status bar.
+        Cmd::Isolate(occurrence) => drop(session.isolate(&[occurrence])),
+        Cmd::UndoIsolate => drop(session.undo_isolate()),
         Cmd::SelectOther => return Effect::SelectOther,
         Cmd::LookAt => return Effect::LookAt,
         // A refusal is explained in the status bar.

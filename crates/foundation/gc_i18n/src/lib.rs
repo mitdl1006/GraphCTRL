@@ -1206,6 +1206,8 @@ messages! {
     BomExport => ("CSV로 내보내기…", "Export to CSV…"),
     BomExported => ("{0}에 저장했습니다", "Saved to {0}"),
     BomEmpty => ("어셈블리에 컴포넌트가 없습니다.", "The assembly has no components."),
+    CmdIsolate => ("격리", "Isolate"),
+    CmdUndoIsolate => ("격리 취소", "Undo Isolate"),
     CmdFindInWindow => ("창에서 찾기", "Find in Window"),
     CmdIProperties => ("iProperties…", "iProperties…"),
     IpTitleDocument => ("iProperties — 문서", "iProperties — Document"),
