@@ -573,6 +573,11 @@ messages! {
     /// Constrain dialog: Predict Offset and Orientation.
     ConstrainPredict => ("오프셋 및 방향 예측", "Predict offset and orientation"),
     /// Constrain dialog: the first selection.
+    ConstrainMore => ("더 보기", "More"),
+    ConstrainName => ("이름", "Name"),
+    ConstrainMax => ("최대", "Maximum"),
+    ConstrainMin => ("최소", "Minimum"),
+    ConstrainResting => ("오프셋을 휴지 위치로", "Use Offset As Resting Position"),
     ConstrainFirst => ("첫 번째 선택", "First selection"),
     /// Constrain dialog: the second selection.
     ConstrainSecond => ("두 번째 선택", "Second selection"),
@@ -901,12 +906,14 @@ messages! {
     /// Browser, right-click a joint: refuse relationships that take its freedom away.
     JointProtectItem => ("보호", "Protect"),
     JointLimitsItem => ("한계…", "Limits…"),
-    JointLimitsTitle => ("조인트 한계", "Joint Limits"),
     LimitAngular => ("각도 한계", "Angular limits"),
     LimitLinear => ("선형 한계", "Linear limits"),
     LimitStart => ("시작", "Start"),
     LimitCurrent => ("현재", "Current"),
     LimitEnd => ("끝", "End"),
+    LimitNone => ("한계를 쓸 수 있는 조인트가 아닙니다 (고정 조인트이거나 아직 원점을 고르지 않았습니다)", "No limits here (a rigid joint, or the origins are not picked yet)"),
+    JointTabPlacement => ("조인트", "Joint"),
+    JointTabLimits => ("한계", "Limits"),
     LimitNow => ("현재 위치: {0}", "Now at {0}"),
     /// Assemble tab: the Assemble command (pick geometry, the geometry decides the constraint types).
     AssembleTitle => ("어셈블", "Assemble"),

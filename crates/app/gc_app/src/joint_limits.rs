@@ -1,12 +1,13 @@
 //! The Limits tab of a joint (Inventor 2026 help, To Define and Manage Joint Relationships,
 //! GUID-21DC3336-5C51-42C1-90FB-4299CD66E0C6, Limits tab): Start, Current and End, each switched on with a
 //! check box; angles in degrees and slides in millimetres. The joint stays within Start..End; Current
-//! holds it there. The current position is shown beside the values.
+//! holds it there. The current position is shown beside the values. The tab lives in the Joint dialog.
 
-use gc_core::Id;
-use gc_doc::{JointRange, Relationship};
+use gc_doc::JointRange;
 use gc_i18n::{Lang, tr};
-use gc_session::Session;
+
+const DEG: f64 = 180.0 / std::f64::consts::PI;
+const MM: f64 = 1000.0;
 
 /// One kind of limit being edited.
 #[derive(Clone, Debug)]
@@ -58,101 +59,92 @@ impl RangeEdit {
     }
 }
 
-/// The dialog's state.
-#[derive(Default)]
-pub(crate) struct JointLimits {
-    pub(crate) open: bool,
-    joint: Option<Id<Relationship>>,
-    angular: Option<RangeEdit>,
-    linear: Option<RangeEdit>,
+/// The values of a joint's Limits tab.
+#[derive(Clone, Debug)]
+pub(crate) struct LimitsEdit {
+    angular: RangeEdit,
+    linear: RangeEdit,
 }
 
-impl JointLimits {
-    /// Opens the dialog on a joint with its stored limits.
-    pub(crate) fn start(&mut self, session: &Session, id: Id<Relationship>) {
-        let Some(kind) = session.doc().get(id).map(|r| r.kind) else { return };
-        let (angular, linear) = session.joint_limits(id);
-        *self = Self {
-            open: true,
-            joint: Some(id),
-            angular: gc_doc::takes_limits(&kind, true)
-                .then(|| RangeEdit::from(angular, 180.0 / std::f64::consts::PI)),
-            linear: gc_doc::takes_limits(&kind, false).then(|| RangeEdit::from(linear, 1000.0)),
-        };
+impl Default for LimitsEdit {
+    fn default() -> Self {
+        Self::from((None, None))
+    }
+}
+
+impl LimitsEdit {
+    /// From the stored limits: (angular, linear).
+    pub(crate) fn from(limits: (Option<JointRange>, Option<JointRange>)) -> Self {
+        Self { angular: RangeEdit::from(limits.0, DEG), linear: RangeEdit::from(limits.1, MM) }
     }
 
-    /// The dialog window. Apply keeps it open; OK applies and closes.
-    pub(crate) fn window(&mut self, ctx: &egui::Context, session: &mut Session, lang: Lang) {
-        let Some(id) = self.joint else { return };
-        let mut open = self.open;
-        let (mut ok, mut apply, mut cancel) = (false, false, false);
-        let deg = 180.0 / std::f64::consts::PI;
-        let position = session.joint_position(id);
-        let valid = self.angular.as_ref().is_none_or(|r| r.valid(deg))
-            && self.linear.as_ref().is_none_or(|r| r.valid(1000.0));
-        let screen = ctx.content_rect();
-        egui::Window::new(tr!(lang, JointLimitsTitle))
-            .open(&mut open)
-            .default_pos(egui::pos2(screen.right() - 330.0, screen.top() + 200.0))
-            .default_width(300.0)
-            .show(ctx, |ui| {
-                for (edit, title, unit, now) in [
-                    (
-                        &mut self.angular,
-                        tr!(lang, LimitAngular),
-                        "°",
-                        position.map(|(rad, _)| format!("{:.3}", rad * deg)),
-                    ),
-                    (
-                        &mut self.linear,
-                        tr!(lang, LimitLinear),
-                        "mm",
-                        position.map(|(_, m)| format!("{:.3}", m * 1000.0)),
-                    ),
-                ] {
-                    let Some(edit) = edit else { continue };
-                    ui.checkbox(&mut edit.enabled, title);
-                    ui.add_enabled_ui(edit.enabled, |ui| {
-                        egui::Grid::new(title).num_columns(3).show(ui, |ui| {
-                            let start = ui.label(tr!(lang, LimitStart));
-                            ui.add(egui::TextEdit::singleline(&mut edit.start).desired_width(80.0))
-                                .labelled_by(start.id);
-                            ui.label(unit);
-                            ui.end_row();
-                            ui.checkbox(&mut edit.hold, tr!(lang, LimitCurrent));
-                            ui.add_enabled(
-                                edit.hold,
-                                egui::TextEdit::singleline(&mut edit.current).desired_width(80.0),
-                            );
-                            ui.label(unit);
-                            ui.end_row();
-                            let end = ui.label(tr!(lang, LimitEnd));
-                            ui.add(egui::TextEdit::singleline(&mut edit.end).desired_width(80.0))
-                                .labelled_by(end.id);
-                            ui.label(unit);
-                            ui.end_row();
-                        });
-                    });
-                    if let Some(now) = now {
-                        ui.weak(tr!(lang, LimitNow, format!("{now} {unit}")));
-                    }
-                    ui.separator();
-                }
-                ui.horizontal(|ui| {
-                    ok = ui.add_enabled(valid, egui::Button::new(tr!(lang, ConstrainOk))).clicked();
-                    apply = ui.add_enabled(valid, egui::Button::new(tr!(lang, ConstrainApply))).clicked();
-                    cancel = ui.button(tr!(lang, ConstrainCancel)).clicked();
+    /// The limits to store: (angular, linear); a kind the joint does not take is cleared.
+    pub(crate) fn ranges(&self, angular: bool, linear: bool) -> (Option<JointRange>, Option<JointRange>) {
+        (angular.then(|| self.angular.range(DEG)).flatten(), linear.then(|| self.linear.range(MM)).flatten())
+    }
+
+    /// Whether every value that is switched on is usable.
+    pub(crate) fn valid(&self, angular: bool, linear: bool) -> bool {
+        (!angular || self.angular.valid(DEG)) && (!linear || self.linear.valid(MM))
+    }
+
+    /// The tab's content. `angular` and `linear` say which limits the joint takes; `position` is where it
+    /// stands now: (turn in radians, slide in metres).
+    pub(crate) fn ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        angular: bool,
+        linear: bool,
+        position: Option<(f64, f64)>,
+        lang: Lang,
+    ) {
+        if !angular && !linear {
+            ui.label(tr!(lang, LimitNone));
+            return;
+        }
+        for (edit, title, unit, now, on) in [
+            (
+                &mut self.angular,
+                tr!(lang, LimitAngular),
+                "°",
+                position.map(|(rad, _)| format!("{:.3}", rad * DEG)),
+                angular,
+            ),
+            (
+                &mut self.linear,
+                tr!(lang, LimitLinear),
+                "mm",
+                position.map(|(_, m)| format!("{:.3}", m * MM)),
+                linear,
+            ),
+        ] {
+            if !on {
+                continue;
+            }
+            ui.checkbox(&mut edit.enabled, title);
+            ui.add_enabled_ui(edit.enabled, |ui| {
+                egui::Grid::new(title).num_columns(3).show(ui, |ui| {
+                    let start = ui.label(tr!(lang, LimitStart));
+                    ui.add(egui::TextEdit::singleline(&mut edit.start).desired_width(80.0))
+                        .labelled_by(start.id);
+                    ui.label(unit);
+                    ui.end_row();
+                    ui.checkbox(&mut edit.hold, tr!(lang, LimitCurrent));
+                    ui.add_enabled(
+                        edit.hold,
+                        egui::TextEdit::singleline(&mut edit.current).desired_width(80.0),
+                    );
+                    ui.label(unit);
+                    ui.end_row();
+                    let end = ui.label(tr!(lang, LimitEnd));
+                    ui.add(egui::TextEdit::singleline(&mut edit.end).desired_width(80.0)).labelled_by(end.id);
+                    ui.label(unit);
+                    ui.end_row();
                 });
             });
-        if (ok || apply) && valid {
-            let angular = self.angular.as_ref().and_then(|r| r.range(deg));
-            let linear = self.linear.as_ref().and_then(|r| r.range(1000.0));
-            // A refusal is explained in the status bar.
-            drop(session.set_joint_limits(id, angular, linear));
+            if let Some(now) = now {
+                ui.weak(tr!(lang, LimitNow, format!("{now} {unit}")));
+            }
         }
-        if ok || cancel {
-            open = false;
-        }
-        self.open = open;
     }
 }

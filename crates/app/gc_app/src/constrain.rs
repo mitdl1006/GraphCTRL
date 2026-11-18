@@ -28,6 +28,12 @@ pub(crate) struct Constrain {
     sense: AxisSense,
     aligned: bool,
     name: String,
+    /// The More section: Maximum and Minimum with their values (mm) and Use Offset As Resting Position.
+    max_on: bool,
+    max: String,
+    min_on: bool,
+    min: String,
+    resting: bool,
     /// A relationship that could not be satisfied: the app opens the constraint error dialog for it.
     pub(crate) conflict: Option<crate::conflict::Conflict>,
 }
@@ -45,6 +51,11 @@ impl Default for Constrain {
             sense: AxisSense::Opposed,
             aligned: false,
             name: String::new(),
+            max_on: false,
+            max: "0".to_owned(),
+            min_on: false,
+            min: "0".to_owned(),
+            resting: false,
             conflict: None,
         }
     }
@@ -122,7 +133,25 @@ impl Constrain {
         } else {
             self.name.trim().to_owned()
         };
-        Some(Relationship::new(name, kind, first, second))
+        // Limits (Inventor 2026 help, GUID-0F500089-4F69-41C5-AFE8-B58AC9E8E15E: "Check Maximum ... Check
+        // Minimum ... Use Offset As Resting Position"): millimetres here, metres in the document.
+        let value = |on: bool, text: &str| -> Result<Option<f64>, ()> {
+            if !on {
+                return Ok(None);
+            }
+            text.trim().parse::<f64>().ok().filter(|v| v.is_finite()).map(|v| Some(v / 1000.0)).ok_or(())
+        };
+        let (min, max) = (value(self.min_on, &self.min).ok()?, value(self.max_on, &self.max).ok()?);
+        if let (Some(min), Some(max)) = (min, max)
+            && min > max
+        {
+            return None;
+        }
+        let mut relationship = Relationship::new(name, kind, first, second);
+        if min.is_some() || max.is_some() || self.resting {
+            relationship.limits = Some(gc_doc::Limits { min, max, resting: self.resting });
+        }
+        Some(relationship)
     }
 
     /// Whether the view is picking for the dialog.
@@ -196,6 +225,32 @@ impl Constrain {
                     field.labelled_by(label.id);
                     ui.label("mm");
                 });
+                // More: the name and the limits.
+                egui::CollapsingHeader::new(tr!(lang, ConstrainMore)).id_salt("gc_constrain_more").show(
+                    ui,
+                    |ui| {
+                        ui.horizontal(|ui| {
+                            let label = ui.label(tr!(lang, ConstrainName));
+                            ui.add(egui::TextEdit::singleline(&mut self.name).desired_width(140.0))
+                                .labelled_by(label.id);
+                        });
+                        for (on, text, label) in [
+                            (&mut self.max_on, &mut self.max, tr!(lang, ConstrainMax)),
+                            (&mut self.min_on, &mut self.min, tr!(lang, ConstrainMin)),
+                        ] {
+                            ui.horizontal(|ui| {
+                                ui.checkbox(on, label);
+                                let field =
+                                    ui.add_enabled(*on, egui::TextEdit::singleline(text).desired_width(80.0));
+                                field.widget_info(|| {
+                                    egui::WidgetInfo::labeled(egui::Role::TextInput, *on, label)
+                                });
+                                ui.label("mm");
+                            });
+                        }
+                        ui.checkbox(&mut self.resting, tr!(lang, ConstrainResting));
+                    },
+                );
                 let ready = self.relationship(session).is_some();
                 ui.horizontal(|ui| {
                     if ui.add_enabled(ready, egui::Button::new(tr!(lang, ConstrainOk))).clicked() {
@@ -278,8 +333,21 @@ pub(crate) struct Joint {
     slot: usize,
     flip: bool,
     name: String,
+    /// The tab shown: the joint itself or its Limits.
+    tab: JointTab,
+    /// The joint being edited (its Limits), when the dialog was opened on one that exists.
+    editing: Option<gc_core::Id<Relationship>>,
+    /// The Limits tab's values.
+    limits: crate::joint_limits::LimitsEdit,
     /// A relationship that could not be satisfied (see `Constrain::conflict`).
     pub(crate) conflict: Option<crate::conflict::Conflict>,
+}
+
+/// The tabs of the Joint dialog (Inventor 2026 help, GUID-21DC3336-5C51-42C1-90FB-4299CD66E0C6).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum JointTab {
+    Joint,
+    Limits,
 }
 
 impl Default for Joint {
@@ -292,6 +360,9 @@ impl Default for Joint {
             slot: 0,
             flip: false,
             name: String::new(),
+            tab: JointTab::Joint,
+            editing: None,
+            limits: crate::joint_limits::LimitsEdit::default(),
             conflict: None,
         }
     }
@@ -303,8 +374,26 @@ impl Joint {
         *self = Self { open: true, ..Self::default() };
     }
 
+    /// Opens the dialog on a joint that exists, at its Limits tab (the browser's "한계…").
+    pub(crate) fn edit_limits(&mut self, session: &Session, id: gc_core::Id<Relationship>) {
+        let Some(relationship) = session.doc().get(id) else { return };
+        *self = Self {
+            open: true,
+            first: Some(relationship.first),
+            second: Some(relationship.second),
+            tab: JointTab::Limits,
+            editing: Some(id),
+            limits: crate::joint_limits::LimitsEdit::from(session.joint_limits(id)),
+            ..Self::default()
+        };
+    }
+
     /// A pick in the view: the origin of the moving component first, then the stationary one.
     pub(crate) fn pick(&mut self, occurrence: Occurrence, element: OriginElement) {
+        // A joint that exists keeps its origins; only its Limits are edited.
+        if self.editing.is_some() {
+            return;
+        }
         let geometry = match element {
             OriginElement::Point => Geometry::origin_frame(),
             other => Geometry::origin(other),
@@ -348,51 +437,109 @@ impl Joint {
             .default_pos(start)
             .default_width(300.0)
             .show(ctx, |ui| {
+                // Two tabs: the joint and its Limits.
                 ui.horizontal(|ui| {
-                    for (kind, name) in [
-                        (JointType::Automatic, tr!(lang, JointAutomatic)),
-                        (JointType::Rigid, tr!(lang, JointRigid)),
-                        (JointType::Rotational, tr!(lang, JointRotational)),
+                    for (tab, name) in [
+                        (JointTab::Joint, tr!(lang, JointTabPlacement)),
+                        (JointTab::Limits, tr!(lang, JointTabLimits)),
                     ] {
-                        if ui.selectable_label(self.kind == kind, name).clicked() {
-                            self.kind = kind;
+                        if ui.selectable_label(self.tab == tab, name).clicked() {
+                            self.tab = tab;
                         }
                     }
                 });
-                for (slot, label, selection) in
-                    [(0, tr!(lang, JointFirst), self.first), (1, tr!(lang, JointSecond), self.second)]
-                {
-                    let text = match selection {
-                        Some(selection) => describe(session, &selection, lang),
-                        None => tr!(lang, ConstrainPick).to_owned(),
-                    };
-                    let name = format!("{label}: {text}");
-                    let button = ui.selectable_label(self.slot == slot, name.clone());
-                    button.widget_info(|| {
-                        egui::WidgetInfo::selected(egui::Role::Button, true, self.slot == slot, &name)
-                    });
-                    if button.clicked() {
-                        self.slot = slot;
+                ui.separator();
+                // What kind of joint the limits are for: the one being edited, or the one the picks give.
+                let kind = match self.editing {
+                    Some(id) => session.doc().get(id).map(|r| r.kind),
+                    None => self.relationship(session).map(|r| r.kind),
+                };
+                let angular = kind.is_some_and(|k| gc_doc::takes_limits(&k, true));
+                let linear = kind.is_some_and(|k| gc_doc::takes_limits(&k, false));
+                match self.tab {
+                    JointTab::Joint => {
+                        let editing = self.editing.is_some();
+                        ui.add_enabled_ui(!editing, |ui| {
+                            ui.horizontal(|ui| {
+                                for (kind, name) in [
+                                    (JointType::Automatic, tr!(lang, JointAutomatic)),
+                                    (JointType::Rigid, tr!(lang, JointRigid)),
+                                    (JointType::Rotational, tr!(lang, JointRotational)),
+                                ] {
+                                    if ui.selectable_label(self.kind == kind, name).clicked() {
+                                        self.kind = kind;
+                                    }
+                                }
+                            });
+                        });
+                        for (slot, label, selection) in
+                            [(0, tr!(lang, JointFirst), self.first), (1, tr!(lang, JointSecond), self.second)]
+                        {
+                            let text = match selection {
+                                Some(selection) => describe(session, &selection, lang),
+                                None => tr!(lang, ConstrainPick).to_owned(),
+                            };
+                            let name = format!("{label}: {text}");
+                            if editing {
+                                ui.label(name);
+                                continue;
+                            }
+                            let button = ui.selectable_label(self.slot == slot, name.clone());
+                            button.widget_info(|| {
+                                egui::WidgetInfo::selected(egui::Role::Button, true, self.slot == slot, &name)
+                            });
+                            if button.clicked() {
+                                self.slot = slot;
+                            }
+                        }
+                        ui.add_enabled(!editing, egui::Checkbox::new(&mut self.flip, tr!(lang, JointFlip)));
+                    }
+                    JointTab::Limits => {
+                        let position = self.editing.and_then(|id| session.joint_position(id));
+                        self.limits.ui(ui, angular, linear, position, lang);
                     }
                 }
-                ui.checkbox(&mut self.flip, tr!(lang, JointFlip));
-                let ready = self.relationship(session).is_some();
+                let ready = (self.editing.is_some() || self.relationship(session).is_some())
+                    && self.limits.valid(angular, linear);
                 ui.horizontal(|ui| {
                     ok = ui.add_enabled(ready, egui::Button::new(tr!(lang, ConstrainOk))).clicked();
                     apply = ui.add_enabled(ready, egui::Button::new(tr!(lang, ConstrainApply))).clicked();
                     cancel = ui.button(tr!(lang, ConstrainCancel)).clicked();
                 });
             });
-        if (ok || apply)
-            && let Some(relationship) = self.relationship(session)
-            && crate::conflict::try_add(session, relationship, &mut self.conflict)
-        {
-            self.first = None;
-            self.second = None;
-            self.slot = 0;
-            self.name.clear();
-            if ok {
-                open = false;
+        if ok || apply {
+            if let Some(id) = self.editing {
+                // The joint exists: only its Limits change. A refusal is explained in the status bar.
+                if let Some(kind) = session.doc().get(id).map(|r| r.kind) {
+                    let (angular, linear) = self
+                        .limits
+                        .ranges(gc_doc::takes_limits(&kind, true), gc_doc::takes_limits(&kind, false));
+                    drop(session.set_joint_limits(id, angular, linear));
+                }
+                if ok {
+                    open = false;
+                }
+            } else if let Some(relationship) = self.relationship(session) {
+                let kind = relationship.kind;
+                if crate::conflict::try_add(session, relationship, &mut self.conflict) {
+                    // The Limits tab's values go with the new joint.
+                    let (angular, linear) = self
+                        .limits
+                        .ranges(gc_doc::takes_limits(&kind, true), gc_doc::takes_limits(&kind, false));
+                    if (angular.is_some() || linear.is_some())
+                        && let Some((id, _)) = session.relationships().into_iter().last()
+                    {
+                        drop(session.set_joint_limits(id, angular, linear));
+                    }
+                    self.first = None;
+                    self.second = None;
+                    self.slot = 0;
+                    self.name.clear();
+                    self.limits = crate::joint_limits::LimitsEdit::default();
+                    if ok {
+                        open = false;
+                    }
+                }
             }
         }
         if cancel {

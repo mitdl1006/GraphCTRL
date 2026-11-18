@@ -52,6 +52,80 @@ pub fn ribbon_small_button(ui: &mut Ui, icon: Icon, label: &str, selected: bool,
     response.on_hover_text(label)
 }
 
+/// One row of a [`ribbon_stack`].
+pub struct StackRow<'a> {
+    /// Its icon.
+    pub icon: Icon,
+    /// Its name.
+    pub label: &'a str,
+    /// Whether the command is running now.
+    pub selected: bool,
+    /// Whether it can be used.
+    pub enabled: bool,
+}
+
+/// Up to three small buttons one above the other, each an icon with its name beside it, as Inventor packs
+/// the less used commands of a panel next to the large ones. Returns the index of the row clicked.
+pub fn ribbon_stack(ui: &mut Ui, rows: &[StackRow<'_>]) -> Option<usize> {
+    const ROW_HEIGHT: f32 = 24.0;
+    let font = egui::FontId::proportional(11.5);
+    let widest = rows
+        .iter()
+        .map(|row| {
+            ui.fonts_mut(|fonts| {
+                fonts.layout_no_wrap(row.label.to_owned(), font.clone(), egui::Color32::BLACK)
+            })
+            .size()
+            .x
+        })
+        .fold(0.0_f32, f32::max);
+    let width = widest + 34.0;
+    let mut clicked = None;
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        // The rows are centred in the height of a large button.
+        let spare = (BUTTON_SIZE.y - ROW_HEIGHT * rows.len() as f32).max(0.0);
+        ui.add_space(spare / 2.0);
+        for (index, row) in rows.iter().enumerate() {
+            let sense = if row.enabled { Sense::click() } else { Sense::hover() };
+            let (rect, response) = ui.allocate_exact_size(vec2(width, ROW_HEIGHT), sense);
+            response.widget_info(|| WidgetInfo::selected(Role::Button, row.enabled, row.selected, row.label));
+            if ui.is_rect_visible(rect) {
+                let visuals = ui.visuals();
+                let fill = if row.selected {
+                    visuals.selection.bg_fill
+                } else if response.hovered() && row.enabled {
+                    visuals.widgets.hovered.weak_bg_fill
+                } else {
+                    egui::Color32::TRANSPARENT
+                };
+                let color = if row.selected {
+                    colors::ACCENT
+                } else if row.enabled {
+                    colors::text()
+                } else {
+                    egui::Color32::from_rgb(0xA3, 0xA9, 0xB2)
+                };
+                ui.painter().rect_filled(rect, 4.0, fill);
+                let icon_rect =
+                    egui::Rect::from_center_size(rect.left_center() + vec2(15.0, 0.0), vec2(18.0, 18.0));
+                row.icon.paint(ui.painter(), icon_rect, color);
+                ui.painter().text(
+                    rect.left_center() + vec2(30.0, 0.0),
+                    egui::Align2::LEFT_CENTER,
+                    row.label,
+                    font.clone(),
+                    color,
+                );
+            }
+            if response.clicked() && row.enabled {
+                clicked = Some(index);
+            }
+        }
+    });
+    clicked
+}
+
 /// A large button: icon above, label below. `selected` marks the active tool.
 pub fn ribbon_button(ui: &mut Ui, icon: Icon, label: &str, selected: bool, enabled: bool) -> Response {
     let sense = if enabled { Sense::click() } else { Sense::hover() };
