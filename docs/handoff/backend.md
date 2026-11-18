@@ -104,6 +104,7 @@
 | 배치 명령 | Ground and Root, Place at Component Origin, 패턴(직사각형·원형), 미러·복사·교체(Replace All) | `ground_at_origin`, `add_pattern`, `mirror_components`, `copy_components`, `replace_component` | `pattern.rs`, `replicate.rs` |
 | 표현 | 뷰(가시·활성·투명도·카메라), 위치(Primary + 재정의) | `CellOp::{Add,Set,Activate}{View,Positional}Representation` | `relate.rs` |
 | 가져오기·성능 | 메시 로드 잡(자리표시), GLB 및 **STEP AP242 테셀레이션** 읽기, 충돌 형상 캐시, 대형 장면 벤치 | `mesh_pending`, `gc_plugin_mesh::{read_gltf, read_step}`, `bench_scene` | `mesh_jobs.rs`, `gc_plugin_mesh/tests/step.rs` |
+| 스케치 → 웨이포인트·경로(계획 9.1·9.4) | 스케치 점 = 웨이포인트 역할, 곡선 사슬 = 경로 역할(직선/관절/곡선 추종, 속도, 툴 자세), 역할을 따라가는 로봇 경로, 두 점 사이 경로 생성 | `add_waypoint_role`, `add_path_role`, `assign_roles`, `chain_at`, `set_role_*`, `follow_roles`, `route_between`, `path_from_sketch` / `CellOp::{AddRole, SetRole, DeleteRole, SetPathFollow, AddFollowPath, AddPathThrough}` | `gc_session/tests/sketch_roles.rs` |
 | 모션 | 플래너·재계획 사다리·ACM·보증(M1–M2, 아래 오래된 절) | `plan`, `planned(path)` | `gc_motion`, `gc_plan` |
 
 ## 현황 — 남음
@@ -122,6 +123,66 @@
 | 모션(오래된 남은 일) | 맨 아래 "남은 일(백엔드)" 절 그대로 |
 
 # 작업 기록(최신 순)
+
+## 2026-11-18 — 스케치 요소의 웨이포인트·경로 역할 (사용자 최우선, 계획 9.1 "스케치 → 로봇 경로·웨이포인트", 9.4)
+
+인벤터에 없는 GraphCTRL 고유 기능이라 Autodesk 원문 근거는 없다. 근거는 PLAN 9.1·9.4·5.10.
+
+### 모델 (`gc_doc::role`, 새 엔티티 `SketchRole`, `Kind::SketchRole`)
+
+- 역할은 **로봇에 속하지 않는다**(작업은 구조에 붙는다). 문서에 저장되고, 편집은 각각 Undo 1단계, 이름 바꾸기(`Command::Rename`)·억제(`SetSuppressed`)·숨김은 다른 브라우저 항목과 같다.
+- `SketchRole { name, sketch, kind, aim }`
+  - `RoleKind::Waypoint { point }` — 2D·3D 스케치 점. 한 점에 하나(`InUse`).
+  - `RoleKind::Path { curves, reversed, motion, tcp_speed }` — 끝과 끝이 이어진(0.1 µm 이내) 열린 곡선: 선·호·타원호·열린 스플라인. 아무 순서로 줘도 사슬 순서로 저장된다. 시작은 "준 목록에서 자유 끝이 있는 첫 곡선의 자유 끝". 원·전체 타원·닫힌 스플라인, 세 곡선이 만나는 분기, 끊긴 묶음은 `BadValue`. 한 곡선은 한 경로 역할에만(`InUse`).
+  - `PathMotion::{Follow(기본, 곡선 추종), Linear(곡선 끝점 사이 직선), Joint(끝점 사이 관절 이동)}`, `tcp_speed: Option<f64>`(m/s).
+  - `aim: ToolAim { reference: AimReference::{SketchPlane, Frame(작업 좌표계)}, rpy }` — 툴 Z가 기준의 Z 반대(기준의 X 유지)를 향한 뒤 `rpy`. 기본값은 예전과 같은 "스케치 평면 법선 반대"(3D 스케치는 −Z). 경로는 전 구간 같은 자세.
+- 스케치 편집으로 점·곡선이 없어지면 같은 Undo 단계에서 역할이 정리된다(`role::prune`, `apply` 끝). 경로 역할은 남은 곡선이 여전히 한 사슬이면 그것만 유지, 아니면 삭제. **로봇 경로가 따라가는 역할은 지우지 않는다**(그 경로는 계획 때 "its sketch curves no longer exist or no longer join end to end"로 실패). 스케치 자체 삭제는 따라가는 경로가 있으면 `Dangling`으로 거부.
+- 치수·드래그로 사슬 끝이 벌어져도 역할은 남는다(깨진 상태: `role_polyline` = `None`).
+
+### 로봇에 붙이기 (수동 모드. 나중에 스케줄러가 같은 것을 만든다)
+
+- 웨이포인트: 기존 `WaypointTarget::SketchPoint` 그대로. 그 점에 웨이포인트 역할이 있으면 자세는 역할의 `aim`(`Document::sketch_point_pose`).
+- 경로: `MotionPath.follow: Vec<Id<SketchRole>>`(새 필드, `#[serde(default)]`). 비어 있지 않으면 `waypoints`는 비어 있고, **계획할 때** 역할에서 곡선·이동 방식·속도·자세를 읽는다. 역할마다 "시작점까지 자유 이동(선택한 플래너)" 뒤 Follow는 사슬 전체를 한 동작으로(멈춤 없이), Linear/Joint는 곡선마다 한 동작. 속도는 역할의 `tcp_speed`, 없으면 경로의 `tcp_speed`. `ContactAllowance.index`는 `follow`에서의 위치.
+- 스케치 치수·역할 설정이 바뀌면 `plan_status` = `Stale`(기존 규칙 그대로, `plan_inputs`에 역할의 월드 곡선·자세·이동 방식 포함).
+- 곡선 추종은 `gc_motion::plan_follow(scene, request, via, control)`(새 함수): 기존 직선 이동을 "여러 자세를 잇는 TCP 추종"으로 일반화. 호는 3° 간격, 스플라인은 구간당 16점, 타원호 96점으로 샘플(`Sketch::curve_run`).
+
+### 세션 API (프론트엔드용, `gc_session/src/role.rs`)
+
+| 무엇 | 호출 |
+|---|---|
+| 점 → 웨이포인트 | `add_waypoint_role(sketch, point) -> Id<SketchRole>` |
+| 곡선들 → 경로 | `add_path_role(sketch, &[curve]) -> Id<SketchRole>` |
+| 스케치 선택 한 번에(Undo 1단계) | `assign_roles(sketch, &points, &curves) -> Vec<Id<SketchRole>>` (이미 웨이포인트인 점은 건너뜀, 곡선은 경로 하나) |
+| 곡선 하나 눌러 사슬 찾기 | `chain_at(sketch, curve) -> Vec<Id<Curve>>` (자유 끝·분기·이미 경로인 곡선에서 멈춤) |
+| 조회 | `waypoint_role(sketch, point)`, `path_role(sketch, curve)`, `sketch_roles(sketch)`, `doc().roles()`, `doc().get(role)` |
+| 속성 편집 | `set_role_motion(id, PathMotion)`, `set_role_speed(id, Option<f64>)`, `reverse_role(id)`, `set_role_aim(id, ToolAim)`, `set_role(id, SketchRole)`(통째), `role_aim_references()` |
+| 해제 | `delete_role(id)` (따라가는 로봇 경로가 있으면 `InUse`) |
+| 화면 표시 | `role_pose(id)`(웨이포인트 자세 / 경로 시작 자세), `role_ends(id)`, `role_polyline(id)`(진행 방향 월드 점열; Linear·Joint는 끝점만) |
+| 로봇이 따라가기 | `follow_roles(robot, &[role]) -> Id<MotionPath>`, `set_path_follow(path, &[role])`, 이후 `plan(path)`·재생은 기존과 같음 |
+| "경로 생성" 모드 | `route_between(robot, (sketch, p1), (sketch, p2), planner_id, linear) -> Id<MotionPath>` — 로봇의 그 점 웨이포인트를 재사용하거나 만들고 경로를 추가(Undo 1단계)한 뒤 `plan`까지 시작. `planner_id`는 `planner_choices()`의 id |
+| 스케치 전체 → 경로 | `path_from_sketch(robot, sketch)` — 시그니처 그대로. 이제 사슬마다 경로 역할을 만들고(이미 있으면 재사용) 그것을 따라가는 경로 하나를 만든다(Undo 1단계, 예전엔 N+1단계). 호·스플라인도 따라간다 |
+
+이름: 웨이포인트 역할 `W{n}`, 경로 역할 `Route{n}`.
+
+### 기존 기능 정리
+
+- "스케치 점 → 웨이포인트"(`add_waypoint(robot, SketchPoint)`)는 그대로 로봇 쪽 바인딩으로 남고 자세만 역할을 따른다.
+- "폴리라인 → 경로"(`path_from_sketch`)는 위 흐름으로 다시 구현. 결과 경로는 `waypoints`가 비고 `follow`가 채워진다 → **경로 패널의 단계 목록·직선 토글이 비어 보인다**(프론트가 `follow`를 보여 주도록 바꿔야 함).
+- 세션의 `pose_at_point`·`frame_pose_of`는 문서로 옮겼다(`Document::sketch_point_pose`, `work_frame_pose_of`).
+
+### 다른 브랜치 영향 (리드·프론트·QA 브랜치 `git grep` 결과)
+
+- `MotionPath`에 `follow` 필드 추가: 구조체 리터럴은 `gc_doc/tests/cell.rs`, `gc_persist`, `gc_session` 안뿐이고 모두 고쳤다. 다른 브랜치에 새 리터럴이 생기면 `follow: Vec::new()`를 넣어야 한다.
+- `Kind::SketchRole`, `Created::Role`, `CellOp` 6종 추가: 세 브랜치에 와일드카드 없는 match는 gc_doc·gc_core 안에만 있었다(고침).
+- `gc_doc::Contents`에 `roles` 필드 추가(만드는 곳은 gc_persist뿐).
+- `CellItem`에는 역할을 **넣지 않았다**(UI에 match가 많다). 브라우저·뷰포트 선택에 필요하면 프론트와 맞춰 추가.
+
+### 남은 것
+
+- 닫힌 곡선(원·타원·닫힌 스플라인) 경로: 시작점을 정할 방법이 필요.
+- 경로를 따라 툴이 접선 방향을 보는 옵션, 구간별 속도, 블렌드 반지름.
+- 역할 편집의 미리보기(드래그 중 문서 불변) 없음 — `set_role_*`는 바로 Undo 단계가 된다.
+- 9.4 작업 단계(`MoveL(웨이포인트)`, `FollowPath(경로)`)가 `Id<SketchRole>`을 참조하도록 잇는 것은 작업 모델 구현 때.
 
 ## 2026-11-18 — Bend Equal 옵션(리드 ③)
 

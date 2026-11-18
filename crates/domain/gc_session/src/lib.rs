@@ -23,6 +23,7 @@ mod look;
 mod measure;
 mod physical;
 mod project;
+mod role;
 mod sketch_pick;
 mod spatial;
 

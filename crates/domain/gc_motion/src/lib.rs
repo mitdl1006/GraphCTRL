@@ -620,12 +620,43 @@ fn linear(
     limits: &Limits,
     control: &dyn Control,
 ) -> Result<MotionPlan, MotionError> {
+    follow(scene, request, &[], space, limits, control)
+}
+
+/// Plans a motion of the tool tip along a curve given as poses close together: from where it is in a
+/// straight line to the first of `via`, on through each of them and to the goal, turning evenly between
+/// them. It is one motion without a stop on the way, refused like a straight move
+/// ([`MotionRequest::linear`], which this is with no `via`) with how far along the curve it got.
+/// [`MotionRequest::max_tcp_speed`] applies; the planner is not used.
+pub fn plan_follow(
+    scene: &RobotScene,
+    request: &MotionRequest,
+    via: &[DPose3],
+    control: &dyn Control,
+) -> Result<MotionPlan, MotionError> {
+    let scoped = with_contacts(scene, request);
+    let scene = scoped.as_ref().unwrap_or(scene);
+    let (space, limits) = setup(scene, request)?;
+    if let Some(problem) = scene.state_problem(&request.start) {
+        return Err(MotionError::StartInvalid(problem));
+    }
+    follow(scene, request, via, &space, &limits, control)
+}
+
+/// The tool tip in straight lines through `via` to the goal (see [`linear`] and [`plan_follow`]).
+fn follow(
+    scene: &RobotScene,
+    request: &MotionRequest,
+    via: &[DPose3],
+    space: &Space,
+    limits: &Limits,
+    control: &dyn Control,
+) -> Result<MotionPlan, MotionError> {
     /// Steps along the line: at most this far and this much turning each.
     const STEP: (f64, f64) = (0.005, 0.02);
     /// The largest change of a joint between two steps that still counts as following.
     const JUMP: f64 = 0.25;
     let chain = scene.chain();
-    let from = scene.tip_in_world(&request.start);
     let to = match &request.goal {
         Goal::Pose(pose) => *pose,
         Goal::Joints(q) if q.len() == chain.dof() => scene.tip_in_world(q),
@@ -633,38 +664,49 @@ fn linear(
             return Err(MotionError::InvalidRequest(format!("the chain has {} joints", chain.dof())));
         }
     };
-    let distance = (to.translation - from.translation).length();
-    let turn = from.rotation.angle_between(to.rotation);
-    let steps = ((distance / STEP.0).max(turn / STEP.1).ceil() as usize).clamp(1, 20_000);
+    // Each leg: where it starts, where it ends and in how many steps.
+    let mut legs = Vec::with_capacity(via.len() + 1);
+    let mut from = scene.tip_in_world(&request.start);
+    for target in via.iter().chain(std::iter::once(&to)) {
+        let distance = (target.translation - from.translation).length();
+        let turn = from.rotation.angle_between(target.rotation);
+        let steps = ((distance / STEP.0).max(turn / STEP.1).ceil() as usize).clamp(1, 20_000);
+        legs.push((from, *target, steps));
+        from = *target;
+    }
+    let total: usize = legs.iter().map(|(_, _, steps)| steps).sum();
     let ik = NumericIk::new(chain, IkOptions::default());
-    let stopped = |k: usize, cause: String| MotionError::Linear {
-        percent: 100.0 * (k - 1) as f64 / steps as f64,
+    let stopped = |done: usize, cause: String| MotionError::Linear {
+        percent: 100.0 * done as f64 / total as f64,
         cause,
     };
     let mut path = vec![request.start.clone()];
-    for k in 1..=steps {
-        if control.cancelled() {
-            return Err(MotionError::Cancelled);
+    for (from, to, steps) in legs {
+        for k in 1..=steps {
+            if control.cancelled() {
+                return Err(MotionError::Cancelled);
+            }
+            let t = k as f64 / steps as f64;
+            let pose = DPose3::from_parts(
+                from.translation.lerp(to.translation, t),
+                from.rotation.slerp(to.rotation, t).normalize(),
+            );
+            let done = path.len() - 1;
+            let previous = &path[done];
+            let q = ik.solve_near(&scene.flange_target(&pose), previous).map_err(|failure| {
+                stopped(done, format!("the arm cannot reach further ({:?})", failure.reason))
+            })?;
+            if q.iter().zip(previous).any(|(a, b)| (a - b).abs() > JUMP) {
+                return Err(stopped(
+                    done,
+                    "the arm would have to change its configuration (near a singularity)".to_owned(),
+                ));
+            }
+            if let Some(problem) = scene.state_problem(&q) {
+                return Err(stopped(done, problem.to_string()));
+            }
+            path.push(q);
         }
-        let t = k as f64 / steps as f64;
-        let pose = DPose3::from_parts(
-            from.translation.lerp(to.translation, t),
-            from.rotation.slerp(to.rotation, t).normalize(),
-        );
-        let previous = &path[k - 1];
-        let q = ik
-            .solve_near(&scene.flange_target(&pose), previous)
-            .map_err(|failure| stopped(k, format!("the arm cannot reach further ({:?})", failure.reason)))?;
-        if q.iter().zip(previous).any(|(a, b)| (a - b).abs() > JUMP) {
-            return Err(stopped(
-                k,
-                "the arm would have to change its configuration (near a singularity)".to_owned(),
-            ));
-        }
-        if let Some(problem) = scene.state_problem(&q) {
-            return Err(stopped(k, problem.to_string()));
-        }
-        path.push(q);
     }
     // A joint goal is met exactly when following the line ends there.
     if let (Goal::Joints(goal), Some(last)) = (&request.goal, path.last_mut())

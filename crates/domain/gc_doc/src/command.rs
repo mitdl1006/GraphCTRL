@@ -911,6 +911,8 @@ pub enum Created {
     Assembly(Id<crate::design::Assembly>),
     /// An assembly constraint.
     Relationship(Id<crate::relate::Relationship>),
+    /// A waypoint or path role of sketch elements.
+    Role(Id<crate::role::SketchRole>),
     /// A subassembly made in the cell.
     Subassembly(crate::subassembly::SubassemblyId),
 }
@@ -3429,6 +3431,7 @@ pub fn apply(doc: &mut Document, command: &Command) -> Result<Applied, EditError
     let (created, label) = run(&mut txn, command)?; // an early return drops `txn`, which rolls back
     crate::pattern::refresh(&mut txn)?;
     crate::project::refresh(&mut txn)?;
+    crate::role::prune(&mut txn)?;
     crate::tree::prune_states(&mut txn)?;
     name_dimensions(&mut txn)?;
     let (delta, changed) = txn.commit()?;
