@@ -124,6 +124,22 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 브라우저 사용자 정의 폴더
+
+원문: Assembly Browser Reference GUID-CB6B1637-71AD-4753-8CC9-19559BFEE3A5("User-defined Folder groups assembly nodes for better browser
+organization"), Working with the Assembly Browser GUID-5F975252-BDB4-488C-A2C5-8B15C7D3C641("Create folders to organize the browser nodes
+into groups or to communicate design intent"). 원문은 이 두 문장뿐이라 세부 규칙(한 수준, 한 행은 한 폴더)은 인벤터 동작에 맞춘 것이고 원문 근거는 없다.
+
+- 폴더는 브라우저 정리용일 뿐이다: `component_tree()`(수준·부모·깊이), 관계, BOM은 그대로. 프론트가 `folders()`를 보고 구성원 행을 폴더 노드 아래로 그린다.
+- `session.folders() -> Vec<BrowserFolder { id, name, members: Vec<TreeKey> }>`, `session.folder_of(TreeKey) -> Option<u32>`.
+- `session.edit_folders(FolderOp)` — 각 Undo 1단계, 문서에 저장(`Components.folders`, `CellOp::Folder`).
+  - `Add { name, members }`: 새 폴더(빈 이름 → "Folder:N", 구성원 없이도 가능). 새 id를 돌려준다.
+  - `Move { members, into: Option<id> }`: 끌어 넣기 / 꺼내기(`None`).
+  - `Rename { id, name }`(빈 이름 `BadValue`, 겹치면 `NameTaken`), `Delete(id)`(구성원은 그 자리에 남음).
+- 규칙: 구성원은 트리의 한 수준 행(`TreeKey`: 컴포넌트·서브어셈블리)이어야 하고 한 행은 한 폴더에만(다른 폴더에 넣으면 앞 폴더에서 빠짐). 다른 수준의 행을 섞으면 `BadValue`. 지워진 행, 다른 수준으로 옮겨진 행은 조회 때 빠진다(폴더 수준 = 첫 구성원의 수준).
+- 없는 것: 폴더 안의 폴더, 관계·스케치·작업 피처를 폴더에 넣기, 폴더 순서 바꾸기.
+- 테스트: `gc_session/tests/folders.rs`.
+
 ## 2026-11-18 — Isolate / Undo Isolate
 
 원문: Frame Generator browser GUID-36AE9264-912D-4D3C-BB24-7EC16FA8777E("Isolate turns off visibility of components … Undo Isolate, instead of Undo,

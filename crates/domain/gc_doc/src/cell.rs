@@ -799,6 +799,8 @@ pub enum CellOp {
     },
     /// Deletes a path.
     DeletePath(Id<MotionPath>),
+    /// Changes user-defined browser folders.
+    Folder(crate::folder::FolderOp),
     /// Isolate (Inventor 2026 help, Frame Generator browser, GUID-36AE9264-912D-4D3C-BB24-7EC16FA8777E:
     /// "Isolate turns off visibility of components", all except the selected ones). Every visible
     /// component that is not one of `keep`, not inside one and not around one is hidden, and remembered
@@ -1104,6 +1106,7 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
         | CellOp::SetPathFollow { .. }
         | CellOp::AddFollowPath { .. }
         | CellOp::AddPathThrough { .. } => crate::role::run(txn, op),
+        CellOp::Folder(op) => crate::folder::run(txn, op),
         CellOp::Isolate { keep } => crate::tree::isolate(txn, keep),
         CellOp::UndoIsolate => crate::tree::undo_isolate(txn),
         CellOp::AddBody(body) => {

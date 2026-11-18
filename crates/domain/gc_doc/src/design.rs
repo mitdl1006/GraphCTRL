@@ -715,6 +715,12 @@ pub struct Components {
     /// The iProperties of components (Summary, Project, density).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub properties: Vec<(Occurrence, crate::iproperties::IProperties)>,
+    /// User-defined browser folders.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub folders: Vec<crate::folder::BrowserFolder>,
+    /// The next folder id: ids only grow.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub next_folder: u32,
     /// Components hidden by Isolate and not yet shown again by Undo Isolate.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub isolated: Vec<Occurrence>,

@@ -31,6 +31,26 @@ impl Session {
         self.doc().component_tree()
     }
 
+    /// The browser's user-defined folders (Inventor 2026 help, Assembly Browser Reference,
+    /// GUID-CB6B1637-71AD-4753-8CC9-19559BFEE3A5), each with the rows of [`Session::component_tree`] it
+    /// holds. A folder only arranges the browser: its rows keep their level, parent and depth in the tree.
+    pub fn folders(&self) -> Vec<gc_doc::BrowserFolder> {
+        self.doc().folders()
+    }
+
+    /// The folder a row of the tree is in, if any.
+    pub fn folder_of(&self, key: gc_doc::TreeKey) -> Option<u32> {
+        self.doc().folder_of(key)
+    }
+
+    /// Changes browser folders: add (with the selected rows), move rows in or out, rename, delete. Each is
+    /// one undo step; saved with the document. Adding returns the new folder's id.
+    pub fn edit_folders(&mut self, op: gc_doc::FolderOp) -> Result<Option<u32>, EditError> {
+        let adds = matches!(op, gc_doc::FolderOp::Add { .. });
+        self.execute(&gc_doc::Command::Cell(gc_doc::CellOp::Folder(op)))?;
+        Ok(if adds { self.doc().folders().last().map(|f| f.id) } else { None })
+    }
+
     /// Changes subassemblies: Demote, move between levels, dissolve, rename. Each is one undo step.
     pub fn edit_subassemblies(&mut self, op: SubassemblyOp) -> Result<Vec<gc_doc::Created>, EditError> {
         self.execute(&gc_doc::Command::Cell(gc_doc::CellOp::Subassembly(op)))
