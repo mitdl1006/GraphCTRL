@@ -15,6 +15,7 @@
 mod cell;
 mod command;
 mod document;
+mod grip;
 mod history;
 mod pattern;
 mod placement;
@@ -45,6 +46,7 @@ pub use design::{
 pub use document::{ChangeSet, Contents, DocDelta, Document, Frame, FrameKind, Param, Store, Table};
 pub use gc_expr::Unit;
 pub use gc_sketch::Sketch;
+pub use grip::{GripLine, GripMotion, grip_pose};
 pub use history::History;
 pub use pattern::{ComponentPattern, PatternDirection, PatternElement, PatternLayout};
 pub use placement::{ComponentOrigin, WorkShape};
