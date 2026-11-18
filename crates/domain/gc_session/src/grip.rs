@@ -9,6 +9,12 @@ use gc_math::DPose3;
 use crate::Session;
 
 impl Session {
+    /// A work plane, axis or point of the assembly as a relationship's selection (its geometry is read live
+    /// from the work feature): pass it to [`Session::add_relationship`], `possible_relations` and the like.
+    pub fn work_feature_selection(&self, id: gc_core::Id<gc_doc::WorkFeature>) -> Option<gc_doc::Selection> {
+        self.doc().work_feature_selection(id)
+    }
+
     /// Where Grip Snap puts a component (body, robot or imported assembly): moved along the reference line
     /// by the part of `to − from` along it, or turned about it by the angle from `from` to `to`. `None` for
     /// something that is not a component, a line of no length, or (turning) a point on the line.

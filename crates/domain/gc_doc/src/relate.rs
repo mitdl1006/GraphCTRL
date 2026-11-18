@@ -349,6 +349,13 @@ impl Entity for Relationship {
 }
 
 impl Relationship {
+    /// True when one of its selections belongs to `item`.
+    pub fn references(&self, item: AnyId) -> bool {
+        let mut refs = Vec::new();
+        self.refs(&mut refs);
+        refs.contains(&item)
+    }
+
     /// A relationship without limits.
     pub fn new(name: impl Into<String>, kind: RelationKind, first: Selection, second: Selection) -> Self {
         Self { name: name.into(), kind, first, second, limits: None }
@@ -655,11 +662,54 @@ struct Term {
 impl Document {
     /// The world pose of a component that can move (a body, robot or imported assembly).
     pub(crate) fn owner_pose(&self, item: AnyId) -> Option<DPose3> {
+        // A work feature of the assembly holds still in the world; its geometry is given in the world.
+        if item.kind == Kind::WorkFeature {
+            return self.work_shape(gc_core::Id::from_raw(item.raw)).map(|_| DPose3::IDENTITY);
+        }
         self.component_origin(Occurrence::Item(item)).map(|o| o.pose)
+    }
+
+    /// A selection of a work plane, axis or point of the assembly, for a relationship (Inventor 2026 help, To
+    /// Place Mate or Flush Constraints in Assemblies, GUID-0F500089-4F69-41C5-AFE8-B58AC9E8E15E: "Select the
+    /// first point, curve, face, or work feature"). Its geometry is read from
+    /// the work feature whenever the relationships are solved, so the relationship follows it when it
+    /// changes. `None` for a work feature that does not exist or does not work out.
+    pub fn work_feature_selection(&self, id: gc_core::Id<crate::design::WorkFeature>) -> Option<Selection> {
+        Some(Selection { occurrence: Occurrence::Item(id.erase()), geometry: self.work_geometry(id)? })
+    }
+
+    /// The geometry of a work feature in the world: a plane, an axis or a point.
+    fn work_geometry(&self, id: gc_core::Id<crate::design::WorkFeature>) -> Option<Geometry> {
+        Some(match self.work_shape(id)? {
+            crate::placement::WorkShape::Plane(pose) => Geometry::Plane {
+                point: pose.translation.to_array(),
+                normal: (pose.rotation * DVec3::Z).to_array(),
+            },
+            crate::placement::WorkShape::Axis { point, direction } => {
+                Geometry::Axis { point: point.to_array(), direction: direction.to_array() }
+            }
+            crate::placement::WorkShape::Point(point) => Geometry::Point(point.to_array()),
+        })
+    }
+
+    /// True when a selection's owner can take part in a relationship: a component, or a work feature of the
+    /// assembly that works out.
+    pub(crate) fn relatable(&self, occurrence: Occurrence) -> bool {
+        match occurrence {
+            Occurrence::Item(item) if item.kind == Kind::WorkFeature => {
+                self.work_shape(gc_core::Id::from_raw(item.raw)).is_some()
+            }
+            _ => self.has_occurrence(occurrence),
+        }
     }
 
     /// The geometry of a selection in its owner's frame (a part's geometry goes through the part's frame).
     fn in_owner(&self, selection: &Selection) -> Option<Geometry> {
+        if let Occurrence::Item(item) = selection.occurrence
+            && item.kind == Kind::WorkFeature
+        {
+            return self.work_geometry(gc_core::Id::from_raw(item.raw));
+        }
         if let Occurrence::Item(_) = selection.occurrence {
             return Some(selection.geometry);
         }
@@ -839,7 +889,8 @@ impl Document {
                 return Some(i);
             }
             let pose = doc.owner_pose(item)?;
-            let free = !doc.component_flag(Occurrence::Item(item), ComponentFlag::Grounded);
+            let free = item.kind != Kind::WorkFeature
+                && !doc.component_flag(Occurrence::Item(item), ComponentFlag::Grounded);
             owners.push(Owner { item, pose, free });
             Some(owners.len() - 1)
         };

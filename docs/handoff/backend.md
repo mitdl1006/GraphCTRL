@@ -54,6 +54,28 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 관계에 어셈블리 작업 피처(프론트엔드 요청)
+
+근거: To Place Mate or Flush Constraints in Assemblies(GUID-0F500089-4F69-41C5-AFE8-B58AC9E8E15E)의 "Select the first point, curve, face, or work feature".
+Place Constraint 참조(GUID-EBD2C784-0E71-452A-B5F2-22738D22D45A)는 Angle의 셋째 선택으로 "work plane, or work axis"를 받는다.
+
+**설계**
+- 작업 피처 선택은 `Selection{occurrence: Occurrence::Item(<작업 피처 id>), geometry}`다.
+  `Geometry`에 새 종류를 넣지 않아서 기존 형상 매치와 저장 포맷이 그대로다. 옛 파일은 영향이 없다.
+- 솔버에서 작업 피처는 월드에 고정된 소유자다(항상 고정, 자세 = 단위).
+  형상은 풀 때마다 `work_shape`에서 다시 읽는다(평면 = Plane, 축 = Axis, 점 = Point).
+  그래서 작업 피처를 고치면(`SetWorkFeature`, 이제 관계를 다시 맞춤) 묶인 컴포넌트가 따라온다. 못 따라오면 그 편집을 거부한다.
+- `AddRelationship`·`SetRelationship` 검사는 `relatable(occ)`를 쓴다: 컴포넌트이거나, 모양이 있는 작업 피처면 된다.
+- 관계가 쓰는 작업 피처를 지우면 `InUse`다(예전에는 커밋 때 `Dangling`). `Relationship::references(item)` 추가.
+
+**API(프론트엔드)**
+- `session.work_feature_selection(id) -> Option<Selection>`: 작업 평면·축·점을 관계의 첫째나 둘째 선택으로 쓴다.
+  `possible_relations`, `predict_relationship`, `add_relationship`에 그대로 넘긴다.
+- 작업 피처는 컴포넌트가 아니다: `components()`·`component_tree()`에 나오지 않고 DOF·접지 대상도 아니다.
+
+**남은 것**
+- 테스트: `gc_session/tests/work_feature_relations.rs`.
+
 ## 2026-11-18 — 그립 스냅 계산(우선순위 표 11 일부, 백엔드는 계산 함수까지)
 
 근거: Grip Snap move or rotate(GUID-E1CA109A-D5A1-4131-AC3A-AE217716DD8C).
