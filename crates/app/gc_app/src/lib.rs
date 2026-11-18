@@ -13,6 +13,7 @@ mod interference;
 mod measure;
 mod parameters;
 mod pattern;
+mod replicate;
 mod ribbon;
 mod sketch_dialogs;
 

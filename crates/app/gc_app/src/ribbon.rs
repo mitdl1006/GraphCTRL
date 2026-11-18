@@ -80,6 +80,8 @@ pub(crate) enum RibbonAction {
     StartJoint,
     /// Open the Pattern dialog.
     StartPattern,
+    /// Open the mirror, copy or replace dialog in a mode.
+    StartReplicate(crate::replicate::Mode),
     /// Open the parameters dialog.
     StartParameters,
     /// Project the edges the sketch plane cuts into the active sketch.
@@ -167,7 +169,7 @@ pub(crate) fn show(
                     // Project Cut Edges: a 2D sketch only.
                     if ribbon_button(
                         ui,
-                        Icon::Text("⊟"),
+                        Icon::CutEdges,
                         tr!(lang, ToolCutEdges),
                         false,
                         sketching && !spatial,
@@ -181,9 +183,9 @@ pub(crate) fn show(
                     // GUID-D489CE6D-7299-4211-A43A-F3580A4BA357): 2D sketches.
                     if !spatial {
                         for (kind, icon, label) in [
-                            (ToolKind::Point, Icon::Text("+"), Msg::ToolPoint),
-                            (ToolKind::Polygon, Icon::Path, Msg::ToolPolygon),
-                            (ToolKind::Slot(SlotKind::CenterToCenter), Icon::Arc, Msg::ToolSlot),
+                            (ToolKind::Point, Icon::Point, Msg::ToolPoint),
+                            (ToolKind::Polygon, Icon::Polygon, Msg::ToolPolygon),
+                            (ToolKind::Slot(SlotKind::CenterToCenter), Icon::Slot, Msg::ToolSlot),
                         ] {
                             if ribbon_button(ui, icon, label.text(lang), current == kind, sketching).clicked()
                             {
@@ -244,9 +246,9 @@ pub(crate) fn show(
                     // Inventor's Pattern panel: Rectangular, Circular, Mirror.
                     ribbon_group(ui, tr!(lang, GroupPattern), |ui| {
                         let patterns = [
-                            (Icon::Text("#"), Msg::ToolRectPattern, RibbonAction::StartSketchRectPattern),
-                            (Icon::Circle, Msg::ToolCircPattern, RibbonAction::StartSketchCircPattern),
-                            (Icon::Text("|"), Msg::ToolMirror, RibbonAction::StartSketchMirror),
+                            (Icon::RectPattern, Msg::ToolRectPattern, RibbonAction::StartSketchRectPattern),
+                            (Icon::CircPattern, Msg::ToolCircPattern, RibbonAction::StartSketchCircPattern),
+                            (Icon::Mirror, Msg::ToolMirror, RibbonAction::StartSketchMirror),
                         ];
                         ui.vertical(|ui| {
                             for row in patterns.chunks(2) {
@@ -272,7 +274,7 @@ pub(crate) fn show(
                         let offset = ToolKind::Offset;
                         if ribbon_button(
                             ui,
-                            Icon::Text("="),
+                            Icon::Offset,
                             tr!(lang, ToolOffset),
                             current == offset,
                             sketching,
@@ -466,12 +468,31 @@ fn assemble_tab(
         if ribbon_button(ui, Icon::Import, tr!(lang, CmdPlace), false, true).clicked() {
             action = Some(RibbonAction::ImportMesh);
         }
+        if ribbon_button(
+            ui,
+            Icon::Select,
+            tr!(lang, ReplicateReplace),
+            false,
+            !session.components().is_empty(),
+        )
+        .clicked()
+        {
+            action = Some(RibbonAction::StartReplicate(crate::replicate::Mode::Replace));
+        }
     });
     ribbon_group(ui, tr!(lang, PatternTitle), |ui| {
         if ribbon_button(ui, Icon::Select, tr!(lang, PatternTitle), false, !session.components().is_empty())
             .clicked()
         {
             action = Some(RibbonAction::StartPattern);
+        }
+        for (mode, label) in [
+            (crate::replicate::Mode::Mirror, tr!(lang, ReplicateMirror)),
+            (crate::replicate::Mode::Copy, tr!(lang, ReplicateCopy)),
+        ] {
+            if ribbon_button(ui, Icon::Select, label, false, !session.components().is_empty()).clicked() {
+                action = Some(RibbonAction::StartReplicate(mode));
+            }
         }
     });
     // Failures of these commands are shown in the status bar.
@@ -509,8 +530,7 @@ fn assemble_tab(
         let selected = session.selected_occurrence().filter(|o| session.can_ground(*o));
         let grounded =
             selected.is_some_and(|o| session.doc().component_flag(o, gc_doc::ComponentFlag::Grounded));
-        if ribbon_button(ui, Icon::Text("⊥"), tr!(lang, CmdGround), grounded, selected.is_some()).clicked()
-        {
+        if ribbon_button(ui, Icon::Ground, tr!(lang, CmdGround), grounded, selected.is_some()).clicked() {
             action = Some(RibbonAction::ToggleGround);
         }
     });

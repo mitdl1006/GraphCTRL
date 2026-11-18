@@ -3499,3 +3499,43 @@ fn the_contact_set_and_the_contact_solver_are_set_from_the_ui() {
     harness.run();
     assert_eq!(harness.state().session.doc().contact_solver(), gc_doc::ContactSolver::ContactSet);
 }
+
+/// Assemble tab > Copy copies the checked component by the offset; Replace swaps its shape.
+#[test]
+fn copy_and_replace_work_from_the_assemble_tab() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.05, 0.05, 0.05] };
+    harness.state_mut().session.add_body(solid, gc_doc::Placement::default()).unwrap();
+    harness.run();
+    harness.get_by_label("조립").click();
+    harness.run();
+    harness.get_by_label("복사").click();
+    harness.run_steps(3);
+    assert_eq!(harness.state().session.components().len(), 1);
+    if gpu {
+        let image = harness.render().unwrap();
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        image.save(out.join("review-44-copy.png")).unwrap();
+    }
+    harness.get_by_role_and_label(egui::accesskit::Role::CheckBox, "Body1").click();
+    harness.run();
+    harness.get_by_label("확인").click();
+    harness.run();
+    assert_eq!(harness.state().session.components().len(), 2, "the copy");
+
+    harness.get_by_label("교체").click();
+    harness.run_steps(3);
+    harness.get_by_label("구").click();
+    harness.run();
+    harness.get_by_role_and_label(egui::accesskit::Role::CheckBox, "Body1").click();
+    harness.run();
+    harness.get_by_label("확인").click();
+    harness.run();
+    let bodies = harness.state().session.doc().bodies().iter().count();
+    assert_eq!(bodies, 2);
+}
