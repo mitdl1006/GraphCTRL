@@ -135,10 +135,8 @@ mod tests {
 
     #[test]
     fn the_camera_and_the_section_round_trip_and_garbage_is_refused() {
-        let mut camera = Camera::default();
-        camera.pivot = DVec3::new(0.1, -0.2, 0.3);
-        camera.distance = 2.5;
-        camera.ortho = false;
+        let camera =
+            Camera { pivot: DVec3::new(0.1, -0.2, 0.3), distance: 2.5, ortho: false, ..Camera::default() };
         let back = camera_from_json(&camera_to_json(&camera)).expect("parses");
         assert!((back.pivot - camera.pivot).length() < 1e-12);
         assert!(back.rotation.dot(camera.rotation).abs() > 1.0 - 1e-12);

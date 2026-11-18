@@ -3607,3 +3607,26 @@ fn a_view_representation_restores_the_camera_and_the_section() {
     assert!((viewport.camera.distance - 3.0).abs() < 1e-9, "{}", viewport.camera.distance);
     assert_eq!(viewport.section.as_ref().map(|s| s.planes.len()), Some(1));
 }
+
+/// At 1280 px the ribbon of a 3D sketch (13 constraints in two rows) still shows "스케치 마무리" inside
+/// the window.
+#[test]
+fn the_3d_sketch_ribbon_keeps_finish_sketch_on_screen() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("3D 스케치").click();
+    harness.run_steps(3);
+    let finish = harness.get_by_label("스케치 마무리").rect();
+    assert!(finish.right() <= SIZE.x && finish.left() >= 0.0, "{finish:?} outside the {SIZE:?} window");
+    if gpu {
+        let image = harness.render().unwrap();
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        image.save(out.join("review-46-3d-sketch-ribbon.png")).unwrap();
+    }
+    harness.get_by_label("스케치 마무리").click();
+    harness.run_steps(3);
+}
