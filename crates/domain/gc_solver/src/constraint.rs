@@ -173,6 +173,29 @@ pub enum Constraint {
         /// `+1.0` or `-1.0`.
         side: f64,
     },
+    /// A circle (or arc) and an ellipse touch at the point `p` (an extra point of the solve): `p` lies on
+    /// both, and the ellipse's normal there passes through the circle's centre.
+    TangentCircleEllipse {
+        /// The touching point.
+        p: P2,
+        /// The circle.
+        round: Round,
+        /// The ellipse's centre.
+        c: P2,
+        /// Its major axis end.
+        major: P2,
+        /// Its minor radius.
+        minor: ParamId,
+    },
+    /// Two ellipses touch at the point `p` (an extra point of the solve): on both, normals parallel.
+    TangentEllipseEllipse {
+        /// The touching point.
+        p: P2,
+        /// First ellipse: centre, major axis end, minor radius.
+        first: (P2, P2, ParamId),
+        /// Second ellipse.
+        second: (P2, P2, ParamId),
+    },
     /// A line ending at the ellipse's point `at` runs along the ellipse there.
     EndTangentEllipse {
         /// The line.
@@ -468,6 +491,26 @@ impl Constraint {
                 RowKind::LineEllipseTangent { side: *side },
                 [line_vars(line).as_slice(), &[c[0], c[1], major[0], major[1], *minor]].concat(),
             )),
+            Self::TangentCircleEllipse { p, round, c, major, minor } => {
+                out.rows.push((RowKind::PointCircle, vec![p[0], p[1], round.c[0], round.c[1], round.r]));
+                out.rows
+                    .push((RowKind::PointEllipse, vec![p[0], p[1], c[0], c[1], major[0], major[1], *minor]));
+                out.rows.push((
+                    RowKind::EllipseNormalThrough,
+                    vec![p[0], p[1], c[0], c[1], major[0], major[1], *minor, round.c[0], round.c[1]],
+                ));
+            }
+            Self::TangentEllipseEllipse { p, first, second } => {
+                let ((c1, m1, b1), (c2, m2, b2)) = (*first, *second);
+                out.rows.push((RowKind::PointEllipse, vec![p[0], p[1], c1[0], c1[1], m1[0], m1[1], b1]));
+                out.rows.push((RowKind::PointEllipse, vec![p[0], p[1], c2[0], c2[1], m2[0], m2[1], b2]));
+                let scale =
+                    nonzero(((get(m1[0]) - get(c1[0])).powi(2) + (get(m1[1]) - get(c1[1])).powi(2)).sqrt());
+                out.rows.push((
+                    RowKind::EllipseNormals { scale },
+                    vec![p[0], p[1], c1[0], c1[1], m1[0], m1[1], b1, c2[0], c2[1], m2[0], m2[1], b2],
+                ));
+            }
             Self::EndTangentEllipse { line, at, c, major, minor } => out.rows.push((
                 RowKind::EndTangentEllipse,
                 [line_vars(line).as_slice(), &[at[0], at[1], c[0], c[1], major[0], major[1], *minor]]
