@@ -101,9 +101,15 @@ impl Sketch {
                 CurveGeom::Line { a, b } => CurveGeom::Line { a: to(a)?, b: to(b)? },
                 CurveGeom::Circle { c, r } => CurveGeom::Circle { c: to(c)?, r: r * radius },
                 CurveGeom::Arc { c, s, e } => CurveGeom::Arc { c: to(c)?, s: to(s)?, e: to(e)? },
-                CurveGeom::Ellipse { c, major, minor } => {
-                    CurveGeom::Ellipse { c: to(c)?, major: to(major)?, minor: minor * radius }
-                }
+                CurveGeom::Ellipse { c, major, minor, arc } => CurveGeom::Ellipse {
+                    c: to(c)?,
+                    major: to(major)?,
+                    minor: minor * radius,
+                    arc: match arc {
+                        Some((s, e)) => Some((to(s)?, to(e)?)),
+                        None => None,
+                    },
+                },
             };
             let copy: Id<Curve> = alloc.alloc();
             self.curves.insert(copy, Curve { geom, construction: curve.construction });

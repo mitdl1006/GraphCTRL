@@ -93,11 +93,11 @@ pub(crate) fn closest_on_curve(sketch: &Sketch, curve: &Curve, at: [f64; 2]) -> 
             (d > 0.0).then(|| [c[0] + (at[0] - c[0]) * r / d, c[1] + (at[1] - c[1]) * r / d])
         }
         // The nearest of many points around it (close enough to pick and snap to).
-        CurveGeom::Ellipse { c, major, minor } => {
-            gc_sketch::ellipse_points(xy(sketch, c)?, xy(sketch, major)?, minor, 256)?
-                .into_iter()
-                .min_by(|p, q| distance(*p, at).total_cmp(&distance(*q, at)))
-        }
+        CurveGeom::Ellipse { .. } => sketch
+            .ellipse_geom_outline(&curve.geom, 256)?
+            .0
+            .into_iter()
+            .min_by(|p, q| distance(*p, at).total_cmp(&distance(*q, at))),
         CurveGeom::Arc { c, s, e } => {
             let (c, s, e) = (xy(sketch, c)?, xy(sketch, s)?, xy(sketch, e)?);
             let (r, d) = (distance(s, c), distance(at, c));
@@ -177,8 +177,16 @@ pub fn pick(sketch: &Sketch, at: [f64; 2], px: f64) -> Option<Item> {
         .map(|(id, _)| Item::Dimension(*id))
 }
 
-/// Where two curves (lines, circles, arcs) cross, within the curves' extents.
-fn intersections(sketch: &Sketch, a: &Curve, b: &Curve) -> Vec<[f64; 2]> {
+/// Where two curves cross, within the curves' extents (ellipses through the sketch's own intersections).
+fn intersections(
+    sketch: &Sketch,
+    (ida, a): (Id<Curve>, &Curve),
+    (idb, b): (Id<Curve>, &Curve),
+) -> Vec<[f64; 2]> {
+    let ellipse = |c: &Curve| matches!(c.geom, CurveGeom::Ellipse { .. });
+    if ellipse(a) || ellipse(b) {
+        return sketch.curve_crossings(ida, idb);
+    }
     let (Some(first), Some(second)) = (curve_shape(sketch, a), curve_shape(sketch, b)) else {
         return Vec::new();
     };
@@ -327,7 +335,7 @@ pub fn snap(sketch: &Sketch, at: [f64; 2], px: f64, previous: Option<[f64; 2]>, 
     };
     for (i, (ida, a)) in close.iter().enumerate() {
         for (idb, b) in &close[i + 1..] {
-            for pos in intersections(sketch, a, b) {
+            for pos in intersections(sketch, (*ida, a), (*idb, b)) {
                 let snap = Snap {
                     pos,
                     kind: SnapKind::OnCurve,
@@ -355,8 +363,19 @@ pub fn snap(sketch: &Sketch, at: [f64; 2], px: f64, previous: Option<[f64; 2]>, 
                 };
                 offer(distance(mid, at), snap);
             }
-            // Its centre is a sketch point (snapped as one); no quadrant snaps yet.
-            CurveGeom::Ellipse { .. } => {}
+            // The ends of its axes (its centre is a sketch point, snapped as one).
+            CurveGeom::Ellipse { .. } => {
+                for pos in sketch.ellipse_quadrants(*id) {
+                    let snap = Snap {
+                        pos,
+                        kind: SnapKind::OnCurve,
+                        curve: Some(*id),
+                        inference: Some(Inference::Quadrant),
+                        ..free
+                    };
+                    offer(distance(pos, at), snap);
+                }
+            }
             CurveGeom::Circle { c, r } => {
                 let (Some(centre_id), Some(c)) = (Some(c), xy(sketch, c)) else { continue };
                 for (k, offset) in [[r, 0.0], [0.0, r], [-r, 0.0], [0.0, -r]].into_iter().enumerate() {

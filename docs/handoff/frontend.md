@@ -151,6 +151,12 @@
 - 원문과 차이: 끄는 동안 화면에는 잡은 구성요소만 미리보기로 움직이고 나머지는 놓을 때 따라온다(세션 미리보기가 한 구성요소만 지원 — 다중 미리보기 API(`preview_components`)가 있으면 바꾼다). 핸들(기즈모) 드래그와 속성 패널 위치 입력은 서브어셈블리 단위가 아니다.
 - 테스트 `free_move_drags_a_whole_subassembly`, `grip_snap_moves_the_whole_subassembly_of_the_picked_component`.
 
+### Trim 미리보기 (지울 조각 강조)
+
+- 근거: Trim/Extend/Split 원문 GUID-DD00037F(원문 목록은 앞 항목 참고): 지워질 부분이 클릭 전에 강조된다.
+- `Preview.cut`(Trim이 지울 조각)을 스케치 뷰에서 빨간 점선(2.6 px)으로 그린다. 선분·호·원 조각을 샘플링해서 그리고, 타원호(`Piece::EllipseArc`)와 `Piece::polyline`은 아직 gc_sketch에 없어 목록에서 건너뛴다(들어오면 `piece_points`에 추가).
+- 증거 `docs/evidence/img/review-57-trim-preview.png`, 테스트 `trim_highlights_the_piece_that_would_go`.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

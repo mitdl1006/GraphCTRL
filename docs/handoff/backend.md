@@ -54,6 +54,30 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 타원 Trim·Extend, 교점·사분점 스냅(리드 다음 ①)
+
+근거: To Create 2D Shape Geometry(GUID-D489CE6D-7299-4211-A43A-F3580A4BA357) "You can trim and extend ellipses like any other curve".
+- 모델: `CurveGeom::Ellipse`에 `arc: Option<(시작, 끝)>`을 추가했다(serde default, 옛 파일 그대로).
+  타원호는 이심각(eccentric angle)으로 반시계 방향이다. 바인딩이 두 끝점을 그 타원 위에 둔다
+  (`PointOnEllipse`, 끝점 id로 키를 단다). `Sketch::ellipse_arc`.
+- cut.rs `Shape::Oval{c, u, a, b, arc}`:
+  - 매개변수는 이심각이다.
+  - 선과의 교점: 타원을 단위원으로 펴는 좌표에서 선-원으로 정확히 구한다.
+  - 원·타원과의 교점: 둘째 곡선 전체를 720칸으로 돌며 첫째의 음함수 부호가 바뀌는 곳을 이분법으로 찾는다. 접하기만 하는 교점은 못 찾는다.
+- Trim:
+  - 온 타원(교점 2개 이상)은 남는 타원호가 되고, 끝은 자른 곡선에 붙는다.
+  - 타원호의 가운데를 자르면 두 타원호가 되고 중심·축 끝 점을 공유한다. 단반경은 `Equal`로 묶는다(두 타원의 Equal = 단반경 같음).
+  - 끝쪽을 자르면 끝이 옮겨진다.
+- Extend: 타원호의 열린 끝을 다음 곡선까지 늘린다. `Piece::EllipseArc`(미리보기)와 `Piece::polyline(n)`(모든 조각을 점열로)을 추가했다.
+- 스냅:
+  - `Sketch::curve_crossings(a, b)`: 모든 곡선 쌍. pick.rs는 타원이 낀 쌍에 이것을 쓴다.
+  - `Sketch::ellipse_quadrants(id)`: 축 끝 4점 중 곡선 위의 것. Quadrant 추론으로 쓰고, 수평·수직 정렬 표시(`aligned`)는 붙이지 않는다.
+- 그리기: `ellipse_points(c, m, b, ends, n) -> (점열, 닫힘)`, `ellipse_param`, `Sketch::ellipse_geom_outline`, `gc_tools::push_polyline`.
+  미리보기·뷰포트·피킹이 타원호를 그린다.
+- 프론트엔드 참고: `Preview.cut`(Trim이 지울 조각)은 지금 UI 어디에서도 그리지 않는다(원래부터). `Piece::polyline`으로 그리면 된다.
+- 남은 것: Split·Fillet·Chamfer·Offset의 타원은 아직 거부한다. 타원 접선 구속·접하는 교점도 없다.
+- 테스트: `gc_persist/tests/ellipse.rs`(자르기·나누기·늘리기·save∘load, 원-타원 교점).
+
 ## 2026-11-18 — 타원(리드 ④)
 
 근거: To Create 2D Shape Geometry(GUID-D489CE6D-7299-4211-A43A-F3580A4BA357)의 Ellipse.
@@ -95,6 +119,9 @@ Grip Snap도 서브어셈블리를 움직일 수 있다(Move and Rotate Assembly
 - 그립 스냅으로 서브어셈블리를 움직일 때는 `grip_snap_pose_on`으로 한 멤버의 새 자세를 구한다.
   `delta = 새 자세 × 지금 자세⁻¹`를 `move_subassembly`에 넘기면 된다.
 - 남은 것: 서브어셈블리 안 관계로 멤버끼리 움직이는 "유연(flexible)" 서브어셈블리는 없다(모두 강체 단위).
+- 여러 컴포넌트 동시 미리보기(프론트엔드 요청): `preview_components(&[(AnyId, DPose3)])`, `end_component_preview()`.
+  Drive 미리보기와 같은 표시 경로라서 `driven_placement`, `shown_body`, `shown_base`에 나타난다. 문서·실행 취소에는 손대지 않는다.
+  컴포넌트가 아니거나 자세가 유한하지 않으면 `BadValue`. 단위 드래그는 미리 보기로 `subassembly_moved` → `preview_components`, 놓을 때 `move_subassembly`.
 - 테스트: `gc_session/tests/subassembly.rs::a_subassembly_moves_as_one_unit`.
 
 ## 2026-11-18 — 그립 스냅 점·면 기준(리드 ②)

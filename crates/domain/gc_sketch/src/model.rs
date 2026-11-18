@@ -105,6 +105,10 @@ pub enum CurveGeom {
         major: Id<SkPoint>,
         /// Minor radius.
         minor: f64,
+        /// An elliptical arc (what a trim leaves): its start and end, counter-clockwise; `None` for the whole
+        /// ellipse.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        arc: Option<(Id<SkPoint>, Id<SkPoint>)>,
     },
 }
 
@@ -129,7 +133,8 @@ impl Curve {
             CurveGeom::Line { a, b } => vec![a, b],
             CurveGeom::Circle { c, .. } => vec![c],
             CurveGeom::Arc { c, s, e } => vec![c, s, e],
-            CurveGeom::Ellipse { c, major, .. } => vec![c, major],
+            CurveGeom::Ellipse { c, major, arc: None, .. } => vec![c, major],
+            CurveGeom::Ellipse { c, major, arc: Some((s, e)), .. } => vec![c, major, s, e],
         }
     }
 }
@@ -361,18 +366,35 @@ impl Sketch {
         }
     }
 
-    /// Points around an ellipse in the sketch plane (`segments` of them, the first at the major axis end,
-    /// counter-clockwise), for drawing and picking. `None` for another curve or a degenerate ellipse.
-    pub fn ellipse_outline(&self, curve: Id<Curve>, segments: usize) -> Option<Vec<[f64; 2]>> {
-        let (c, major, b) = self.ellipse(curve)?;
-        let (c, m) = (self.pos(c)?, self.pos(major)?);
-        ellipse_points([c[0], c[1]], [m[0], m[1]], b, segments)
+    /// Points along an ellipse or elliptical arc in the sketch plane, with whether they close (see
+    /// [`ellipse_points`]). `None` for another curve or a degenerate ellipse.
+    pub fn ellipse_outline(&self, curve: Id<Curve>, segments: usize) -> Option<(Vec<[f64; 2]>, bool)> {
+        self.ellipse_geom_outline(&self.curves.get(&curve)?.geom, segments)
+    }
+
+    /// [`Sketch::ellipse_outline`] for a curve's shape (`None` when it is not an ellipse).
+    pub fn ellipse_geom_outline(&self, geom: &CurveGeom, segments: usize) -> Option<(Vec<[f64; 2]>, bool)> {
+        let CurveGeom::Ellipse { c, major, minor, arc } = *geom else { return None };
+        let xy = |p: Id<SkPoint>| self.pos(p).map(|q| [q[0], q[1]]);
+        let ends = match arc {
+            Some((s, e)) => Some((xy(s)?, xy(e)?)),
+            None => None,
+        };
+        ellipse_points(xy(c)?, xy(major)?, minor, ends, segments)
+    }
+
+    /// An elliptical arc's start and end (counter-clockwise); `None` for a whole ellipse or another curve.
+    pub fn ellipse_arc(&self, curve: Id<Curve>) -> Option<(Id<SkPoint>, Id<SkPoint>)> {
+        match self.curves.get(&curve)?.geom {
+            CurveGeom::Ellipse { arc, .. } => arc,
+            CurveGeom::Line { .. } | CurveGeom::Circle { .. } | CurveGeom::Arc { .. } => None,
+        }
     }
 
     /// An ellipse's centre, major axis end and minor radius; `None` for another kind of curve.
     pub fn ellipse(&self, curve: Id<Curve>) -> Option<(Id<SkPoint>, Id<SkPoint>, f64)> {
         match self.curves.get(&curve)?.geom {
-            CurveGeom::Ellipse { c, major, minor } => Some((c, major, minor)),
+            CurveGeom::Ellipse { c, major, minor, .. } => Some((c, major, minor)),
             CurveGeom::Line { .. } | CurveGeom::Circle { .. } | CurveGeom::Arc { .. } => None,
         }
     }
@@ -435,24 +457,52 @@ impl Sketch {
     }
 }
 
-/// Points around the ellipse with centre `c`, major axis end `m` and minor radius `b` (`segments` of them,
-/// the first at `m`, counter-clockwise). `None` for a degenerate ellipse or fewer than three segments.
-pub fn ellipse_points(c: [f64; 2], m: [f64; 2], b: f64, segments: usize) -> Option<Vec<[f64; 2]>> {
+/// The eccentric angle of a point seen in the ellipse's own axes (centre `c`, major axis end `m`, minor
+/// radius `b`): the parameter of `c + a·cos t·u + b·sin t·v`, in `[0, 2π)`.
+pub fn ellipse_param(c: [f64; 2], m: [f64; 2], b: f64, p: [f64; 2]) -> f64 {
+    let (dx, dy) = (m[0] - c[0], m[1] - c[1]);
+    let a = gc_math::fm::hypot(dx, dy).max(f64::MIN_POSITIVE);
+    let (ux, uy) = (dx / a, dy / a);
+    let (x, y) = (p[0] - c[0], p[1] - c[1]);
+    let along = (x * ux + y * uy) / a;
+    let across = (y * ux - x * uy) / b.abs().max(f64::MIN_POSITIVE);
+    gc_math::fm::atan2(across, along).rem_euclid(std::f64::consts::TAU)
+}
+
+/// Points along the ellipse with centre `c`, major axis end `m` and minor radius `b`, for drawing and
+/// picking: the whole ellipse (`segments` points, a closed loop, the first at `m`), or with `ends` the
+/// arc from the first end counter-clockwise to the second (`segments + 1` points, open). The flag is
+/// true for a closed loop. `None` for a degenerate ellipse or fewer than three segments.
+pub fn ellipse_points(
+    c: [f64; 2],
+    m: [f64; 2],
+    b: f64,
+    ends: Option<([f64; 2], [f64; 2])>,
+    segments: usize,
+) -> Option<(Vec<[f64; 2]>, bool)> {
     let (dx, dy) = (m[0] - c[0], m[1] - c[1]);
     let a = gc_math::fm::hypot(dx, dy);
     if !(a > 1e-12 && a.is_finite() && b.is_finite() && segments >= 3) {
         return None;
     }
     let (ux, uy) = (dx / a, dy / a);
+    let at = |t: f64| {
+        let (sin, cos) = gc_math::fm::sin_cos(t);
+        [c[0] + a * cos * ux - b * sin * uy, c[1] + a * cos * uy + b * sin * ux]
+    };
     #[allow(clippy::cast_precision_loss, reason = "a few hundred segments")]
-    let step = std::f64::consts::TAU / segments as f64;
-    Some(
-        (0..segments)
-            .map(|k| {
-                #[allow(clippy::cast_precision_loss, reason = "a few hundred segments")]
-                let (sin, cos) = gc_math::fm::sin_cos(step * k as f64);
-                [c[0] + a * cos * ux - b * sin * uy, c[1] + a * cos * uy + b * sin * ux]
-            })
-            .collect(),
-    )
+    let n = segments as f64;
+    Some(match ends {
+        None => {
+            let step = std::f64::consts::TAU / n;
+            #[allow(clippy::cast_precision_loss, reason = "a few hundred segments")]
+            ((0..segments).map(|k| at(step * k as f64)).collect(), true)
+        }
+        Some((s, e)) => {
+            let start = ellipse_param(c, m, b, s);
+            let sweep = (ellipse_param(c, m, b, e) - start).rem_euclid(std::f64::consts::TAU);
+            #[allow(clippy::cast_precision_loss, reason = "a few hundred segments")]
+            ((0..=segments).map(|k| at(start + sweep * k as f64 / n)).collect(), false)
+        }
+    })
 }

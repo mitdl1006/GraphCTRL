@@ -314,12 +314,18 @@ fn curve_path(
                 view.polyline(ring(c, radius.unwrap_or(r), 0.0, tau), stroke);
             }
         }
-        CurveGeom::Ellipse { c, major, minor } => {
+        CurveGeom::Ellipse { c, major, minor, arc } => {
+            let flat = |p: [f64; 3]| [p[0], p[1]];
+            let ends = match arc {
+                Some((s, e)) => pos(s).zip(pos(e)).map(|(s, e)| (flat(s), flat(e))),
+                None => None,
+            };
             if let (Some(c), Some(m)) = (pos(c), pos(major))
-                && let Some(points) = gc_sketch::ellipse_points([c[0], c[1]], [m[0], m[1]], minor, 96)
+                && (arc.is_none() || ends.is_some())
+                && let Some((points, closed)) = gc_sketch::ellipse_points(flat(c), flat(m), minor, ends, 96)
             {
-                let closed = points.iter().chain(points.first()).map(|p| plane.world([p[0], p[1], 0.0]));
-                view.polyline(closed, stroke);
+                let back = if closed { points.first() } else { None };
+                view.polyline(points.iter().chain(back).map(|p| plane.world([p[0], p[1], 0.0])), stroke);
             }
         }
         // In a 3D sketch an arc lies in the plane of its three points (`gc_sketch::Arc3`).
@@ -690,6 +696,16 @@ fn preview(view: &View<'_>, plane: &SketchPlane, session: &Session) {
             stroke,
         );
     }
+    // What Trim would remove, in red and dashed over the sketch (Inventor 2026 help, Trim,
+    // GUID-DD00037F-... : the part to be trimmed is highlighted before the click).
+    let cut = Stroke::new(2.6, Color32::from_rgb(0xE0, 0x30, 0x30));
+    for piece in &preview.cut {
+        let points: Vec<Pos2> =
+            piece_points(piece).into_iter().filter_map(|p| view.screen(world(p))).collect();
+        if points.len() >= 2 {
+            view.painter.extend(egui::Shape::dashed_line(&points, cut, 7.0, 4.0));
+        }
+    }
     if let Some(snap) = preview.snap {
         let Some(at) = view.screen(world(snap.pos)) else { return };
         match snap.kind {
@@ -720,6 +736,27 @@ fn preview(view: &View<'_>, plane: &SketchPlane, session: &Session) {
         {
             view.painter.circle_stroke(at, 7.0, stroke);
         }
+    }
+}
+
+/// The points along a piece of a curve, in sketch coordinates (enough of them to look round).
+fn piece_points(piece: &gc_sketch::Piece) -> Vec<[f64; 2]> {
+    use gc_sketch::Piece;
+    const STEPS: u32 = 72;
+    let on = |centre: [f64; 2], radius: f64, start: f64, sweep: f64| -> Vec<[f64; 2]> {
+        (0..=STEPS)
+            .map(|i| {
+                let angle = start + sweep * f64::from(i) / f64::from(STEPS);
+                [centre[0] + radius * fm::cos(angle), centre[1] + radius * fm::sin(angle)]
+            })
+            .collect()
+    };
+    match piece {
+        Piece::Segment(a, b) => vec![*a, *b],
+        Piece::Arc { centre, radius, start, sweep } => on(*centre, *radius, *start, *sweep),
+        Piece::Circle { centre, radius } => on(*centre, *radius, 0.0, std::f64::consts::TAU),
+        #[allow(unreachable_patterns, reason = "pieces the sketch crate adds later (ellipse arcs)")]
+        _ => Vec::new(),
     }
 }
 

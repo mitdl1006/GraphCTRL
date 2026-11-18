@@ -1200,9 +1200,15 @@ impl PatternBuild {
                 gc_sketch::CurveGeom::Arc { c, s, e } => {
                     gc_sketch::CurveGeom::Arc { c: to(c)?, s: to(s)?, e: to(e)? }
                 }
-                gc_sketch::CurveGeom::Ellipse { c, major, minor } => {
-                    gc_sketch::CurveGeom::Ellipse { c: to(c)?, major: to(major)?, minor }
-                }
+                gc_sketch::CurveGeom::Ellipse { c, major, minor, arc } => gc_sketch::CurveGeom::Ellipse {
+                    c: to(c)?,
+                    major: to(major)?,
+                    minor,
+                    arc: match arc {
+                        Some((s, e)) => Some((to(s)?, to(e)?)),
+                        None => None,
+                    },
+                },
             };
             let id: Id<Curve> = ids.alloc();
             sketch.curves.insert(id, Curve { geom, construction: curve.construction });
@@ -1949,9 +1955,16 @@ fn sketch_op(
                     gc_sketch::CurveGeom::Arc { c, s, e } => {
                         gc_sketch::CurveGeom::Arc { c: map(c)?, s: map(e)?, e: map(s)? }
                     }
-                    gc_sketch::CurveGeom::Ellipse { c, major, minor } => {
-                        gc_sketch::CurveGeom::Ellipse { c: map(c)?, major: map(major)?, minor }
-                    }
+                    // Like an arc, an elliptical arc runs back from the copied end.
+                    gc_sketch::CurveGeom::Ellipse { c, major, minor, arc } => gc_sketch::CurveGeom::Ellipse {
+                        c: map(c)?,
+                        major: map(major)?,
+                        minor,
+                        arc: match arc {
+                            Some((s, e)) => Some((map(e)?, map(s)?)),
+                            None => None,
+                        },
+                    },
                 };
                 let id: Id<Curve> = ids.alloc();
                 sketch.curves.insert(id, Curve { geom, construction: curve.construction });
