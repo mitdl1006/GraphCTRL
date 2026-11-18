@@ -971,6 +971,7 @@ messages! {
     ToolBend => ("굽힘", "Bend"),
     BendPickFirst => ("굽힘: 첫 번째 선을 클릭하십시오", "Bend: click the first line"),
     BendPickSecond => ("굽힘: 두 번째 선을 클릭하십시오", "Bend: click the second line"),
+    BendEqual => ("같음", "Equal"),
     BendRadius => ("반지름", "Radius"),
     CmdSplitSpline => ("스플라인 분할", "Split Spline"),
     CmdFlexible => ("유연", "Flexible"),

@@ -337,6 +337,10 @@ struct BendState {
     lines: Vec<Id<gc_sketch::Curve>>,
     radius: String,
     fresh: bool,
+    /// The Equal check box (default on): the next bends take the radius of the first one.
+    equal: bool,
+    /// The arc of the first bend made, and the radius typed for it: what Equal follows.
+    first: Option<(Id<gc_sketch::Curve>, String)>,
 }
 
 /// The Helical Curve command of a 3D sketch (Inventor 2026 help, To Draw 3D Curves,
@@ -1836,7 +1840,18 @@ impl Viewport {
 
     /// Starts Bend in the 3D sketch being edited: click two lines that meet, then type the radius.
     pub fn start_bend(&mut self) {
-        self.bend = Some(BendState { lines: Vec::new(), radius: "10 mm".to_owned(), fresh: true });
+        self.bend = Some(BendState {
+            lines: Vec::new(),
+            radius: "10 mm".to_owned(),
+            fresh: true,
+            equal: true,
+            first: None,
+        });
+    }
+
+    /// How many lines the running Bend has picked so far.
+    pub fn bend_picked(&self) -> usize {
+        self.bend.as_ref().map_or(0, |bend| bend.lines.len())
     }
 
     /// Whether Bend is running.
@@ -1847,6 +1862,10 @@ impl Viewport {
     /// Bend's prompt, and the radius box once both lines are picked. Enter makes the bend, Esc ends.
     fn bend_box(&mut self, ui: &egui::Ui, session: &mut Session, rect: egui::Rect, lang: Lang) {
         let Some(mut bend) = self.bend.take() else { return };
+        if bend.lines.len() < 2 {
+            // The radius box takes the keyboard each time it comes up.
+            bend.fresh = true;
+        }
         if !session.sketch_is_spatial() || ui.input(|i| i.key_pressed(Key::Escape)) {
             return;
         }
@@ -1856,14 +1875,16 @@ impl Viewport {
             _ => tr!(lang, BendRadius),
         };
         let mut make = false;
+        // In the bottom-left corner, out of the way of the lines being picked.
         egui::Area::new(egui::Id::unique("gc_bend"))
-            .fixed_pos(rect.center_top() + egui::vec2(0.0, 14.0))
-            .pivot(egui::Align2::CENTER_TOP)
+            .fixed_pos(rect.left_bottom() + egui::vec2(14.0, -14.0))
+            .pivot(egui::Align2::LEFT_BOTTOM)
             .order(egui::Order::Foreground)
             .show(ui.ctx(), |ui| {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
                     ui.strong(tr!(lang, ToolBend));
                     ui.label(prompt);
+                    ui.checkbox(&mut bend.equal, tr!(lang, BendEqual));
                     if bend.lines.len() == 2 {
                         let field = ui.add(egui::TextEdit::singleline(&mut bend.radius).desired_width(90.0));
                         field.widget_info(|| {
@@ -1879,13 +1900,29 @@ impl Viewport {
                 });
             });
         if make && let [a, b] = bend.lines[..] {
-            // A refusal (lines that do not meet, a radius too big) is explained in the status bar; the
-            // command stays open to try again.
-            if session
-                .edit_active_sketch(gc_doc::SketchOp::Bend { lines: [a, b], radius: bend.radius.clone() })
-                .is_ok()
-            {
-                return;
+            // With Equal on and the radius unchanged, a bend after the first takes the first one's radius
+            // (Bend Equal); otherwise it is a Bend of the radius typed, and becomes the one to follow. A refusal
+            // (lines that do not meet, a radius too big) is explained in the status bar; the command stays
+            // open to try again, and after a bend it stays open for the next one (Esc ends).
+            let follow = bend
+                .first
+                .as_ref()
+                .filter(|(_, radius)| bend.equal && *radius == bend.radius)
+                .map(|(arc, _)| *arc);
+            let op = match follow {
+                Some(to) => gc_doc::SketchOp::BendEqual { lines: [a, b], to },
+                None => gc_doc::SketchOp::Bend { lines: [a, b], radius: bend.radius.clone() },
+            };
+            if let Ok(made) = session.edit_active_sketch(op) {
+                if follow.is_none()
+                    && let Some(arc) = made.iter().find_map(|c| match c {
+                        gc_doc::Created::Curve(id) => Some(*id),
+                        _ => None,
+                    })
+                {
+                    bend.first = Some((arc, bend.radius.clone()));
+                }
+                bend.lines.clear();
             }
         }
         self.bend = Some(bend);
