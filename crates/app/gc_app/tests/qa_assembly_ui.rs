@@ -34,6 +34,25 @@ fn click_at(harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, at: egui::Pos
     }
 }
 
+/// Chooses a variant of a split button of the ribbon: the arrow ("<group> 더 보기") opens the list, the
+/// variant's name picks it. (The arrow is drawn with `ui.interact`, so it takes pointer events.)
+fn pick_variant(harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, group: &str, variant: &str) {
+    let at = harness.get_by_label(&format!("{group} 더 보기")).rect().center();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run_steps(3);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run_steps(3);
+    }
+    harness.get_by_label(variant).click();
+    harness.run_steps(3);
+}
+
 #[test]
 fn the_origin_folder_lists_its_seven_elements_in_the_decided_order() {
     let mut harness = harness();
@@ -532,18 +551,14 @@ fn editing_in_place_scopes_viewport_clicks_and_the_return_buttons_walk_back() {
     // Return to Parent goes up to Outer; Return goes back to Inner; Return to Top leaves.
     harness.get_by_label("조립").click();
     harness.run();
-    harness.get_by_label("상위로").click();
-    harness.run_steps(3);
+    pick_variant(&mut harness, "편집", "상위로");
     assert_eq!(harness.state().session.edit_target(), Some(gc_doc::TreeKey::Subassembly(outer)));
-    harness.get_by_label("복귀").click();
-    harness.run_steps(3);
+    pick_variant(&mut harness, "편집", "복귀");
     assert_eq!(harness.state().session.edit_target(), Some(gc_doc::TreeKey::Subassembly(inner)));
-    harness.get_by_label("최상위로").click();
-    harness.run_steps(3);
+    pick_variant(&mut harness, "편집", "최상위로");
     assert_eq!(harness.state().session.edit_target(), None);
-    // The buttons at the top level do nothing harmful.
-    harness.get_by_label("상위로").click();
-    harness.get_by_label("복귀").click();
+    // The button at the top level does nothing harmful (it is disabled).
+    harness.get_by_label("최상위로").click();
     harness.run_steps(2);
     assert_eq!(harness.state().session.edit_target(), None);
 
