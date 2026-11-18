@@ -101,10 +101,10 @@ fn auto_bend_places_a_bend_at_each_corner_as_lines_are_drawn() {
     use gc_tools::ToolKind;
     let mut s = Session::new();
     let _k = s.create_sketch_3d().unwrap();
-    assert_eq!(s.auto_bend(), None, "off by default");
-    // The document's radius (10 mm unless set) is the one to pass.
-    s.set_auto_bend(Some(s.doc_settings().auto_bend_text()));
-    assert_eq!(s.auto_bend(), Some("10 mm"));
+    assert!(!s.auto_bend(), "off by default");
+    // The radius is the document's (10 mm unless set).
+    assert!((s.doc_settings().auto_bend_radius - 0.01).abs() < 1e-12);
+    s.set_auto_bend(true);
     s.set_tool(ToolKind::Line);
     s.spatial_click([0.0, 0.0, 0.0], None, None);
     s.spatial_click([0.1, 0.0, 0.0], None, None);
@@ -131,7 +131,7 @@ fn auto_bend_places_a_bend_at_each_corner_as_lines_are_drawn() {
     s.spatial_click([0.2, 0.105, 0.05], None, None);
     assert_eq!(arcs(&s), 2);
     // Off again: plain corners.
-    s.set_auto_bend(None);
+    s.set_auto_bend(false);
     s.spatial_click([0.3, 0.2, 0.1], None, None);
     assert_eq!(arcs(&s), 2);
 }

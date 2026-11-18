@@ -133,7 +133,7 @@ FE 대화상자 필드: Summary(Title, Subject, Author, Company, Comments), Proj
 - `Session::{doc_settings, set_doc_settings}`.
 - 도우미: `DocSettings::{format_length, format_angle, dimension_text, length(), angle(), auto_bend_text, is_valid}`.
 - 뷰포트 치수 글자가 단위·자릿수·표시 모드를 따른다(`dimension_text`).
-- Auto-Bend: `Session::set_auto_bend(Option<String>)` / `auto_bend() -> Option<&str>`는 그대로 둔다(프론트엔드가 이미 씀). 문서 반지름을 쓰려면 `set_auto_bend(Some(doc_settings().auto_bend_text()))`. 한때 `bool`로 바꿨다가 FE 브랜치와 맞추려고 되돌렸다.
+- Auto-Bend: `Session::set_auto_bend(bool)` / `auto_bend() -> bool`(응용 옵션, 세션 값). 반지름은 문서의 `auto_bend_radius`. **API 바뀜**: 이전 `Option<String>`.
 
 FE 대화상자 필드(Tools > Document Settings):
 
@@ -159,7 +159,7 @@ FE 대화상자 필드(Tools > Document Settings):
 없음: Tolerance 표시(치수에 허용차 없음), Modeling·Drawing·BOM·Default Tolerance 탭, Lineweight.
 
 - 테스트: `gc_session/tests/doc_settings.rs`, `gc_doc` 단위 테스트 `settings::tests`.
-- QA·FE 브랜치 영향: 없음(Auto-Bend API는 그대로; `Timeline` 구조체 리터럴 없음).
+- QA 브랜치 영향: QA 브랜치의 `sketch_bend.rs`는 내 파일의 옛 사본이라 병합하면 내 쪽(`set_auto_bend(bool)`)으로 바뀐다. 다른 영향 없음(`Timeline` 구조체 리터럴 없음).
 
 ## 2026-11-18 — 스플라인 Tangent·Smooth(G2)(① 6번)
 
