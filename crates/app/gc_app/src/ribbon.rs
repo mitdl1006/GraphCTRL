@@ -333,6 +333,19 @@ pub(crate) fn show(
                         // The tab that was open before the sketch comes back on its own.
                         session.finish_sketch();
                     }
+                    // Cancel Sketch: discards what was done since the sketch was entered.
+                    if gc_ui::ribbon_small_button(
+                        ui,
+                        Icon::Text("x"),
+                        tr!(lang, CmdCancelSketch),
+                        false,
+                        sketching,
+                    )
+                    .clicked()
+                    {
+                        // False only past the 200-step history: then as much as it holds is taken back.
+                        let _complete = session.cancel_sketch();
+                    }
                 });
             }
             Tab::Assemble => action = assemble_tab(ui, session, viewport, lang),

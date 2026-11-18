@@ -76,6 +76,9 @@ pub struct Session {
     picked: Vec<Item>,
     /// The active selector of an open sketch dialog.
     pick_target: Option<SketchPick>,
+    /// Where the history stood when the sketch being edited was entered (or before it was created), with
+    /// the history's trim count then: what Cancel Sketch goes back to.
+    sketch_mark: Option<(usize, u64)>,
     drag: Option<SketchDrag>,
     report: Option<SketchReport>,
     request: Option<ValueRequest>,
@@ -125,6 +128,7 @@ impl Session {
             selection: BTreeSet::new(),
             picked: Vec::new(),
             pick_target: None,
+            sketch_mark: None,
             drag: None,
             report: None,
             request: None,
@@ -160,6 +164,7 @@ impl Session {
         self.path = path;
         self.history.clear();
         self.active = None;
+        self.sketch_mark = None;
         self.selection.clear();
         self.last_error = None;
         self.set_tool(ToolKind::Select);
@@ -431,7 +436,7 @@ impl Session {
         let created = self.execute(&Command::CreateSketch { name, frame, spatial: false })?;
         match created.first() {
             Some(Created::Sketch(id)) => {
-                self.enter_sketch(*id);
+                self.enter_created_sketch(*id);
                 Ok(*id)
             }
             _ => Err(gc_sketch::SketchError::MissingItem.into()),
@@ -966,7 +971,7 @@ impl Session {
         let created = self.execute(&Command::CreateSketchOn { name, source })?;
         match created.first() {
             Some(Created::Sketch(id)) => {
-                self.enter_sketch(*id);
+                self.enter_created_sketch(*id);
                 Ok(*id)
             }
             _ => Err(gc_sketch::SketchError::MissingItem.into()),
@@ -980,7 +985,7 @@ impl Session {
         let created = self.execute(&Command::CreateSketch { name, frame, spatial: true })?;
         match created.first() {
             Some(Created::Sketch(id)) => {
-                self.enter_sketch(*id);
+                self.enter_created_sketch(*id);
                 Ok(*id)
             }
             _ => Err(gc_sketch::SketchError::MissingItem.into()),
@@ -992,14 +997,44 @@ impl Session {
         if self.doc.get(sketch).is_some() {
             self.pick_target = None;
             self.active = Some(sketch);
+            self.sketch_mark = Some((self.history.undo_depth(), self.history.trimmed()));
             self.selection.clear();
             self.set_tool(ToolKind::Select);
             self.refresh();
         }
     }
 
+    /// Enters a sketch just created: Cancel Sketch also takes back its creation.
+    fn enter_created_sketch(&mut self, sketch: Id<Sketch>) {
+        self.enter_sketch(sketch);
+        self.sketch_mark = self.sketch_mark.map(|(depth, trimmed)| (depth.saturating_sub(1), trimmed));
+    }
+
+    /// Cancel Sketch (Inventor 2026 help, To Create and Edit Sketches, GUID-E96FB3C4-136B-4551-BF45-
+    /// F54594543ECB, Cancel a Sketch): everything done since the sketch was entered is discarded — its
+    /// creation too when it was new — and editing ends. The discarded steps cannot be redone. Returns false
+    /// when no sketch is being edited, or when the history (200 steps) no longer reaches back to the start;
+    /// then as much as it holds is taken back.
+    pub fn cancel_sketch(&mut self) -> bool {
+        let (Some(_), Some((depth, trimmed))) = (self.active, self.sketch_mark) else { return false };
+        self.drag = None;
+        let lost = self.history.trimmed().saturating_sub(trimmed);
+        let mark = usize::try_from(lost).ok().and_then(|lost| depth.checked_sub(lost));
+        let target = mark.unwrap_or(0);
+        while self.history.undo_depth() > target {
+            if self.history.undo(&mut self.doc).is_none() {
+                break;
+            }
+        }
+        self.history.drop_redo();
+        self.after_history();
+        self.finish_sketch();
+        mark.is_some()
+    }
+
     /// Stops editing the active sketch.
     pub fn finish_sketch(&mut self) {
+        self.sketch_mark = None;
         self.pick_target = None;
         self.active = None;
         self.selection.clear();

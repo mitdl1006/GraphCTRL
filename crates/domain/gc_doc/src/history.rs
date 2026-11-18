@@ -12,11 +12,13 @@ pub struct History {
     undo: Vec<Step>,
     redo: Vec<Step>,
     limit: usize,
+    /// How many of the oldest steps were dropped to keep within the limit, ever.
+    trimmed: u64,
 }
 
 impl Default for History {
     fn default() -> Self {
-        Self { undo: Vec::new(), redo: Vec::new(), limit: 200 }
+        Self { undo: Vec::new(), redo: Vec::new(), limit: 200, trimmed: 0 }
     }
 }
 
@@ -35,6 +37,7 @@ impl History {
         self.undo.push(Step { label: label.to_owned(), delta });
         if self.undo.len() > self.limit {
             self.undo.remove(0);
+            self.trimmed += 1;
         }
     }
 
@@ -70,6 +73,17 @@ impl History {
     /// The label of the step [`History::undo`] would undo.
     pub fn undo_label(&self) -> Option<&str> {
         self.undo.last().map(|s| s.label.as_str())
+    }
+
+    /// How many of the oldest steps have been dropped to keep within the limit so far (a mark taken as an
+    /// undo depth moves down by as many).
+    pub fn trimmed(&self) -> u64 {
+        self.trimmed
+    }
+
+    /// Forgets the steps that could be redone (they were discarded, as by Cancel Sketch).
+    pub fn drop_redo(&mut self) {
+        self.redo.clear();
     }
 
     /// Forgets everything (after opening another document).

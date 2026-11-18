@@ -336,3 +336,19 @@ fn the_three_dimensional_sketch_offers_parallel_perpendicular_and_equal() {
         assert_eq!(harness.state().session.tool(), kind);
     }
 }
+
+/// Cancel a Sketch (Inventor 2026 help, To Create and Edit Sketches,
+/// GUID-E96FB3C4-136B-4551-BF45-F54594543ECB): the ribbon's Cancel Sketch throws a new sketch away.
+#[test]
+fn cancel_sketch_on_the_ribbon_throws_a_new_sketch_away() {
+    let mut harness = sketching();
+    harness.state_mut().session.set_tool(ToolKind::Circle);
+    click(harness.state_mut(), mm(0.0, 0.0), false);
+    click(harness.state_mut(), mm(5.0, 0.0), false);
+    harness.run();
+    harness.get_by_label("스케치 취소").click();
+    harness.run();
+    assert!(harness.state().session.active_sketch().is_none());
+    assert_eq!(harness.state().session.doc().sketches().len(), 0);
+    harness.get_by_label("XY 스케치");
+}

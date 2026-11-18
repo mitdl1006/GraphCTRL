@@ -1033,6 +1033,7 @@ messages! {
     HudDistance => ("거리", "Distance"),
     HudX => ("X", "X"),
     ToolArc3 => ("3점 호", "Three Point Arc"),
+    CmdCancelSketch => ("스케치 취소", "Cancel Sketch"),
     HudY => ("Y", "Y"),
     /// Ribbon group (Inventor: Pattern panel).
     GroupPattern => ("패턴", "Pattern"),

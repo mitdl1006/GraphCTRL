@@ -349,3 +349,39 @@ fn three_dimensional_arcs_by_three_points_or_by_centre() {
     }
     assert!(session.active_sketch().unwrap().1.curves.is_empty());
 }
+
+/// Inventor 2026 help, To Create and Edit Sketches (GUID-E96FB3C4-136B-4551-BF45-F54594543ECB), Cancel a
+/// Sketch: creating, everything is discarded with the sketch; editing, what the edit did is discarded.
+#[test]
+fn cancel_sketch_discards_the_edit_or_the_new_sketch() {
+    // A new sketch: gone, with what was drawn in it, and nothing to redo.
+    let mut session = Session::new();
+    let before = session.doc().sketches().len();
+    session.create_sketch("XY").unwrap();
+    session.set_tool(ToolKind::Line);
+    click(&mut session, mm(0.0, 0.0));
+    click(&mut session, mm(20.0, 0.0));
+    assert!(session.cancel_sketch());
+    assert!(session.active_sketch().is_none());
+    assert_eq!(session.doc().sketches().len(), before);
+    assert_eq!(session.history().redo_depth(), 0);
+
+    // An existing sketch: back to how it was when the edit began; earlier work stays.
+    let mut session = new_session();
+    session.set_tool(ToolKind::Line);
+    click(&mut session, mm(0.0, 0.0));
+    click(&mut session, mm(20.0, 0.0));
+    session.tool_event(ToolEvent::Key(Key::Escape));
+    let (id, _) = session.active_sketch().unwrap();
+    session.finish_sketch();
+    let kept = session.doc().get(id).unwrap().clone();
+    session.enter_sketch(id);
+    session.set_tool(ToolKind::Circle);
+    click(&mut session, mm(50.0, 0.0));
+    click(&mut session, mm(55.0, 0.0));
+    assert_ne!(session.doc().get(id).unwrap(), &kept);
+    assert!(session.cancel_sketch());
+    assert!(session.active_sketch().is_none());
+    assert_eq!(session.doc().get(id).unwrap(), &kept);
+    assert!(!session.cancel_sketch(), "nothing to cancel outside a sketch");
+}
