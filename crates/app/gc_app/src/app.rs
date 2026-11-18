@@ -762,10 +762,8 @@ impl GraphCtrlApp {
                     }
                 }
                 egui::Key::V if command && !sketching => {
-                    // New instances in place, one undo step, hung on the cursor to be set down.
-                    if let Ok(created) = self.session.paste(gc_doc::Placement::default()) {
-                        self.viewport.start_placing_group(&self.session, &created);
-                    }
+                    // The paste waits for the click that gives its place: one undo step.
+                    self.viewport.start_paste(&self.session);
                 }
                 // F10 shows or hides the sketch being edited, else the latest sketch (Inventor 2026 help,
                 // shortcut table GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E: "F10 Sketch visibility").
