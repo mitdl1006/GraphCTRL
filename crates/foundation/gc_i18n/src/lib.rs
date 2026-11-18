@@ -266,6 +266,7 @@ messages! {
     /// Button: recover the automatic save.
     BtnRecover => ("복구", "Recover"),
     /// Notice after recovering. `{0}` is the project, or empty for a new one.
+    FileWarnings => ("열었지만 쓸 수 없는 데이터 {0}건을 버렸습니다: {1}", "Opened, but {0} unusable item(s) were dropped: {1}"),
     FileRecovered => ("복구했습니다. 저장해야 남습니다. {0}", "Recovered. Save it to keep it. {0}"),
     /// Button: do not save.
     BtnDiscard => ("저장 안 함", "Don't Save"),

@@ -5282,3 +5282,59 @@ fn the_joint_dialogs_limits_tab_goes_with_a_new_rotational_joint() {
     assert!((range.end - 90f64.to_radians()).abs() < 1e-9, "{range:?}");
     let _ = moving;
 }
+
+/// A file with an unusable joint range opens; the status bar says what was dropped (Session::load_warnings).
+#[test]
+fn opening_a_file_with_a_damaged_joint_range_reports_the_warning() {
+    let mut s = gc_session::Session::new();
+    let frame = |z: f64, nz: f64| gc_doc::Geometry::Frame {
+        origin: [0.0, 0.0, z],
+        z: [0.0, 0.0, nz],
+        x: [1.0, 0.0, 0.0],
+    };
+    let sel = |id: gc_core::AnyId, geometry| gc_doc::Selection {
+        occurrence: gc_doc::Occurrence::Item(id),
+        geometry,
+    };
+    let table = s
+        .add_body(
+            gc_doc::Solid::Box { size: [2.0, 1.0, 1.0] },
+            gc_doc::Placement { xyz: [0.0, 0.0, 0.5], rpy: [0.0; 3] },
+        )
+        .unwrap();
+    let block = s
+        .add_body(
+            gc_doc::Solid::Box { size: [0.2; 3] },
+            gc_doc::Placement { xyz: [0.3, 0.2, 1.6], rpy: [0.0; 3] },
+        )
+        .unwrap();
+    let hinge = s
+        .add_relationship(gc_doc::Relationship::new(
+            "Hinge",
+            gc_doc::RelationKind::Rotational { flip: false },
+            sel(block.erase(), frame(-0.1, -1.0)),
+            sel(table.erase(), frame(0.5, 1.0)),
+        ))
+        .unwrap();
+    s.set_joint_limits(hinge, Some(gc_doc::JointRange { start: -0.123, end: 0.456, current: None }), None)
+        .unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("cell.gcp");
+    s.save_as(&path).unwrap();
+    // Start past End: the range cannot be used.
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("-0.123"), "the range is in the file");
+    std::fs::write(&path, text.replacen("-0.123", "9.0", 1)).unwrap();
+
+    let mut harness =
+        egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0).build_eframe(|cc| {
+            GraphCtrlApp::new(cc, RunOptions::default()).with_dialogs(Box::new(Scripted(path.clone())))
+        });
+    harness.run();
+    harness.get_by_label("파일").click();
+    harness.run();
+    harness.get_by_label("열기...").click();
+    harness.run_steps(5);
+    assert_eq!(harness.state().session.load_warnings().len(), 1);
+    harness.get_by_label_contains("열었지만 쓸 수 없는 데이터 1건을 버렸습니다");
+}
