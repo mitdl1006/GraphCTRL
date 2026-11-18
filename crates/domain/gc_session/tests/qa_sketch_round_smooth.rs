@@ -243,7 +243,6 @@ fn two_ellipses_boundaries_and_edits_that_follow() {
 /// circles (`Unsolved(Flipped)`) and was for a line and an ellipse, but an ellipse is now accepted as tangent to
 /// itself — a constraint that means nothing and takes a place in the list.
 #[test]
-#[ignore = "BUG: Tangent of an ellipse with itself is accepted (owner: backend, gc_sketch bind.rs/gc_solver)"]
 fn an_ellipse_is_not_tangent_to_itself() {
     let mut s = Session::new();
     let k = s.create_sketch("XY").unwrap();
