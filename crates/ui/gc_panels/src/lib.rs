@@ -80,6 +80,19 @@ pub struct ParamsUi {
     pub group_name: Option<GroupName>,
     /// The Find box: only rows whose name contains this (case does not matter) are listed.
     pub find: String,
+    /// Display Preferences of the browser menu (Inventor 2026 help, Working with the Assembly Browser,
+    /// GUID-5F975252-BDB4-488C-A2C5-8B15C7D3C641). Hide Work Features also hides the Origin folders.
+    pub hide_work_features: bool,
+    /// Hide Fully Constrained: only components and relationships with issues are listed.
+    pub hide_fully_constrained: bool,
+    /// Show Constraint State is on unless this is set (so that the default state is the usual one).
+    pub hide_constraint_state: bool,
+    /// Edit Values in Browser is on unless this is set.
+    pub no_edit_values: bool,
+    /// The relationship selected in the browser, the value typed for it and which one that was loaded for.
+    pub relationship: Option<gc_core::Id<gc_doc::Relationship>>,
+    /// The text of the browser edit box.
+    pub relationship_value: String,
 }
 
 /// What a name typed in the browser is for.
@@ -154,6 +167,50 @@ fn params(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi) -> O
     command
 }
 
+/// The value of a constraint as the browser edit box shows it: millimetres, or degrees for an angle.
+fn relation_value_text(kind: &gc_doc::RelationKind) -> Option<String> {
+    use gc_doc::RelationKind;
+    let show = |v: f64| format!("{}", (v * 1000.0).round() / 1000.0);
+    match kind {
+        RelationKind::Mate { offset, .. }
+        | RelationKind::Flush { offset }
+        | RelationKind::Insert { offset, .. }
+        | RelationKind::Tangent { offset, .. } => Some(show(offset * 1000.0)),
+        RelationKind::Angle { angle, .. } => Some(show(angle.to_degrees())),
+        _ => None,
+    }
+}
+
+/// The unit of that value, when the constraint has one.
+fn relation_unit_name(kind: &gc_doc::RelationKind) -> Option<&'static str> {
+    use gc_doc::RelationKind;
+    match kind {
+        RelationKind::Mate { .. }
+        | RelationKind::Flush { .. }
+        | RelationKind::Insert { .. }
+        | RelationKind::Tangent { .. } => Some("mm"),
+        RelationKind::Angle { .. } => Some("°"),
+        _ => None,
+    }
+}
+
+/// The constraint with the value typed in the browser edit box (millimetres or degrees), or `None` when the
+/// text is not a number or the constraint has no value.
+fn relation_with_value(relationship: &gc_doc::Relationship, text: &str) -> Option<gc_doc::Relationship> {
+    use gc_doc::RelationKind;
+    let typed = text.trim().parse::<f64>().ok().filter(|v| v.is_finite())?;
+    let mut changed = relationship.clone();
+    changed.kind = match changed.kind {
+        RelationKind::Mate { sense, .. } => RelationKind::Mate { offset: typed / 1000.0, sense },
+        RelationKind::Flush { .. } => RelationKind::Flush { offset: typed / 1000.0 },
+        RelationKind::Insert { aligned, .. } => RelationKind::Insert { offset: typed / 1000.0, aligned },
+        RelationKind::Tangent { inside, .. } => RelationKind::Tangent { offset: typed / 1000.0, inside },
+        RelationKind::Angle { solution, .. } => RelationKind::Angle { angle: typed.to_radians(), solution },
+        _ => return None,
+    };
+    Some(changed)
+}
+
 /// Whether `name` is listed with the Find text `find` (case does not matter; an empty text lists everything).
 fn found(find: &str, name: &str) -> bool {
     find.trim().is_empty() || name.to_lowercase().contains(&find.trim().to_lowercase())
@@ -178,9 +235,22 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
         ui.add(
             egui::TextEdit::singleline(&mut state.find)
                 .hint_text(tr!(lang, BrowserFindHint))
-                .desired_width(ui.available_width() - 4.0),
+                .desired_width(ui.available_width() - 34.0),
         )
         .labelled_by(label.id);
+        // The browser menu: Display Preferences and Edit Values in Browser.
+        let menu = ui.menu_button("…", |ui| {
+            let mut show = !state.hide_constraint_state;
+            let mut edit = !state.no_edit_values;
+            ui.checkbox(&mut state.hide_work_features, tr!(lang, BrowserHideWork));
+            ui.checkbox(&mut state.hide_fully_constrained, tr!(lang, BrowserHideConstrained));
+            ui.checkbox(&mut show, tr!(lang, BrowserShowState));
+            ui.checkbox(&mut edit, tr!(lang, BrowserEditValues));
+            state.hide_constraint_state = !show;
+            state.no_edit_values = !edit;
+        });
+        menu.response
+            .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tr!(lang, BrowserMenu)));
     });
     group_name_row(ui, lang, state, &mut action);
     // F2 renames the selected node when the mouse is over the browser (over the 3D view, F2 pans).
@@ -216,6 +286,11 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
                     if !found(&state.find, &relationship.name) {
                         continue;
                     }
+                    if state.hide_fully_constrained
+                        && session.relationship_status(id) == Some(gc_doc::RelationStatus::Full)
+                    {
+                        continue;
+                    }
                     let suppressed = session.doc().is_inactive(id.erase());
                     let is_joint = gc_doc::is_joint_kind(&relationship.kind);
                     let condition = session.joint_condition(id);
@@ -235,7 +310,7 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
                         // A locked joint shows a padlock.
                         icon: if locked { Icon::Lock } else { Icon::Path },
                         text: &label,
-                        selected: false,
+                        selected: state.relationship == Some(id),
                         visible: None,
                         delete: Some(&delete),
                         edit: None,
@@ -243,7 +318,16 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
                         dim: suppressed,
                     };
                     let result = gc_ui::panel::tree_row(ui, row);
-                    if let Some(status) = session.relationship_status(id).filter(|_| !suppressed) {
+                    // Clicking a constraint selects it; with Edit Values in Browser its value can be typed.
+                    if result.row.clicked() && state.relationship != Some(id) {
+                        state.relationship = Some(id);
+                        state.relationship_value =
+                            relation_value_text(&relationship.kind).unwrap_or_default();
+                    }
+                    if let Some(status) = session
+                        .relationship_status(id)
+                        .filter(|_| !suppressed && !state.hide_constraint_state)
+                    {
                         use gc_doc::RelationStatus;
                         status_dot(
                             ui,
@@ -290,6 +374,34 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
                             ui.close();
                         }
                     });
+                    if state.relationship == Some(id)
+                        && !state.no_edit_values
+                        && let Some(unit) = relation_unit_name(&relationship.kind)
+                    {
+                        ui.horizontal(|ui| {
+                            ui.add_space(24.0);
+                            let field = ui.add(
+                                egui::TextEdit::singleline(&mut state.relationship_value).desired_width(80.0),
+                            );
+                            field.widget_info(|| {
+                                egui::WidgetInfo::labeled(
+                                    egui::Role::TextInput,
+                                    true,
+                                    tr!(lang, BrowserRelationValue),
+                                )
+                            });
+                            ui.label(unit);
+                            if field.lost_focus()
+                                && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                && let Some(changed) =
+                                    relation_with_value(relationship, &state.relationship_value)
+                            {
+                                action = Some(BrowserAction::Edit(Box::new(gc_doc::Command::Cell(
+                                    gc_doc::CellOp::SetRelationship { id, relationship: changed },
+                                ))));
+                            }
+                        });
+                    }
                     if result.deleted {
                         action = Some(BrowserAction::Edit(Box::new(gc_doc::Command::Cell(
                             gc_doc::CellOp::DeleteRelationship(id),
@@ -330,23 +442,25 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
                 });
             }
             representations(ui, session, lang, &mut action);
-            egui::CollapsingHeader::new(tr!(lang, BrowserOrigin)).default_open(false).show(ui, |ui| {
-                for (_, frame) in
-                    session.doc().frames().iter().filter(|(_, f)| f.kind == FrameKind::OriginPlane)
-                {
-                    let row = TreeRow {
-                        icon: Icon::Frame,
-                        text: &frame.name,
-                        selected: false,
-                        visible: None,
-                        delete: None,
-                        edit: None,
-                        focus: false,
-                        dim: false,
-                    };
-                    gc_ui::panel::tree_row(ui, row);
-                }
-            });
+            if !state.hide_work_features {
+                egui::CollapsingHeader::new(tr!(lang, BrowserOrigin)).default_open(false).show(ui, |ui| {
+                    for (_, frame) in
+                        session.doc().frames().iter().filter(|(_, f)| f.kind == FrameKind::OriginPlane)
+                    {
+                        let row = TreeRow {
+                            icon: Icon::Frame,
+                            text: &frame.name,
+                            selected: false,
+                            visible: None,
+                            delete: None,
+                            edit: None,
+                            focus: false,
+                            dim: false,
+                        };
+                        gc_ui::panel::tree_row(ui, row);
+                    }
+                });
+            }
             let rows = session.component_tree();
             component_rows(ui, session, lang, state, selected, &mut action, &rows, None);
         });
@@ -357,7 +471,9 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
             sketch_row(ui, session, lang, state, &mut action, id);
         }
     });
-    work_features(ui, session, lang, &mut action);
+    if !state.hide_work_features {
+        work_features(ui, session, lang, &mut action);
+    }
     if let Some(command) = params(ui, session, lang, state) {
         action = Some(BrowserAction::Edit(Box::new(command)));
     }
@@ -604,6 +720,13 @@ fn component_rows(
         if !row_found(rows, row, &state.find) {
             continue;
         }
+        // Hide Fully Constrained: a component that is fully constrained is not listed.
+        if state.hide_fully_constrained
+            && let TreeKey::Component(Occurrence::Item(any)) = row.key
+            && state.statuses.get(&any) == Some(&gc_doc::ComponentStatus::Full)
+        {
+            continue;
+        }
         match row.key {
             TreeKey::Subassembly(id) => {
                 let mark = if editing == Some(row.key) { "● " } else { "" };
@@ -843,7 +966,9 @@ fn browser_section(
             }
             // Components have an origin folder of their own.
             if let CellItem::Body(_) | CellItem::Robot(_) = item {
-                origin_folder(ui, session, lang, state, gc_doc::Occurrence::Item(cell_any(item)), action);
+                if !state.hide_work_features {
+                    origin_folder(ui, session, lang, state, gc_doc::Occurrence::Item(cell_any(item)), action);
+                }
                 if let CellItem::Robot(robot) = item {
                     robot_links(ui, session, lang, state, robot, action);
                 }
@@ -903,7 +1028,9 @@ fn robot_links(
                         dim: false,
                     };
                     gc_ui::panel::tree_row(ui, row);
-                    origin_folder(ui, session, lang, state, node.occurrence, action);
+                    if !state.hide_work_features {
+                        origin_folder(ui, session, lang, state, node.occurrence, action);
+                    }
                 }
             });
     });
@@ -1115,7 +1242,7 @@ fn node_row(
         let at = egui::Rect::from_center_size(icon_centre + egui::vec2(6.0, -5.0), egui::vec2(10.0, 10.0));
         Icon::Pin.paint(ui.painter(), at, gc_ui::colors::text());
     }
-    if let Some(&status) = state.statuses.get(&node.any) {
+    if let Some(&status) = state.statuses.get(&node.any).filter(|_| !state.hide_constraint_state) {
         use gc_doc::ComponentStatus;
         status_dot(
             ui,

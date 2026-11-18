@@ -5503,3 +5503,62 @@ fn the_browser_menu_enables_and_grounds_components_and_find_filters_the_rows() {
     harness.get_by_label("Body2:1");
     assert!(harness.query_all_by_label("Body1:1").next().is_none(), "Body1 is filtered out");
 }
+
+/// The browser menu: Display Preferences (Hide Work Features hides the Origin folders) and Edit Values in
+/// Browser (a selected constraint shows an edit box for its value), Inventor 2026 help, Working with the
+/// Assembly Browser, GUID-5F975252-BDB4-488C-A2C5-8B15C7D3C641.
+#[test]
+fn the_browser_menu_hides_work_features_and_edits_a_constraint_value_in_place() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.05; 3] };
+    let app = harness.state_mut();
+    let fixed = app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    let moving =
+        app.session.add_body(solid, gc_doc::Placement { xyz: [0.0, 0.0, 0.2], rpy: [0.0; 3] }).unwrap();
+    let plane = gc_doc::Geometry::origin(gc_doc::OriginElement::Plane(gc_doc::OriginPlane::Xy));
+    let select = |body: gc_core::Id<gc_doc::Body>| gc_doc::Selection {
+        occurrence: gc_doc::Occurrence::Item(body.erase()),
+        geometry: plane,
+    };
+    let id = app
+        .session
+        .add_relationship(gc_doc::Relationship::new(
+            "Mate:1",
+            gc_doc::RelationKind::Mate { offset: 0.01, sense: gc_doc::AxisSense::Opposed },
+            select(moving),
+            select(fixed),
+        ))
+        .unwrap();
+    harness.run();
+    let origins = |h: &egui_kittest::Harness<'_, GraphCtrlApp>| h.query_all_by_label("원점").count();
+    assert!(origins(&harness) >= 1, "the Origin folders are listed");
+    harness.get_by_label("브라우저 메뉴").click();
+    harness.run_steps(3);
+    harness.get_by_label("작업 피처 숨기기").click();
+    harness.run_steps(3);
+    assert_eq!(origins(&harness), 0, "Hide Work Features hides the Origin folders");
+    harness.get_by_label("브라우저 메뉴").click();
+    harness.run_steps(3);
+    harness.get_by_label("작업 피처 숨기기").click();
+    harness.run_steps(3);
+    assert!(origins(&harness) >= 1, "and shows them again");
+
+    // Edit Values in Browser: select the constraint, type a value, Enter.
+    harness.get_by_label("Mate:1").click();
+    harness.run_steps(3);
+    let input = egui::accesskit::Role::TextInput;
+    let field = harness.get_by_role_and_label(input, "관계 값");
+    field.click();
+    harness.run_steps(2);
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.get_by_role_and_label(input, "관계 값").type_text("25");
+    harness.key_press(egui::Key::Enter);
+    harness.run_steps(3);
+    let kind = harness.state().session.doc().get(id).unwrap().kind;
+    let gc_doc::RelationKind::Mate { offset, .. } = kind else { panic!("{kind:?}") };
+    assert!((offset - 0.025).abs() < 1e-9, "the offset was typed in the browser: {offset}");
+}
