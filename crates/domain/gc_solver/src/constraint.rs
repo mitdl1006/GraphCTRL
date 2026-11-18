@@ -51,6 +51,17 @@ pub enum Constraint {
     PointOnLine(P2, Line2),
     /// The point lies on the circle.
     PointOnCircle(P2, Round),
+    /// The point lies on the ellipse with centre `c`, major axis end `major` and minor radius `minor`.
+    PointOnEllipse {
+        /// The point.
+        p: P2,
+        /// Centre.
+        c: P2,
+        /// End of the major axis.
+        major: P2,
+        /// Minor radius (a length parameter).
+        minor: ParamId,
+    },
     /// The point is the midpoint of the segment.
     Midpoint(P2, Line2),
     /// The two points have the same y.
@@ -348,6 +359,10 @@ impl Constraint {
             )),
             Self::PointOnCircle(p, round) => {
                 out.rows.push((RowKind::PointCircle, vec![p[0], p[1], round.c[0], round.c[1], round.r]));
+            }
+            Self::PointOnEllipse { p, c, major, minor } => {
+                out.rows
+                    .push((RowKind::PointEllipse, vec![p[0], p[1], c[0], c[1], major[0], major[1], *minor]));
             }
             Self::Midpoint(p, line) => {
                 for k in 0..2 {

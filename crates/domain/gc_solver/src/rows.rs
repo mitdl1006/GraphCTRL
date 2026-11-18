@@ -22,6 +22,10 @@ pub(crate) enum RowKind {
     PointLine { frozen: Option<f64>, target: f64 },
     /// `[px, py, cx, cy, r]`: `|p - c| - r`.
     PointCircle,
+    /// `[px, py, cx, cy, mx, my, b]`: the point on the ellipse with centre `c`, major axis end `m` and
+    /// minor radius `b`: `(|(x / a, y / b)| - 1) * b`, with `(x, y)` the point in the ellipse's axes and
+    /// `a = |m - c|` (a length, zero on the ellipse).
+    PointEllipse,
     /// `[p, a, b]` (one coordinate each): `p - (a + b) / 2`.
     Mid,
     /// `[ax, ay, bx, by, cx, cy, dx, dy]`: `cross(b - a, d - c) / scale`.
@@ -100,6 +104,7 @@ impl RowKind {
             Self::Distance { dim, .. } => 2 * dim,
             Self::Mid => 3,
             Self::PointCircle => 5,
+            Self::PointEllipse => 7,
             Self::PointLine { .. } | Self::CircleCircle { .. } => 6,
             Self::LineCircleTangent { .. } => 7,
             Self::Cross { .. }
@@ -136,6 +141,20 @@ impl RowKind {
                 if divisor.value() == 0.0 { cross - c(target) } else { cross / divisor - c(target) }
             }
             Self::PointCircle => length(&[v[0] - v[2], v[1] - v[3]], size, degenerate) - v[4],
+            Self::PointEllipse => {
+                let (ux, uy) = (v[0] - v[2], v[1] - v[3]);
+                let (dx, dy) = (v[4] - v[2], v[5] - v[3]);
+                let a = length(&[dx, dy], size, degenerate);
+                let b = v[6];
+                if a.value() <= DEGENERATE * size || b.value().abs() <= DEGENERATE * size {
+                    // No ellipse to speak of: keep the point at the major radius from the centre.
+                    *degenerate = true;
+                    return length(&[ux, uy], size, degenerate) - a;
+                }
+                let x = (ux * dx + uy * dy) / a;
+                let y = (dx * uy - dy * ux) / a;
+                (length(&[x / a, y / b], size, degenerate) - c(1.0)) * b
+            }
             Self::Mid => v[0] - (v[1] + v[2]) / c(2.0),
             Self::Cross { scale } => {
                 ((v[2] - v[0]) * (v[7] - v[5]) - (v[3] - v[1]) * (v[6] - v[4])) / c(scale)
@@ -257,6 +276,7 @@ mod tests {
             RowKind::PointLine { frozen: None, target: 0.4 },
             RowKind::PointLine { frozen: Some(2.5), target: 0.0 },
             RowKind::PointCircle,
+            RowKind::PointEllipse,
             RowKind::Mid,
             RowKind::Cross { scale: 2.0 },
             RowKind::Dot { scale: 2.0 },

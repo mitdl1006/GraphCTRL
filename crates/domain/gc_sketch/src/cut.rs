@@ -211,6 +211,8 @@ impl Sketch {
                 let start = angle(c, s);
                 Shape::Round(c, dist(c, s), Some((start, (angle(c, e) - start).rem_euclid(TAU))))
             }
+            // Trim, extend and split do not cut ellipses yet.
+            CurveGeom::Ellipse { .. } => return None,
         })
     }
 
@@ -335,7 +337,7 @@ impl Sketch {
                 let centre = self.pos(c).ok_or(SketchError::MissingPoint)?;
                 self.add_arc(alloc, centre, [to.pos[0], to.pos[1], 0.0], last_pos)?
             }
-            CurveGeom::Circle { .. } => return Err(SketchError::InvalidValue),
+            CurveGeom::Circle { .. } | CurveGeom::Ellipse { .. } => return Err(SketchError::InvalidValue),
         };
         if let Some(k) = self.curves.get_mut(&piece) {
             k.construction = construction;
@@ -382,7 +384,7 @@ impl Sketch {
         match *geom {
             CurveGeom::Line { a, b } => Some((a, b)),
             CurveGeom::Arc { s, e, .. } => Some((s, e)),
-            CurveGeom::Circle { .. } => None,
+            CurveGeom::Circle { .. } | CurveGeom::Ellipse { .. } => None,
         }
     }
 

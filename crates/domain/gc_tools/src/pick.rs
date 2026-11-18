@@ -92,6 +92,12 @@ pub(crate) fn closest_on_curve(sketch: &Sketch, curve: &Curve, at: [f64; 2]) -> 
             let d = distance(at, c);
             (d > 0.0).then(|| [c[0] + (at[0] - c[0]) * r / d, c[1] + (at[1] - c[1]) * r / d])
         }
+        // The nearest of many points around it (close enough to pick and snap to).
+        CurveGeom::Ellipse { c, major, minor } => {
+            gc_sketch::ellipse_points(xy(sketch, c)?, xy(sketch, major)?, minor, 256)?
+                .into_iter()
+                .min_by(|p, q| distance(*p, at).total_cmp(&distance(*q, at)))
+        }
         CurveGeom::Arc { c, s, e } => {
             let (c, s, e) = (xy(sketch, c)?, xy(sketch, s)?, xy(sketch, e)?);
             let (r, d) = (distance(s, c), distance(at, c));
@@ -188,6 +194,8 @@ pub(crate) fn curve_shape(sketch: &Sketch, c: &Curve) -> Option<Shape> {
             let (c, s, e) = (xy(sketch, c)?, xy(sketch, s)?, xy(sketch, e)?);
             Shape::Round(c, distance(c, s), Some((s, e)))
         }
+        // Intersections with ellipses are not found yet.
+        CurveGeom::Ellipse { .. } => return None,
     })
 }
 
@@ -347,6 +355,8 @@ pub fn snap(sketch: &Sketch, at: [f64; 2], px: f64, previous: Option<[f64; 2]>, 
                 };
                 offer(distance(mid, at), snap);
             }
+            // Its centre is a sketch point (snapped as one); no quadrant snaps yet.
+            CurveGeom::Ellipse { .. } => {}
             CurveGeom::Circle { c, r } => {
                 let (Some(centre_id), Some(c)) = (Some(c), xy(sketch, c)) else { continue };
                 for (k, offset) in [[r, 0.0], [0.0, r], [-r, 0.0], [0.0, -r]].into_iter().enumerate() {
@@ -380,7 +390,7 @@ pub fn snap(sketch: &Sketch, at: [f64; 2], px: f64, previous: Option<[f64; 2]>, 
                     }
                     _ => continue,
                 },
-                CurveGeom::Line { .. } => continue,
+                CurveGeom::Line { .. } | CurveGeom::Ellipse { .. } => continue,
             };
             let d = distance(from, centre);
             if d <= radius * (1.0 + 1e-9) {

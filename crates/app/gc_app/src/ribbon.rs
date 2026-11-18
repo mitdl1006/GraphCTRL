@@ -246,6 +246,7 @@ pub(crate) fn show(
                             &[
                                 (ToolKind::Circle, Icon::Circle, Msg::ToolCircle),
                                 (ToolKind::TangentCircle, Icon::Text("(/)"), Msg::ToolTangentCircle),
+                                (ToolKind::Ellipse, Icon::Text("( )"), Msg::ToolEllipse),
                             ],
                         );
                         split(

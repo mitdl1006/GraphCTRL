@@ -96,6 +96,16 @@ pub enum CurveGeom {
         /// End point.
         e: Id<SkPoint>,
     },
+    /// A full ellipse (Inventor 2026 help, To Create 2D Shape Geometry, Ellipse): its centre, the end of its
+    /// major axis (the major radius is their distance, the axis their direction) and its minor radius.
+    Ellipse {
+        /// Centre point.
+        c: Id<SkPoint>,
+        /// End of the major axis.
+        major: Id<SkPoint>,
+        /// Minor radius.
+        minor: f64,
+    },
 }
 
 /// A curve of a sketch.
@@ -119,6 +129,7 @@ impl Curve {
             CurveGeom::Line { a, b } => vec![a, b],
             CurveGeom::Circle { c, .. } => vec![c],
             CurveGeom::Arc { c, s, e } => vec![c, s, e],
+            CurveGeom::Ellipse { c, major, .. } => vec![c, major],
         }
     }
 }
@@ -350,6 +361,22 @@ impl Sketch {
         }
     }
 
+    /// Points around an ellipse in the sketch plane (`segments` of them, the first at the major axis end,
+    /// counter-clockwise), for drawing and picking. `None` for another curve or a degenerate ellipse.
+    pub fn ellipse_outline(&self, curve: Id<Curve>, segments: usize) -> Option<Vec<[f64; 2]>> {
+        let (c, major, b) = self.ellipse(curve)?;
+        let (c, m) = (self.pos(c)?, self.pos(major)?);
+        ellipse_points([c[0], c[1]], [m[0], m[1]], b, segments)
+    }
+
+    /// An ellipse's centre, major axis end and minor radius; `None` for another kind of curve.
+    pub fn ellipse(&self, curve: Id<Curve>) -> Option<(Id<SkPoint>, Id<SkPoint>, f64)> {
+        match self.curves.get(&curve)?.geom {
+            CurveGeom::Ellipse { c, major, minor } => Some((c, major, minor)),
+            CurveGeom::Line { .. } | CurveGeom::Circle { .. } | CurveGeom::Arc { .. } => None,
+        }
+    }
+
     /// Centre and current radius of a circle or arc, if `curve` is one.
     pub fn round(&self, curve: Id<Curve>) -> Option<(Id<SkPoint>, f64)> {
         match self.curves.get(&curve)?.geom {
@@ -359,7 +386,7 @@ impl Sketch {
                 let squares = (0..3).map(|k| (start[k] - centre[k]).powi(2)).sum::<f64>();
                 Some((c, squares.sqrt()))
             }
-            CurveGeom::Line { .. } => None,
+            CurveGeom::Line { .. } | CurveGeom::Ellipse { .. } => None,
         }
     }
 
@@ -406,4 +433,26 @@ impl Sketch {
             DimKind::PlaneDistance { p, .. } => (vec![p], Vec::new()),
         }
     }
+}
+
+/// Points around the ellipse with centre `c`, major axis end `m` and minor radius `b` (`segments` of them,
+/// the first at `m`, counter-clockwise). `None` for a degenerate ellipse or fewer than three segments.
+pub fn ellipse_points(c: [f64; 2], m: [f64; 2], b: f64, segments: usize) -> Option<Vec<[f64; 2]>> {
+    let (dx, dy) = (m[0] - c[0], m[1] - c[1]);
+    let a = gc_math::fm::hypot(dx, dy);
+    if !(a > 1e-12 && a.is_finite() && b.is_finite() && segments >= 3) {
+        return None;
+    }
+    let (ux, uy) = (dx / a, dy / a);
+    #[allow(clippy::cast_precision_loss, reason = "a few hundred segments")]
+    let step = std::f64::consts::TAU / segments as f64;
+    Some(
+        (0..segments)
+            .map(|k| {
+                #[allow(clippy::cast_precision_loss, reason = "a few hundred segments")]
+                let (sin, cos) = gc_math::fm::sin_cos(step * k as f64);
+                [c[0] + a * cos * ux - b * sin * uy, c[1] + a * cos * uy + b * sin * ux]
+            })
+            .collect(),
+    )
 }

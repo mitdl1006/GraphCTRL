@@ -320,6 +320,19 @@ pub enum SketchOp {
         #[serde(default)]
         rim_snap: EndSnap,
     },
+    /// Adds an ellipse (Inventor 2026 help, To Create 2D Shape Geometry, Ellipse: the centre, a point that
+    /// sets the first axis, then a point that sets the minor radius).
+    AddEllipse {
+        /// Centre.
+        centre: [f64; 3],
+        /// End of the major (first) axis.
+        major: [f64; 3],
+        /// Minor radius.
+        minor: f64,
+        /// What the centre was snapped to.
+        #[serde(default)]
+        centre_snap: EndSnap,
+    },
     /// Adds an arc, counter-clockwise from `start` to `end`.
     AddArc {
         /// Centre.
@@ -1187,6 +1200,9 @@ impl PatternBuild {
                 gc_sketch::CurveGeom::Arc { c, s, e } => {
                     gc_sketch::CurveGeom::Arc { c: to(c)?, s: to(s)?, e: to(e)? }
                 }
+                gc_sketch::CurveGeom::Ellipse { c, major, minor } => {
+                    gc_sketch::CurveGeom::Ellipse { c: to(c)?, major: to(major)?, minor }
+                }
             };
             let id: Id<Curve> = ids.alloc();
             sketch.curves.insert(id, Curve { geom, construction: curve.construction });
@@ -1384,6 +1400,11 @@ fn auto_dimension(
             Some(gc_sketch::CurveGeom::Line { a, b }) => candidates.push(DimKind::Distance { p: a, q: b }),
             Some(gc_sketch::CurveGeom::Circle { .. }) => candidates.push(DimKind::Diameter(*curve)),
             Some(gc_sketch::CurveGeom::Arc { .. }) => candidates.push(DimKind::Radius(*curve)),
+            // The major radius (centre to major axis end) and the minor radius.
+            Some(gc_sketch::CurveGeom::Ellipse { c, major, .. }) => {
+                candidates.push(DimKind::Distance { p: c, q: major });
+                candidates.push(DimKind::Radius(*curve));
+            }
             None => {}
         }
     }
@@ -1515,7 +1536,7 @@ pub(crate) fn leaving_direction(sketch: &Sketch, curve: Id<Curve>, at: Id<SkPoin
                 None
             }
         }
-        gc_sketch::CurveGeom::Circle { .. } => None,
+        gc_sketch::CurveGeom::Circle { .. } | gc_sketch::CurveGeom::Ellipse { .. } => None,
     }
 }
 
@@ -1928,6 +1949,9 @@ fn sketch_op(
                     gc_sketch::CurveGeom::Arc { c, s, e } => {
                         gc_sketch::CurveGeom::Arc { c: map(c)?, s: map(e)?, e: map(s)? }
                     }
+                    gc_sketch::CurveGeom::Ellipse { c, major, minor } => {
+                        gc_sketch::CurveGeom::Ellipse { c: map(c)?, major: map(major)?, minor }
+                    }
                 };
                 let id: Id<Curve> = ids.alloc();
                 sketch.curves.insert(id, Curve { geom, construction: curve.construction });
@@ -2197,6 +2221,14 @@ fn sketch_op(
                 infer(sketch, ids, constraint, &mut created);
             }
             "Circle"
+        }
+        SketchOp::AddEllipse { centre, major, minor, centre_snap } => {
+            let ellipse = sketch.add_ellipse(ids, *centre, *major, *minor)?;
+            created.push(Created::Curve(ellipse));
+            if let Some((c, _, _)) = sketch.ellipse(ellipse) {
+                snap_constraint(sketch, ids, c, centre_snap, &mut created);
+            }
+            "Ellipse"
         }
         SketchOp::AddArc { centre, start, end } => {
             created.push(Created::Curve(sketch.add_arc(ids, *centre, *start, *end)?));
