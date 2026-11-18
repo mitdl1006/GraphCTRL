@@ -23,11 +23,23 @@ pub(crate) struct SpatialState {
     arc: Vec<([f64; 3], Option<Id<SkPoint>>)>,
     /// The fit points clicked so far for a spline, with the existing points they were placed on.
     spline: Vec<([f64; 3], Option<Id<SkPoint>>)>,
+    /// The line the line in progress continues from (for Auto-Bend).
+    previous: Option<Id<gc_sketch::Curve>>,
+    /// Auto-Bend's radius as typed, when it is on.
+    auto_bend: Option<String>,
 }
 
 impl Default for SpatialState {
     fn default() -> Self {
-        Self { anchor: None, hover: None, plane: 2, arc: Vec::new(), spline: Vec::new() }
+        Self {
+            anchor: None,
+            hover: None,
+            plane: 2,
+            arc: Vec::new(),
+            spline: Vec::new(),
+            previous: None,
+            auto_bend: None,
+        }
     }
 }
 
@@ -37,6 +49,7 @@ impl SpatialState {
         self.hover = None;
         self.arc.clear();
         self.spline.clear();
+        self.previous = None;
     }
 
     /// Drops the line or arc in progress. Returns false when there was none.
@@ -45,6 +58,7 @@ impl SpatialState {
         let arc = !self.arc.is_empty() || !self.spline.is_empty();
         self.arc.clear();
         self.spline.clear();
+        self.previous = None;
         self.anchor.take().is_some() || arc
     }
 }
@@ -53,6 +67,19 @@ impl Session {
     /// True when the sketch being edited is a 3D sketch.
     pub fn sketch_is_spatial(&self) -> bool {
         self.active_sketch().is_some_and(|(_, sketch)| sketch.is_spatial())
+    }
+
+    /// Auto-Bend for 3D lines (Sketch tab of Application Options, GUID-1898C432-CFD2-46F1-8BAE-631392DFBF1D:
+    /// "Automatically places tangent corner bends on 3D lines as you sketch them. Default setting is off"):
+    /// `Some(radius)` turns it on with that radius as typed (the document's 3D Sketch Auto-Bend Radius),
+    /// `None` off.
+    pub fn set_auto_bend(&mut self, radius: Option<String>) {
+        self.spatial.auto_bend = radius;
+    }
+
+    /// Auto-Bend's radius when it is on.
+    pub fn auto_bend(&self) -> Option<&str> {
+        self.spatial.auto_bend.as_deref()
     }
 
     /// The normal of the working plane of 3D sketching: 2 = XY, 0 = YZ, 1 = ZX.
@@ -149,12 +176,21 @@ impl Session {
             snap_b: EndSnap { point, ..EndSnap::default() },
             horizontal: None,
         };
-        let Ok(created) = self.sketch_op(line) else { return };
-        let ends = created.iter().find_map(|c| match c {
-            Created::Curve(curve) => self.active_sketch()?.1.line(*curve),
+        // With Auto-Bend, the corner with the line before gets a bend.
+        let op = match (&self.spatial.auto_bend, self.spatial.previous) {
+            (Some(radius), Some(previous)) => {
+                SketchOp::AddLineBent { line: Box::new(line), previous, radius: radius.clone() }
+            }
+            _ => line,
+        };
+        let Ok(created) = self.sketch_op(op) else { return };
+        let new = created.iter().find_map(|c| match c {
+            Created::Curve(curve) => self.active_sketch()?.1.line(*curve).map(|_| *curve),
             _ => None,
         });
-        let Some((from, to)) = ends else { return };
+        let Some(new) = new else { return };
+        let Some((from, to)) = self.active_sketch().and_then(|(_, sk)| sk.line(new)) else { return };
+        self.spatial.previous = Some(new);
         if let Some(axis) = axis {
             // Implied by how the point was placed: dropped without a word if it does not fit.
             let along = SketchOp::AddConstraint(GeoConstraint::AlongAxis { p: from, q: to, axis });

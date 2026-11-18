@@ -133,3 +133,53 @@ fn the_dimension_tool_measures_from_a_line_to_a_circle_and_between_circles() {
         sk.dimensions.values().map(|d| d.kind).collect::<Vec<_>>()
     );
 }
+
+/// The dimension tool on two circles (lead's report): clicking the first circle's rim and then the second's
+/// gives the distance between them, not a diameter; inside one another too.
+#[test]
+fn the_dimension_tool_on_two_circle_rims_gives_their_distance() {
+    use gc_tools::{ToolEvent, ToolKind};
+    for (b_centre, b_radius, external, expected) in
+        [([0.1, 0.0], 0.01, true, 0.1 - 0.02 - 0.01), ([0.005, 0.0], 0.005, false, 0.02 - 0.005 - 0.005)]
+    {
+        let mut s = Session::new();
+        let k = s.create_sketch("XY").unwrap();
+        let a = circle(&mut s, k, [0.0, 0.0], 0.02);
+        let b = circle(&mut s, k, b_centre, b_radius);
+        s.set_tool(ToolKind::Dimension);
+        let px = 1e-4;
+        let click = |s: &mut Session, at: [f64; 2]| {
+            s.tool_event(ToolEvent::Move { pos: at, px, suppress_snap: false });
+            s.tool_event(ToolEvent::Click { pos: at, px, modifier: false });
+        };
+        // The rims, on their tops (away from each other's).
+        click(&mut s, [0.0, 0.02]);
+        click(&mut s, [b_centre[0], b_radius]);
+        click(&mut s, [0.05, 0.06]);
+        let request = *s.value_request().unwrap();
+        assert_eq!(request.kind, DimKind::ArcArc { a, b, external }, "{:?}", request.kind);
+        assert!((request.measured - expected).abs() < 1e-9, "{}", request.measured);
+    }
+}
+
+/// Two crossing circles have no gap: the tool dimensions the distance between their centres instead of
+/// falling back to one circle's diameter.
+#[test]
+fn the_dimension_tool_on_two_crossing_circles_gives_the_centre_distance() {
+    use gc_tools::{ToolEvent, ToolKind};
+    let mut s = Session::new();
+    let k = s.create_sketch("XY").unwrap();
+    let a = circle(&mut s, k, [0.0, 0.0], 0.02);
+    let b = circle(&mut s, k, [0.03, 0.0], 0.02);
+    s.set_tool(ToolKind::Dimension);
+    let px = 1e-4;
+    for at in [[0.0, 0.02], [0.03, 0.02], [0.015, 0.05]] {
+        s.tool_event(ToolEvent::Move { pos: at, px, suppress_snap: false });
+        s.tool_event(ToolEvent::Click { pos: at, px, modifier: false });
+    }
+    let request = *s.value_request().unwrap();
+    let sk = s.active_sketch().unwrap().1;
+    let (ca, cb) = (sk.round(a).unwrap().0, sk.round(b).unwrap().0);
+    assert_eq!(request.kind, DimKind::Distance { p: ca, q: cb });
+    assert!((request.measured - 0.03).abs() < 1e-9);
+}
