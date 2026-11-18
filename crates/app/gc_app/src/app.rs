@@ -558,6 +558,33 @@ impl GraphCtrlApp {
         }
     }
 
+    /// Replaces a robot with a description file or a robot of the library (Inventor 2026 help, Replace assembly
+    /// components, GUID-E5FAA224-7332-4AC6-A78E-793FDACFEEDD); the relationships that could not be kept are named.
+    fn replace_robot(&mut self, request: crate::replicate::RobotRequest, lang: Lang) {
+        use crate::replicate::RobotSource;
+        let result = match request.source {
+            RobotSource::File => {
+                let Some(path) = self.dialogs.open_urdf() else { return };
+                self.session.replace_robot_file(request.robot, &path, request.all)
+            }
+            RobotSource::Library(index) => match self.library.get(index) {
+                Some(LibraryRobot::Package(package)) => {
+                    self.session.replace_library_robot(request.robot, package, request.all)
+                }
+                Some(LibraryRobot::Plugin { name, urdf }) => {
+                    self.session.replace_robot(request.robot, name, urdf, "", request.all)
+                }
+                None => return,
+            },
+        };
+        self.notice = Some(match result {
+            Ok(suppressed) if suppressed.is_empty() => tr!(lang, ReplaceRobotDone).to_owned(),
+            Ok(suppressed) => tr!(lang, ReplaceRobotSuppressed, suppressed.join(", ")),
+            // A robot with joint waypoints and another number of joints is refused with the reason.
+            Err(error) => tr!(lang, FileError, error),
+        });
+    }
+
     /// Place at Component Origin (Inventor 2026 help, GUID-E7A45820-E297-449D-AFBF-3C8D8EAE8A0E): the file of the
     /// new component is asked for, and it is put on the origin of `target` and constrained there.
     fn place_at_origin(&mut self, target: gc_doc::Occurrence, lang: Lang) {
@@ -1799,6 +1826,7 @@ impl eframe::App for GraphCtrlApp {
                         Some(BrowserAction::PlaceAtOrigin(target)) => {
                             self.place_origin_request = Some(target)
                         }
+                        Some(BrowserAction::Replace(item)) => self.replicate.start_replace(item),
                         Some(BrowserAction::Diagnose(id)) => self.diagnose.start(&self.session, id),
                         Some(BrowserAction::IsolateRelatedFailed(id)) => {
                             let (_, keep) = self.session.related_failed(id);
@@ -2054,7 +2082,10 @@ impl eframe::App for GraphCtrlApp {
             self.pattern.window(&ctx, &mut self.session, lang);
         }
         if self.replicate.open {
-            self.replicate.window(&ctx, &mut self.session, lang);
+            let names: Vec<String> = self.library.iter().map(|robot| robot.name().to_owned()).collect();
+            if let Some(request) = self.replicate.window(&ctx, &mut self.session, lang, &names) {
+                self.replace_robot(request, lang);
+            }
         }
         if self.diagnose.open {
             self.diagnose.window(&ctx, &mut self.session, lang);

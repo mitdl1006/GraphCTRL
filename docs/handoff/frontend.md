@@ -646,6 +646,23 @@
 - 한계: 원(Circle) 모서리·구 면은 아직 골라지지 않는다(Feature에 없음): Insert의 원형 모서리와 Tangent 구는 원점/작업 피처로만. 면의 윤곽 하이라이트는 없음. 뷰에서 면의 어느 쪽(법선 방향)을 고르는지는 보이는 면의 법선으로 정한다.
 - 테스트: `the_constrain_dialog_picks_faces_in_the_view`(두 상자의 윗면을 클릭해 Flush가 만들어지고 지오메트리가 면의 평면). QA 시나리오는 같은 흐름으로 쓸 수 있다.
 
+## Mirror 혼합 한 번 호출·로봇 교체 (백엔드 6fd9006·146a266)
+
+- 미러 "평평한 구조": 컴포넌트별 Mirror/Reuse를 `mirror_components_mixed(&[(item, MirrorState)], …)` 한 번으로 보낸다(실행 취소 1단계).
+- 로봇 교체: 컴포넌트(바디·로봇) 행 우클릭 "교체"와 조립 탭 Replace가 Replace 대화상자를 연다. 선택이 로봇이면 도형 칸 대신 "로봇 설명 파일에서…"와 라이브러리 로봇 단추가 나오고(OK는 쓰지 않음), 고르면 `replace_robot_file`(파일 대화상자)·`replace_library_robot`/`replace_robot`(플러그인)을 부른다. "모든 같은 부품 교체(All)" 체크가 `all`. 결과: 억제된 관계 이름을 알림으로("로봇을 바꿨습니다. 억제된 관계: …"), 오류(관절 수가 다른데 관절 웨이포인트가 있음 등)는 `FileError` 알림.
+- 근거: Replace assembly components GUID-E5FAA224-7332-4AC6-A78E-793FDACFEEDD(원문은 새 부품 파일을 고르는 대화상자).
+- 오류를 대화상자로 띄우진 않고 상태 줄 알림으로 보인다(리드 요청은 InUse 대화상자 오류).
+- 테스트: `a_robot_is_replaced_from_its_menu`(라이브러리 UR5e로 제자리 교체), `replicate.rs`의 기존 테스트.
+
+## BOM 설정·Static Quantity (백엔드 3f56a6a)
+
+근거: To Work with Bill of Materials GUID-7A1FC6F1-8833-4A76-9E2B-AA6FE5FDF223(BOM Settings, Hide Suppressed), 병합·Static Quantity는 백엔드 doc의 GUID-EBBCAEA4…·37BA8DB6….
+
+- BOM 창에 접이식 "BOM 설정": "부품 번호가 같으면 행 합치기"(`merge_part_numbers`), "합치지 않을 부품 번호(쉼표로 구분)"(`merge_excluded`, 포커스를 잃을 때 적용), "억제된 컴포넌트를 BOM에서 숨기기"(`hide_suppressed`) = `set_bom_settings`.
+- 수량 칸은 편집 가능한 숫자 칸(끌기 또는 입력 후 Enter)이고 `set_bom_quantity(key, Some(n))`; 직접 입력한 수량(`static_quantity`) 옆에 "×"로 되돌리기(`None`). 억제 행의 수량 0과 병합 Description "Varies"는 백엔드가 준 값을 그대로 보인다.
+- 하지 않은 것: 직접 입력한 수량을 파란색으로 표시(Inventor는 진한 파랑), BOM 설정의 열 사용자 정의·First Level 보기.
+- 테스트: `the_bom_dialog_has_settings_and_static_quantities`.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹
