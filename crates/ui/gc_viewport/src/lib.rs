@@ -10,6 +10,7 @@ mod gizmo;
 mod hud;
 mod origin;
 mod paint;
+mod place;
 mod radial;
 mod repr;
 mod section;
@@ -106,6 +107,7 @@ pub struct Viewport {
     pub free_tool: Option<FreeTool>,
     /// A component being dragged with it.
     free_drag: Option<freemove::FreeDrag>,
+    placing: Option<place::Placing>,
     /// The marking menu of the graphics window and the commands it offers.
     marking: gc_ui::marking::MarkingMenu,
     marking_set: radial::Set,
@@ -167,6 +169,7 @@ impl Viewport {
             hud_on: true,
             free_tool: None,
             free_drag: None,
+            placing: None,
             marking: gc_ui::marking::MarkingMenu::default(),
             marking_set: radial::Set::default(),
             request: None,
@@ -1074,6 +1077,28 @@ impl Viewport {
         self.picker.pick(&scene, &self.camera.ray(at, size)).map(|(_, item)| item)
     }
 
+    /// Starts placing a component: it hangs on the cursor until Esc or a right click. `copy` marks one
+    /// that is dropped when placing ends without a click.
+    pub fn start_placing(&mut self, item: gc_session::CellItem, copy: bool) {
+        self.placing = Some(place::Placing { item, copy });
+        self.free_tool = None;
+    }
+
+    /// Whether a component hangs on the cursor.
+    pub fn is_placing(&self) -> bool {
+        self.placing.is_some()
+    }
+
+    /// Another copy of the component just set down, to hang on the cursor next. Only bodies are copied.
+    fn attach_copy(&self, session: &mut Session, item: gc_session::CellItem) -> Option<place::Placing> {
+        let gc_session::CellItem::Body(body) = item else { return None };
+        let before: Vec<gc_core::AnyId> = session.doc().bodies().iter().map(|(id, _)| id.erase()).collect();
+        session.copy_components(&[body.erase()], gc_doc::Placement::default(), false, false).ok()?;
+        let copy =
+            session.doc().bodies().iter().map(|(id, _)| id).find(|id| !before.contains(&id.erase()))?;
+        Some(place::Placing { item: gc_session::CellItem::Body(copy), copy: true })
+    }
+
     /// Outside sketches: the item under the cursor is highlighted, a click selects it, a right click
     /// opens its context menu.
     fn cell_input(
@@ -1119,6 +1144,27 @@ impl Viewport {
             if self.free_drag.is_some() {
                 return;
             }
+        }
+        // Place Component: the component hangs on the cursor; a click sets it down and attaches a copy.
+        if let Some(placing) = self.placing {
+            if ui.input(|i| i.key_pressed(egui::Key::Escape)) || response.secondary_clicked() {
+                // Ends: the copy that was still hanging is dropped (the first component stays).
+                if placing.copy {
+                    gizmo::commit(session, placing.item);
+                    drop(session.delete_item(placing.item));
+                }
+                self.placing = None;
+                return;
+            }
+            if let Some(at) = response.hover_pos() {
+                place::follow(&placing, &self.camera, size, session, to_view(at));
+                ui.ctx().request_repaint();
+            }
+            if response.clicked_by(PointerButton::Primary) {
+                place::set_down(&placing, session);
+                self.placing = self.attach_copy(session, placing.item);
+            }
+            return;
         }
         if self.constrain_mode && response.clicked_by(PointerButton::Primary) {
             let at = response.interact_pointer_pos().map(to_view);
