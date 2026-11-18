@@ -877,6 +877,66 @@ impl Document {
         Some(Selection { occurrence: origin.occurrence, geometry })
     }
 
+    /// The relationships accepted although they cannot be solved (Place/Edit Connection Error, "Accept
+    /// the relationship"): what Recover lists in the Design Doctor (Inventor 2026 help, Use Design Doctor
+    /// to repair relationship errors, GUID-8C95B0AB-4505-4092-8C37-E60C68DCF4A0).
+    pub fn sick_relationships(&self) -> Vec<Id<Relationship>> {
+        self.timeline().map(|(_, t)| t.components.sick_relationships.clone()).unwrap_or_default()
+    }
+
+    /// True for a relationship kept with an error mark.
+    pub fn is_sick(&self, id: Id<Relationship>) -> bool {
+        self.timeline().is_some_and(|(_, t)| t.components.sick_relationships.contains(&id))
+    }
+
+    /// Isolate Related Failed (same Design Doctor page: "identifies all relationships and components
+    /// that can cause the relationship failure. The visibility of the remaining components is turned
+    /// off"): for a relationship with an error, the relationships that each alone stand in its way and
+    /// the components of all of them (to keep visible with Isolate). Empty for one without an error.
+    pub fn related_failed(&self, id: Id<Relationship>) -> (Vec<Id<Relationship>>, Vec<Occurrence>) {
+        let Some(relationship) = self.get(id).filter(|_| self.is_sick(id)) else {
+            return (Vec::new(), Vec::new());
+        };
+        let culprits = self.conflicting_relationships(Some(relationship));
+        let mut components: Vec<Occurrence> = Vec::new();
+        for r in std::iter::once(relationship).chain(culprits.iter().filter_map(|c| self.get(*c))) {
+            for occurrence in [r.first.occurrence, r.second.occurrence] {
+                let item = Occurrence::Item(occurrence.owner());
+                if item.owner().kind != Kind::WorkFeature && !components.contains(&item) {
+                    components.push(item);
+                }
+            }
+        }
+        (culprits, components)
+    }
+
+    /// Check in Relationship Conflict Analysis (Inventor 2026 help, Relationship Conflict Analysis
+    /// Reference, GUID-528B2CD0-93FD-45BC-AB69-6C5A559BB8E8: relationships set to Keep or Break, components
+    /// toggled grounded or not, "Check: Solves the listed assembly relationships and updates the Solve
+    /// result"): true when every relationship, those with an error included, can be satisfied once the
+    /// ones in `broken` are left out and the grounding of the components in `toggled` is turned round.
+    /// The document is not changed.
+    pub fn conflict_check(&self, broken: &[Id<Relationship>], toggled: &[Occurrence]) -> bool {
+        let mut trial = self.clone();
+        let mut txn = crate::txn::Txn::new(&mut trial);
+        let prepared = (|| -> Result<(), crate::EditError> {
+            for id in broken {
+                txn.remove(*id)?;
+            }
+            for occurrence in toggled {
+                let grounded = txn.doc().component_flag(*occurrence, crate::design::ComponentFlag::Grounded);
+                crate::tree::set_component(
+                    &mut txn,
+                    *occurrence,
+                    crate::design::ComponentFlag::Grounded,
+                    !grounded,
+                )?;
+            }
+            crate::cell::set_timeline(&mut txn, |t| t.components.sick_relationships.clear())
+        })();
+        prepared.is_ok() && txn.commit().is_ok() && trial.solve_relationships().is_ok()
+    }
+
     /// Where a selection is in the world: a plane's or axis's point, a circle's or sphere's centre, a
     /// point, a joint origin. `None` for a missing component.
     pub fn selection_point(&self, selection: &Selection) -> Option<DVec3> {
@@ -1104,7 +1164,8 @@ impl Document {
             let suppressed = position
                 .and_then(|p| p.suppression.iter().find(|(r, _)| *r == id).map(|(_, s)| *s))
                 .unwrap_or_else(|| self.is_inactive(id.erase()));
-            if suppressed {
+            // One accepted with an error waits outside the solve.
+            if suppressed || self.is_sick(id) {
                 continue;
             }
             let value = position.and_then(|p| p.values.iter().find(|(r, _)| *r == id).map(|(_, v)| *v));
@@ -2125,6 +2186,15 @@ impl Document {
         let (owners, terms) = found;
         let poses: Vec<DPose3> = owners.iter().map(|o| o.pose).collect();
         let owner = self.solver_owner(item);
+        // A relationship accepted with an error leaves its components' state unknown.
+        let marked = self.sick_relationships().iter().filter_map(|id| self.get(*id)).any(|r| {
+            [r.first.occurrence.owner(), r.second.occurrence.owner()]
+                .iter()
+                .any(|o| self.solver_owner(*o) == owner)
+        });
+        if marked {
+            return ComponentStatus::Unknown;
+        }
         let index = owners.iter().position(|o| o.item == owner);
         let sick = index.is_some_and(|index| {
             terms
@@ -2145,6 +2215,9 @@ impl Document {
     /// ties have no freedom left, otherwise under-constrained. `None` when it does not exist.
     pub fn relationship_status(&self, id: Id<Relationship>) -> Option<RelationStatus> {
         let relationship = self.get(id)?;
+        if self.is_sick(id) {
+            return Some(RelationStatus::Sick);
+        }
         let (owners, terms) = self.gather().ok()?;
         let term = terms.iter().find(|t| t.id == id)?;
         let poses: Vec<DPose3> = owners.iter().map(|o| o.pose).collect();

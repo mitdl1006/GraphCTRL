@@ -699,6 +699,10 @@ pub struct Components {
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub joint_conditions:
         std::collections::BTreeMap<Id<crate::relate::Relationship>, crate::relate::JointCondition>,
+    /// Relationships accepted although they could not be solved (Place/Edit Connection Error, "Accept
+    /// the relationship"): kept with an error mark and left out of the solve until they can be satisfied.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sick_relationships: Vec<Id<crate::relate::Relationship>>,
     /// The model parameters of constraint offsets and angles.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub relation_params:
@@ -792,6 +796,7 @@ impl Components {
             && !self.dof_all
             && self.joint_conditions.is_empty()
             && self.relation_params.is_empty()
+            && self.sick_relationships.is_empty()
             && self.subassemblies.is_empty()
             && self.placed_in.is_empty()
             && self.sketch_owners.is_empty()

@@ -1001,3 +1001,60 @@ fn the_active_view_follows_the_display_until_it_is_locked() {
     assert_eq!(reps.active_position, None);
     assert!(bench.cell(CellOp::CopyPositionalRepresentation(5)).is_err());
 }
+
+/// Accept the relationship (Inventor 2026 help, Place/Edit Connection Error Reference,
+/// GUID-23D0D333-AD6A-4CB6-9786-6966DFE8FDFF) and Recover (Use Design Doctor to repair relationship
+/// errors, GUID-8C95B0AB-4505-4092-8C37-E60C68DCF4A0; Relationship Conflict Analysis Reference,
+/// GUID-528B2CD0-93FD-45BC-AB69-6C5A559BB8E8).
+#[test]
+fn a_relationship_that_cannot_be_solved_can_be_accepted_with_an_error() {
+    use gc_doc::{ComponentStatus, RelationStatus};
+    let mut bench = Bench::new();
+    let (table, block) = table_and_box(&mut bench);
+    let mate = |offset: f64| Relationship {
+        limits: None,
+        name: format!("Mate {offset}"),
+        kind: RelationKind::Mate { offset, sense: AxisSense::Opposed },
+        first: on(block, bottom(0.2)),
+        second: on(table, top(1.0)),
+    };
+    let first = bench.relate(mate(0.0)).unwrap();
+    let rest = bench.pose(block);
+    // The same faces 0.3 m apart as well: refused as before, and nothing is left behind.
+    assert!(matches!(bench.relate(mate(0.3)), Err(EditError::Unsolvable { .. })));
+    assert_eq!(bench.doc.relationships().iter().count(), 1);
+    // Accepted: it is there with an error, the block stays where the first mate holds it.
+    let created = bench.cell(CellOp::AcceptRelationship(mate(0.3))).unwrap();
+    let Created::Relationship(second) = created[0] else { panic!() };
+    assert_eq!(bench.doc.sick_relationships(), [second]);
+    assert_eq!(bench.doc.relationship_status(second), Some(RelationStatus::Sick));
+    assert_ne!(bench.doc.relationship_status(first), Some(RelationStatus::Sick));
+    assert_eq!(bench.pose(block), rest);
+    assert_eq!(bench.doc.component_status(block.erase()), Some(ComponentStatus::Unknown));
+    // Other commands keep working, the error stays.
+    let moved = Placement { xyz: [0.2, 0.1, 0.5], rpy: [0.0; 3] };
+    let mut body = bench.doc.get(table).unwrap().clone();
+    body.placement = moved;
+    bench.cell(CellOp::SetBody { id: table, body }).unwrap();
+    assert!(bench.doc.is_sick(second));
+
+    // Isolate Related Failed: the first mate stands in its way; both components take part.
+    let (culprits, components) = bench.doc.related_failed(second);
+    assert_eq!(culprits, [first]);
+    assert_eq!(components.len(), 2);
+    assert!(bench.doc.related_failed(first).0.is_empty());
+    // Conflict analysis: still in conflict as it is; fine once either mate is set to Break.
+    assert!(!bench.doc.conflict_check(&[], &[]));
+    assert!(bench.doc.conflict_check(&[first], &[]) && bench.doc.conflict_check(&[second], &[]));
+    let before = bench.doc.clone();
+    assert!(bench.doc.same_content(&before));
+
+    // Treatments. Suppressing the first mate lets the accepted one be satisfied: the mark goes and the
+    // block moves to 0.3 m above the table.
+    bench.cell(CellOp::SetSuppressed { item: first.erase(), suppressed: true }).unwrap();
+    bench.cell(CellOp::UpdateAssembly).unwrap();
+    assert!(bench.doc.sick_relationships().is_empty());
+    assert!(
+        (bench.pose(block).translation.z - bench.pose(table).translation.z - 0.5 - 0.3 - 0.1).abs() < 1e-7
+    );
+}

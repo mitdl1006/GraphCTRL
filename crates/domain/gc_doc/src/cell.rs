@@ -611,6 +611,19 @@ pub enum CellOp {
     },
     /// Subassemblies made in the cell: Demote, move between levels, dissolve, rename.
     Subassembly(crate::subassembly::SubassemblyOp),
+    /// Accept the relationship (Inventor 2026 help, Place/Edit Connection Error Reference,
+    /// GUID-23D0D333-AD6A-4CB6-9786-6966DFE8FDFF: "Creates the relationship or accepts the change to the
+    /// existing relationship. The relationship is created and added to the browser with an icon"): adds
+    /// a relationship even when it cannot be satisfied with the others. It is then kept with an error
+    /// mark and left out of the solve; it loses the mark as soon as the assembly can satisfy it.
+    AcceptRelationship(crate::relate::Relationship),
+    /// Accept the change to an existing relationship although it cannot be solved (same page).
+    AcceptRelationshipEdit {
+        /// Which.
+        id: Id<crate::relate::Relationship>,
+        /// The new definition.
+        relationship: Box<crate::relate::Relationship>,
+    },
     /// Lock or unlock a view representation (Inventor 2026 help, To Create, Edit, and Restore View
     /// Representations, GUID-397F9263-12C3-47A1-B6A6-16FC05EDEF47): a locked one keeps its display
     /// characteristics, and components added later are hidden while it is active.
@@ -954,6 +967,19 @@ pub(crate) fn set_timeline(
             t.components.joint_conditions.keys().copied().filter(|id| txn.doc().get(*id).is_none()).collect()
         })
         .unwrap_or_default();
+    // Error marks of relationships that no longer exist go as well.
+    let lost: Vec<Id<crate::relate::Relationship>> = txn
+        .doc()
+        .timeline()
+        .map(|(_, t)| {
+            t.components
+                .sick_relationships
+                .iter()
+                .copied()
+                .filter(|id| txn.doc().get(*id).is_none())
+                .collect()
+        })
+        .unwrap_or_default();
     // Owners of sketches that are gone, and owners that are gone (their sketches go to the top level).
     let orphaned: Vec<Id<Sketch>> = txn
         .doc()
@@ -990,6 +1016,7 @@ pub(crate) fn set_timeline(
             c.properties.retain(|(o, _)| !gone.contains(o));
         }
         t.components.joint_conditions.retain(|id, _| !dropped.contains(id));
+        t.components.sick_relationships.retain(|id| !lost.contains(id));
         edit(t);
     };
     match existing {
@@ -1158,6 +1185,32 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
         | CellOp::AddFollowPath { .. }
         | CellOp::AddPathThrough { .. } => crate::role::run(txn, op),
         CellOp::Work(op) => crate::work::run(txn, op),
+        CellOp::AcceptRelationship(relationship) => {
+            if !relationship.is_valid()
+                || !txn.doc().relatable(relationship.first.occurrence)
+                || !txn.doc().relatable(relationship.second.occurrence)
+            {
+                return Err(EditError::BadValue);
+            }
+            let id = txn.insert(relationship.clone());
+            set_timeline(txn, |t| t.components.sick_relationships.push(id))?;
+            settle(txn)?;
+            Ok((vec![Created::Relationship(id)], "Constrain"))
+        }
+        CellOp::AcceptRelationshipEdit { id, relationship } => {
+            if !relationship.is_valid()
+                || !txn.doc().relatable(relationship.first.occurrence)
+                || !txn.doc().relatable(relationship.second.occurrence)
+            {
+                return Err(EditError::BadValue);
+            }
+            txn.modify(*id, |r: &mut crate::relate::Relationship, _| r.clone_from(relationship.as_ref()))?;
+            if !txn.doc().is_sick(*id) {
+                set_timeline(txn, |t| t.components.sick_relationships.push(*id))?;
+            }
+            settle(txn)?;
+            Ok((Vec::new(), "Edit constraint"))
+        }
         CellOp::LockViewRepresentation { index, locked } => {
             crate::representation::lock_view(txn, *index, *locked)
         }
@@ -1510,6 +1563,10 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
             }
             let before = txn.doc().protected_freedom();
             txn.modify(*id, |r: &mut crate::relate::Relationship, _| r.clone_from(relationship))?;
+            // An edit has to solve: a relationship accepted with an error is counted again.
+            if txn.doc().is_sick(*id) {
+                set_timeline(txn, |t| t.components.sick_relationships.retain(|sick| sick != id))?;
+            }
             settle(txn)?;
             check_protected(txn, &before)?;
             Ok((Vec::new(), "Edit constraint"))
@@ -1870,6 +1927,32 @@ pub(crate) fn settle_holding(txn: &mut Txn<'_>, held: &[AnyId]) -> Result<(), Ed
             u.sick.iter().map(|id| txn.doc().get(*id).map_or_else(String::new, |r| r.name.clone())).collect();
         EditError::Unsolvable { ids: u.sick, names }
     })?;
+    apply_moves(txn, moves)?;
+    heal(txn)
+}
+
+/// Relationships accepted with an error are tried again: one that the assembly can now satisfy loses
+/// its mark and is solved with the others from then on.
+fn heal(txn: &mut Txn<'_>) -> Result<(), EditError> {
+    let sick = txn.doc().sick_relationships();
+    for id in sick {
+        let without: Vec<Id<crate::relate::Relationship>> =
+            txn.doc().sick_relationships().into_iter().filter(|other| *other != id).collect();
+        let mut trial = txn.doc().clone();
+        let solved = {
+            let mut inner = Txn::new(&mut trial);
+            let listed = without.clone();
+            set_timeline(&mut inner, |t| t.components.sick_relationships = listed).is_ok()
+                && inner.commit().is_ok()
+        };
+        let Some(moves) = solved.then(|| trial.solve_relationships().ok()).flatten() else { continue };
+        set_timeline(txn, |t| t.components.sick_relationships = without)?;
+        apply_moves(txn, moves)?;
+    }
+    Ok(())
+}
+
+fn apply_moves(txn: &mut Txn<'_>, moves: Vec<(AnyId, gc_math::DPose3)>) -> Result<(), EditError> {
     for (item, pose) in moves {
         let placement =
             Placement { xyz: pose.translation.to_array(), rpy: gc_math::rpy_from_quat(pose.rotation) };
