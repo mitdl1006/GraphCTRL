@@ -612,6 +612,133 @@ impl Sketch {
         Ok(result)
     }
 
+    /// Where a split at `at` would cut `curve`: the crossing with another curve nearest `at` (Inventor 2026
+    /// help, To Split, Trim, or Extend Curves, GUID-DD00037F-6BBA-4B95-AA90-4F99DCEB667D). `None` for a
+    /// circle, or when nothing crosses the curve between its ends.
+    pub fn split_preview(&self, curve: Id<Curve>, at: [f64; 2]) -> Option<[f64; 2]> {
+        self.split_cut(curve, at).map(|cut| cut.pos)
+    }
+
+    fn split_cut(&self, curve: Id<Curve>, at: [f64; 2]) -> Option<Cut> {
+        let shape = self.shape(curve)?;
+        if let Shape::Round(_, _, None) = shape {
+            return None;
+        }
+        let t = shape.param(at);
+        let end = shape.span();
+        self.cuts(curve, false)
+            .into_iter()
+            .filter(|c| c.t > EPS && c.t < end - EPS)
+            .min_by(|a, b| (a.t - t).abs().total_cmp(&(b.t - t).abs()))
+    }
+
+    /// Splits `curve` in two at the crossing nearest `at`: the curve ends there and a new curve carries on
+    /// from there, joined to it and held in line (a line) or on the same circle (an arc). The new curve is
+    /// the first of the result.
+    pub fn split_at(
+        &mut self,
+        alloc: &mut IdAlloc,
+        curve: Id<Curve>,
+        at: [f64; 2],
+    ) -> Result<CutResult, SketchError> {
+        if self.is_spatial() {
+            return Err(SketchError::WrongSpace);
+        }
+        let cut = self.split_cut(curve, at).ok_or(SketchError::InvalidValue)?;
+        let geom = self.curves.get(&curve).ok_or(SketchError::MissingCurve)?.geom;
+        let construction = self.curves[&curve].construction;
+        let mut result = CutResult::default();
+        self.split(alloc, curve, geom, construction, (cut, cut), &mut result)?;
+        // Nothing was taken out: the two pieces meet.
+        let (_, end) = Self::ends(&self.curves[&curve].geom).ok_or(SketchError::InvalidValue)?;
+        let piece = *result.curves.first().ok_or(SketchError::InvalidValue)?;
+        let (start, _) = Self::ends(&self.curves[&piece].geom).ok_or(SketchError::InvalidValue)?;
+        self.add_quietly(alloc, GeoConstraint::Coincident(end, start), &mut result);
+        Ok(result)
+    }
+
+    /// Where a chamfer cutting `distances` back from the corner of two lines would join them: the corner,
+    /// and the two cut points. Each line keeps the side of the corner where it was picked.
+    pub fn chamfer_plan(
+        &self,
+        lines: [(Id<Curve>, [f64; 2]); 2],
+        distances: [f64; 2],
+    ) -> Option<([f64; 2], [[f64; 2]; 2])> {
+        self.chamfer_ends(lines, distances).map(|(corner, cuts, _)| (corner, cuts))
+    }
+
+    #[allow(clippy::type_complexity, reason = "a private plan: corner, cut points, moving ends")]
+    fn chamfer_ends(
+        &self,
+        lines: [(Id<Curve>, [f64; 2]); 2],
+        distances: [f64; 2],
+    ) -> Option<([f64; 2], [[f64; 2]; 2], [(Id<SkPoint>, Id<SkPoint>); 2])> {
+        if self.is_spatial() || !distances.iter().all(|d| d.is_finite() && *d > 0.0) {
+            return None;
+        }
+        let [(l1, at1), (l2, at2)] = lines;
+        if l1 == l2 {
+            return None;
+        }
+        let (s1, s2) = (self.shape(l1)?, self.shape(l2)?);
+        let (Shape::Segment(a1, b1), Shape::Segment(a2, b2)) = (s1, s2) else { return None };
+        let x = *meet(&s1, &s2).first()?;
+        let unit = |v: [f64; 2]| {
+            let n = fm::hypot(v[0], v[1]);
+            (n > 0.0).then(|| [v[0] / n, v[1] / n])
+        };
+        let dot = |u: [f64; 2], v: [f64; 2]| u[0] * v[0] + u[1] * v[1];
+        let side = |a: [f64; 2], b: [f64; 2], at: [f64; 2]| -> Option<[f64; 2]> {
+            let d = unit([b[0] - a[0], b[1] - a[1]])?;
+            let s = dot([at[0] - x[0], at[1] - x[1]], d);
+            let s = if s.abs() > 1e-12 {
+                s
+            } else {
+                dot([a[0] + b[0] - 2.0 * x[0], a[1] + b[1] - 2.0 * x[1]], d)
+            };
+            Some(if s >= 0.0 { d } else { [-d[0], -d[1]] })
+        };
+        let u = [side(a1, b1, at1)?, side(a2, b2, at2)?];
+        let cuts = [0, 1].map(|i| [x[0] + u[i][0] * distances[i], x[1] + u[i][1] * distances[i]]);
+        let mover = |line: Id<Curve>, u: [f64; 2], back: f64| -> Option<(Id<SkPoint>, Id<SkPoint>)> {
+            let (a, b) = self.line(line)?;
+            let along = |p: Id<SkPoint>| self.xy(p).map(|q| dot([q[0] - x[0], q[1] - x[1]], u));
+            let (da, db) = (along(a)?, along(b)?);
+            let (near, far, far_along) = if da <= db { (a, b, db) } else { (b, a, da) };
+            (far_along > back * (1.0 + 1e-9)).then_some((near, far))
+        };
+        let ends = [mover(l1, u[0], distances[0])?, mover(l2, u[1], distances[1])?];
+        Some((x, cuts, ends))
+    }
+
+    /// Bevels the corner of two lines: each is cut back to `distances` from where they meet (or extended
+    /// to there), and a new line joins the cut points (Inventor 2026 help, To Create 2D Shape Geometry,
+    /// GUID-D489CE6D-7299-4211-A43A-F3580A4BA357, Create Chamfers). The new line is the first curve of the
+    /// result.
+    pub fn chamfer(
+        &mut self,
+        alloc: &mut IdAlloc,
+        lines: [(Id<Curve>, [f64; 2]); 2],
+        distances: [f64; 2],
+    ) -> Result<CutResult, SketchError> {
+        if self.is_spatial() {
+            return Err(SketchError::WrongSpace);
+        }
+        let (_, cuts, ends) = self.chamfer_ends(lines, distances).ok_or(SketchError::InvalidValue)?;
+        let mut result = CutResult::default();
+        for i in 0..2 {
+            let (end, far) = ends[i];
+            self.move_end(lines[i].0, end, Some(far), cuts[i]);
+        }
+        let lift = |p: [f64; 2]| [p[0], p[1], 0.0];
+        let bevel = self.add_line(alloc, lift(cuts[0]), lift(cuts[1]));
+        result.curves.push(bevel);
+        let (start, stop) = self.line(bevel).ok_or(SketchError::MissingCurve)?;
+        self.add_required(alloc, GeoConstraint::Coincident(ends[0].0, start), &mut result)?;
+        self.add_required(alloc, GeoConstraint::Coincident(ends[1].0, stop), &mut result)?;
+        Ok(result)
+    }
+
     fn add_required(
         &mut self,
         alloc: &mut IdAlloc,

@@ -843,3 +843,59 @@ fn midpoint_lines_center_rectangles_and_tangent_circles() {
     let c = bench.sketch().pos(c).unwrap();
     assert!((r - 0.1).abs() < 1e-9 && (c[0] - 0.1).abs() < 1e-9 && (c[1] - 0.1).abs() < 1e-9, "{c:?} {r}");
 }
+
+/// Split (To Split, Trim, or Extend Curves, GUID-DD00037F-6BBA-4B95-AA90-4F99DCEB667D) and the 2D
+/// Chamfer's three types (To Create 2D Shape Geometry, GUID-D489CE6D-7299-4211-A43A-F3580A4BA357).
+#[test]
+fn split_cuts_at_the_nearest_crossing_and_chamfers_bevel_corners() {
+    use gc_doc::ChamferKind;
+    // A line crossed at 30 and 70: a split clicked at 60 cuts at 70; the pieces stay in line.
+    let mut bench = Bench::new();
+    let long = add_line(&mut bench, [0.0, 0.0], [0.1, 0.0]);
+    add_line(&mut bench, [0.03, -0.01], [0.03, 0.01]);
+    add_line(&mut bench, [0.07, -0.01], [0.07, 0.01]);
+    let dof = bench.dof();
+    let created = bench.op(SketchOp::Split { curve: long, at: [0.06, 0.0] }).unwrap();
+    let piece = Bench::curves(&created)[0];
+    let x = |bench: &Bench, line| {
+        let (a, b) = bench.sketch().line(line).unwrap();
+        [bench.sketch().pos(a).unwrap()[0], bench.sketch().pos(b).unwrap()[0]]
+    };
+    assert_eq!(x(&bench, long), [0.0, 0.07]);
+    assert_eq!(x(&bench, piece), [0.07, 0.1]);
+    assert_eq!(bench.dof(), dof, "the same freedom: the cut point is held at the crossing");
+    assert!(bench.op(SketchOp::Split { curve: piece, at: [0.09, 0.0] }).is_err(), "nothing crosses there");
+
+    // An L corner at the origin: lines along +X and +Y.
+    let corner = |kind: ChamferKind, dimensions: bool| {
+        let mut bench = Bench::new();
+        let h = add_line(&mut bench, [0.0, 0.0], [0.1, 0.0]);
+        let v = add_line(&mut bench, [0.0, 0.0], [0.0, 0.1]);
+        let created = bench
+            .op(SketchOp::Chamfer { lines: [(h, [0.05, 0.0]), (v, [0.0, 0.05])], kind, dimensions })
+            .unwrap();
+        let bevel = Bench::curves(&created)[0];
+        let (a, b) = bench.sketch().line(bevel).unwrap();
+        let (a, b) = (bench.sketch().pos(a).unwrap(), bench.sketch().pos(b).unwrap());
+        (bench, created, [a[0], a[1]], [b[0], b[1]])
+    };
+    let near = |p: [f64; 2], q: [f64; 2]| (p[0] - q[0]).abs() < 1e-9 && (p[1] - q[1]).abs() < 1e-9;
+    let (_, created, a, b) = corner(ChamferKind::Equal("10".into()), true);
+    assert!(near(a, [0.01, 0.0]) && near(b, [0.0, 0.01]), "{a:?} {b:?}");
+    assert_eq!(dimensions(&created).len(), 2);
+    let (_, _, a, b) = corner(ChamferKind::Unequal("10".into(), "20".into()), false);
+    assert!(near(a, [0.01, 0.0]) && near(b, [0.0, 0.02]), "{a:?} {b:?}");
+    // 45° from the first line, 10 along the second: 10 along the first too.
+    let (mut bench, created, a, b) =
+        corner(ChamferKind::DistanceAngle { distance: "10".into(), angle: "45".into() }, true);
+    assert!(near(a, [0.01, 0.0]) && near(b, [0.0, 0.01]), "{a:?} {b:?}");
+    let dims = dimensions(&created);
+    assert_eq!(dims.len(), 2);
+    // The sizes drive: 20 along the second line at 45° moves the bevel out.
+    bench.op(SketchOp::SetDimension { id: dims[0], source: "20".into() }).unwrap();
+    let bevel = Bench::curves(&created)[0];
+    let (_, q) = bench.sketch().line(bevel).unwrap();
+    let corner = Bench::points(&created)[0];
+    let (c, q) = (bench.sketch().pos(corner).unwrap(), bench.sketch().pos(q).unwrap());
+    assert!((((q[0] - c[0]).powi(2) + (q[1] - c[1]).powi(2)).sqrt() - 0.02).abs() < 1e-7);
+}

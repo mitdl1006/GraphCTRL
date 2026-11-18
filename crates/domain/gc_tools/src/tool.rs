@@ -212,6 +212,10 @@ pub enum ToolKind {
     CenterRectangle3,
     /// Tangent Circle: three lines it touches.
     TangentCircle,
+    /// Split a curve at the crossing nearest the click.
+    Split,
+    /// 2D Chamfer: two lines, the corner bevelled with the Chamfer dialog's values.
+    Chamfer,
     /// Offset curves (whole loops by default): pick one, then where the offset goes.
     Offset,
 }
@@ -303,6 +307,9 @@ pub enum Prompt {
     CenterRectSide,
     CenterRectWidth,
     TangentCircleLine,
+    SplitPick,
+    ChamferFirst,
+    ChamferSecond,
     /// A sketch dialog's Geometry selector is active.
     PickGeometry,
     /// A sketch dialog's line selector is active.
@@ -384,6 +391,9 @@ pub struct Tool {
     slot_third: Option<[f64; 2]>,
     /// Tangent Circle: the lines picked so far and where.
     tangent_lines: Vec<(Id<Curve>, [f64; 2])>,
+    /// Chamfer: the dialog's type and sizes, and Create Dimensions.
+    chamfer: gc_doc::ChamferKind,
+    chamfer_dimensions: bool,
 }
 
 fn angle_about(centre: [f64; 2], point: [f64; 2]) -> f64 {
@@ -628,6 +638,8 @@ impl Tool {
             offset_measured: 0.0,
             slot_third: None,
             tangent_lines: Vec::new(),
+            chamfer: gc_doc::ChamferKind::Equal("5 mm".to_owned()),
+            chamfer_dimensions: true,
         }
     }
 
@@ -683,7 +695,9 @@ impl Tool {
                 | ToolKind::MidpointLine
                 | ToolKind::CenterRectangle
                 | ToolKind::CenterRectangle3
-                | ToolKind::TangentCircle,
+                | ToolKind::TangentCircle
+                | ToolKind::Split
+                | ToolKind::Chamfer,
                 _,
             ) => self.shape_prompt(),
         }
@@ -1034,10 +1048,19 @@ impl Tool {
                         | ToolKind::CenterRectangle
                         | ToolKind::CenterRectangle3
                         | ToolKind::TangentCircle
+                        | ToolKind::Split
+                        | ToolKind::Chamfer
                 );
-                self.hover = matches!(self.kind, ToolKind::Trim | ToolKind::Extend | ToolKind::Fillet)
-                    .then(|| nearest_curve(sketch, pos, px, &[]))
-                    .flatten();
+                self.hover = matches!(
+                    self.kind,
+                    ToolKind::Trim
+                        | ToolKind::Extend
+                        | ToolKind::Fillet
+                        | ToolKind::Split
+                        | ToolKind::Chamfer
+                )
+                .then(|| nearest_curve(sketch, pos, px, &[]))
+                .flatten();
                 let previous = if self.kind == ToolKind::Line { self.anchor } else { None };
                 let before = self.cursor.map(|s| s.pos);
                 self.cursor =
@@ -1279,7 +1302,9 @@ impl Tool {
             | ToolKind::MidpointLine
             | ToolKind::CenterRectangle
             | ToolKind::CenterRectangle3
-            | ToolKind::TangentCircle => Vec::new(),
+            | ToolKind::TangentCircle
+            | ToolKind::Split
+            | ToolKind::Chamfer => Vec::new(),
             ToolKind::Select => vec![ToolOutput::Select { item: pick(sketch, pos, px), extend: modifier }],
             ToolKind::Line => {
                 let here = self.place(sketch, pos, px, self.anchor, modifier);

@@ -14,7 +14,7 @@
 | 2 | ~~3D 호~~ **완료**(반원 미만) | 리드 지정 | 3D 원은 아직 `WrongSpace` | 아래 작업 기록 |
 | 3 | ~~Cancel Sketch~~ **완료** | 스케치 32 (P2) | — | 아래 작업 기록 |
 | 4 | ~~Tangent Circle·Midpoint Line·중심 사각형 2종~~ **완료** | 44, 46, 57 (P2) | — | 아래 작업 기록 |
-| 5 | Chamfer·Split | 65, 81 (P2) | 없음(Split은 Trim 내부만) | `SketchOp` + 도구 |
+| 5 | ~~Chamfer·Split~~ **완료** | 65, 81 (P2) | — | 아래 작업 기록 |
 | 6 | Move·Copy·Rotate(스케치) / Scale·Stretch | 76–78 (P2) / 83–84 (P3) | 드래그만 | 선택 형상 변환 명령(치수 완화 옵션 포함) |
 | 7 | Auto-project(모서리 자동 투영) | 68 (P2) | 없음 | 그리기 중 모델 모서리 스냅 → 투영 |
 | 8 | Automatic Dimensions and Constraints | 126 (P2) | 없음 | 남은 자유도를 치수로 채우기 |
@@ -53,6 +53,29 @@
 | 모션(오래된 남은 일) | 맨 아래 "남은 일(백엔드)" 절 그대로 |
 
 # 작업 기록(최신 순)
+
+## 2026-11-18 — 분할(Split)·2D 모따기(Chamfer)(우선순위 표 5)
+
+- **원문**:
+  - To Split, Trim, or Extend Curves `GUID-DD00037F-6BBA-4B95-AA90-4F99DCEB667D.htm`: 2D에서 곡선을 가장 가까운 교차 곡선에서 나누고, 두 조각이 원래 구속을 잇는다.
+  - Create Chamfers(`GUID-D489CE6D-7299-4211-A43A-F3580A4BA357.htm`): 2D Chamfer 대화상자. Create Dimensions, Equal to Parameters, Equal Distance / Unequal Distance / Distance and Angle.
+- **gc_sketch `cut.rs`**:
+  - `split_preview`, `split_at`: 클릭에 가장 가까운 교차점 한 곳에서 자른다. 기존 Trim의 내부 `split`을 틈 없이 쓰고, 두 조각을 일치로 잇는다. 선은 동일선상, 호는 같은 원.
+  - `chamfer_plan`, `chamfer`: 모서리와 집은 쪽 판정은 모깎기와 같다. 두 선을 거리만큼 줄이거나 늘이고 새 선으로 잇는다.
+- **gc_doc**:
+  - `SketchOp::Split{curve, at}`.
+  - `SketchOp::Chamfer{lines, kind: ChamferKind::{Equal, Unequal, DistanceAngle{distance, angle}}, dimensions}`. 크기는 식이다.
+  - 치수를 켜면 모서리에 구성용 점을 두 선 위에 두고, 그 점에서 각 자른 점까지 거리 치수를 단다. 거리와 각도 형식은 둘째 선 거리 + 첫 선과 모따기 선 사이 각도 치수.
+- **도구·UI**:
+  - `ToolKind::{Split, Chamfer}`. Split은 마우스를 올리면 자를 곳에 × 표시. Chamfer는 첫 선 → 둘째 선, 모따기 선을 미리 보여 준다.
+  - 세션 `chamfer_options()/set_chamfer_options()`는 도구를 바꿔도 유지된다.
+  - gc_app '2D 모따기' 창: 치수 만들기, 세 형식, 크기, 확인 = 도구 끝.
+  - 리본 '수정' 패널은 작은 버튼 두 줄(간격띄우기·분할 / 모따기)로 바꿨다. 인벤터는 모따기가 작성 패널에 있지만, 1280 px에 맞추려고 이렇게 했다.
+- **원문과 다른 점**:
+  - Equal to Parameters는 없다(모따기마다 그때 값).
+  - 3D Split(면·작업 평면까지)은 없다. Split의 오른쪽 클릭 Trim/Extend 전환도 없다.
+  - 원 분할은 거부한다(교차점 한 곳으로는 원을 나눌 수 없음).
+- **테스트**: `gc_doc/tests/sketch_shapes.rs` split_cuts…(교차점·자유도·세 형식·치수 구동), 세션 split_and_chamfer_tools, 앱 kittest split_and_chamfer_on_the_ribbon….
 
 ## 2026-11-18 — 중점 선·접선 원·중심 직사각형 2종(우선순위 표 4)
 

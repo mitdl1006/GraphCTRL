@@ -399,3 +399,60 @@ pub(crate) fn offset_window(ctx: &egui::Context, session: &mut Session, lang: La
         session.set_offset_options(loop_select, constrain);
     }
 }
+
+/// The 2D Chamfer dialog while the Chamfer tool runs (Inventor 2026 help, To Create 2D Shape Geometry,
+/// GUID-D489CE6D-7299-4211-A43A-F3580A4BA357, Create Chamfers): Create Dimensions, and the type with its
+/// sizes. OK or closing leaves the tool. ("Equal to Parameters" is not offered: each chamfer takes the
+/// values as they stand.)
+pub(crate) fn chamfer_window(ctx: &egui::Context, session: &mut Session, lang: Lang) {
+    use gc_doc::ChamferKind;
+    let (mut kind, mut dimensions) = session.chamfer_options();
+    let mut open = true;
+    let mut done = false;
+    egui::Window::new(tr!(lang, ChamferTitle)).open(&mut open).resizable(false).show(ctx, |ui| {
+        ui.checkbox(&mut dimensions, tr!(lang, ChamferCreateDimensions));
+        let first = |kind: &ChamferKind| match kind {
+            ChamferKind::Equal(d) | ChamferKind::Unequal(d, _) => d.clone(),
+            ChamferKind::DistanceAngle { distance, .. } => distance.clone(),
+        };
+        ui.horizontal(|ui| {
+            let d = first(&kind);
+            if ui.radio(matches!(kind, ChamferKind::Equal(_)), tr!(lang, ChamferEqual)).clicked() {
+                kind = ChamferKind::Equal(d.clone());
+            }
+            if ui.radio(matches!(kind, ChamferKind::Unequal(..)), tr!(lang, ChamferUnequal)).clicked() {
+                kind = ChamferKind::Unequal(d.clone(), d.clone());
+            }
+            if ui
+                .radio(matches!(kind, ChamferKind::DistanceAngle { .. }), tr!(lang, ChamferDistanceAngle))
+                .clicked()
+            {
+                kind = ChamferKind::DistanceAngle { distance: d, angle: "45 deg".to_owned() };
+            }
+        });
+        let field = |ui: &mut egui::Ui, label: &str, text: &mut String| {
+            ui.horizontal(|ui| {
+                let label = ui.label(label).id;
+                ui.text_edit_singleline(text).labelled_by(label);
+            });
+        };
+        match &mut kind {
+            ChamferKind::Equal(d) => field(ui, tr!(lang, ChamferDistance), d),
+            ChamferKind::Unequal(d1, d2) => {
+                field(ui, tr!(lang, ChamferDistance1), d1);
+                field(ui, tr!(lang, ChamferDistance2), d2);
+            }
+            ChamferKind::DistanceAngle { distance, angle } => {
+                field(ui, tr!(lang, ChamferDistance), distance);
+                field(ui, tr!(lang, ChamferAngle), angle);
+            }
+        }
+        done = ui.button(tr!(lang, DialogOk)).clicked();
+    });
+    if (kind.clone(), dimensions) != session.chamfer_options() {
+        session.set_chamfer_options(kind, dimensions);
+    }
+    if !open || done {
+        session.set_tool(ToolKind::Select);
+    }
+}

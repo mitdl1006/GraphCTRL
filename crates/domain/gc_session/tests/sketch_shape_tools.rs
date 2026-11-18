@@ -435,3 +435,46 @@ fn midpoint_line_center_rectangles_and_tangent_circle_tools() {
     let circle = drawn(&session).into_iter().find(|c| sketch.round(*c).is_some()).unwrap();
     assert!((sketch.round(circle).unwrap().1 - 0.01).abs() < 1e-9, "the 30-40-50 triangle's incircle");
 }
+
+/// The Split and Chamfer tools (To Split, Trim, or Extend Curves, GUID-DD00037F-6BBA-4B95-AA90-4F99DCEB667D;
+/// Create Chamfers in GUID-D489CE6D-7299-4211-A43A-F3580A4BA357).
+#[test]
+fn split_and_chamfer_tools() {
+    use gc_doc::ChamferKind;
+    let mut session = new_session();
+    for (a, b) in [((0.0, 0.0), (40.0, 0.0)), ((20.0, -10.0), (20.0, 10.0))] {
+        session.set_tool(ToolKind::Line);
+        click(&mut session, mm(a.0, a.1));
+        click(&mut session, mm(b.0, b.1));
+        session.tool_event(ToolEvent::Key(Key::Escape));
+    }
+    session.set_tool(ToolKind::Split);
+    assert_eq!(session.prompt(), Prompt::SplitPick);
+    session.tool_event(ToolEvent::Move { pos: mm(30.0, 0.0), px: PX, suppress_snap: true });
+    assert_eq!(session.preview().lines.len(), 2, "a mark where it would split");
+    session.tool_event(ToolEvent::Click { pos: mm(30.0, 0.0), px: PX, modifier: false });
+    assert_eq!(drawn(&session).len(), 3, "the long line is now two");
+
+    // An L corner bevelled 5 by 10 mm with dimensions.
+    let mut session = new_session();
+    for (a, b) in [((0.0, 0.0), (40.0, 0.0)), ((0.0, 0.0), (0.0, 40.0))] {
+        session.set_tool(ToolKind::Line);
+        click(&mut session, mm(a.0, a.1));
+        click(&mut session, mm(b.0, b.1));
+        session.tool_event(ToolEvent::Key(Key::Escape));
+    }
+    session.set_tool(ToolKind::Chamfer);
+    session.set_chamfer_options(ChamferKind::Unequal("5".into(), "10".into()), true);
+    session.set_tool(ToolKind::Select);
+    session.set_tool(ToolKind::Chamfer);
+    assert!(matches!(session.chamfer_options().0, ChamferKind::Unequal(..)), "kept across tools");
+    assert_eq!(session.prompt(), Prompt::ChamferFirst);
+    session.tool_event(ToolEvent::Click { pos: mm(20.0, 0.0), px: PX, modifier: false });
+    assert_eq!(session.prompt(), Prompt::ChamferSecond);
+    session.tool_event(ToolEvent::Move { pos: mm(0.0, 20.0), px: PX, suppress_snap: true });
+    assert_eq!(session.preview().lines.len(), 1, "the bevel follows");
+    session.tool_event(ToolEvent::Click { pos: mm(0.0, 20.0), px: PX, modifier: false });
+    let (_, sketch) = session.active_sketch().unwrap();
+    assert_eq!(drawn(&session).len(), 3);
+    assert_eq!(sketch.dimensions.len(), 2);
+}
