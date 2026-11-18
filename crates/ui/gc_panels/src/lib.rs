@@ -61,6 +61,10 @@ pub enum BrowserAction {
     GroundAtOrigin(Vec<gc_core::AnyId>),
     /// Place at Component Origin: a new component (the app asks for its file) on this component's origin.
     PlaceAtOrigin(gc_doc::Occurrence),
+    /// Diagnose: the Relationship Conflict Analysis dialog for this relationship.
+    Diagnose(gc_core::Id<gc_doc::Relationship>),
+    /// Recover: isolate the components of the relationships that fail together with this one.
+    IsolateRelatedFailed(gc_core::Id<gc_doc::Relationship>),
     /// Copy these rows to the clipboard (the row menu's Copy; the marked rows go together).
     Copy(Vec<gc_doc::TreeKey>),
     /// Paste what was copied (the app waits for the click that gives its place).
@@ -246,23 +250,6 @@ fn relation_unit_name(kind: &gc_doc::RelationKind) -> Option<&'static str> {
     }
 }
 
-/// The constraint with the value typed in the browser edit box (millimetres or degrees), or `None` when the
-/// text is not a number or the constraint has no value.
-fn relation_with_value(relationship: &gc_doc::Relationship, text: &str) -> Option<gc_doc::Relationship> {
-    use gc_doc::RelationKind;
-    let typed = text.trim().parse::<f64>().ok().filter(|v| v.is_finite())?;
-    let mut changed = relationship.clone();
-    changed.kind = match changed.kind {
-        RelationKind::Mate { sense, .. } => RelationKind::Mate { offset: typed / 1000.0, sense },
-        RelationKind::Flush { .. } => RelationKind::Flush { offset: typed / 1000.0 },
-        RelationKind::Insert { aligned, .. } => RelationKind::Insert { offset: typed / 1000.0, aligned },
-        RelationKind::Tangent { inside, .. } => RelationKind::Tangent { offset: typed / 1000.0, inside },
-        RelationKind::Angle { solution, .. } => RelationKind::Angle { angle: typed.to_radians(), solution },
-        _ => return None,
-    };
-    Some(changed)
-}
-
 /// Whether `name` is listed with the Find text `find` (case does not matter; an empty text lists everything).
 fn found(find: &str, name: &str) -> bool {
     find.trim().is_empty() || name.to_lowercase().contains(&find.trim().to_lowercase())
@@ -384,8 +371,13 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
                     // Clicking a constraint selects it; with Edit Values in Browser its value can be typed.
                     if result.row.clicked() && state.relationship != Some(id) {
                         state.relationship = Some(id);
-                        state.relationship_value =
-                            relation_value_text(&relationship.kind).unwrap_or_default();
+                        // The text as typed (an expression keeps its names), else the number.
+                        state.relationship_value = session
+                            .doc()
+                            .relation_param(id)
+                            .map(|p| p.source.clone())
+                            .or_else(|| relation_value_text(&relationship.kind))
+                            .unwrap_or_default();
                     }
                     if let Some(status) = session
                         .relationship_status(id)
@@ -404,6 +396,16 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
                     result.row.context_menu(|ui| {
                         if ui.add_enabled(drivable, egui::Button::new(tr!(lang, MenuDrive))).clicked() {
                             action = Some(BrowserAction::DriveRelationship(id));
+                            ui.close();
+                        }
+                        // Recover: for a relationship that failed (Inventor 2026 help, Use Design Doctor to repair
+                        // relationship errors, GUID-8C95B0AB-4505-4092-8C37-E60C68DCF4A0).
+                        if session.doc().is_sick(id) && ui.button(tr!(lang, RecoverIsolateFailed)).clicked() {
+                            action = Some(BrowserAction::IsolateRelatedFailed(id));
+                            ui.close();
+                        }
+                        if session.doc().is_sick(id) && ui.button(tr!(lang, CmdDiagnose)).clicked() {
+                            action = Some(BrowserAction::Diagnose(id));
                             ui.close();
                         }
                         // Lock and Protect are for joints only (Inventor 2026 help, To Define and Manage Joint
@@ -454,14 +456,23 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
                                 )
                             });
                             ui.label(unit);
-                            if field.lost_focus()
-                                && ui.input(|i| i.key_pressed(egui::Key::Enter))
-                                && let Some(changed) =
-                                    relation_with_value(relationship, &state.relationship_value)
-                            {
+                            // The same box as a sketch dimension's: numbers, units, expressions with parameter names;
+                            // what is wrong is said under the box (Inventor 2026 help, About Parameters in Models,
+                            // GUID-8E5C63EA-0540-4EBE-9B17-B8159C7FE40C).
+                            let unit_kind = if unit == "deg" { gc_doc::Unit::Deg } else { gc_doc::Unit::Mm };
+                            let valid =
+                                gc_doc::evaluate_value(session.doc(), &state.relationship_value, unit_kind)
+                                    .is_some();
+                            if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && valid {
                                 action = Some(BrowserAction::Edit(Box::new(gc_doc::Command::Cell(
-                                    gc_doc::CellOp::SetRelationship { id, relationship: changed },
+                                    gc_doc::CellOp::SetRelationValue {
+                                        id,
+                                        source: state.relationship_value.clone(),
+                                    },
                                 ))));
+                            }
+                            if !valid {
+                                ui.colored_label(gc_ui::colors::ERROR, tr!(lang, ErrExpression));
                             }
                         });
                     }
@@ -599,7 +610,13 @@ fn representations(ui: &mut Ui, session: &Session, lang: Lang, action: &mut Opti
                         let position = index.checked_sub(1);
                         let delete = tr!(lang, CmdDeleteItem, node.name);
                         let primary = !is_view && index == 0;
-                        let text = if node.active { format!("● {}", node.name) } else { node.name.clone() };
+                        let locked =
+                            is_view && session.representations().views.get(index).is_some_and(|v| v.locked);
+                        let mut text =
+                            if node.active { format!("● {}", node.name) } else { node.name.clone() };
+                        if locked {
+                            text.push_str(&format!(" ({})", tr!(lang, RepLocked)));
+                        }
                         let row = TreeRow {
                             icon: Icon::View,
                             text: &text,
@@ -633,6 +650,25 @@ fn representations(ui: &mut Ui, session: &Session, lang: Lang, action: &mut Opti
                             {
                                 *action = Some(activate.clone());
                                 ui.close();
+                            }
+                            // Copy: a view's copy becomes the active one, a position's copy keeps its overrides
+                            // (Inventor 2026 help, GUID-397F9263-12C3-47A1-B6A6-16FC05EDEF47 and
+                            // GUID-34C28C35-45CA-4476-9336-30146F7C9471).
+                            if ui.add_enabled(!primary, egui::Button::new(tr!(lang, CmdCopy))).clicked() {
+                                *action = if is_view {
+                                    edit(CellOp::CopyViewRepresentation(index))
+                                } else {
+                                    position.and_then(|p| edit(CellOp::CopyPositionalRepresentation(p)))
+                                };
+                                ui.close();
+                            }
+                            // Lock: the view's display no longer follows what is changed.
+                            if is_view {
+                                let text = if locked { tr!(lang, RepUnlock) } else { tr!(lang, RepLock) };
+                                if ui.button(text).clicked() {
+                                    *action = edit(CellOp::LockViewRepresentation { index, locked: !locked });
+                                    ui.close();
+                                }
                             }
                             if ui.add_enabled(!primary, egui::Button::new(delete.as_str())).clicked() {
                                 *action = edit(remove.clone());

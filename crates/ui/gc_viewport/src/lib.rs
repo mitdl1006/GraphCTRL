@@ -169,6 +169,14 @@ pub struct Viewport {
     pub show_view_cube: bool,
     /// The navigation bar is shown.
     pub show_nav_bar: bool,
+    /// Right-click opens the classic context menu (a list) instead of the radial marking menu.
+    pub classic_menu: bool,
+    /// The Home view the ViewCube's menu saved (Set Current View as Home); the default is the isometric view.
+    pub home: Option<Camera>,
+    /// Where the ViewCube's menu is open.
+    cube_menu: Option<(egui::Pos2, u8)>,
+    /// ViewCube options: fit the model to the window when a part of the cube is clicked.
+    pub cube_fit_on_view_change: bool,
     /// Object Visibility (View tab, Visibility panel).
     pub visibility: ObjectVisibility,
     /// A selection box being dragged in a sketch: where the mouse went down.
@@ -506,6 +514,10 @@ impl Viewport {
             browser_hover: None,
             show_view_cube: true,
             show_nav_bar: true,
+            classic_menu: false,
+            home: None,
+            cube_menu: None,
+            cube_fit_on_view_change: false,
             visibility: ObjectVisibility::default(),
             box_select: None,
             frame_time: 0.0,
@@ -768,8 +780,17 @@ impl Viewport {
         {
             self.select_menu = Some(at);
         }
+        // The ViewCube has a menu of its own.
+        let over_cube = self.cube_centre.is_some_and(|c| {
+            ui.input(|i| i.pointer.latest_pos())
+                .is_some_and(|p| egui::Rect::from_center_size(c, egui::Vec2::splat(124.0)).contains(p))
+        });
+        if secondary_pressed && over_cube && !shift_menu {
+            self.cube_menu = ui.input(|i| i.pointer.latest_pos()).map(|p| (p, 0));
+        }
         if secondary_pressed
             && !shift_menu
+            && !over_cube
             && response.hovered()
             && self.navigating.is_none()
             && !self.marking.is_open()
@@ -905,15 +926,36 @@ impl Viewport {
             }
         }
         if self.marking.is_open() {
-            let radial: Vec<Option<gc_ui::marking::MarkingItem>> =
-                self.marking_set.radial.iter().map(|cmd| cmd.map(|cmd| cmd.item(session, lang))).collect();
-            let overflow: Vec<gc_ui::marking::MarkingItem> =
-                self.marking_set.overflow.iter().map(|cmd| cmd.item(session, lang)).collect();
+            // The classic context menu lists every command, the radial ones first (Inventor 2026 help, Reference for
+            // Marking Menu Tab of Customize Dialog, GUID-1A2766FB-EB3E-476B-9C44-D500A5137478: Use Classic Context Menu).
+            let classic = self.classic_menu;
+            let listed: Vec<radial::Cmd> = if classic {
+                self.marking_set
+                    .radial
+                    .iter()
+                    .flatten()
+                    .chain(self.marking_set.overflow.iter())
+                    .copied()
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            let radial: Vec<Option<gc_ui::marking::MarkingItem>> = if classic {
+                Vec::new()
+            } else {
+                self.marking_set.radial.iter().map(|cmd| cmd.map(|cmd| cmd.item(session, lang))).collect()
+            };
+            let overflow: Vec<gc_ui::marking::MarkingItem> = if classic {
+                listed.iter().map(|cmd| cmd.item(session, lang)).collect()
+            } else {
+                self.marking_set.overflow.iter().map(|cmd| cmd.item(session, lang)).collect()
+            };
             let picked = self.marking.show(ui.ctx(), &radial, &overflow);
             let cmd = picked.and_then(|pick| match pick {
                 gc_ui::marking::MarkingPick::Radial(sector) => {
                     self.marking_set.radial.get(sector).copied().flatten()
                 }
+                gc_ui::marking::MarkingPick::Overflow(index) if classic => listed.get(index).copied(),
                 gc_ui::marking::MarkingPick::Overflow(index) => self.marking_set.overflow.get(index).copied(),
             });
             if let Some(cmd) = cmd {
@@ -929,7 +971,7 @@ impl Viewport {
                             self.open_select_other(session, at, size, &to_view);
                         }
                     }
-                    radial::Effect::Home => self.camera.look(StandardView::Iso),
+                    radial::Effect::Home => self.go_home(),
                     radial::Effect::Fit => self.fit(session, [1000.0, 700.0]),
                     radial::Effect::Free(tool) => self.free_tool = Some(tool),
                 }
@@ -1108,8 +1150,9 @@ impl Viewport {
         } else {
             self.hud.cancel();
         }
+        self.elastic_bands(ui, rect, session, size);
         if self.show_view_cube {
-            self.view_cube(ui, rect, lang);
+            self.view_cube(ui, rect, session, lang);
         } else {
             self.cube_centre = None;
         }
@@ -1239,7 +1282,7 @@ impl Viewport {
             }
             gc_ui::Icon::Home.paint(&painter, home.shrink(3.0), colors::text());
             if response.on_hover_text(label).clicked() {
-                self.camera.look(StandardView::Iso);
+                self.go_home();
             }
         }
     }
@@ -1296,7 +1339,7 @@ impl Viewport {
 
     /// The view cube in the top-right corner: shows how the view is turned; clicking a face, an edge or a
     /// corner looks at the model from there.
-    fn view_cube(&mut self, ui: &mut egui::Ui, rect: egui::Rect, lang: Lang) {
+    fn view_cube(&mut self, ui: &mut egui::Ui, rect: egui::Rect, session: &Session, lang: Lang) {
         /// Pixels per cube unit (the cube's half-size).
         const HALF: f32 = 27.0;
         let free = self.clear.unwrap_or(rect);
@@ -1362,6 +1405,68 @@ impl Viewport {
                 response.interact_pointer_pos().and_then(|p| viewcube::pick(&self.camera, to_cube(p)))
         {
             viewcube::look(&mut self.camera, target);
+            if self.cube_fit_on_view_change {
+                self.fit(session, [1000.0, 700.0]);
+            }
+        }
+        // The ViewCube's menu (Inventor 2026 help, To Reorient the View, GUID-94F44C80-7313-4529-85D1-E64ABF732700):
+        // Set Current View as Home, Go Home, and the Fit-to-View option. (Front and Reset Front are not offered:
+        // the cube's face directions are fixed.)
+        if let Some((at, age)) = self.cube_menu.take() {
+            let mut keep = true;
+            let area = egui::Area::new(egui::Id::unique("gc_cube_menu"))
+                .fixed_pos(at)
+                .order(egui::Order::Foreground)
+                .show(ui.ctx(), |ui| {
+                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                        if ui.button(tr!(lang, CubeSetHome)).clicked() {
+                            self.home = Some(self.camera);
+                            keep = false;
+                        }
+                        if ui.button(tr!(lang, CubeGoHome)).clicked() {
+                            self.go_home();
+                            keep = false;
+                        }
+                        ui.checkbox(&mut self.cube_fit_on_view_change, tr!(lang, CubeFitOnChange));
+                    });
+                });
+            // (The menu is not laid out yet on the frame that opens it.)
+            let outside =
+                age > 0 && ui.input(|i| i.pointer.any_pressed()) && !area.response.contains_pointer();
+            if keep && !outside && !ui.input(|i| i.key_pressed(Key::Escape)) {
+                self.cube_menu = Some((at, age.saturating_add(1)));
+            }
+        }
+    }
+
+    /// The relationships of components that Free Move or Free Rotate left out of place, as elastic bands from each
+    /// component to where its relationship wants it (Inventor 2026 help, Move assembly components,
+    /// GUID-9796C22B-23C1-4D69-BC2E-54056E46F255: "The Free Move command displays component relationships as an
+    /// elastic band").
+    fn elastic_bands(&self, ui: &egui::Ui, rect: egui::Rect, session: &Session, size: [f64; 2]) {
+        if !session.needs_update() {
+            return;
+        }
+        let painter = ui.painter_at(rect);
+        for band in session.relationship_bands() {
+            let [a, b] = band.ends;
+            let (Some(a), Some(b)) = (self.camera.project(a, size), self.camera.project(b, size)) else {
+                continue;
+            };
+            let at = |p: [f64; 2]| {
+                #[allow(clippy::cast_possible_truncation, reason = "screen coordinates fit f32")]
+                egui::pos2(rect.left() + p[0] as f32, rect.top() + p[1] as f32)
+            };
+            let colour = if band.satisfied { colors::SELECTED } else { colors::ERROR };
+            painter.line_segment([at(a), at(b)], egui::Stroke::new(1.5, colour));
+        }
+    }
+
+    /// Go Home: the saved Home view, else the isometric view.
+    pub fn go_home(&mut self) {
+        match self.home {
+            Some(home) => self.camera = home,
+            None => self.camera.look(StandardView::Iso),
         }
     }
 

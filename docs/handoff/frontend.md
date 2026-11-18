@@ -502,6 +502,94 @@
 - 리본 탭 전환: 스케치 진입 시 스케치 탭 활성화·종료 시 이전 탭 복귀는 이미 있다(`tab_before_sketch`). 그 밖의 문맥 전환은 원문 근거를 찾지 못했다.
 - 백엔드의 구속 값 매개변수·식, Planar 조인트, Gap/정렬, Free Move/Rotate, 표현 재정의·Lock은 API가 오면 연결한다.
 
+## 어셈블 탭 Productivity: Ground and Root 대화상자·Place at Component Origin
+
+근거(원문): Ground and Root GUID-98FA88B2-AA32-4A27-946A-DCECB36A6696, Place at Component Origin GUID-E7A45820-E297-449D-AFBF-3C8D8EAE8A0E.
+
+- 리본 조립 탭 "생산성 (Productivity)" 그룹(작은 단추 두 줄; 큰 단추 두 개는 1280px 너비 테스트를 넘겨 쌓았다).
+- Ground and Root 대화상자(`productivity.rs`): 컴포넌트 체크 목록(브라우저에서 표시한 행이 미리 선택), 옵션 3개 — "Ground at origin"(켜짐, `ground_at_origin`), "Create origin flush constraints"·"Reposition to the top of the browser"(백엔드에 없어 비활성 + "아직 지원하지 않습니다" 툴팁). 거부되면 상태 줄 알림.
+- Place at Component Origin: 단추 → 뷰에서 대상 컴포넌트 선택(상태 줄 프롬프트, Esc 취소) → 파일 대화상자 → `place_at_component_origin`. 원문 흐름과 같다(여러 파일 선택은 대화상자 한계로 한 개).
+- 우클릭 항목(앞선 커밋)은 그대로 둔다. 한국어 표기는 한국어 도움말을 못 읽어 한국어 + 영어 원문 병기.
+- 남은 지시: ② 마킹 메뉴 원문 조사·구현, ③ 리본 탭 배치를 Ribbon reference와 대조.
+
+## 마킹 메뉴 원문 반영
+
+근거(원문, curl): About Marking Menus GUID-4B081B74-45EA-451E-84BE-9FFE0E2ACAE3, To Work with Marking Menus GUID-756BC728-3366-497D-B480-4A06E932ED20, Reference for Marking Menu Tab of Customize Dialog GUID-1A2766FB-EB3E-476B-9C44-D500A5137478.
+
+- 이미 있던 것: 우클릭 방사형 메뉴(중심은 커서), 누른 채 끌어 빨리 놓는 마크(제스처) 즉시 선택, 클릭하면 메뉴+오버플로 목록, 환경별 기본 명령(조립: Constrain·Place Component·Move·Rotate, 스케치: Center Point Circle·Line·Two Point Rectangle·Finish Sketch).
+- 이번에 맞춘 것: ① 중앙 클릭으로 닫기는 있다. Esc로도 계속 닫는다(원문은 Esc를 쓰지 말라고 하나 QA 테스트 여러 개가 Esc로 닫는다고 가정하고, 메뉴가 Esc를 먹어도 해롭지 않아 유지). ② 위/아래 화살표로 명령을 옮기고 클릭으로 확정(방사형 순서, 북쪽부터 시계 방향). ③ View > User Interface의 "마킹 메뉴" 체크 해제 = "Use Classic Context Menu": 명령 전체를 목록으로(설정 `classic_context_menu`로 저장).
+- 하지 않은 것(원문에 있으나 우리 범위 밖): Customize 대화상자의 명령 배치 편집·XML 가져오기/내보내기, Ctrl+우클릭 사용자 메뉴, 표시 형식(글자만/아이콘만), 오버플로 형식(전체/방사형만/짧게). 방향별 기본 항목 표는 2026 원문에 없다(위치는 우리가 북·동·남·서로 정함).
+
+## 리본 배치 대조 (조사 결과)
+
+- 2026 도움말에는 탭·패널을 한 장에 나열한 "Ribbon reference"가 없다. About the Ribbon(GUID-78BFC5E2-5323-48E3-A704-58DDD1836EFE)은 "탭 > 패널(드롭다운 화살표 = 추가 명령)" 구조만 설명하고, 패널 이름·순서는 명령 페이지마다 "Assemble tab > Component panel > Place" 식으로 흩어져 나온다.
+- 우리 스케치 탭 패널 이름(Create·Modify·Pattern·Constrain·Exit)은 명령 페이지의 표기와 같다. 조립 탭은 Component·Pattern·Productivity·Relationships·Edit·Position 순이라 원문 표기(Component > Position > Relationships > Pattern > … > Productivity)와 순서가 다를 수 있으나, 순서를 확정할 원문 페이지를 못 찾아 바꾸지 않았다. 순서 근거(리본 스크린샷 또는 패널 목록)를 받으면 조정한다.
+
+## ViewCube 우클릭 메뉴 (Home)
+
+근거(원문, curl): To Reorient the View GUID-94F44C80-7313-4529-85D1-E64ABF732700, About Reorienting the View GUID-4A18A2AC-69F2-44DD-AD07-B8733321E8C9, To Work with the Navigation Bar GUID-FAAB453E-31EB-46B8-9A74-3BF7A4D88EC9.
+
+- ViewCube 우클릭: "현재 뷰를 홈으로 설정"(Set Current View as Home), "홈으로 이동"(Go Home), "뷰를 바꿀 때 모델 맞추기"(Fit-to-View on view change). 홈 단추·마킹 메뉴의 Home도 저장한 홈 뷰로 간다(없으면 등각). 홈 뷰는 세션 안에서만 기억한다(문서에 저장 안 함).
+- 큐브 위의 우클릭은 마킹 메뉴를 열지 않는다.
+- 구현 메모: egui의 `context_menu`는 큐브 위젯이 우클릭을 못 받아 쓰지 못했고(뷰포트 응답과 겹침) 직접 그린 Area로 열었다. 메뉴가 열린 첫 프레임엔 크기가 없어 "밖을 눌렀다"로 닫히지 않게 나이를 센다.
+- 하지 않은 것: Set Current View as Front / Reset Front(큐브 면 방향이 고정이라), 애니메이션 전환 옵션, 큐브 우클릭의 Orthographic/Perspective(2026 원문 페이지에 없음), 탐색 막대 Customize·도킹·불투명도.
+
+## 구속 값 = 모델 매개변수 (백엔드 ac86218)
+
+근거(원문, curl): About Parameters in Models GUID-8E5C63EA-0540-4EBE-9B17-B8159C7FE40C, To Work with Parameters in Models GUID-595F9D8E-9EEA-4446-91AB-830E5BAE548E, Edit assembly constraints GUID-36315745-5FE6-4277-9F00-E410B962D83F.
+
+- ② 매개변수 표 "모델 매개변수"에 구속의 오프셋·각도 행(이름 dN·식·값·단위)이 스케치 치수 뒤에 나온다. 식 칸 Enter = `SetRelationValue`(실패는 대화상자에 표시), 이름 칸 Enter = `RenameRelationParam`, 우클릭 "사용자 매개변수로 복사".
+- ① 브라우저의 구속 값 칸(Edit Values in Browser): 식을 입력할 수 있다(처음 값은 입력했던 식 그대로). 식이 틀리면 칸 아래에 "식을 읽을 수 없습니다"류 문구가 뜨고 저장하지 않는다. 구속 대화상자(Constrain)의 오프셋 칸도 같은 식 입력이다: 숫자는 mm, 식·단위·매개변수 이름 가능, 틀리면 칸 아래 문구 + 버튼 비활성, 식은 만든 뒤 `SetRelationValue`로 매개변수에 그대로 저장된다. Angle 구속 대화상자는 아직 없다(구속 대화상자가 Mate/Flush/Insert만).
+- ③ 브라우저 노드 이름 옆 값 표시 형식("Mate:1 (d3 = 10 mm)")은 원문에 형식이 없어 넣지 않았다(Edit assembly constraints는 "브라우저 아래 편집 상자에 값을 입력"만 말한다).
+- 테스트: `a_constraints_offset_is_a_model_parameter_edited_as_an_expression`.
+
+## Free Move/Free Rotate 놓기·고무줄·Update (백엔드 ee91fd5)
+
+근거(원문, 백엔드 handoff 표): Move assembly components GUID-9796C22B-23C1-4D69-BC2E-54056E46F255, Rotate assembly components GUID-7EAE9DFD-899A-4FD1-B63F-92DD41D0A916.
+
+- 조립 탭 Position 그룹의 Free Move/Free Rotate는 이미 있었다(드래그 미리보기). 이번에 놓을 때 바디·로봇은 `session.free_move`로 확정해 관계를 풀지 않고 그 자리에 둔다(예전엔 SetBody라 바로 제자리로 돌아갔다). 하위 어셈블리 묶음과 웨이포인트·프레임은 이전 방식 그대로.
+- 관계가 어긋난 동안(`needs_update()`) 뷰에 고무줄 선: `relationship_bands()` 두 끝을 잇고 맞으면 선택 색, 안 맞으면 오류 색.
+- 신속 접근 막대에 "U"(업데이트) 단추: `needs_update()`일 때만 활성, `update_assembly()`. 리본 단추는 1280px 너비 때문에 QAT로만 했다.
+- 하지 않은 것: 회전 기호 손잡이(안쪽=임의, 위·아래=수평축, 좌·우=수직축, 테두리=화면 평면; 지금은 화면 기준 드래그), 드래그 중 고무줄, 브라우저에서 어긋남을 오류와 구별해 표시.
+- 테스트: `update_brings_a_free_moved_component_back_to_its_relationships`.
+
+## Constrain 대화상자: Angle·Tangent·Symmetry
+
+근거(원문, curl): To Place Angle Constraints in Assemblies GUID-AD4679FD-EE9B-47C0-9E32-04B990BDD29E(Directed / Undirected / Explicit Reference Vector, 세 번째 선택은 "면·선형 모서리·작업 평면·작업 축, 가능하면 고정 컴포넌트에서", 한계는 Directed에 없음).
+
+- 종류 탭: 맞춤·플러시·각도·접선·삽입·대칭. 각도: 값(deg, 식·매개변수 이름 가능)과 해법 3개, Explicit이면 세 번째 선택 줄이 생기고 다음 뷰 선택이 거기 들어간다. 접선: 오프셋 + 안쪽/바깥쪽. 대칭: 세 번째 선택 = 대칭 평면, 값 칸 없음.
+- 한계(Maximum/Minimum/Resting)는 맞춤·플러시·삽입에만 보인다(각도 한계는 원문 규칙이 복잡해 아직 안 함).
+- 예측(Predict)은 각도·접선도 채운다.
+- 테스트: `constrain.rs`의 `angle_tangent_and_symmetry_are_described_by_the_dialog`(필드→`Relationship`). 뷰에서 고르는 흐름은 UI 테스트 없음.
+- 한국어: 각도/접선/대칭/방향 각도/방향 없는 각도/명시 기준 벡터(영어 원문 병기 필요하면 말해 주세요).
+
+## 표현 노드 우클릭: Lock·Copy (백엔드 2fe39fd)
+
+근거: To Create, Edit, and Restore View Representations GUID-397F9263-12C3-47A1-B6A6-16FC05EDEF47(Copy: 복사본이 활성, Lock: 표시 변경을 막음), To Create, Edit, or Copy Positional Representations GUID-34C28C35-45CA-4476-9336-30146F7C9471.
+
+- 뷰 표현 행 우클릭: "복사"(`CopyViewRepresentation`), "잠금 (Lock)"/"잠금 해제 (Unlock)"(`LockViewRepresentation`), 잠기면 행에 "(잠김)". 위치 표현 행 우클릭: "복사"(`CopyPositionalRepresentation`; [Primary]는 비활성).
+- 백엔드가 곧 넣는 "새 뷰가 만들자마자 활성"·"위치 표현 활성 중 편집 거부"에 맞춰 표현 테스트를 고쳐야 하면 그때 맞춘다(지금 테스트는 통과).
+- 테스트: `the_representation_menus_lock_and_copy`.
+
+## 구속 오류: Accept·Recover (백엔드 9c7e8b8)
+
+근거: Place/Edit Connection Error Reference GUID-23D0D333-AD6A-4CB6-9786-6966DFE8FDFF(Accept the relationship), Use Design Doctor to repair relationship errors GUID-8C95B0AB-4505-4092-8C37-E60C68DCF4A0(Recover 처치), Relationship Conflict Analysis Reference GUID-528B2CD0-93FD-45BC-AB69-6C5A559BB8E8.
+
+- 구속 오류 대화상자에 "그대로 받기 (Accept)": 새 구속은 `accept_relationship`, 편집은 `accept_relationship_edit`(`Conflict.edit`). 받은 구속은 브라우저에서 빨간 대시(sick)로 표시된다(기존 상태 점).
+- 브라우저 구속 노드 우클릭: 실패한 구속에 "복구: 관련된 실패 분리 (Isolate Related Failed)" = `related_failed(id)`의 컴포넌트만 남기고 `isolate`. 삭제·억제는 기존 메뉴 항목.
+- 편집 쪽 Accept 경로는 브라우저의 `SetRelationship` 실패(Unsolvable)만 대화상자로 보낸다. 값 칸(SetRelationValue)과 편집 대화상자(아직 없음)는 상태 줄 오류로 남는다.
+- 하지 않은 것: Conflict Analysis 대화상자(Keep/Break·Check = `conflict_check`), Isolate and Edit·Diagnose.
+- 테스트: `a_failed_relationship_offers_recover_in_its_menu`.
+
+## Motion 구속·Conflict Analysis (백엔드 ac7e63f·9c7e8b8)
+
+근거(원문, curl): Place Motion constraints between assembly components GUID-493DEAF8-D124-47BE-AFF2-B0535E9005C5, Place Constraint Reference - Motion Tab GUID-0293C151-565F-4980-AA95-DD76C54AB538, Relationship Conflict Analysis Reference GUID-528B2CD0-93FD-45BC-AB69-6C5A559BB8E8.
+
+- Constrain 대화상자 "모션 (Motion)" 탭: 회전(Rotation: 비율, 단위 없음) / 회전-이동(Rotation-Translation: 거리 mm), 정방향·역방향, 두 선택이 되면 `Document::motion_default`로 값을 채운다. 비율은 0 불가. 한계 없음. 비율·거리 식 입력은 백엔드에 구속 값 매개변수(dN)가 아직 없어 숫자(거리는 단위·식 평가)만 받는다.
+- Conflict Analysis 대화상자(`diagnose.rs`): 실패한(sick) 구속의 우클릭 "진단 (Diagnose)" → 관련 구속 각각 유지/끊기, 관련 컴포넌트의 고정 상태 반전 체크, 확인(`conflict_check`)의 결과("충돌 없음/아직 충돌이 있습니다"), "끊은 관계 억제/삭제". 
+- 하지 않은 것: 원문의 폴더 트리·상태 기호 순환·"Isolate connected components"·"충돌하는 관계만 표시", Place/Edit 오류 대화상자의 "Diagnose" 단추(브라우저 메뉴로만 연다).
+- 테스트: `constrain.rs`의 `motion_takes_a_ratio_or_a_distance_and_a_direction`, 셸의 `the_conflict_analysis_checks_with_a_relationship_broken`.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

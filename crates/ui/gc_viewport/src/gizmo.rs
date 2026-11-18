@@ -66,7 +66,7 @@ pub(crate) fn pose_of(session: &Session, item: CellItem) -> Option<(DPose3, bool
     }
 }
 
-fn placement(pose: &DPose3) -> Placement {
+pub(crate) fn placement(pose: &DPose3) -> Placement {
     Placement { xyz: pose.translation.to_array(), rpy: gc_math::rpy_from_quat(pose.rotation) }
 }
 

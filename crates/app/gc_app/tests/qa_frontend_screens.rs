@@ -429,7 +429,9 @@ fn the_spline_right_click_menu_offers_what_fits_the_point_under_the_cursor() {
     for name in ["스플라인 분할", "곡선 닫기", "점 삽입"] {
         assert!(h.query_all_by_label(name).next().is_none(), "{name} offered in empty space");
     }
-    h.key_press(egui::Key::Escape);
+    // The marking menu is dismissed by a click in its centre (Esc is left to the command in progress; Inventor 2026
+    // help, To Work with Marking Menus, GUID-756BC728-3366-497D-B480-4A06E932ED20).
+    button(&mut h, egui::pos2(900.0, 700.0), egui::PointerButton::Primary);
     h.run_steps(3);
     // An inner fit point offers Split Spline; the end offers Close Curve; both are one undo step.
     right(&mut h, pts[1]);

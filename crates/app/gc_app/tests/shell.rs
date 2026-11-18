@@ -7105,3 +7105,382 @@ fn a_row_menu_grounds_the_component_at_the_origin() {
     harness.state_mut().session.undo();
     assert_eq!(harness.state().session.doc().get(a).unwrap().placement.xyz, [0.5, 0.2, 0.3]);
 }
+
+/// The Assemble tab's Productivity panel opens the Ground and Root dialog: the chosen component goes to the
+/// origin and is grounded; the options the backend lacks are listed, disabled (GUID-98FA88B2-AA32-4A27-946A-DCECB36A6696).
+#[test]
+fn the_productivity_panel_grounds_components_in_its_dialog() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let a = harness
+        .state_mut()
+        .session
+        .add_body(
+            gc_doc::Solid::Box { size: [0.1; 3] },
+            gc_doc::Placement { xyz: [0.5, 0.2, 0.3], rpy: [0.0; 3] },
+        )
+        .unwrap();
+    harness.run();
+    harness.get_by_label("조립").click();
+    harness.run_steps(3);
+    harness.get_by_label("Ground and Root").click();
+    harness.run_steps(3);
+    harness.get_by_label("원점 Flush 구속 만들기 (Create origin flush constraints)");
+    let name = harness.state().session.doc().get(a).unwrap().name.clone();
+    harness.get_all_by_label(&name).last().unwrap().click();
+    harness.run_steps(2);
+    harness.get_by_label("확인").click();
+    harness.run_steps(3);
+    assert!(harness.state().session.doc().get(a).unwrap().placement.xyz.iter().all(|v| v.abs() < 1e-9));
+    // Place at Component Origin asks for the component in the view first.
+    harness.get_by_label("원점에 배치").click();
+    harness.run_steps(3);
+    harness.get_by_label("원점에 맞출 기존 컴포넌트를 선택하십시오");
+}
+
+/// The marking menu (Inventor 2026 help, To Work with Marking Menus, GUID-756BC728-3366-497D-B480-4A06E932ED20):
+/// the Down key moves to a command and a click confirms it; a click in the centre dismisses it. With the classic context menu (GUID-1A2766FB-EB3E-476B-9C44-D500A5137478) the commands are a list.
+#[test]
+fn the_marking_menu_takes_the_keys_and_can_be_the_classic_list() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let centre = egui::pos2(500.0, 450.0);
+    let right_click = |h: &mut egui_kittest::Harness<'_, GraphCtrlApp>| {
+        h.event(egui::Event::PointerMoved(centre));
+        h.run_steps(2);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: centre,
+                button: egui::PointerButton::Secondary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+        h.run_steps(3);
+    };
+    let left_click = |h: &mut egui_kittest::Harness<'_, GraphCtrlApp>| {
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: centre,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+        h.run_steps(3);
+    };
+    right_click(&mut harness);
+    harness.get_by_label("구속");
+    // Down moves to the first command (north: Constrain); a click confirms it.
+    harness.key_press(egui::Key::ArrowDown);
+    harness.run_steps(2);
+    left_click(&mut harness);
+    harness.get_by_label("첫 번째 선택: 뷰에서 선택");
+    harness.get_by_label("취소").click();
+    harness.run_steps(3);
+    // A click in the centre without a chosen command dismisses the menu.
+    right_click(&mut harness);
+    left_click(&mut harness);
+    assert!(harness.query_all_by_label("구속").next().is_none());
+    // Classic context menu: the same commands as a list.
+    harness.state_mut().viewport_mut().classic_menu = true;
+    right_click(&mut harness);
+    harness.get_by_label("구속").click();
+    harness.run_steps(3);
+    harness.get_by_label("첫 번째 선택: 뷰에서 선택");
+}
+
+/// The ViewCube's menu (Inventor 2026 help, To Reorient the View, GUID-94F44C80-7313-4529-85D1-E64ABF732700):
+/// Set Current View as Home saves the camera, and Go Home (and the Home button) bring it back.
+#[test]
+fn the_view_cube_menu_sets_and_goes_to_the_home_view() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let (middle, half) = harness.state().viewport().view_cube_placement().expect("the ViewCube is shown");
+    let centre = middle + egui::vec2(0.9 * half, 0.0);
+    let right_click = |h: &mut egui_kittest::Harness<'_, GraphCtrlApp>| {
+        h.event(egui::Event::PointerMoved(centre));
+        h.run_steps(2);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: centre,
+                button: egui::PointerButton::Secondary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            h.run_steps(2);
+        }
+        h.run_steps(2);
+    };
+    harness.state_mut().viewport_mut().look(gc_draw::StandardView::Front);
+    harness.run_steps(2);
+    let saved = harness.state().viewport().camera.rotation;
+    right_click(&mut harness);
+    harness.get_by_label("현재 뷰를 홈으로 설정").click();
+    harness.run_steps(3);
+    harness.state_mut().viewport_mut().look(gc_draw::StandardView::Top);
+    harness.run_steps(2);
+    assert_ne!(harness.state().viewport().camera.rotation, saved);
+    right_click(&mut harness);
+    harness.get_by_label("홈으로 이동").click();
+    harness.run_steps(3);
+    assert_eq!(harness.state().viewport().camera.rotation, saved);
+}
+
+/// A constraint's offset is a model parameter (Inventor 2026 help, About Parameters in Models,
+/// GUID-8E5C63EA-0540-4EBE-9B17-B8159C7FE40C): the Parameters dialog lists it, an expression typed there
+/// changes the constraint, and a wrong one is not stored.
+#[test]
+fn a_constraints_offset_is_a_model_parameter_edited_as_an_expression() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.05, 0.05, 0.05] };
+    let app = harness.state_mut();
+    let fixed = app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    let moving =
+        app.session.add_body(solid, gc_doc::Placement { xyz: [0.0, 0.0, 0.2], rpy: [0.0; 3] }).unwrap();
+    let plane = gc_doc::Geometry::origin(gc_doc::OriginElement::Plane(gc_doc::OriginPlane::Xy));
+    let select = |body: gc_core::Id<gc_doc::Body>| gc_doc::Selection {
+        occurrence: gc_doc::Occurrence::Item(body.erase()),
+        geometry: plane,
+    };
+    let id = app
+        .session
+        .add_relationship(gc_doc::Relationship::new(
+            "Mate:1",
+            gc_doc::RelationKind::Mate { offset: 0.0, sense: gc_doc::AxisSense::Opposed },
+            select(moving),
+            select(fixed),
+        ))
+        .unwrap();
+    harness.run();
+    let name =
+        harness.state().session.doc().relation_param(id).expect("the offset has a parameter").name.clone();
+    harness.get_by_label("관리").click();
+    harness.run();
+    harness.get_by_label("매개변수").click();
+    harness.run();
+    let type_into = |h: &mut egui_kittest::Harness<'_, GraphCtrlApp>, row: &str, text: &str| {
+        let field = h.get_by_role_and_label(egui::accesskit::Role::TextInput, row);
+        field.focus();
+        h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        h.get_by_role_and_label(egui::accesskit::Role::TextInput, row).type_text(text);
+        h.key_press(egui::Key::Enter);
+        h.run();
+    };
+    type_into(&mut harness, &name, "5 mm * 3");
+    let value = |h: &egui_kittest::Harness<'_, GraphCtrlApp>| {
+        h.state().session.doc().relation_param(id).unwrap().value
+    };
+    assert!((value(&harness) - 0.015).abs() < 1e-9, "{}", value(&harness));
+    // A wrong expression is refused and the value stays.
+    type_into(&mut harness, &name, "apples +");
+    assert!((value(&harness) - 0.015).abs() < 1e-9);
+}
+
+/// A component dropped by Free Move stays where it was put until Update snaps it back to its relationship
+/// (Inventor 2026 help, Move assembly components, GUID-9796C22B-23C1-4D69-BC2E-54056E46F255); the Quick Access
+/// Toolbar's Update is available only then.
+#[test]
+fn update_brings_a_free_moved_component_back_to_its_relationships() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.05, 0.05, 0.05] };
+    let app = harness.state_mut();
+    let fixed = app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    let moving =
+        app.session.add_body(solid, gc_doc::Placement { xyz: [0.0, 0.0, 0.2], rpy: [0.0; 3] }).unwrap();
+    let plane = gc_doc::Geometry::origin(gc_doc::OriginElement::Plane(gc_doc::OriginPlane::Xy));
+    let select = |body: gc_core::Id<gc_doc::Body>| gc_doc::Selection {
+        occurrence: gc_doc::Occurrence::Item(body.erase()),
+        geometry: plane,
+    };
+    app.session
+        .add_relationship(gc_doc::Relationship::new(
+            "Mate:1",
+            gc_doc::RelationKind::Mate { offset: 0.0, sense: gc_doc::AxisSense::Opposed },
+            select(moving),
+            select(fixed),
+        ))
+        .unwrap();
+    let held = app.session.doc().get(moving).unwrap().placement;
+    app.session.free_move(moving.erase(), gc_doc::Placement { xyz: [0.3, 0.0, 0.5], rpy: [0.0; 3] }).unwrap();
+    harness.run_steps(3);
+    assert!(harness.state().session.needs_update());
+    harness.get_by_label("업데이트 (빠른 실행)").click();
+    harness.run_steps(3);
+    assert!(!harness.state().session.needs_update());
+    let back = harness.state().session.doc().get(moving).unwrap().placement;
+    assert!(back.xyz[2] < 0.1, "snapped back from z = 0.5 to the mate: {back:?} (was {held:?})");
+}
+
+/// A view representation's menu locks it and copies it; a position's menu copies it (Inventor 2026 help,
+/// GUID-397F9263-12C3-47A1-B6A6-16FC05EDEF47, GUID-34C28C35-45CA-4476-9336-30146F7C9471).
+#[test]
+fn the_representation_menus_lock_and_copy() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("표현").click();
+    harness.run();
+    harness.get_by_label("새 뷰 표현").click();
+    harness.run();
+    harness.get_by_label("새 위치 표현").click();
+    harness.run();
+    let right_click = |h: &mut egui_kittest::Harness<'_, GraphCtrlApp>, label: &str| {
+        let at = h.get_all_by_label_contains(label).find(|n| n.rect().min.x < 300.0).unwrap().rect().center();
+        h.event(egui::Event::PointerMoved(at));
+        h.run_steps(2);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Secondary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+        h.run_steps(3);
+    };
+    right_click(&mut harness, "View:1");
+    harness.get_by_label("잠금 (Lock)").click();
+    harness.run_steps(3);
+    assert!(harness.state().session.representations().views[0].locked);
+    right_click(&mut harness, "View:1");
+    harness.get_all_by_label("복사").last().unwrap().click();
+    harness.run_steps(3);
+    assert_eq!(harness.state().session.representation_folder().views.len(), 2);
+    right_click(&mut harness, "Position:1");
+    harness.get_all_by_label("복사").last().unwrap().click();
+    harness.run_steps(3);
+    assert_eq!(harness.state().session.representation_folder().positions.len(), 3, "[Primary] and two");
+}
+
+/// A relationship accepted although it cannot be solved is marked failed in the browser; its menu offers Recover:
+/// Isolate Related Failed (Inventor 2026 help, GUID-8C95B0AB-4505-4092-8C37-E60C68DCF4A0).
+#[test]
+fn a_failed_relationship_offers_recover_in_its_menu() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.05, 0.05, 0.05] };
+    let app = harness.state_mut();
+    let fixed = app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    let moving =
+        app.session.add_body(solid, gc_doc::Placement { xyz: [0.0, 0.0, 0.2], rpy: [0.0; 3] }).unwrap();
+    let plane = gc_doc::Geometry::origin(gc_doc::OriginElement::Plane(gc_doc::OriginPlane::Xy));
+    let select = |body: gc_core::Id<gc_doc::Body>| gc_doc::Selection {
+        occurrence: gc_doc::Occurrence::Item(body.erase()),
+        geometry: plane,
+    };
+    let mate = |name: &str, offset: f64| {
+        gc_doc::Relationship::new(
+            name,
+            gc_doc::RelationKind::Mate { offset, sense: gc_doc::AxisSense::Opposed },
+            select(moving),
+            select(fixed),
+        )
+    };
+    // A third component that has nothing to do with the failure is hidden by Isolate Related Failed.
+    app.session
+        .add_body(
+            gc_doc::Solid::Box { size: [0.05; 3] },
+            gc_doc::Placement { xyz: [1.0, 0.0, 0.0], rpy: [0.0; 3] },
+        )
+        .unwrap();
+    app.session.add_relationship(mate("Mate:1", 0.0)).unwrap();
+    assert!(app.session.add_relationship(mate("Mate:2", 0.1)).is_err());
+    let failed = app.session.accept_relationship(mate("Mate:2", 0.1)).unwrap();
+    assert!(app.session.doc().is_sick(failed));
+    harness.run_steps(2);
+    let at = harness.get_by_label("Mate:2").rect().center();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run_steps(2);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+    harness.run_steps(3);
+    assert!(!harness.state().session.is_isolated());
+    harness.get_by_label("복구: 관련된 실패 분리 (Isolate Related Failed)").click();
+    harness.run_steps(3);
+    assert!(harness.state().session.is_isolated());
+}
+
+/// Diagnose opens the Relationship Conflict Analysis (Inventor 2026 help, GUID-528B2CD0-93FD-45BC-AB69-6C5A559BB8E8):
+/// Check says there is still a conflict until the failed relationship is set to Break.
+#[test]
+fn the_conflict_analysis_checks_with_a_relationship_broken() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.05, 0.05, 0.05] };
+    let app = harness.state_mut();
+    let fixed = app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    let moving =
+        app.session.add_body(solid, gc_doc::Placement { xyz: [0.0, 0.0, 0.2], rpy: [0.0; 3] }).unwrap();
+    let plane = gc_doc::Geometry::origin(gc_doc::OriginElement::Plane(gc_doc::OriginPlane::Xy));
+    let select = |body: gc_core::Id<gc_doc::Body>| gc_doc::Selection {
+        occurrence: gc_doc::Occurrence::Item(body.erase()),
+        geometry: plane,
+    };
+    let mate = |name: &str, offset: f64| {
+        gc_doc::Relationship::new(
+            name,
+            gc_doc::RelationKind::Mate { offset, sense: gc_doc::AxisSense::Opposed },
+            select(moving),
+            select(fixed),
+        )
+    };
+    app.session.add_relationship(mate("Mate:1", 0.0)).unwrap();
+    app.session.accept_relationship(mate("Mate:2", 0.1)).unwrap();
+    harness.run_steps(2);
+    let at = harness.get_by_label("Mate:2").rect().center();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run_steps(2);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+    harness.run_steps(3);
+    harness.get_by_label("진단 (Diagnose)").click();
+    harness.run_steps(3);
+    harness.get_by_label("구속 충돌 분석 (Conflict Analysis)");
+    harness.get_by_label("확인 (Check)").click();
+    harness.run_steps(2);
+    harness.get_by_label("아직 충돌이 있습니다");
+    // Breaking the failed relationship (the first in the list) resolves it.
+    harness.get_all_by_label("끊기 (Break)").next().unwrap().click();
+    harness.run_steps(2);
+    harness.get_by_label("확인 (Check)").click();
+    harness.run_steps(2);
+    harness.get_by_label("충돌 없음");
+}

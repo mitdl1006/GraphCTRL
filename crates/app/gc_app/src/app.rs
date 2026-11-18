@@ -341,6 +341,10 @@ pub struct GraphCtrlApp {
     right_open: bool,
     /// The status bar is shown (View tab, Windows panel, User Interface).
     show_status: bool,
+    diagnose: crate::diagnose::Diagnose,
+    ground_root: crate::productivity::GroundRoot,
+    /// Place at Component Origin: the view is waiting for the component to place on.
+    place_origin_picking: bool,
     /// Place at Component Origin asked for in the browser: handled after the panels (it opens a file dialog).
     place_origin_request: Option<gc_doc::Occurrence>,
     /// Clean Screen is on: the ribbon and the browser are away; the browser's state before it.
@@ -407,6 +411,7 @@ impl GraphCtrlApp {
         let mut viewport = Viewport::new(cc.wgpu_render_state.clone());
         viewport.show_view_cube = !saved.hide_view_cube;
         viewport.show_nav_bar = !saved.hide_nav_bar;
+        viewport.classic_menu = saved.classic_context_menu;
         Self {
             options,
             frames: 0,
@@ -455,6 +460,9 @@ impl GraphCtrlApp {
             left_open: !saved.browser_closed,
             right_open: !saved.properties_closed,
             show_status: !saved.hide_status_bar,
+            diagnose: crate::diagnose::Diagnose::default(),
+            ground_root: crate::productivity::GroundRoot::default(),
+            place_origin_picking: false,
             place_origin_request: None,
             clean_screen: None,
             about: false,
@@ -1210,6 +1218,13 @@ impl GraphCtrlApp {
             if qat(ui, "↑", tr!(lang, CmdReturn), editing) {
                 self.session.return_edit();
             }
+            // Update: the components dropped by Free Move or Free Rotate snap back to their relationships (Inventor
+            // 2026 help, Move assembly components, GUID-9796C22B-23C1-4D69-BC2E-54056E46F255); available while
+            // something is out of place.
+            let stale = self.session.needs_update();
+            if qat(ui, "U", tr!(lang, CmdUpdate), stale) {
+                drop(self.session.update_assembly());
+            }
         });
     }
 
@@ -1256,6 +1271,7 @@ impl GraphCtrlApp {
             hide_view_cube: !self.viewport.show_view_cube,
             hide_nav_bar: !self.viewport.show_nav_bar,
             hide_status_bar: !self.show_status,
+            classic_context_menu: self.viewport.classic_menu,
             browser_closed: !self.clean_screen.unwrap_or(self.left_open),
             properties_closed: !self.right_open,
             ..Default::default()
@@ -1452,6 +1468,7 @@ impl eframe::App for GraphCtrlApp {
             browser: self.left_open,
             properties: self.right_open,
             status_bar: self.show_status,
+            marking_menu: !self.viewport.classic_menu,
             clean_screen: self.clean_screen.is_some(),
         };
         // Clean Screen hides the ribbon.
@@ -1500,6 +1517,7 @@ impl eframe::App for GraphCtrlApp {
                     ribbon::InterfaceElement::Browser => self.left_open = on,
                     ribbon::InterfaceElement::Properties => self.right_open = on,
                     ribbon::InterfaceElement::StatusBar => self.show_status = on,
+                    ribbon::InterfaceElement::MarkingMenu => self.viewport.classic_menu = !on,
                 }
                 self.save_settings();
             }
@@ -1510,6 +1528,19 @@ impl eframe::App for GraphCtrlApp {
             Some(ribbon::RibbonAction::StartJoint) => self.joint.start(),
             Some(ribbon::RibbonAction::StartPattern) => self.pattern.start(Vec::new()),
             Some(ribbon::RibbonAction::StartReplicate(mode)) => self.replicate.start(mode),
+            Some(ribbon::RibbonAction::StartGroundRoot) => {
+                let marked = self
+                    .params
+                    .marked
+                    .iter()
+                    .filter_map(|k| match k {
+                        gc_doc::TreeKey::Component(gc_doc::Occurrence::Item(any)) => Some(*any),
+                        _ => None,
+                    })
+                    .collect();
+                self.ground_root.start(marked);
+            }
+            Some(ribbon::RibbonAction::StartPlaceAtOrigin) => self.place_origin_picking = true,
             Some(ribbon::RibbonAction::StartParameters) => self.parameters.open = true,
             Some(ribbon::RibbonAction::StartBom) => self.bom.open = true,
             Some(ribbon::RibbonAction::StartAutoDimension) => {
@@ -1609,7 +1640,9 @@ impl eframe::App for GraphCtrlApp {
                     self.notice.as_deref(),
                     (self.session.active_sketch().is_some() && !self.session.sketch_is_spatial())
                         .then_some(&mut self.viewport.slice),
-                    if self.assemble.picking() {
+                    if self.place_origin_picking {
+                        Some(gc_i18n::Msg::StatusPickPlaceOrigin)
+                    } else if self.assemble.picking() {
                         Some(gc_i18n::Msg::StatusPickAssemble)
                     } else if self.constrain.picking() {
                         Some(gc_i18n::Msg::StatusPickConstrain)
@@ -1764,6 +1797,11 @@ impl eframe::App for GraphCtrlApp {
                         Some(BrowserAction::PlaceAtOrigin(target)) => {
                             self.place_origin_request = Some(target)
                         }
+                        Some(BrowserAction::Diagnose(id)) => self.diagnose.start(&self.session, id),
+                        Some(BrowserAction::IsolateRelatedFailed(id)) => {
+                            let (_, keep) = self.session.related_failed(id);
+                            drop(self.session.isolate(&keep));
+                        }
                         Some(BrowserAction::Copy(keys)) => drop(self.session.copy_to_clipboard(&keys)),
                         Some(BrowserAction::Paste) => drop(self.viewport.start_paste(&self.session)),
                         Some(BrowserAction::Isolate(keep)) => drop(self.session.isolate(&keep)),
@@ -1789,10 +1827,31 @@ impl eframe::App for GraphCtrlApp {
                         // A refused edit (still in use, bad expression) is explained in the status bar.
                         Some(BrowserAction::Edit(command)) => {
                             self.cell.playing = false;
-                            if self.session.execute(&command).is_ok()
-                                && matches!(*command, gc_doc::Command::AddParam { .. })
-                            {
-                                self.params = gc_panels::ParamsUi::default();
+                            match self.session.execute(&command) {
+                                Ok(_) => {
+                                    if matches!(*command, gc_doc::Command::AddParam { .. }) {
+                                        self.params = gc_panels::ParamsUi::default();
+                                    }
+                                }
+                                // An edit of a relationship that cannot be solved opens the constraint error dialog,
+                                // which can accept it as failed.
+                                Err(gc_doc::EditError::Unsolvable { names, .. }) => {
+                                    if let gc_doc::Command::Cell(gc_doc::CellOp::SetRelationship {
+                                        id,
+                                        relationship,
+                                    }) = *command
+                                    {
+                                        self.conflict.show_for(
+                                            &self.session,
+                                            crate::conflict::Conflict {
+                                                candidate: relationship,
+                                                names,
+                                                edit: Some(id),
+                                            },
+                                        );
+                                    }
+                                }
+                                Err(_) => {}
                             }
                         }
                         Some(BrowserAction::Select(item)) => {
@@ -1940,7 +1999,8 @@ impl eframe::App for GraphCtrlApp {
             || self.joint.open
             || self.pattern.open
             || self.replicate.picking()
-            || self.assemble.picking();
+            || self.assemble.picking()
+            || self.place_origin_picking;
         if let Some((first, second)) = self.viewport.take_quick_constrain() {
             crate::assemble::quick_mate(&mut self.session, first, second, &mut self.assemble.conflict);
         }
@@ -1954,8 +2014,14 @@ impl eframe::App for GraphCtrlApp {
                 self.constrain.pick_selection(&self.session, selection);
             }
         }
+        if self.place_origin_picking && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.place_origin_picking = false;
+        }
         if let Some((occurrence, element)) = self.viewport.take_constrain_pick() {
-            if self.assemble.picking() {
+            if self.place_origin_picking {
+                self.place_origin_picking = false;
+                self.place_origin_request = Some(occurrence);
+            } else if self.assemble.picking() {
                 self.assemble.pick(&self.session, occurrence, element);
             } else if self.replicate.picking() {
                 self.replicate.pick(occurrence, element);
@@ -1975,6 +2041,14 @@ impl eframe::App for GraphCtrlApp {
         }
         if self.replicate.open {
             self.replicate.window(&ctx, &mut self.session, lang);
+        }
+        if self.diagnose.open {
+            self.diagnose.window(&ctx, &mut self.session, lang);
+        }
+        if self.ground_root.open
+            && let Some(error) = self.ground_root.window(&ctx, &mut self.session, lang)
+        {
+            self.notice = Some(tr!(lang, FileError, error));
         }
         if self.assemble.open {
             self.assemble.window(&ctx, &mut self.session, lang);
