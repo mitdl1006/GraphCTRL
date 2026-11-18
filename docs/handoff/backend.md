@@ -54,6 +54,23 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 그립 스냅 점·면 기준(리드 ②)
+
+근거: Grip Snap Move Options Bar Reference(GUID-C030C32C-7E1E-4F37-BBDF-120412898D00), "Reference Geometry …" 행들.
+- 점: Displacement(두 점의 방향·크기), Rotate(두 점의 외적 축, 내적 각).
+- 선: Displacement Along Ray, Rotate(이미 있음).
+- 면(평면 면·작업 평면): Displacement Within Plane(두 점 성분 중 평면 안 성분), Along Normal(법선 성분).
+
+**API**
+- `GripReference::{Point, Line(GripLine), Plane{point, normal}}`.
+- `GripMotion`에 `Displace`, `RotateAboutPoint`, `MoveWithinPlane`, `MoveAlongNormal`을 추가했다.
+- `grip_pose_on(pose, motion, reference, from, to)`, `Document::grip_snap_pose_on`, 세션 `grip_snap_pose_on`.
+  기준 종류와 안 맞는 움직임, 퇴화한 기준, 축이 안 나오는 점은 `None`이다.
+- `grip_snap_allowed(item, motion, reference, from, to)`: 그 스냅의 실제 변화(이동 + 회전 벡터)가 남은 자유도로 되는지
+  1차로 본다. 접지면 false다. 기존 선 전용 `grip_allows`는 그대로 둔다.
+- Free Drag·스냅점 계열(커서 위치로 놓기, 임시 구속)은 화면 몫이라 넣지 않았다. 원통·구 등 해석 면 기준도 아직이다.
+- 테스트: `gc_session/tests/grip_snap.rs::point_and_plane_references_move_and_turn_as_the_options_bar_says`.
+
 ## 2026-11-18 — 조인트 한계(Limits, 리드 ①)
 
 근거: To Define and Manage Joint Relationships(GUID-21DC3336-5C51-42C1-90FB-4299CD66E0C6) Limits 탭.
