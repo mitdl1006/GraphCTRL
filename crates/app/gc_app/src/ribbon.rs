@@ -630,7 +630,16 @@ pub(crate) fn show(
                     let styles = [
                         (gc_viewport::VisualStyle::Shaded, tr!(lang, VisualStyleShaded)),
                         (gc_viewport::VisualStyle::ShadedWithEdges, tr!(lang, VisualStyleShadedEdges)),
+                        (gc_viewport::VisualStyle::ShadedWithHiddenEdges, tr!(lang, VisualStyleShadedHidden)),
                         (gc_viewport::VisualStyle::Wireframe, tr!(lang, VisualStyleWireframe)),
+                        (
+                            gc_viewport::VisualStyle::WireframeWithHiddenEdges,
+                            tr!(lang, VisualStyleWireframeHidden),
+                        ),
+                        (
+                            gc_viewport::VisualStyle::WireframeVisibleEdges,
+                            tr!(lang, VisualStyleWireframeVisible),
+                        ),
                     ];
                     let items: Vec<gc_ui::SplitItem<'_>> = styles
                         .iter()

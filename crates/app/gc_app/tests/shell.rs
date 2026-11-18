@@ -5790,6 +5790,12 @@ fn the_visual_style_drop_down_switches_shaded_edges_and_wireframe() {
     assert_eq!(harness.state().viewport().style, gc_viewport::VisualStyle::ShadedWithEdges);
     pick_variant(&mut harness, "시각 스타일", "와이어프레임");
     assert_eq!(harness.state().viewport().style, gc_viewport::VisualStyle::Wireframe);
+    pick_variant(&mut harness, "시각 스타일", "숨은 모서리가 있는 와이어프레임");
+    assert_eq!(harness.state().viewport().style, gc_viewport::VisualStyle::WireframeWithHiddenEdges);
+    pick_variant(&mut harness, "시각 스타일", "보이는 모서리만 있는 와이어프레임");
+    assert_eq!(harness.state().viewport().style, gc_viewport::VisualStyle::WireframeVisibleEdges);
+    pick_variant(&mut harness, "시각 스타일", "숨은 모서리가 있는 음영 처리");
+    assert_eq!(harness.state().viewport().style, gc_viewport::VisualStyle::ShadedWithHiddenEdges);
     pick_variant(&mut harness, "시각 스타일", "음영 처리");
     assert_eq!(harness.state().viewport().style, gc_viewport::VisualStyle::Shaded);
 }
