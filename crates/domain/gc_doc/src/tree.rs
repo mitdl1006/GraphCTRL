@@ -37,6 +37,7 @@ pub(crate) fn rename(txn: &mut Txn<'_>, item: AnyId, name: &str) -> Outcome {
         Kind::WorkFeature => rename_in!(work_features, WorkFeature),
         Kind::Feature => rename_in!(features, Feature),
         Kind::Assembly => rename_in!(assemblies, Assembly),
+        Kind::SketchRole => rename_in!(roles, crate::role::SketchRole),
         // Parameters are referred to by name in expressions; origin frames are fixed.
         _ => return Err(EditError::BadValue),
     }
@@ -58,7 +59,13 @@ pub(crate) fn set_visible(txn: &mut Txn<'_>, item: AnyId, visible: bool) -> Outc
         Kind::Assembly => {
             txn.modify(Id::<Assembly>::from_raw(item.raw), |a: &mut Assembly, _| a.look.hidden = !visible)?;
         }
-        Kind::Sketch | Kind::Waypoint | Kind::Path | Kind::WorkFrame | Kind::WorkFeature | Kind::Feature => {
+        Kind::Sketch
+        | Kind::Waypoint
+        | Kind::Path
+        | Kind::WorkFrame
+        | Kind::WorkFeature
+        | Kind::Feature
+        | Kind::SketchRole => {
             crate::cell::set_timeline(txn, |t| {
                 t.hidden.retain(|h| *h != item);
                 if !visible {

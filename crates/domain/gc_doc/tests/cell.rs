@@ -61,6 +61,7 @@ fn a_cell_is_built_undone_and_redone() {
         seed: 1,
         tcp_speed: None,
         contacts: Vec::new(),
+        follow: Vec::new(),
     };
     let Created::Path(path_id) = cell(&mut doc, &mut history, CellOp::AddPath(path)).unwrap()[0] else {
         panic!()
@@ -99,6 +100,7 @@ fn what_is_in_use_stays_and_bad_values_change_nothing() {
         seed: 0,
         tcp_speed: None,
         contacts: Vec::new(),
+        follow: Vec::new(),
     };
     let Created::Path(path_id) = cell(&mut doc, &mut history, CellOp::AddPath(path.clone())).unwrap()[0]
     else {
