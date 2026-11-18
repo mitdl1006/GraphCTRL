@@ -40,6 +40,20 @@ fn is_angle(solution: AssembleSolution) -> bool {
     matches!(solution, AssembleSolution::AngleDirected)
 }
 
+/// Alt + drag: a Mate of the dragged component's geometry on what it was dropped on, with the first
+/// solution the geometry offers and no offset (Inventor 2026 help, GUID-0F500089-4F69-41C5-AFE8-B58AC9E8E15E).
+pub(crate) fn quick_mate(
+    session: &mut Session,
+    first: Selection,
+    second: Selection,
+    conflict: &mut Option<crate::conflict::Conflict>,
+) {
+    let Some(solution) = session.possible_relations(&first, &second).first().copied() else { return };
+    let name = format!("{}:{}", solution_word(solution), session.relationships().len() + 1);
+    let relationship = Relationship::new(name, solution.kind(0.0), first, second);
+    crate::conflict::try_add(session, relationship, conflict);
+}
+
 impl Assemble {
     /// Opens the command with nothing picked.
     pub(crate) fn start(&mut self) {

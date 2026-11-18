@@ -258,6 +258,8 @@ pub struct GraphCtrlApp {
     interference: crate::interference::Interference,
     /// The Drive dialog.
     drive: crate::drive::Drive,
+    /// The body Ctrl+C copied.
+    clipboard: Option<gc_core::Id<gc_doc::Body>>,
     joint_limits: crate::joint_limits::JointLimits,
     /// The Constrain dialog.
     constrain: crate::constrain::Constrain,
@@ -369,6 +371,7 @@ impl GraphCtrlApp {
             measure: crate::measure::Measure::default(),
             interference: crate::interference::Interference::default(),
             drive: crate::drive::Drive::default(),
+            clipboard: None,
             joint_limits: crate::joint_limits::JointLimits::default(),
             constrain: crate::constrain::Constrain::default(),
             assemble: crate::assemble::Assemble::default(),
@@ -742,6 +745,49 @@ impl GraphCtrlApp {
                 egui::Key::Y if command => {
                     self.session.redo();
                 }
+                // Ctrl+C copies the selected body, Ctrl+V pastes it hanging on the cursor like Place
+                // Component: each click sets a copy down, Esc or a right click ends (Inventor 2026 help,
+                // shortcut table GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E). Without relationships, as Copy
+                // Components has them off by default.
+                egui::Key::C if command && !sketching => {
+                    if let Some(gc_session::CellItem::Body(body)) = self.session.selected_item() {
+                        self.clipboard = Some(body);
+                    }
+                }
+                egui::Key::V if command && !sketching => {
+                    if let Some(body) = self.clipboard.filter(|b| self.session.doc().get(*b).is_some()) {
+                        let before: Vec<gc_core::AnyId> =
+                            self.session.doc().bodies().iter().map(|(id, _)| id.erase()).collect();
+                        if self
+                            .session
+                            .copy_components(&[body.erase()], gc_doc::Placement::default(), false, false)
+                            .is_ok()
+                            && let Some(copy) = self
+                                .session
+                                .doc()
+                                .bodies()
+                                .iter()
+                                .map(|(id, _)| id)
+                                .find(|id| !before.contains(&id.erase()))
+                        {
+                            self.viewport.start_placing(gc_session::CellItem::Body(copy), true);
+                        }
+                    }
+                }
+                // F10 shows or hides the sketch being edited, else the latest sketch (Inventor 2026 help,
+                // shortcut table GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E: "F10 Sketch visibility").
+                egui::Key::F10 => {
+                    let sketch = self
+                        .session
+                        .active_sketch()
+                        .map(|(id, _)| id)
+                        .or_else(|| self.session.doc().sketches().iter().map(|(id, _)| id).last());
+                    if let Some(sketch) = sketch {
+                        let item = sketch.erase();
+                        let shown = self.session.is_visible(item);
+                        drop(self.session.set_visible(item, !shown));
+                    }
+                }
                 egui::Key::F6 => self.viewport.look(StandardView::Iso),
                 // J starts the Joint command, as in Inventor (outside sketches, where J is free).
                 egui::Key::J if !command && !sketching => self.joint.start(),
@@ -750,6 +796,35 @@ impl GraphCtrlApp {
                 // in a sketch C is the circle.
                 egui::Key::C if !command && !sketching => self.constrain.start(),
                 egui::Key::P if !command && !sketching => self.place_component(self.lang),
+                // Tab demotes the selected component (asks for the new subassembly's name, as the browser
+                // menu does) and Shift + Tab promotes it one level up (Inventor 2026 help, shortcut table
+                // GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E: "Tab Demote", "Shift + Tab Promote").
+                egui::Key::Tab if !command && !sketching => {
+                    ctx.input_mut(|i| {
+                        i.consume_key(egui::Modifiers::NONE, egui::Key::Tab);
+                        i.consume_key(egui::Modifiers::SHIFT, egui::Key::Tab);
+                    });
+                    if let Some(occurrence) = self.session.selected_occurrence() {
+                        let key = gc_doc::TreeKey::Component(occurrence);
+                        if !modifiers.shift {
+                            self.params.group_name =
+                                Some(gc_panels::GroupName::Demote(vec![key], String::new()));
+                        } else if let Some(gc_doc::TreeKey::Subassembly(unit)) =
+                            self.session.doc().tree_parent(key)
+                        {
+                            let into =
+                                match self.session.doc().tree_parent(gc_doc::TreeKey::Subassembly(unit)) {
+                                    Some(gc_doc::TreeKey::Subassembly(parent)) => Some(parent),
+                                    _ => None,
+                                };
+                            // A refusal is explained in the status bar.
+                            drop(self.session.edit_subassemblies(gc_doc::SubassemblyOp::Move {
+                                members: vec![key],
+                                into,
+                            }));
+                        }
+                    }
+                }
                 // S makes a 2D sketch on the selected plane (an origin plane of a component or a work
                 // plane), else on XY, and starts with the line tool as the ribbon does.
                 egui::Key::S if !command && !sketching => {
@@ -1434,6 +1509,9 @@ impl eframe::App for GraphCtrlApp {
             || self.pattern.open
             || self.replicate.picking()
             || self.assemble.picking();
+        if let Some((first, second)) = self.viewport.take_quick_constrain() {
+            crate::assemble::quick_mate(&mut self.session, first, second, &mut self.assemble.conflict);
+        }
         if let Some(id) = self.viewport.take_constrain_work()
             && let Some(selection) = self.session.work_feature_selection(id)
         {
