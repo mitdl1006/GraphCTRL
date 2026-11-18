@@ -27,8 +27,16 @@ pub(crate) enum Tab {
 
 /// The constraint buttons: kind, symbol and name.
 /// The constraint buttons of a 3D sketch.
-const CONSTRAINTS_3D: [(ConstraintKind, &str, Msg); 8] = [
+// The 3D Sketch tab's Constrain panel (Inventor 2026 help, To Apply Geometric Constraints,
+// GUID-A85A7A30-7D81-4C75-8769-CAD034EEA930): Coincident, Collinear, Parallel, Perpendicular, Equal, Fix, the
+// axis and plane alignments; Midpoint as in 2D.
+const CONSTRAINTS_3D: [(ConstraintKind, &str, Msg); 13] = [
     (ConstraintKind::Coincident, "::", Msg::ConCoincident),
+    (ConstraintKind::Collinear, "--", Msg::ConCollinear),
+    (ConstraintKind::Parallel, "//", Msg::ConParallel),
+    (ConstraintKind::Perpendicular, "_|_", Msg::ConPerpendicular),
+    (ConstraintKind::Equal, "=", Msg::ConEqual),
+    (ConstraintKind::Midpoint, "M", Msg::ConMidpoint),
     (ConstraintKind::Fix, "#", Msg::ConFix),
     (ConstraintKind::AlongX, "X", Msg::ConAlongX),
     (ConstraintKind::AlongY, "Y", Msg::ConAlongY),

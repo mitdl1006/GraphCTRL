@@ -17,6 +17,15 @@ pub struct Line2 {
     pub b: P2,
 }
 
+/// A line segment through two 3D points.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Line3 {
+    /// Start point.
+    pub a: P3,
+    /// End point.
+    pub b: P3,
+}
+
 /// A circle, or the circle an arc lies on: centre and radius parameter.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Round {
@@ -194,6 +203,31 @@ pub enum Constraint {
         /// Its value.
         value: f64,
     },
+    /// Two 3D lines are parallel.
+    Parallel3(Line3, Line3),
+    /// Two 3D lines are at right angles (they need not meet).
+    Perpendicular3(Line3, Line3),
+    /// Two 3D lines lie on one line.
+    Collinear3(Line3, Line3),
+    /// Two 3D lines are as long as each other.
+    EqualLength3(Line3, Line3),
+    /// A 3D point lies on (the extension of) a 3D line.
+    PointOnLine3(P3, Line3),
+    /// A 3D point is the midpoint of a 3D line.
+    Midpoint3(P3, Line3),
+    /// Angle between two 3D lines, in `(0, pi)`, each direction optionally reversed.
+    Angle3 {
+        /// First line.
+        l1: Line3,
+        /// Its direction reversed.
+        rev1: bool,
+        /// Second line.
+        l2: Line3,
+        /// Its direction reversed.
+        rev2: bool,
+        /// The angle, radians.
+        value: f64,
+    },
     /// `q - p` is parallel to one axis of the sketch frame: the two other coordinates are equal.
     AlongAxis {
         /// First point.
@@ -220,6 +254,17 @@ fn line_vars(l: &Line2) -> [ParamId; 4] {
     [l.a[0], l.a[1], l.b[0], l.b[1]]
 }
 
+fn line3_vars(l: &Line3) -> [ParamId; 6] {
+    [l.a[0], l.a[1], l.a[2], l.b[0], l.b[1], l.b[2]]
+}
+
+/// The two axes across a 3D direction: the components of a cross product with it that are independent
+/// (the one along its largest component follows from the others).
+fn across(d: [f64; 3]) -> [usize; 2] {
+    let big = (0..3).fold(0, |best, k| if d[k].abs() > d[best].abs() { k } else { best });
+    [(big + 1) % 3, (big + 2) % 3]
+}
+
 impl Constraint {
     /// The driving value of a dimension, or `None` for a geometric constraint.
     pub fn value(&self) -> Option<f64> {
@@ -232,6 +277,7 @@ impl Constraint {
             | Self::Radius { value, .. }
             | Self::Diameter { value, .. }
             | Self::Distance3 { value, .. }
+            | Self::Angle3 { value, .. }
             | Self::CoordValue { value, .. } => Some(*value),
             _ => None,
         }
@@ -248,6 +294,7 @@ impl Constraint {
             | Self::Radius { value, .. }
             | Self::Diameter { value, .. }
             | Self::Distance3 { value, .. }
+            | Self::Angle3 { value, .. }
             | Self::CoordValue { value, .. } => {
                 *value = new;
                 true
@@ -259,7 +306,7 @@ impl Constraint {
     /// True when the dimension value is a length (as opposed to an angle); used for the sketch scale.
     pub(crate) fn length_value(&self) -> Option<f64> {
         match self {
-            Self::Angle { .. } => None,
+            Self::Angle { .. } | Self::Angle3 { .. } => None,
             other => other.value(),
         }
     }
@@ -274,6 +321,12 @@ impl Constraint {
         // A frozen scale must never be zero; a degenerate line is reported separately.
         let nonzero = |s: f64| if s > 0.0 && s.is_finite() { s } else { 1.0 };
         let two_lines = |a: &Line2, b: &Line2| [line_vars(a), line_vars(b)].concat();
+        let dir3 = |l: &Line3| [0, 1, 2].map(|k| get(l.b[k]) - get(l.a[k]));
+        let len3 = |l: &Line3| {
+            let d = dir3(l);
+            (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
+        };
+        let two3 = |a: &Line3, b: &Line3| [line3_vars(a), line3_vars(b)].concat();
         match self {
             Self::Fix(params) => out.fixes.extend(params.iter().map(|p| (*p, get(*p)))),
             Self::Coincident(p, q) => out.merges.extend([(p[0], q[0], 0.0), (p[1], q[1], 0.0)]),
@@ -379,6 +432,43 @@ impl Constraint {
             Self::AlongAxis { p, q, axis } => {
                 out.merges.extend((0..3).filter(|k| k != axis).map(|k| (p[k], q[k], 0.0)));
             }
+            Self::Parallel3(a, b) => {
+                let scale = nonzero(len3(a).max(len3(b)));
+                for k in across(dir3(a)) {
+                    out.rows.push((RowKind::Cross3 { scale, k }, two3(a, b)));
+                }
+            }
+            Self::Perpendicular3(a, b) => {
+                out.rows.push((RowKind::Dot3 { scale: nonzero(len3(a).max(len3(b))) }, two3(a, b)));
+            }
+            Self::Collinear3(a, b) => {
+                for point in [b.a, b.b] {
+                    for k in across(dir3(a)) {
+                        out.rows
+                            .push((RowKind::PointLine3 { k }, [point.as_slice(), &line3_vars(a)].concat()));
+                    }
+                }
+            }
+            Self::EqualLength3(a, b) => out.rows.push((RowKind::EqualLen3, two3(a, b))),
+            Self::PointOnLine3(p, line) => {
+                for k in across(dir3(line)) {
+                    out.rows.push((RowKind::PointLine3 { k }, [p.as_slice(), &line3_vars(line)].concat()));
+                }
+            }
+            Self::Midpoint3(p, line) => {
+                for k in 0..3 {
+                    out.rows.push((RowKind::Mid, vec![p[k], line.a[k], line.b[k]]));
+                }
+            }
+            Self::Angle3 { l1, rev1, l2, rev2, value } => out.rows.push((
+                RowKind::Angle3 {
+                    target: *value,
+                    scale: nonzero(len3(l1).min(len3(l2))),
+                    rev1: *rev1,
+                    rev2: *rev2,
+                },
+                two3(l1, l2),
+            )),
         }
         out
     }
