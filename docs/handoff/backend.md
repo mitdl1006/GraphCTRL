@@ -71,6 +71,14 @@ To Work with Sketch Dimensions GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185.
 | Flip Direction 대상의 "line to an arc (the arc itself)"·"between 2 arcs" 거리 | 없음 | 선-호·호-호 거리 치수 |
 | 구동 치수 토글 | 있음(`SketchOp::SetDriving`) | — |
 
+## 2026-11-18 — QA: 풀리지 않는 접선이 퇴화로 수락되던 것
+
+- 증상: 고정 직선이 고정 원·타원을 가로지르는 상태에서 Tangent를 걸면 수락되고 Solved, 두 구속이 degenerate로만 보고된다.
+- 원인: 솔버가 고정선의 두 끝을 교점으로 모아 길이 0인 선을 만들고, 방향이 정해지지 않은 그 선으로 접선을 "만족"시켰다.
+- 고침(`gc_solver::System::try_add`): 후보 구속이 추가 전에는 아니었는데 풀린 결과에서 퇴화(`degenerate`)로 나오면 `Conflicting`으로 거부한다. 흔적은 남지 않는다. `with`에는 함께 새로 퇴화한 구속이 들어간다.
+- 테스트: `gc_session/tests/tangent_conflict.rs`(원·타원).
+- QA 브랜치 영향: `qa_sketch_new_curves.rs` 312행 "fixed crossing line made tangent"는 `step`(수락 또는 거부 모두 허용)이라 그대로 통과. 관찰 메모를 "거부됨"으로 바꿔도 된다.
+
 ## 2026-11-18 — Helical Curve(리드 ③ 4번)
 
 근거: To Draw 3D Curves, GUID-37BA1DCE-6BC4-41CD-A36D-577F31B304FC — Type(Constant/Variable), Definition(Pitch and Revolution, Revolution and Height,

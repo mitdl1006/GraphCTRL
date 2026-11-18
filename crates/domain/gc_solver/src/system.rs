@@ -818,6 +818,17 @@ impl System {
             }
             other => return AddOutcome::Failed(other),
         }
+        // Solved only by shrinking geometry to nothing (a fixed line made tangent to a circle it crosses
+        // collapses to the crossing point, where its direction is free): it cannot really hold.
+        if report.degenerate.contains(&id) && !before.degenerate.contains(&id) {
+            let with: Vec<Blame> = report
+                .degenerate
+                .iter()
+                .filter(|c| **c != id && !before.degenerate.contains(c))
+                .map(|c| Blame::Row(*c, 0))
+                .collect();
+            return AddOutcome::Conflicting { with };
+        }
         let singular = report.dof >= before.dof;
         if singular && !trial.gains_rank_nearby(id) {
             return AddOutcome::Redundant {
