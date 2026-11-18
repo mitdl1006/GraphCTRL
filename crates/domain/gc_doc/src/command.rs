@@ -462,6 +462,14 @@ pub enum SketchOp {
         /// The radius as typed, e.g. `"5 mm"`.
         radius: String,
     },
+    /// Bend (To Create Lines, Arcs, and Bends, GUID-4F861674-F74C-474E-869A-4C190ED6EC4B): a tangent arc of
+    /// `radius` at the corner where two lines of a 3D sketch meet, with a radius dimension.
+    Bend {
+        /// The two lines.
+        lines: [Id<Curve>; 2],
+        /// The radius as typed, e.g. `"20 mm"`.
+        radius: String,
+    },
     /// Move, Copy or Rotate the curves (Inventor 2026 help, To Copy, Move, or Rotate 2D Sketch Geometry,
     /// GUID-F8114270-18F7-4C7A-947E-AC489EDACFA9). `copy` makes moved copies (with the constraints among
     /// them) and leaves the originals; otherwise the curves themselves move, and with `relax` constraints
@@ -2909,6 +2917,17 @@ fn sketch_op(
         SketchOp::Extend { curve, at } => {
             push_cut(&mut created, &sketch.extend(ids, *curve, *at)?);
             "Extend"
+        }
+        SketchOp::Bend { lines, radius } => {
+            let value = evaluate(radius, scope, Unit::Mm)?;
+            let cut = sketch.bend(ids, *lines, value)?;
+            push_cut(&mut created, &cut);
+            let arc = *cut.curves.first().ok_or(SketchError::InvalidValue)?;
+            let text_pos =
+                sketch.round(arc).and_then(|(c, _)| sketch.pos(c)).map_or([0.0; 2], |c| [c[0], c[1]]);
+            let result = sketch.try_add_dimension(ids, DimKind::Radius(arc), radius, value, text_pos)?;
+            created.push(Created::Dimension(added(result)?));
+            "Bend"
         }
         SketchOp::Fillet { lines, radius } => {
             let value = evaluate(radius, scope, Unit::Mm)?;

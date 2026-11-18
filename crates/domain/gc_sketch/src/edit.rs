@@ -189,13 +189,14 @@ impl Sketch {
     /// Adds an interpolation spline through new fit points at `points` (two or more, finite, no two in a
     /// row at the same place).
     pub fn add_spline(&mut self, alloc: &mut IdAlloc, points: &[[f64; 3]]) -> Result<Id<Curve>, SketchError> {
-        if self.is_spatial() {
-            return Err(SketchError::WrongSpace);
-        }
+        // In a 2D sketch the fit points lie in its plane; in a 3D sketch anywhere ("Interpolation splines
+        // can be created in both 2D and 3D sketches", GUID-DB15C479-66F2-456A-9E54-40A60F83DC92).
+        let spatial = self.is_spatial();
         let finite = points.iter().flatten().all(|v| v.is_finite());
-        let apart = points
-            .windows(2)
-            .all(|w| ((w[1][0] - w[0][0]).powi(2) + (w[1][1] - w[0][1]).powi(2)).sqrt() > 1e-9);
+        let apart = points.windows(2).all(|w| {
+            let dz = if spatial { w[1][2] - w[0][2] } else { 0.0 };
+            ((w[1][0] - w[0][0]).powi(2) + (w[1][1] - w[0][1]).powi(2) + dz * dz).sqrt() > 1e-9
+        });
         if points.len() < 2 || !finite || !apart {
             return Err(SketchError::InvalidValue);
         }

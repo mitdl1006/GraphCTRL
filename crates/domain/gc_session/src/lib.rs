@@ -18,6 +18,7 @@ mod design;
 mod editing;
 mod grip;
 pub mod library;
+mod look;
 mod measure;
 mod project;
 mod sketch_pick;
@@ -39,6 +40,7 @@ pub use gc_motion::{Guarantee, LinkPair, PairReason, StateProblem};
 pub use gc_persist::PersistError;
 use gc_sketch::{Curve, DimKind, Dimension, FrameOutcome, Item, SkPoint, SketchDrag, SketchReport};
 use gc_tools::{Preview, Prompt, Tool, ToolEvent, ToolKind, ToolOutput};
+pub use look::{LookItem, LookTarget};
 pub use measure::{
     Feature, FeaturePair, InterferenceRow, ItemMeasure, PairMeasure, angle_at, measure_features,
 };
