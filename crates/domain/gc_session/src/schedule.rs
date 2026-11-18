@@ -43,6 +43,9 @@ impl Schedule {
     }
 }
 
+/// A tool's state after a task's tool actions, and the states they leave their objects in.
+type ToolOutcome = (Option<String>, Vec<(String, String)>);
+
 /// The states as the schedule goes along.
 struct World {
     variables: BTreeMap<String, CondValue>,
@@ -121,6 +124,14 @@ impl Session {
         type Bid = Result<(f64, Vec<f64>), String>;
         type BidKey = (Id<Task>, Id<Robot>, Vec<u64>);
         let mut bids: BTreeMap<BidKey, Bid> = BTreeMap::new();
+        // The state of each robot's tool, and what the tool actions of a running task do to their objects
+        // when it ends.
+        let mut tools: BTreeMap<Id<Robot>, Option<String>> = doc
+            .robots()
+            .iter()
+            .map(|(id, _)| (id, doc.robot_tool_kit(id).and_then(|(_, state)| state)))
+            .collect();
+        let mut changes: BTreeMap<Id<Task>, Vec<(String, String)>> = BTreeMap::new();
         let mut running: Vec<Assignment> = Vec::new();
         let mut out = Schedule::default();
         let mut reasons: BTreeMap<Id<Task>, String> = BTreeMap::new();
@@ -143,7 +154,7 @@ impl Session {
                     reasons.insert(id, "no robot may do it".to_owned());
                 }
                 // The idle robot that would finish soonest; the first of equals.
-                let mut best: Option<(f64, Id<Robot>, Vec<f64>)> = None;
+                let mut best: Option<(f64, Id<Robot>, Vec<f64>, ToolOutcome)> = None;
                 for robot in allowed {
                     let Some((joints, free_at)) = robots.get(&robot) else { continue };
                     if *free_at > now {
@@ -154,9 +165,18 @@ impl Session {
                     let bid = bids.entry(key).or_insert_with(|| {
                         self.task_plan_from(id, robot, joints).map(|plan| (plan.duration(), plan.end))
                     });
+                    // Its tool must be in a state to do the task's tool actions.
+                    let tool = tools.get(&robot).cloned().flatten();
+                    let outcome = match self.tool_outcome(task, robot, &world, tool) {
+                        Ok(outcome) => outcome,
+                        Err(why) => {
+                            reasons.insert(id, why);
+                            continue;
+                        }
+                    };
                     match bid {
                         Ok((time, end)) if best.as_ref().is_none_or(|(t, ..)| *time < *t) => {
-                            best = Some((*time, robot, end.clone()));
+                            best = Some((*time, robot, end.clone(), outcome));
                         }
                         Ok(_) => {}
                         Err(why) => {
@@ -165,9 +185,11 @@ impl Session {
                     }
                 }
                 match best {
-                    Some((time, robot, end)) => {
+                    Some((time, robot, end, (tool, objects))) => {
                         let assignment = Assignment { task: id, robot, start: now, end: now + time };
                         robots.insert(robot, (end, assignment.end));
+                        tools.insert(robot, tool);
+                        changes.insert(id, objects);
                         running.push(assignment.clone());
                         out.assignments.push(assignment);
                         reasons.remove(&id);
@@ -183,6 +205,8 @@ impl Session {
                 running.into_iter().partition(|a| a.end <= now);
             running = still;
             for assignment in ended {
+                // What its tool actions did to their objects, then the task's own effects.
+                world.objects.extend(changes.remove(&assignment.task).unwrap_or_default());
                 if let Some(task) = doc.get(assignment.task) {
                     self.apply_effects(&mut world, task);
                 }
@@ -193,6 +217,53 @@ impl Session {
             .map(|id| (id, reasons.remove(&id).unwrap_or_else(|| "it cannot be done".to_owned())))
             .collect();
         out
+    }
+
+    /// Goes through a task's tool actions for a robot whose tool is in `tool`: each must be possible when
+    /// its turn comes (its precondition, with the states as the actions before it left them). Gives the
+    /// tool's state afterwards and the objects' new states, or why an action cannot be done. Without tool
+    /// kits in the document, nothing is checked.
+    fn tool_outcome(
+        &self,
+        task: &Task,
+        robot: Id<Robot>,
+        world: &World,
+        mut tool: Option<String>,
+    ) -> Result<ToolOutcome, String> {
+        let doc = self.doc();
+        let mut objects: Vec<(String, String)> = Vec::new();
+        if doc.tool_kits().is_empty() {
+            return Ok((tool, objects));
+        }
+        let kit = doc.robot_tool_kit(robot).and_then(|(kit, _)| doc.get(kit));
+        for step in &task.steps {
+            let gc_doc::Step::ToolAction { action, target } = step else { continue };
+            let found =
+                kit.and_then(|k| k.action(action)).ok_or_else(|| format!("its tool cannot `{action}`"))?;
+            let target = target.and_then(|t| doc.get(t)).map(|o| o.name.clone());
+            // The object's state: as an earlier action of this task left it, else as the world has it.
+            let state = target.as_ref().and_then(|name| {
+                objects
+                    .iter()
+                    .rev()
+                    .find(|(n, _)| n == name)
+                    .map(|(_, s)| s.clone())
+                    .or_else(|| world.objects.get(name).cloned())
+            });
+            let scope = gc_doc::ActionScope { outer: world, tool: tool.as_deref(), target: state.as_deref() };
+            let possible = found.precondition.trim().is_empty()
+                || Condition::parse(&found.precondition).is_ok_and(|c| c.eval(&scope) == Ok(true));
+            if !possible {
+                return Err(format!("`{action}` cannot be done: its precondition does not hold"));
+            }
+            if let Some(next) = &found.tool_state {
+                tool = Some(next.clone());
+            }
+            if let (Some(name), Some(next)) = (target, &found.target_state) {
+                objects.push((name, next.clone()));
+            }
+        }
+        Ok((tool, objects))
     }
 
     /// [`Session::task_robots`] for the states of a schedule in progress.

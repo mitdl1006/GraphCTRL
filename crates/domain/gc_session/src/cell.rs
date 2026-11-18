@@ -2981,8 +2981,8 @@ pub struct TaskPlan {
     /// Its motions, in the order of the task's steps (a path step is a move to its start and the motion
     /// along it; steps without motion have none).
     pub segments: Vec<MotionPlan>,
-    /// Seconds spent in `Wait` steps. Signals, signal waits and tool actions count as no time (they have
-    /// no model yet).
+    /// Seconds spent in `Wait` steps and in tool actions (their durations). Signals and signal waits
+    /// count as no time.
     pub waiting: f64,
     /// The joint values the robot ends in.
     pub end: Vec<f64>,
@@ -3043,6 +3043,7 @@ impl Session {
             return Err(format!("{} is not for {}", task.name, robot.name));
         }
         let loaded = self.robot_model(robot_id).ok_or("the robot description could not be read")?;
+        let kit = doc.robot_tool_kit(robot_id).and_then(|(kit, _)| doc.get(kit));
         let mut steps = Vec::new();
         let mut waiting = 0.0;
         let free = |name: &str, goal: Goal, travel: Travel| Step {
@@ -3064,9 +3065,27 @@ impl Session {
                     waiting += seconds;
                     continue;
                 }
-                gc_doc::Step::SetIo { .. }
-                | gc_doc::Step::WaitIo { .. }
-                | gc_doc::Step::ToolAction { .. } => continue,
+                gc_doc::Step::ToolAction { action, target } => {
+                    // Once the document has tool kits, the robot's own must be able to do it.
+                    if !doc.tool_kits().is_empty() {
+                        let found = kit
+                            .and_then(|k| k.action(action))
+                            .ok_or_else(|| format!("{}: its tool cannot `{action}`", robot.name))?;
+                        let object_type = target.and_then(|t| doc.get(t)).map(|o| o.ty);
+                        if found.target != object_type {
+                            return Err(format!("`{action}` is not done to this kind of object"));
+                        }
+                        waiting += found.duration;
+                    }
+                    continue;
+                }
+                gc_doc::Step::SetIo { name, .. } => {
+                    if !doc.tool_kits().is_empty() && !kit.is_some_and(|k| k.has_output(name)) {
+                        return Err(format!("{}: its tool has no output signal `{name}`", robot.name));
+                    }
+                    continue;
+                }
+                gc_doc::Step::WaitIo { .. } => continue,
             };
             steps.push(match target {
                 MoveTarget::Role(role) => {

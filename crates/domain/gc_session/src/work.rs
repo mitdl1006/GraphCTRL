@@ -19,6 +19,7 @@ impl Session {
             Created::WorkObject(id) => Some(id.erase()),
             Created::StateVar(id) => Some(id.erase()),
             Created::Task(id) => Some(id.erase()),
+            Created::ToolKit(id) => Some(id.erase()),
             _ => None,
         }))
     }
@@ -40,6 +41,11 @@ impl Session {
     /// words; empty when nothing is.
     pub fn task_problems(&self, task: Id<Task>) -> Vec<String> {
         self.doc().task_problems(task)
+    }
+
+    /// The tool kit a robot is fitted with and the state its tool starts in.
+    pub fn robot_tool_kit(&self, robot: Id<gc_doc::Robot>) -> Option<(Id<gc_doc::ToolKit>, Option<String>)> {
+        self.doc().robot_tool_kit(robot)
     }
 
     /// The tasks in the order they were made (the order does not change when one is edited).

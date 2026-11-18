@@ -137,6 +137,8 @@ struct FileV1 {
     state_vars: BTreeMap<Id<gc_doc::StateVar>, gc_doc::StateVar>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     tasks: BTreeMap<Id<gc_doc::Task>, gc_doc::Task>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    tool_kits: BTreeMap<Id<gc_doc::ToolKit>, gc_doc::ToolKit>,
 }
 
 /// A loaded document.
@@ -209,6 +211,7 @@ pub fn to_text(doc: &Document) -> Result<String, PersistError> {
         objects: doc.objects().iter().map(|(id, x)| (id, x.clone())).collect(),
         state_vars: doc.state_vars().iter().map(|(id, x)| (id, x.clone())).collect(),
         tasks: doc.tasks().iter().map(|(id, x)| (id, x.clone())).collect(),
+        tool_kits: doc.tool_kits().iter().map(|(id, x)| (id, x.clone())).collect(),
     };
     let mut text = serde_json::to_string_pretty(&file)?;
     text.push('\n');
@@ -291,6 +294,7 @@ pub fn from_text(text: &str) -> Result<Loaded, PersistError> {
         objects: file.objects,
         state_vars: file.state_vars,
         tasks: file.tasks,
+        tool_kits: file.tool_kits,
     })?;
     let needs_repair = doc
         .sketches()

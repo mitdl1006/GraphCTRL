@@ -124,6 +124,26 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 툴 종류(ToolKit)·툴 동작·IO 이름표 (PLAN 9.4, GraphCTRL 고유)
+
+기존 `gc_doc::Tool { solid, placement }`(형상)과 `Robot`은 그대로다. 장치로서의 툴은 새 엔티티다.
+
+- `ToolKit { name, signals: Vec<IoSignal { name, direction: In|Out, pin }>, states: Vec<String>, actions: Vec<ToolAction> }` (`Kind::ToolKit`, `gc_doc::toolkit`).
+- `ToolAction { name, target: Option<Id<ObjectType>>, precondition, set: Option<(신호, bool)>, confirm: Option<(신호, bool)>, tool_state, target_state, duration, timeout }`.
+  - `precondition`은 조건식이고 여기서만 `tool.state`·`target.state`를 쓸 수 있다(작업 조건식에서 쓰면 `check_condition`이 오류). 그래서 객체 이름 `tool`·`target`은 `BadName`으로 거부한다.
+  - 검사: 이름 유일, `set`은 Out 신호·`confirm`은 In 신호, 같은 방향·같은 핀 중복 거부, `tool_state`는 툴 상태, `target_state`는 대상 타입의 상태, 시간은 0 이상.
+- 장착: `WorkOp::SetRobotTool { robot, kit: Option<_>, state: Option<String> }` → `Components.tool_kits`(`FittedTool`). 조회 `session.robot_tool_kit(robot) -> Option<(Id<ToolKit>, Option<상태>)>`(상태 생략 시 첫 상태).
+- 편집: `session.edit_work(WorkOp::{AddToolKit, SetToolKit, DeleteToolKit, SetRobotTool})`, 이름 바꾸기 `Command::Rename`. 각 Undo 1단계, 저장.
+  - `SetToolKit`: 동작(신호) 개수가 같으면 자리별로 이름이 달라진 것을 이름 바꾸기로 보고 작업 단계(`ToolAction.action`, `SetIo.name`)를 고친다(다른 툴 종류가 옛 이름을 아직 갖고 있으면 그대로 둠).
+  - 단계가 쓰는 동작·출력 신호를 없애면 `InUse`. 로봇에 장착된 툴 종류 삭제도 `InUse`. 동작의 대상 타입은 삭제가 거부된다.
+- 작업과의 연결(기존 `Step`·`Task` 타입 불변):
+  - 문서는 `ToolAction`·`SetIo`의 이름을 강제하지 않는다(툴 종류가 없는 예전 문서가 그대로 열리게). **툴 종류가 하나라도 있으면** `task_problems`가 "그 동작/출력 신호를 가진 툴이 없다", "대상 객체 타입이 다르다"를 알려 준다.
+  - `task_plan`: 툴 종류가 하나라도 있으면 그 로봇의 툴 종류에 동작·출력 신호가 있어야 한다(없으면 이유와 함께 실패 → `task_candidates`에서 뒤로). 동작의 `duration`이 `TaskPlan.waiting`에 더해진다.
+  - `schedule`: 로봇별 툴 상태를 추적한다. 로봇에 주기 전에 작업의 툴 동작을 순서대로 따져 전제조건(`tool.state`, `target.state`, 전역 상태)이 맞아야 하고, 할당하면 툴 상태가 바뀌며, 작업이 끝날 때 대상 객체 상태가 바뀐다(그 뒤 작업의 효과).
+- 없는 것: 실제 신호 송수신, 확인 신호·시간 초과 실패의 시뮬레이션, `WaitIo` 조건의 검사(글자 그대로), 아날로그 IO, 툴 교환.
+- 테스트: `gc_session/tests/tool_kits.rs`.
+- 다음 후보(리드 메모): 로봇 간 회피 — 다른 로봇을 그 시간대 자세로 장애물에 넣기.
+
 ## 2026-11-18 — 작업 → 로봇별 계획(입찰)과 최소 스케줄러 (PLAN 9.4·9.5, GraphCTRL 고유)
 
 ### 작업 계획 (`gc_session/src/cell.rs` 끝)

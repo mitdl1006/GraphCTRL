@@ -230,6 +230,7 @@ tables! {
     objects: crate::work::WorkObject,
     state_vars: crate::work::StateVar,
     tasks: crate::work::Task,
+    tool_kits: crate::toolkit::ToolKit,
 }
 
 /// Everything a stored document consists of, as [`Document::restore`] takes it.
@@ -273,6 +274,8 @@ pub struct Contents {
     pub state_vars: BTreeMap<Id<crate::work::StateVar>, crate::work::StateVar>,
     /// Tasks.
     pub tasks: BTreeMap<Id<crate::work::Task>, crate::work::Task>,
+    /// Tool kits.
+    pub tool_kits: BTreeMap<Id<crate::toolkit::ToolKit>, crate::toolkit::ToolKit>,
 }
 
 impl Default for Document {
@@ -306,6 +309,7 @@ impl Document {
             objects: Store::default(),
             state_vars: Store::default(),
             tasks: Store::default(),
+            tool_kits: Store::default(),
             ids: IdAlloc::new(),
             revision: Revision::default(),
         };
@@ -355,6 +359,7 @@ impl Document {
             objects: Store { items: contents.objects },
             state_vars: Store { items: contents.state_vars },
             tasks: Store { items: contents.tasks },
+            tool_kits: Store { items: contents.tool_kits },
             ids: IdAlloc::new(),
             revision: Revision::default(),
         };
@@ -378,6 +383,7 @@ impl Document {
         doc.objects.items.keys().for_each(|id| raise(id.raw()));
         doc.state_vars.items.keys().for_each(|id| raise(id.raw()));
         doc.tasks.items.keys().for_each(|id| raise(id.raw()));
+        doc.tool_kits.items.keys().for_each(|id| raise(id.raw()));
         for (id, sketch) in &doc.sketches.items {
             raise(id.raw());
             sketch.points.keys().for_each(|p| raise(p.raw()));
@@ -490,6 +496,11 @@ impl Document {
     /// Tasks.
     pub fn tasks(&self) -> &Store<crate::work::Task> {
         &self.tasks
+    }
+
+    /// Tool kits: kinds of tools as devices.
+    pub fn tool_kits(&self) -> &Store<crate::toolkit::ToolKit> {
+        &self.tool_kits
     }
 
     /// The stored model-tree order, if any was set (see [`Document::model_order`]).
