@@ -5705,3 +5705,29 @@ fn a_3d_spline_is_placed_with_fit_points_and_finished_with_enter() {
     harness.run();
     assert_eq!(count(&harness), 1);
 }
+
+/// Auto-bend with 3D line creation (Application Options, Sketch tab, GUID-1898C432-CFD2-46F1-8BAE-631392DFBF1D):
+/// off by default, saved, read back at the next start.
+#[test]
+fn the_auto_bend_option_is_off_by_default_saved_and_read_back() {
+    let directory = tempfile::tempdir().unwrap();
+    let options =
+        || RunOptions { settings_dir: Some(directory.path().to_path_buf()), ..RunOptions::default() };
+    let mut harness =
+        egui_kittest::Harness::builder().with_size(SIZE).build_eframe(|cc| GraphCtrlApp::new(cc, options()));
+    harness.run();
+    assert!(harness.state().session.auto_bend().is_none());
+    harness.get_by_label("파일").click();
+    harness.run();
+    harness.get_by_label("응용 프로그램 옵션").click();
+    harness.run_steps(3);
+    harness.get_by_label("3D 선 그릴 때 자동 굽힘").click();
+    harness.run();
+    assert_eq!(harness.state().session.auto_bend(), Some("10 mm"));
+    let saved = gc_persist::places::load_settings(directory.path());
+    assert!(saved.auto_bend);
+
+    let again =
+        egui_kittest::Harness::builder().with_size(SIZE).build_eframe(|cc| GraphCtrlApp::new(cc, options()));
+    assert_eq!(again.state().session.auto_bend(), Some("10 mm"));
+}

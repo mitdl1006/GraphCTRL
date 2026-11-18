@@ -76,6 +76,11 @@ pub struct Settings {
     /// Sketches made on a face do not get the face's edges projected into them (Application Options, Sketch
     /// tab, "Autoproject edges for sketch creation and edit"; default: on, so this is false).
     pub autoproject_edges_off: bool,
+    /// Automatically places tangent corner bends on 3D lines as they are sketched (Sketch tab, "Auto-bend
+    /// with 3D line creation"; default: off).
+    pub auto_bend: bool,
+    /// The radius of those bends as typed (empty: the default, 10 mm).
+    pub auto_bend_radius: String,
 }
 
 /// The settings file in the settings folder.
