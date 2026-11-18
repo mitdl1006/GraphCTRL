@@ -124,6 +124,15 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — IO 신호 모델: 신호 대기와 로봇 간 핸드셰이크
+
+- **대기 조건의 뜻**: `Step::WaitIo.condition`은 여전히 글자로 저장하지만 "신호 이름 + 값"으로 읽는다 — `ready`, `not ready`, `ready == true`, `"part ready" == false`(공백 든 이름은 큰따옴표). `gc_doc::signal_condition(text) -> Option<(String, bool)>`(입력 칸 검증에 쓸 수 있다). 읽을 수 없으면 거부하지 않고 `task_problems`가 알려 준다(툴 종류가 있는 문서에서).
+- **셀이 구동하는 신호**: `doc().driven_signals()` — 어떤 작업의 `SetIo`가 세팅하거나 어떤 툴 동작의 `set`이 세팅하는 이름. 같은 이름이면 한 선으로 본다(한 로봇의 출력 = 다른 로봇의 같은 이름 입력).
+- **스케줄**: 구동 신호는 모두 꺼진 상태로 시작한다. 작업이 **끝날 때** 그 작업의 `SetIo`와 툴 동작 `set`이 단계 순서대로 신호를 바꾼다. 구동 신호를 기다리는 `WaitIo`가 있는 작업은 그 신호가 그 값일 때만 시작한다(막히면 이유 "it waits for the signal `x`"). 아무도 구동하지 않는 신호(센서·장치)를 기다리는 것은 응답이 온 것으로 본다.
+  - 단순화: 작업 안의 시점이 아니라 작업 단위다 — "A 작업이 끝나며 신호를 켬 → 그 신호를 기다리는 B 작업이 시작"이 핸드셰이크다. 작업 도중 켜고 도중에 기다리는 맞물림, 시간 초과 실패는 시뮬레이션하지 않는다.
+- **URScript**: `WaitIo` → 그 로봇 툴 종류의 **입력** 신호 핀으로 `while (get_digital_in(pin) != True/False and waited < timeout)` 루프, 시간 초과면 `popup` + `halt`. 그 로봇에 그 이름의 입력이 없거나 조건을 읽을 수 없으면 `# TODO wait for: …` 주석.
+- 테스트: `tool_kits.rs::a_wait_for_a_signal_another_robot_sets_is_a_handshake`.
+
 ## 2026-11-18 — URScript 프로그램 생성 (PLAN 9.6, 오프라인 텍스트만)
 
 근거: `docs/research/robotics-domain.md`의 URScript 절(SI 단위, `movej` 기본 a = 1.4 rad/s²·v = 1.05 rad/s, `movel` 기본 a = 1.2 m/s²·v = 0.25 m/s, 자세 `p[x, y, z, rx, ry, rz]` 회전벡터), `m2-references.md`. **URSim·실제 로봇으로 실행해 본 적 없다**(이 환경에 URSim 없음). 전송·RTDE·Dashboard는 없다.

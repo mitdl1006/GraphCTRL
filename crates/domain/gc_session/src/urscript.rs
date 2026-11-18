@@ -150,9 +150,31 @@ impl Session {
                     }
                 }
                 ProgramStep::WaitFor { condition, timeout } => {
+                    let limit = short(*timeout);
+                    let wait = gc_doc::signal_condition(condition)
+                        .and_then(|(name, value)| Some((pin(&name, IoDirection::In)?, name, value)));
+                    let Some((input, name, value)) = wait else {
+                        line(format!(
+                            "# TODO wait for: {condition} (at most {limit} s): no such input on this robot"
+                        ));
+                        continue;
+                    };
+                    line(format!("# wait for {name}"));
+                    line("waited = 0.0".to_owned());
                     line(format!(
-                        "# TODO wait for: {condition} (at most {timeout} s); signals have no model yet"
+                        "while (get_digital_in({input}) != {} and waited < {limit}):",
+                        boolean(value)
                     ));
+                    line("  sleep(0.01)".to_owned());
+                    line("  waited = waited + 0.01".to_owned());
+                    line("end".to_owned());
+                    line(format!("if (waited >= {limit}):"));
+                    line(format!(
+                        "  popup(\"{}: not seen on input {input}\", \"GraphCTRL\", False, True)",
+                        identifier(&name)
+                    ));
+                    line("  halt".to_owned());
+                    line("end".to_owned());
                 }
             }
         }
