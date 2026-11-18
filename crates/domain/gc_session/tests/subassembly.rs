@@ -175,3 +175,36 @@ fn editing_in_place_scopes_picks_and_returns() {
     assert_eq!(s.edit_component(key(a)), Err(EditError::BadValue));
     assert!(s.in_edit_scope(occ(c)));
 }
+
+/// A dissolved subassembly's id is never given to a new one (an id names one subassembly for the life of
+/// the document, like other document ids).
+#[test]
+fn subassembly_ids_are_not_reused() {
+    let mut s = Session::new();
+    let (a, b) = (body(&mut s, 0.0), body(&mut s, 0.3));
+    let first = demote(&mut s, vec![key(a)], "First");
+    s.edit_subassemblies(SubassemblyOp::Dissolve(first)).unwrap();
+    let second = demote(&mut s, vec![key(b)], "Second");
+    assert_ne!(first, second);
+}
+
+/// While a subassembly is edited in place, components outside it cannot be selected, so the Ground toggle,
+/// Delete and the like cannot reach them.
+#[test]
+fn components_outside_the_edit_target_cannot_be_selected() {
+    let mut s = Session::new();
+    let (a, c) = (body(&mut s, 0.0), body(&mut s, 0.6));
+    let sub = demote(&mut s, vec![key(a)], "Jig");
+    assert!(s.select_occurrence(Some(occ(c))));
+    s.edit_component(TreeKey::Subassembly(sub)).unwrap();
+    // A selection made before entering no longer counts.
+    assert_eq!(s.selected_occurrence(), None);
+    assert_eq!(s.selected_item(), None);
+    assert!(!s.select_occurrence(Some(occ(c))));
+    s.select_item(Some(gc_session::CellItem::Body(c)));
+    assert_eq!(s.selected_item(), None);
+    assert!(s.select_occurrence(Some(occ(a))));
+    assert_eq!(s.selected_item(), Some(gc_session::CellItem::Body(a)));
+    s.return_to_top();
+    assert!(s.select_occurrence(Some(occ(c))));
+}

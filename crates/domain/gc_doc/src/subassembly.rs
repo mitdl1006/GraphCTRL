@@ -260,7 +260,8 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &SubassemblyOp) -> Outcome {
             if levels.iter().any(|l| *l != Some(level)) {
                 return Err(EditError::BadValue);
             }
-            let id = SubassemblyId(all.iter().map(|s| s.id.0 + 1).max().unwrap_or(1).max(1));
+            let next = doc.timeline().map_or(0, |(_, t)| t.components.next_subassembly);
+            let id = SubassemblyId(all.iter().map(|s| s.id.0 + 1).max().unwrap_or(1).max(next).max(1));
             let name = if name.trim().is_empty() {
                 (1..)
                     .map(|n| format!("Subassembly:{n}"))
@@ -275,6 +276,7 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &SubassemblyOp) -> Outcome {
             let members = members.clone();
             crate::cell::set_timeline(txn, |t| {
                 t.components.subassemblies.push(Subassembly { id, name, parent: level });
+                t.components.next_subassembly = id.0 + 1;
                 place(&mut t.components, &members, Some(id));
             })?;
             Ok((vec![Created::Subassembly(id)], "Demote"))
