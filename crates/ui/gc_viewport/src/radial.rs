@@ -18,6 +18,8 @@ pub enum ViewportRequest {
     Constrain,
     /// Ask for a mesh file and place it as a component.
     PlaceComponent,
+    /// Double click on a work feature: edit it.
+    EditWorkFeature(gc_core::Id<gc_doc::WorkFeature>),
     /// Double click on a component: edit the unit that holds it in place (a subassembly as one).
     EditUnit(gc_doc::Occurrence),
 }

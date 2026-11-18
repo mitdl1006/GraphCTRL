@@ -47,6 +47,8 @@ pub enum BrowserAction {
     JointLock(gc_core::Id<gc_doc::Relationship>, bool),
     /// Protect a joint's freedom, or not.
     JointProtect(gc_core::Id<gc_doc::Relationship>, bool),
+    /// Edit a work feature (double-click, or its menu).
+    EditWorkFeature(Id<gc_doc::WorkFeature>),
     /// Edit a component or subassembly in place (double-click in the browser).
     EditComponent(gc_doc::TreeKey),
     /// Demote, move, dissolve or rename subassemblies.
@@ -460,6 +462,32 @@ fn work_features(ui: &mut Ui, session: &Session, lang: Lang, action: &mut Option
                 dim: false,
             };
             let result = gc_ui::panel::tree_row(ui, row);
+            if result.row.double_clicked() {
+                *action = Some(BrowserAction::EditWorkFeature(id));
+            }
+            result.row.context_menu(|ui| {
+                ui.label(RichText::new(&feature.name).strong());
+                ui.separator();
+                if ui.button(tr!(lang, CmdEditWorkFeature)).clicked() {
+                    *action = Some(BrowserAction::EditWorkFeature(id));
+                    ui.close();
+                }
+                let text = if feature.visible { tr!(lang, CmdHide) } else { tr!(lang, CmdShow) };
+                if ui.button(text).clicked() {
+                    let mut changed = feature.clone();
+                    changed.visible = !feature.visible;
+                    *action = Some(BrowserAction::Edit(Box::new(Command::Cell(CellOp::SetWorkFeature {
+                        id,
+                        feature: changed,
+                    }))));
+                    ui.close();
+                }
+                if ui.button(delete.as_str()).clicked() {
+                    *action =
+                        Some(BrowserAction::Edit(Box::new(Command::Cell(CellOp::DeleteWorkFeature(id)))));
+                    ui.close();
+                }
+            });
             if result.toggled {
                 let mut changed = feature.clone();
                 changed.visible = visible;

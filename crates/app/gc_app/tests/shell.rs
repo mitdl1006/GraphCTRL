@@ -4144,3 +4144,87 @@ fn a_subassembly_folder_is_nested_from_its_menu() {
     let outer = groups.iter().find(|g| g.name == "Outer").unwrap();
     assert_eq!(inner.parent, Some(outer.id), "Inner now sits in Outer");
 }
+
+/// Work planes and points have their dialogs; a double click in the browser edits a feature; a click in the
+/// view selects it and Delete removes it.
+#[test]
+fn work_features_are_edited_from_the_browser_and_selected_in_the_view() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .with_step_dt(0.05)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let add = |harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, name: &str, geometry| {
+        let op = gc_doc::CellOp::AddWorkFeature(gc_doc::WorkFeature {
+            name: name.to_owned(),
+            geometry,
+            visible: true,
+        });
+        harness.state_mut().session.execute(&gc_doc::Command::Cell(op)).unwrap();
+    };
+    add(
+        &mut harness,
+        "Plane1",
+        gc_doc::WorkGeometry::PlaneOffset {
+            base: gc_doc::PlaneRef::Origin(gc_doc::OriginPlane::Xy),
+            distance: 0.05,
+        },
+    );
+    add(
+        &mut harness,
+        "Axis1",
+        gc_doc::WorkGeometry::AxisThroughPoints {
+            points: [gc_doc::PointRef::Origin, gc_doc::PointRef::Fixed([0.0, 0.0, 0.2])],
+        },
+    );
+    add(&mut harness, "Point1", gc_doc::WorkGeometry::Point { at: gc_doc::PointRef::Fixed([0.1, 0.0, 0.0]) });
+    harness.run();
+
+    // The ribbon has the three commands.
+    harness.get_by_label("작업 평면");
+    harness.get_by_label("작업 점");
+
+    // A double click on a row in the browser opens the dialog on that feature.
+    let at = harness.get_by_label("Plane1").rect().center();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run();
+    for _ in 0..2 {
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.step();
+        }
+    }
+    harness.run_steps(3);
+    assert!(harness.query_all_by_label("작업 평면").count() >= 2, "the dialog is up on the plane");
+    assert!(harness.query_all_by_label("거리 (mm)").count() >= 1);
+
+    // In the view: a click on the axis selects it, Delete removes it.
+    harness.state_mut().fit_view();
+    harness.state_mut().viewport_mut().camera.pan([0.0, 0.0], [-250.0, 0.0], [1280.0, 700.0]);
+    harness.run();
+    let axis =
+        harness.state().session.doc().work_features().iter().find(|(_, f)| f.name == "Axis1").unwrap().0;
+    let on_axis = harness.state().viewport().screen_of(gc_math::DVec3::new(0.0, 0.0, 0.1)).unwrap();
+    harness.event(egui::Event::PointerMoved(on_axis));
+    harness.run();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: on_axis,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.step();
+    }
+    harness.run_steps(3);
+    assert_eq!(harness.state().viewport().work_selected, Some(axis));
+    harness.key_press(egui::Key::Delete);
+    harness.run_steps(3);
+    assert!(harness.state().session.doc().work_features().iter().all(|(_, f)| f.name != "Axis1"));
+}
