@@ -593,14 +593,13 @@ fn value_fits(doc: &Document, kind: &StateValue, text: &str) -> Result<(), EditE
     let fits = match kind {
         StateValue::Bool(_) => matches!(text.trim(), "true" | "false"),
         // A number, or an expression over the numeric state variables.
-        StateValue::Real(_) => {
-            return effect_number(text, &|name| doc.number_of(name)).map(|_| ());
-        }
-        // Worked out from the starting values, a whole-number variable must get a whole number that fits
-        // (`3.5` and `1e30` are refused; `count / 2` is rounded when the schedule runs).
+        StateValue::Real(_) => return effect_number(text, &|name| doc.number_of(name)).map(|_| ()),
+        // A whole number: what the expression gives for the starting values must be one, in range.
         StateValue::Int(_) => {
             let value = effect_number(text, &|name| doc.number_of(name))?;
-            value.fract() == 0.0 && value.abs() <= i64::MAX as f64
+            #[allow(clippy::cast_precision_loss, reason = "the bounds of whole numbers a state can hold")]
+            let in_range = value.abs() <= i64::MAX as f64;
+            value.fract() == 0.0 && in_range
         }
         StateValue::Enum { choices, .. } => choices.iter().any(|c| c == text.trim()),
     };

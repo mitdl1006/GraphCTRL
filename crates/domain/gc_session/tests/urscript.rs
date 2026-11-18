@@ -177,3 +177,40 @@ fn the_program_text_is_the_same_every_time() {
     assert_eq!(text, expected);
     assert_eq!(s.task_urscript(task, robot).unwrap(), text);
 }
+
+/// QA: names and conditions with line breaks, quotes or only non-ASCII letters must not change what the
+/// program does.
+#[test]
+fn text_from_the_user_cannot_add_commands_and_names_stay_apart() {
+    let mut s = Session::new();
+    let robot: Id<Robot> = s.add_robot("로봇", &six_axis()).unwrap();
+    let there = s.add_waypoint(robot, gc_doc::WaypointTarget::Joints(vec![0.1; 6])).unwrap();
+    let nasty = |name: &str| Task {
+        name: name.into(),
+        location: Location::Robot(robot),
+        precondition: String::new(),
+        steps: vec![
+            Step::MoveJ(MoveTarget::Waypoint(there)),
+            Step::WaitIo { condition: "ok\n  set_digital_out(0, True)\r\t#".into(), timeout: 1.0 },
+            Step::SetIo { name: "x\npopup(\"hi\")".into(), value: true },
+        ],
+        effects: Vec::new(),
+        robots: RobotChoice::Any,
+        priority: 0,
+    };
+    let first: Id<Task> = made(&mut s, WorkOp::AddTask(nasty("작업\nhalt")));
+    let second: Id<Task> = made(&mut s, WorkOp::AddTask(nasty("과업")));
+    let text = s.task_urscript(first, robot).unwrap();
+    // Every line that is not a comment is one of the commands the generator writes.
+    for line in text.lines() {
+        let line = line.trim_start();
+        let known = ["#", "def ", "set_tcp(", "movej(", "end"];
+        assert!(known.iter().any(|start| line.starts_with(start)), "{line:?}\n{text}");
+    }
+    assert!(!text.contains("\r") && !text.contains("\t"));
+    // Names of only non-ASCII letters get the item's id, so two of them differ.
+    let name = |text: &str| text.lines().find(|l| l.starts_with("def ")).unwrap().to_owned();
+    assert_ne!(name(&text), name(&s.task_urscript(second, robot).unwrap()));
+    let whole = s.schedule_urscript(&s.schedule());
+    assert!(whole[0].1.lines().all(|l| !l.trim_start().starts_with("halt")), "{}", whole[0].1);
+}
