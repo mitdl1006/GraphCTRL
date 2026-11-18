@@ -520,6 +520,9 @@ fn dimension_for(sketch: &Sketch, picks: &[Item]) -> Option<DimKind> {
                 Some(DimKind::ArcArc { a, b, external: true })
             } else if apart < (ra - rb).abs() {
                 Some(DimKind::ArcArc { a, b, external: false })
+            } else if apart > 1e-12 {
+                // Crossing or touching: there is no gap between them; the distance between the centres.
+                Some(DimKind::Distance { p: ca, q: cb })
             } else {
                 None
             }

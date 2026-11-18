@@ -462,6 +462,18 @@ pub enum SketchOp {
         /// The radius as typed, e.g. `"5 mm"`.
         radius: String,
     },
+    /// A 3D line drawn with Auto-Bend on (Sketch tab of Application Options, GUID-1898C432-CFD2-46F1-8BAE-
+    /// 631392DFBF1D: "Automatically places tangent corner bends on 3D lines as you sketch them"): the line
+    /// (`line`, an `AddLine`), then a Bend of `radius` where it turns from `previous`. Where the bend does
+    /// not fit (the lines too short, in line), the line is kept without it. One undo step.
+    AddLineBent {
+        /// The `AddLine` for the new line.
+        line: Box<SketchOp>,
+        /// The line it continues from.
+        previous: Id<Curve>,
+        /// The bend radius as typed (the document's 3D Sketch Auto-Bend Radius).
+        radius: String,
+    },
     /// Bend (To Create Lines, Arcs, and Bends, GUID-4F861674-F74C-474E-869A-4C190ED6EC4B): a tangent arc of
     /// `radius` at the corner where two lines of a 3D sketch meet, with a radius dimension.
     Bend {
@@ -2917,6 +2929,21 @@ fn sketch_op(
         SketchOp::Extend { curve, at } => {
             push_cut(&mut created, &sketch.extend(ids, *curve, *at)?);
             "Extend"
+        }
+        SketchOp::AddLineBent { line, previous, radius } => {
+            let SketchOp::AddLine { .. } = **line else { return Err(SketchError::InvalidValue.into()) };
+            let (made, _) = sketch_op(sketch, ids, line, scope)?;
+            let new = made.iter().find_map(|c| if let Created::Curve(id) = c { Some(*id) } else { None });
+            created.extend(made);
+            if let Some(new) = new {
+                let before = sketch.clone();
+                let bend = SketchOp::Bend { lines: [*previous, new], radius: radius.clone() };
+                match sketch_op(sketch, ids, &bend, scope) {
+                    Ok((bent, _)) => created.extend(bent),
+                    Err(_) => *sketch = before,
+                }
+            }
+            "Line"
         }
         SketchOp::Bend { lines, radius } => {
             let value = evaluate(radius, scope, Unit::Mm)?;
