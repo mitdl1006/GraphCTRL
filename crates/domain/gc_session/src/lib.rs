@@ -27,6 +27,7 @@ mod role;
 mod schedule;
 mod sketch_pick;
 mod spatial;
+mod urscript;
 mod work;
 
 use std::collections::BTreeSet;
@@ -36,7 +37,7 @@ pub use assembly::{AssemblyReader, Imported, Importer, ShownAssemblyPart};
 pub use bom::{BomRow, BomView, structure_name};
 pub use cell::{
     CellItem, CompareRow, ContactStop, Ghost, LoadedRobot, MeshRef, PADDING, PLANNERS, PlanStatus,
-    PlannedPath, Reference, Resources, Shown, ShownPart, TaskCandidate, TaskPlan,
+    PlannedPath, ProgramStep, Reference, Resources, Shown, ShownPart, TaskCandidate, TaskPlan,
 };
 pub use design::WorkShape;
 pub use gc_collide::{Closest, Interference};
@@ -51,7 +52,7 @@ pub use measure::{
     Feature, FeaturePair, InterferenceRow, ItemMeasure, PairMeasure, angle_at, measure_features,
 };
 pub use physical::PhysicalProperties;
-pub use schedule::{Assignment, Schedule};
+pub use schedule::{Assignment, MAX_ASSIGNMENTS, ParkMove, Schedule, Wait};
 pub use sketch_pick::SketchPick;
 
 /// A dimension that is about to be placed and needs its value from the user.

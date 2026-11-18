@@ -715,6 +715,13 @@ pub struct Components {
     /// The iProperties of components (Summary, Project, density).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub properties: Vec<(Occurrence, crate::iproperties::IProperties)>,
+    /// Where robots go to be out of the way (their park poses), as joint values.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parks: Vec<(Id<crate::cell::Robot>, Vec<f64>)>,
+    /// Tasks that are done more than once: the task and how many times at most (0: as often as its
+    /// precondition comes to hold).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub task_repeats: Vec<(Id<crate::work::Task>, u32)>,
     /// The tool kits robots are fitted with (work model).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tool_kits: Vec<crate::toolkit::FittedTool>,
