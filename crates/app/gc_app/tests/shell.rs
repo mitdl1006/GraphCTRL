@@ -5108,10 +5108,10 @@ fn alt_drag_places_a_mate_between_two_faces() {
 /// (shortcut table GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E).
 #[test]
 fn ctrl_c_and_ctrl_v_paste_a_copy_of_the_selected_body() {
-    let mut harness = egui_kittest::Harness::builder()
-        .with_size(SIZE)
-        .with_pixels_per_point(1.0)
-        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
     harness.run();
     let app = harness.state_mut();
     let body =
@@ -5134,9 +5134,20 @@ fn ctrl_c_and_ctrl_v_paste_a_copy_of_the_selected_body() {
     harness.run_steps(3);
     assert_eq!(bodies(&harness), 1, "nothing is made before the click");
     assert!(harness.state().viewport().is_placing(), "the paste waits for its place");
+    // A ghost of the copy follows the cursor (the document is untouched).
+    harness.event(egui::Event::PointerMoved(egui::pos2(560.0, 430.0)));
+    harness.run_steps(3);
+    assert_eq!(harness.state().session.paste_ghosts().len(), 1, "the ghost");
+    if gpu {
+        let image = harness.render().unwrap();
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        image.save(out.join("review-64-paste-ghost.png")).unwrap();
+    }
     harness.key_press(egui::Key::Escape);
     harness.run_steps(3);
     assert_eq!(bodies(&harness), 1, "Esc pasted nothing");
+    assert!(harness.state().session.paste_ghosts().is_empty(), "and the ghost is gone");
     assert!(!harness.state().viewport().is_placing());
     // Pasted again, a click pastes where the cursor is: one undo step.
     let depth = harness.state().session.history().undo_depth();

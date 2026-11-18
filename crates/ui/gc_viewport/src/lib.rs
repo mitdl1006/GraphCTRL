@@ -1680,16 +1680,19 @@ impl Viewport {
         if self.grip_step(ui, response, session, size, &to_view, lang) {
             return;
         }
-        // Paste: a ring follows the cursor; a click pastes there (one undo step), Esc does nothing.
+        // Paste: a see-through ghost of the copy follows the cursor (nothing is made yet); a click pastes
+        // there (one undo step), Esc or a right click does nothing.
         if let Some(paste) = self.placing_paste {
             if ui.input(|i| i.key_pressed(egui::Key::Escape)) || response.secondary_clicked() {
+                session.end_paste_preview();
                 self.placing_paste = None;
                 return;
             }
-            if let Some(at) = response.hover_pos() {
-                let painter = ui.painter_at(self.rect);
-                painter.circle_stroke(at, 9.0, egui::Stroke::new(1.8, colors::ACCENT));
-                painter.circle_filled(at, 2.5, colors::ACCENT);
+            if let Some(at) = response.hover_pos()
+                && let Some(point) = place::ground_hit(&self.camera, size, to_view(at), paste.anchor)
+            {
+                let by = point - paste.anchor;
+                drop(session.preview_paste(gc_doc::Placement { xyz: by.to_array(), rpy: [0.0; 3] }));
                 ui.ctx().request_repaint();
             }
             if response.clicked_by(PointerButton::Primary)
@@ -1699,6 +1702,7 @@ impl Viewport {
                 let by = point - paste.anchor;
                 // A refusal is explained in the status bar.
                 drop(session.paste(gc_doc::Placement { xyz: by.to_array(), rpy: [0.0; 3] }));
+                session.end_paste_preview();
                 self.placing_paste = None;
             }
             return;
