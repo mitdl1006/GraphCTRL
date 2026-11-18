@@ -126,6 +126,8 @@ pub struct Viewport {
     /// Where the view has stood (F5 goes back, Shift + F5 forward), the one shown now, and when the
     /// camera last changed.
     views: ViewHistory,
+    /// Insert Point is running on this spline: each click adds a fit point, Esc ends.
+    insert_spline: Option<Id<gc_sketch::Curve>>,
     /// Whether Alt was held when the primary button last went down.
     alt_at_press: bool,
     /// An Alt + drag that places a Mate constraint.
@@ -257,6 +259,7 @@ impl Viewport {
             free_drag: None,
             placing: None,
             placing_paste: None,
+            insert_spline: None,
             alt_at_press: false,
             alt_drag: None,
             quick_constrain: None,
@@ -427,7 +430,27 @@ impl Viewport {
                 if response.drag_stopped_by(PointerButton::Primary) {
                     session.tool_event(ToolEvent::DragEnd);
                 }
-                if response.clicked_by(PointerButton::Primary)
+                if let Some(curve) = self.insert_spline {
+                    // Insert Point: every click on the spline adds a fit point; Esc ends.
+                    if ui.input(|i| i.key_pressed(Key::Escape)) {
+                        self.insert_spline = None;
+                    } else if response.clicked_by(PointerButton::Primary)
+                        && let Some(pos) = response.interact_pointer_pos().and_then(on_sketch)
+                    {
+                        // A refusal is explained in the status bar.
+                        drop(session.edit_active_sketch(gc_doc::SketchOp::InsertSplinePoint {
+                            curve,
+                            at: [pos[0], pos[1]],
+                        }));
+                    }
+                    ui.painter_at(self.rect).text(
+                        self.rect.center_top() + egui::vec2(0.0, 14.0),
+                        egui::Align2::CENTER_TOP,
+                        tr!(lang, SplineInsertHint),
+                        egui::FontId::proportional(13.0),
+                        colors::ACCENT,
+                    );
+                } else if response.clicked_by(PointerButton::Primary)
                     && let Some(pos) = response.interact_pointer_pos().and_then(on_sketch)
                 {
                     session.tool_event(ToolEvent::Click { pos, px, modifier: ctrl });
@@ -495,23 +518,49 @@ impl Viewport {
         {
             let at = ui.input(|i| i.pointer.press_origin().or(i.pointer.interact_pos()));
             self.marking_set = if let Some((_, plane)) = active.as_ref() {
-                // On an inner fit point of a spline the menu offers Split Spline.
-                let split = at.and_then(|at| {
+                // What the spline under the cursor offers: Split Spline at an inner fit point, Close Curve at
+                // the start of an open one, Insert Point on the curve.
+                let mut menu = radial::SplineMenu::default();
+                if let Some(at) = at {
                     let at = to_view(at);
-                    let (_, sketch) = session.active_sketch()?;
-                    sketch.curves.iter().find_map(|(curve, c)| {
-                        let gc_sketch::CurveGeom::Spline { points } = &c.geom else { return None };
-                        let inner = points.get(1..points.len().saturating_sub(1))?;
-                        inner.iter().find_map(|point| {
-                            let local = session.point_pos(*point)?;
-                            let screen = self.camera.project(plane.world(local), size)?;
-                            let near = gc_math::fm::hypot(screen[0] - at[0], screen[1] - at[1])
-                                <= gc_tools::tolerance::POINT_PX;
-                            near.then_some((*curve, *point))
-                        })
-                    })
-                });
-                radial::Set::sketch(session.sketch_is_spatial(), split)
+                    let near_point = |point: Id<gc_sketch::SkPoint>| -> bool {
+                        session
+                            .point_pos(point)
+                            .and_then(|local| self.camera.project(plane.world(local), size))
+                            .is_some_and(|s| {
+                                gc_math::fm::hypot(s[0] - at[0], s[1] - at[1])
+                                    <= gc_tools::tolerance::POINT_PX
+                            })
+                    };
+                    if let Some((_, sketch)) = session.active_sketch() {
+                        for (curve, c) in &sketch.curves {
+                            let gc_sketch::CurveGeom::Spline { points } = &c.geom else { continue };
+                            let closed = points.len() > 1 && points.first() == points.last();
+                            if let Some(inner) = points.get(1..points.len().saturating_sub(1))
+                                && let Some(point) = inner.iter().find(|p| near_point(**p))
+                            {
+                                menu.split = Some((*curve, *point));
+                            }
+                            if !closed && points.len() >= 3 && points.first().is_some_and(|p| near_point(*p))
+                            {
+                                menu.close = Some(*curve);
+                            }
+                            // On the curve itself: the outline in pixels.
+                            if let Some(outline) = sketch.spline_outline(&c.geom, 16) {
+                                let on_screen: Vec<[f64; 2]> = outline
+                                    .iter()
+                                    .filter_map(|p| self.camera.project(plane.world([p[0], p[1], 0.0]), size))
+                                    .collect();
+                                let near =
+                                    on_screen.windows(2).any(|w| segment_distance(at, w[0], w[1]) <= 6.0);
+                                if near {
+                                    menu.insert = Some(*curve);
+                                }
+                            }
+                        }
+                    }
+                }
+                radial::Set::sketch(session.sketch_is_spatial(), menu)
             } else {
                 // What is under the cursor is selected, and decides the short menu.
                 let view = at.map(to_view);
@@ -555,6 +604,7 @@ impl Viewport {
                 match radial::run(cmd, session) {
                     radial::Effect::None => {}
                     radial::Effect::Request(request) => self.request = Some(request),
+                    radial::Effect::InsertSplinePoint(curve) => self.insert_spline = Some(curve),
                     radial::Effect::SelectOther => {
                         if let Some(at) = ui.input(|i| i.pointer.latest_pos()) {
                             self.open_select_other(session, at, size, &to_view);

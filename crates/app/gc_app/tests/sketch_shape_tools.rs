@@ -639,3 +639,164 @@ fn offset_works_on_an_ellipse_and_a_spline_on_screen() {
         image.save(out.join("review-62-offset.png")).unwrap();
     }
 }
+
+/// A press and release of the right button without moving opens the menu list at `at`.
+fn right_click(harness: &mut Harness<'_>, at: egui::Pos2) {
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run_steps(2);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+    harness.run_steps(3);
+}
+
+fn spline_with_four_points() -> (Harness<'static>, [[f64; 2]; 4]) {
+    let mut harness = sketching();
+    harness.state_mut().session.set_tool(ToolKind::Spline);
+    let points = [mm(-60.0, 0.0), mm(-20.0, 40.0), mm(20.0, -30.0), mm(60.0, 20.0)];
+    for p in points {
+        click(harness.state_mut(), p, false);
+    }
+    harness.state_mut().session.tool_event(ToolEvent::Key(gc_tools::Key::Enter));
+    harness.state_mut().session.set_tool(ToolKind::Select);
+    harness.run_steps(3);
+    (harness, points)
+}
+
+fn spline_points(harness: &Harness<'_>) -> Vec<gc_core::Id<gc_sketch::SkPoint>> {
+    let (_, sketch) = harness.state().session.active_sketch().unwrap();
+    sketch
+        .curves
+        .values()
+        .find_map(|c| {
+            if let gc_sketch::CurveGeom::Spline { points } = &c.geom { Some(points.clone()) } else { None }
+        })
+        .unwrap_or_default()
+}
+
+/// Close Curve at the start of an open spline, Insert Point on it (Inventor 2026 help, To Create, Lock Spline
+/// Length, and Edit Splines, GUID-DB15C479-66F2-456A-9E54-40A60F83DC92: "To close a curve, right-click the
+/// starting point and choose Close Curve"; "right-click the spline and choose Insert Point. Then click the
+/// curve").
+#[test]
+fn the_spline_menu_inserts_points_and_closes_the_curve() {
+    let (mut harness, points) = spline_with_four_points();
+    assert_eq!(spline_points(&harness).len(), 4);
+    let screen = |h: &Harness<'_>, p: [f64; 2]| {
+        h.state().viewport().screen_of(gc_math::DVec3::new(p[0], p[1], 0.0)).unwrap()
+    };
+
+    // Insert Point: the menu on the curve between two fit points, then clicks on the curve, Esc ends.
+    let between = [(points[0][0] + points[1][0]) / 2.0 + 0.0, (points[0][1] + points[1][1]) / 2.0];
+    // The curve passes near the chord's middle; find a point of its outline.
+    let (_, sketch) = harness.state().session.active_sketch().unwrap();
+    let outline = sketch.curves.values().find_map(|c| sketch.spline_outline(&c.geom, 16)).unwrap();
+    let on_curve = outline[outline.len() / 6];
+    let _ = between;
+    let at = screen(&harness, on_curve);
+    right_click(&mut harness, at);
+    harness.get_by_label("점 삽입").click();
+    harness.run_steps(3);
+    let target = screen(&harness, outline[outline.len() / 2]);
+    harness.event(egui::Event::PointerMoved(target));
+    harness.run_steps(2);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: target,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run_steps(2);
+    }
+    assert_eq!(spline_points(&harness).len(), 5, "a fit point was inserted");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(3);
+    // Esc ended it: a further click on the curve inserts nothing.
+    let again = screen(&harness, outline[outline.len() * 2 / 3]);
+    harness.event(egui::Event::PointerMoved(again));
+    harness.run_steps(2);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: again,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run_steps(2);
+    }
+    assert_eq!(spline_points(&harness).len(), 5);
+
+    // Close Curve: right-click the start point.
+    let start = screen(&harness, points[0]);
+    right_click(&mut harness, start);
+    harness.get_by_label("곡선 닫기").click();
+    harness.run_steps(3);
+    let fit = spline_points(&harness);
+    assert_eq!(fit.first(), fit.last(), "the spline is closed");
+}
+
+/// A curve the Offset tool has picked is highlighted, and Extend takes an open spline up to a boundary
+/// (Inventor 2026 help, GUID-D489CE6D-7299-4211-A43A-F3580A4BA357 and trim/extend GUID-DD00037F-6BBA-4B95-AA90-4F99DCEB667D).
+/// The screenshots are the evidence.
+#[test]
+fn offset_highlights_its_pick_and_extend_takes_an_open_spline_to_a_boundary() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("XY 스케치").click();
+    harness.run();
+    let app = harness.state_mut();
+    app.session.set_tool(ToolKind::Spline);
+    for p in [mm(0.0, 0.0), mm(20.0, 25.0), mm(40.0, 10.0)] {
+        click(app, p, false);
+    }
+    app.session.tool_event(ToolEvent::Key(gc_tools::Key::Enter));
+    line(app, mm(70.0, -80.0), mm(70.0, 60.0));
+    let evidence = |harness: &mut Harness<'_>, name: &str| {
+        if gpu {
+            harness.run_steps(3);
+            let image = harness.render().unwrap();
+            let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+            std::fs::create_dir_all(&out).unwrap();
+            image.save(out.join(name)).unwrap();
+        }
+    };
+    // Offset: the picked spline is in the tool's preview and drawn heavy.
+    let app = harness.state_mut();
+    app.session.set_tool(ToolKind::Offset);
+    let on_spline = mm(20.0, 25.0);
+    app.session.tool_event(ToolEvent::Move { pos: on_spline, px: PX, suppress_snap: true });
+    app.session.tool_event(ToolEvent::Click { pos: on_spline, px: PX, modifier: false });
+    app.session.tool_event(ToolEvent::Move { pos: mm(20.0, 32.0), px: PX, suppress_snap: true });
+    assert!(
+        app.session.preview().picks.iter().any(|i| matches!(i, gc_sketch::Item::Curve(_))),
+        "the picked curve is handed to the view"
+    );
+    evidence(&mut harness, "review-66-offset-pick.png");
+    harness.state_mut().session.set_tool(ToolKind::Select);
+
+    // Extend: near the spline's end the piece up to the boundary is previewed; a click extends it.
+    let app = harness.state_mut();
+    app.session.set_tool(ToolKind::Extend);
+    // A point of the curve near its end (the click must be on the curve, on the end's side).
+    let near_end = {
+        let (_, sketch) = app.session.active_sketch().unwrap();
+        let outline = sketch.curves.values().find_map(|c| sketch.spline_outline(&c.geom, 16)).unwrap();
+        outline[outline.len() - 4]
+    };
+    app.session.tool_event(ToolEvent::Move { pos: near_end, px: PX, suppress_snap: true });
+    evidence(&mut harness, "review-67-extend-spline.png");
+    let app = harness.state_mut();
+    app.session.tool_event(ToolEvent::Click { pos: near_end, px: PX, modifier: false });
+    let fit = spline_points(&harness);
+    let last = harness.state().session.point_pos(*fit.last().unwrap()).unwrap();
+    assert!((last[0] - 0.07).abs() < 1e-6, "the spline reaches the boundary at x = 70 mm: {last:?}");
+}

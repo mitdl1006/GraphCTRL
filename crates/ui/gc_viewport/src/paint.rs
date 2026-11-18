@@ -740,6 +740,15 @@ fn preview(view: &View<'_>, plane: &SketchPlane, session: &Session) {
         }
     }
     for item in &preview.picks {
+        // A curve a tool has picked (Offset's pick, the first curve of a Fillet ...) is drawn over the
+        // sketch in the preview colour.
+        if let Item::Curve(id) = item
+            && let Some((_, sketch)) = session.active_sketch()
+            && let Some(curve) = sketch.curves.get(id)
+        {
+            let picked = Stroke::new(3.0, colors::PREVIEW);
+            curve_path(view, plane, curve, |p| session.point_pos(p), None, picked, false);
+        }
         if let Item::Point(p) = item
             && let Some(at) = session.point_pos(*p).and_then(|p| view.screen(plane.world(p)))
         {

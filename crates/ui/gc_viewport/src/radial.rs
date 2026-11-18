@@ -24,6 +24,16 @@ pub enum ViewportRequest {
     EditUnit(gc_doc::Occurrence),
 }
 
+/// What the right-click menu of a sketch offers for the spline under the cursor (Inventor 2026 help,
+/// GUID-DB15C479-66F2-456A-9E54-40A60F83DC92): Split Spline at an inner fit point, Close Curve at the start
+/// of an open spline, Insert Point on the curve.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct SplineMenu {
+    pub(crate) split: Option<(gc_core::Id<gc_sketch::Curve>, gc_core::Id<gc_sketch::SkPoint>)>,
+    pub(crate) close: Option<gc_core::Id<gc_sketch::Curve>>,
+    pub(crate) insert: Option<gc_core::Id<gc_sketch::Curve>>,
+}
+
 /// A command of the marking menu.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Cmd {
@@ -56,6 +66,10 @@ pub(crate) enum Cmd {
     /// Split a spline at one of its inner fit points (Inventor 2026 help, GUID-DB15C479-66F2-456A-9E54-40A60F83DC92:
     /// "right-click a point and choose Split Spline").
     SplitSpline(gc_core::Id<gc_sketch::Curve>, gc_core::Id<gc_sketch::SkPoint>),
+    /// Insert Point: each click on the spline adds a fit point (Esc ends).
+    InsertSplinePoint(gc_core::Id<gc_sketch::Curve>),
+    /// Close Curve: an open spline of three or more fit points closes.
+    CloseSpline(gc_core::Id<gc_sketch::Curve>),
     /// Make a subassembly flexible, or rigid again (the flag is what it becomes).
     Flexible(gc_doc::SubassemblyId, bool),
     /// The isometric view.
@@ -73,10 +87,7 @@ pub(crate) struct Set {
 
 impl Set {
     /// The menu of a sketch being edited.
-    pub(crate) fn sketch(
-        spatial: bool,
-        split: Option<(gc_core::Id<gc_sketch::Curve>, gc_core::Id<gc_sketch::SkPoint>)>,
-    ) -> Self {
+    pub(crate) fn sketch(spatial: bool, spline: SplineMenu) -> Self {
         let mut radial = vec![None; 8];
         radial[0] = Some(Cmd::Tool(ToolKind::Line));
         if !spatial {
@@ -85,8 +96,14 @@ impl Set {
         }
         radial[4] = Some(Cmd::FinishSketch);
         let mut overflow = Vec::new();
-        if let Some((curve, point)) = split {
+        if let Some((curve, point)) = spline.split {
             overflow.push(Cmd::SplitSpline(curve, point));
+        }
+        if let Some(curve) = spline.close {
+            overflow.push(Cmd::CloseSpline(curve));
+        }
+        if let Some(curve) = spline.insert {
+            overflow.push(Cmd::InsertSplinePoint(curve));
         }
         overflow.push(Cmd::Done);
         Self { radial, overflow }
@@ -154,6 +171,8 @@ impl Cmd {
             Self::SketchHere(..) => tr!(lang, CmdSketchHere).to_owned(),
             Self::HideOrigin(..) => tr!(lang, CmdHide).to_owned(),
             Self::SplitSpline(..) => tr!(lang, CmdSplitSpline).to_owned(),
+            Self::InsertSplinePoint(_) => tr!(lang, CmdInsertSplinePoint).to_owned(),
+            Self::CloseSpline(_) => tr!(lang, CmdCloseSpline).to_owned(),
             Self::SelectOther => tr!(lang, SelOther).to_owned(),
             // The check mark shows the state it has now (the command switches it).
             Self::Flexible(_, becomes) => {
@@ -174,6 +193,8 @@ pub(crate) enum Effect {
     Request(ViewportRequest),
     /// Show the Select Other list at the cursor.
     SelectOther,
+    /// Start inserting fit points into a spline.
+    InsertSplinePoint(gc_core::Id<gc_sketch::Curve>),
     /// Turn the view to the isometric one.
     Home,
     /// Fit everything in the view.
@@ -211,6 +232,9 @@ pub(crate) fn run(cmd: Cmd, session: &mut Session) -> Effect {
         Cmd::SplitSpline(curve, point) => {
             drop(session.edit_active_sketch(gc_doc::SketchOp::SplitSpline { curve, point }))
         }
+        Cmd::InsertSplinePoint(curve) => return Effect::InsertSplinePoint(curve),
+        // A refusal is explained in the status bar.
+        Cmd::CloseSpline(curve) => drop(session.edit_active_sketch(gc_doc::SketchOp::CloseSpline { curve })),
         Cmd::SelectOther => return Effect::SelectOther,
         // A refusal is explained in the status bar.
         Cmd::Flexible(id, flexible) => drop(session.set_flexible(id, flexible)),

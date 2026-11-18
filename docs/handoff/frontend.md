@@ -220,6 +220,12 @@
 - 테스트: `midplanes_and_intersection_points_are_made_and_read_back`(대화상자 단위), `the_work_plane_dialog_offers_the_newer_definitions_and_makes_a_midplane`, 증거 `docs/evidence/img/review-65-work-plane-kinds.png`.
 - 원문과 차이: 대상은 뷰에서 클릭하지 않고 목록에서 고른다(앞 항목과 같음). 어셈블리에서 인벤터가 허용하는 종류 제한은 두지 않았다.
 
+### 스플라인: 점 삽입 / 곡선 닫기, 간격띄우기 선택 강조, 열린 스플라인 연장
+
+- 원문 GUID-DB15C479-66F2-456A-9E54-40A60F83DC92("To close a curve, right-click the starting point and choose Close Curve", "right-click the spline and choose Insert Point. Then click the curve"). 스케치에서 스플라인 위를 멈춤 우클릭(누르고 떼기)하면 목록에: 안쪽 맞춤점 위 = "스플라인 분할", **시작 맞춤점 위(열린 스플라인, 맞춤점 3개 이상) = "곡선 닫기"**(`SketchOp::CloseSpline`), **곡선 위 = "점 삽입"**: 고르면 곡선을 클릭할 때마다 가장 가까운 자리에 맞춤점을 넣고(`InsertSplinePoint`, 클릭마다 Undo 한 단계) 위쪽에 안내가 보이며 Esc로 끝낸다. 테스트 `the_spline_menu_inserts_points_and_closes_the_curve`.
+- 간격띄우기 등 도구가 고른 곡선(`Preview.picks`의 `Item::Curve`)을 이제 굵은 미리보기 색으로 그린다(전에는 점만 그렸다) — 타원·스플라인의 선택이 보인다(`review-66-offset-pick.png`). 열린 스플라인 연장: 끝쪽에 커서를 대면 경계까지의 선이 미리보기되고 클릭하면 새 끝 맞춤점이 경계에 묶여 이어진다(`review-67-extend-spline.png`). 테스트 `offset_highlights_its_pick_and_extend_takes_an_open_spline_to_a_boundary`.
+- 원문과 차이: 점 삽입 중 커서 옆에 삽입 위치 미리보기는 없다, 곡선 닫기/점 삽입/분할의 핸들 재설정 메뉴(Reset Handle)는 없다.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

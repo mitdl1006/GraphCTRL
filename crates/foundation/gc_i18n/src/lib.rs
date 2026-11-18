@@ -920,6 +920,9 @@ messages! {
     CmdMoveInto => ("서브어셈블리로 이동", "Move into subassembly"),
     /// Browser, right-click a subassembly: dissolve it; its contents go up one level.
     CmdDissolve => ("해체", "Dissolve"),
+    CmdInsertSplinePoint => ("점 삽입", "Insert Point"),
+    CmdCloseSpline => ("곡선 닫기", "Close Curve"),
+    SplineInsertHint => ("스플라인 위를 클릭해 점을 삽입합니다 (Esc로 끝)", "Click the spline to insert points (Esc to end)"),
     CmdSplitSpline => ("스플라인 분할", "Split Spline"),
     CmdFlexible => ("유연", "Flexible"),
     /// Assemble tab, Edit group: the group's title.
