@@ -462,6 +462,35 @@ impl Viewport {
         self.camera.look(view);
     }
 
+    /// Find in Window (browser right-click; Inventor 2026 help, Frame Generator browser,
+    /// GUID-36AE9264-912D-4D3C-BB24-7EC16FA8777E: "the selected objects are found, zoomed, and centered in the
+    /// graphics window"): frames the body or robot. False when it has nothing to show.
+    pub fn find_in_window(&mut self, session: &Session, any: gc_core::AnyId) -> bool {
+        let item = match any.kind {
+            gc_core::Kind::Body => gc_session::CellItem::Body(gc_core::Id::from_raw(any.raw)),
+            gc_core::Kind::RobotInstance => gc_session::CellItem::Robot(gc_core::Id::from_raw(any.raw)),
+            _ => return false,
+        };
+        let scene = Scene::of(session);
+        let mut bounds = Aabb::EMPTY;
+        for solid in scene.solids.iter().filter(|solid| solid.owner == Some(item)) {
+            let local = solid.shape.local_bounds();
+            for x in [local.min.x, local.max.x] {
+                for y in [local.min.y, local.max.y] {
+                    for z in [local.min.z, local.max.z] {
+                        bounds = bounds.including(solid.pose * DVec3::new(x, y, z));
+                    }
+                }
+            }
+        }
+        if bounds.is_empty() {
+            return false;
+        }
+        self.camera.pivot = bounds.center();
+        self.camera.fit(&bounds, [1000.0, 700.0]);
+        true
+    }
+
     /// Frames everything in the document.
     pub fn fit(&mut self, session: &Session, size: [f64; 2]) {
         let mut bounds = Aabb::EMPTY;

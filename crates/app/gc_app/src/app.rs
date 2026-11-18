@@ -269,6 +269,8 @@ pub struct GraphCtrlApp {
     replicate: crate::replicate::Replicate,
     /// The Parameters dialog.
     parameters: crate::parameters::Parameters,
+    /// The iProperties dialog.
+    iproperties: crate::iproperties::IPropertiesDialog,
     /// Tools > Document Settings.
     doc_settings: crate::doc_settings::DocSettingsDialog,
     /// The open sketch Mirror or Pattern dialog.
@@ -390,6 +392,7 @@ impl GraphCtrlApp {
             sketch_dialog: None,
             auto_dimension: None,
             parameters: crate::parameters::Parameters::default(),
+            iproperties: crate::iproperties::IPropertiesDialog::default(),
             doc_settings: crate::doc_settings::DocSettingsDialog::default(),
             importing: false,
             loading_shown: false,
@@ -946,6 +949,10 @@ impl GraphCtrlApp {
                 }
             });
             ui.menu_button(tr!(lang, MenuTools), |ui| {
+                if ui.button(tr!(lang, CmdIProperties)).clicked() {
+                    self.iproperties.start(&self.session, None, "", lang);
+                    ui.close();
+                }
                 if ui.button(tr!(lang, MenuDocSettings)).clicked() {
                     self.doc_settings.start(&self.session);
                     ui.close();
@@ -971,6 +978,41 @@ impl GraphCtrlApp {
                     }
                 });
             });
+            // The Quick Access Toolbar (Inventor 2026 help, To Customize the Quick Access Toolbar,
+            // GUID-3BF60B85-4BE9-4619-9FD3-0A179FA680E0: commands across all environments, Undo and Redo, and
+            // Return, "available only from the QAT", which quits in-place editing and returns to the previous
+            // editing state).
+            ui.separator();
+            let ctx = ui.ctx().clone();
+            let qat = |ui: &mut egui::Ui, symbol: &str, label: &str, enabled: bool| {
+                // Named apart from the menu's own entries ("저장 (빠른 실행)"), so a screen can tell them apart.
+                let name = format!("{label} ({})", tr!(lang, QatTitle));
+                let response = ui.add_enabled(enabled, egui::Button::new(symbol).frame(false));
+                response
+                    .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, name.as_str()));
+                response.on_hover_text(label).clicked()
+            };
+            if qat(ui, "+", tr!(lang, CmdNew), true) {
+                self.request(Pending::New, &ctx);
+            }
+            if qat(ui, "O", tr!(lang, CmdOpen), true) {
+                self.request(Pending::Open, &ctx);
+            }
+            if qat(ui, "S", tr!(lang, CmdSave), true) {
+                self.save(false);
+            }
+            let (can_undo, can_redo) =
+                (self.session.history().undo_depth() > 0, self.session.history().redo_depth() > 0);
+            if qat(ui, "←", tr!(lang, CmdUndo), can_undo) {
+                self.session.undo();
+            }
+            if qat(ui, "→", tr!(lang, CmdRedo), can_redo) {
+                self.session.redo();
+            }
+            let editing = self.session.edit_target().is_some();
+            if qat(ui, "↑", tr!(lang, CmdReturn), editing) {
+                self.session.return_edit();
+            }
         });
     }
 
@@ -1387,6 +1429,9 @@ impl eframe::App for GraphCtrlApp {
         if self.interference.open {
             self.interference.window(&ctx, &self.session, lang);
         }
+        if self.iproperties.open {
+            self.iproperties.window(&ctx, &mut self.session, lang);
+        }
         if self.doc_settings.open {
             self.doc_settings.window(&ctx, &mut self.session, lang);
         }
@@ -1445,6 +1490,19 @@ impl eframe::App for GraphCtrlApp {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     self.params.origin_selected = self.viewport.origin_selected;
                     match gc_panels::browser(ui, &self.session, lang, &mut self.params) {
+                        Some(BrowserAction::FindInWindow(any)) => {
+                            self.viewport.find_in_window(&self.session, any);
+                        }
+                        Some(BrowserAction::Properties(occurrence)) => {
+                            let name = self
+                                .session
+                                .components()
+                                .into_iter()
+                                .find(|n| n.occurrence == occurrence)
+                                .map(|n| n.name)
+                                .unwrap_or_default();
+                            self.iproperties.start(&self.session, Some(occurrence), &name, lang);
+                        }
                         Some(BrowserAction::EditSketch(id)) => {
                             self.session.enter_sketch(id);
                             self.tab = Tab::Sketch;

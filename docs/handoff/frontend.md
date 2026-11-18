@@ -319,6 +319,24 @@
 - 원문에 있고 여기 없는 것: Modeling·Drawing·BOM·Default Tolerance 탭, Lineweight, 허용차 표시.
 - 테스트: `the_document_settings_dialog_changes_the_units_and_the_auto_bend_radius`(잘못된 값 거부, 좋은 값 저장, 확인으로 닫힘); `the_auto_bend_option_is_off_by_default_saved_and_read_back` 유지.
 
+### iProperties 대화상자
+
+- 근거: Inventor 2026 도움말 GUID-8ABF17C5-B9EB-47B5-92CF-9FBD335334E3 (iProperties Reference: 탭 목록, 브라우저 파일 이름 우클릭 iProperties), GUID-877564AC-78CE-4216-9913-003A2DE8D698 (Physical 탭: 질량·면적·부피 계산, Update, 밀도, 단위는 문서 설정 Units 탭).
+- 진입: 브라우저의 컴포넌트(바디·로봇·어셈블리) 우클릭 "iProperties…", 도구 메뉴 "iProperties…"(문서). 제목에 컴포넌트 이름.
+- 탭: 요약(제목·주제·작성자·회사·설명), 프로젝트(부품 번호·설명·개정 번호·프로젝트·설계자·공급업체), 물리적(밀도 kg/m³·질량 재정의 입력, 계산값 질량·부피·면적·무게중심 읽기 전용 + 업데이트 버튼). 확인/적용/취소. 값은 `Session::set_properties`(한 번의 실행 취소). 밀도·질량 재정의는 비우면 없음, 0 이하나 숫자가 아니면 대화상자에 사유를 보이고 닫지 않는다.
+- 단위: 길이는 문서 설정의 길이 단위(부피는 ³, 면적은 ²), 질량은 kg.
+- 업데이트: 계산 결과는 열 때·적용할 때·업데이트를 눌렀을 때만 다시 계산한다(메시가 큰 장면에서 매 프레임 계산하지 않기 위해). 원문의 "값이 최신이면 업데이트 비활성"은 두지 않았다(항상 활성).
+- 원문에 있고 여기 없는 것: General·Custom·Weld Bead·Status·Details·Occurrence·Thumbnail·Save 탭, 재료 목록·Requested Accuracy·상대 오차, 클립보드 보고서, 관성 모멘트. 모양을 알 수 없는 항목(가져온 어셈블리 등)은 "계산할 수 없습니다"를 보인다.
+- 테스트: `the_iproperties_dialog_saves_the_summary_and_checks_the_density`(요약 저장, 밀도 0 거부, 비우면 저장); shell 110개 통과.
+
+### 메뉴·브라우저 전수 대조 1차, Find in Window, 빠른 실행 도구 모음
+
+- 대조표: `docs/ux/inventor-menu-browser-audit.md` (파일 메뉴·QAT·브라우저 자체·노드별 우클릭·끌어 놓기·마킹 메뉴, 항목마다 ✓/△/✗/⛔). 읽은 원문: GUID-EDF6B951-C309-44A8-868C-B72D99F6D5A7(Inventor Browser), GUID-5F975252-BDB4-488C-A2C5-8B15C7D3C641(Assembly Browser), GUID-CB6B1637-71AD-4753-8CC9-19559BFEE3A5(아이콘), GUID-3BF60B85-4BE9-4619-9FD3-0A179FA680E0(QAT), GUID-36AE9264-912D-4D3C-BB24-7EC16FA8777E(Find in Window·Isolate), GUID-39DE5C99-A7AD-41CD-AB63-DEA72BFCFC28(애플리케이션 메뉴, 2014 쪽만 열림).
+- 한계: 2026 원문에는 브라우저 노드별 우클릭 항목·순서 표와 마킹 메뉴 방향별 표가 없다(원문은 "some or all options are available"). 완전한 표는 실제 Inventor 화면 확인이 필요 — 리드에게 요청.
+- 채운 것: 브라우저 우클릭 "창에서 찾기"(바디·로봇: 경계 상자로 카메라를 맞춤, `Viewport::find_in_window`), 메뉴 줄 오른쪽 빠른 실행 도구 모음(새로 만들기·열기·저장·실행 취소·다시 실행·복귀; 복귀는 제자리 편집 중에만 활성, `Session::return_edit`). QAT 버튼은 글자 단추(+ O S ← → ↑)이고 접근성 이름은 "<이름> (빠른 실행)" — 메뉴 항목과 겹치지 않게 했다. 글꼴에 ↵ 글리프가 없어 ↑를 썼다.
+- 브라우저 "…" 메뉴에 "경고 숨기기"(Hide Warnings, GUID-5F975252): 관계의 sick 표시만 숨기고 실패 상태는 유지. `qa_frontend_screens`의 메뉴 옵션 테스트에 항목 추가.
+- 테스트: `find_in_window_centres_the_view_on_a_component`, `the_quick_access_toolbar_undoes_redoes_and_returns`; shell 112개, qa_*·sketch_shape_tools 통과.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

@@ -5954,3 +5954,101 @@ fn the_document_settings_dialog_changes_the_units_and_the_auto_bend_radius() {
     assert!((harness.state().session.doc_settings().auto_bend_radius - 0.005).abs() < 1e-12);
     assert!(harness.query_by_label("확인").is_none(), "OK closed the dialog");
 }
+
+/// The iProperties dialog (Tools > iProperties…; Inventor 2026 help, iProperties Reference,
+/// GUID-8ABF17C5-B9EB-47B5-92CF-9FBD335334E3, Physical tab GUID-877564AC-78CE-4216-9913-003A2DE8D698): the
+/// Summary values are saved with the document; a bad density is refused.
+#[test]
+fn the_iproperties_dialog_saves_the_summary_and_checks_the_density() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("도구").click();
+    harness.run();
+    harness.get_by_label("iProperties…").click();
+    harness.run_steps(3);
+    let title = harness.get_all_by_label("제목").last().unwrap();
+    title.click();
+    harness.run_steps(2);
+    harness.get_all_by_label("제목").last().unwrap().type_text("Cell A");
+    harness.run_steps(2);
+    // The Physical tab: the Update button is there; a density of zero is refused.
+    harness.get_by_label("물리적").click();
+    harness.run_steps(2);
+    harness.get_by_label("업데이트");
+    let density = harness.get_all_by_label("밀도(kg/m³)").last().unwrap();
+    density.click();
+    harness.run_steps(2);
+    harness.get_all_by_label("밀도(kg/m³)").last().unwrap().type_text("0");
+    harness.run_steps(2);
+    harness.get_by_label("확인").click();
+    harness.run_steps(2);
+    harness.get_by_label("값이 올바르지 않습니다(0보다 큰 길이)");
+    assert_eq!(harness.state().session.properties(None).title, "");
+    // Clearing the density lets OK save the title.
+    harness.get_all_by_label("밀도(kg/m³)").last().unwrap().click();
+    harness.run_steps(2);
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.key_press(egui::Key::Backspace);
+    harness.run_steps(2);
+    harness.get_by_label("확인").click();
+    harness.run_steps(3);
+    assert_eq!(harness.state().session.properties(None).title, "Cell A");
+}
+
+/// Find in Window (browser right-click on a component; Inventor 2026 help, Frame Generator browser,
+/// GUID-36AE9264-912D-4D3C-BB24-7EC16FA8777E: "zooms to the element selected in the browser").
+#[test]
+fn find_in_window_centres_the_view_on_a_component() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let app = harness.state_mut();
+    app.session
+        .add_body(gc_doc::Solid::Box { size: [0.1; 3] }, gc_doc::Placement { xyz: [0.0; 3], rpy: [0.0; 3] })
+        .unwrap();
+    let far = app
+        .session
+        .add_body(
+            gc_doc::Solid::Box { size: [0.1; 3] },
+            gc_doc::Placement { xyz: [1.0, 0.5, 0.2], rpy: [0.0; 3] },
+        )
+        .unwrap();
+    let any = gc_core::Id::<gc_doc::Body>::erase(far);
+    // A viewport of its own: the call needs the session and the viewport at once.
+    let mut viewport = gc_viewport::Viewport::new(None);
+    assert!(viewport.find_in_window(&app.session, any));
+    let pivot = viewport.camera.pivot;
+    assert!((pivot - gc_math::DVec3::new(1.0, 0.5, 0.2)).length() < 1e-9, "{pivot:?}");
+}
+
+/// The Quick Access Toolbar beside the menus (Inventor 2026 help, To Customize the Quick Access Toolbar,
+/// GUID-3BF60B85-4BE9-4619-9FD3-0A179FA680E0): Undo and Redo, and Return.
+#[test]
+fn the_quick_access_toolbar_undoes_redoes_and_returns() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness
+        .state_mut()
+        .session
+        .add_body(gc_doc::Solid::Box { size: [0.1; 3] }, gc_doc::Placement { xyz: [0.0; 3], rpy: [0.0; 3] })
+        .unwrap();
+    harness.run();
+    assert_eq!(harness.state().session.doc().bodies().len(), 1);
+    harness.get_by_label("실행 취소 (빠른 실행)").click();
+    harness.run();
+    assert_eq!(harness.state().session.doc().bodies().len(), 0);
+    harness.get_by_label("다시 실행 (빠른 실행)").click();
+    harness.run();
+    assert_eq!(harness.state().session.doc().bodies().len(), 1);
+    // Return does nothing at the top level (disabled), and the other buttons are there.
+    harness.get_by_label("복귀 (빠른 실행)");
+    harness.get_by_label("저장 (빠른 실행)");
+}
