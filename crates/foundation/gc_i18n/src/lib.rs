@@ -872,6 +872,14 @@ messages! {
     WaTypedPoint => ("좌표로 입력", "Type the coordinates"),
     /// Browser, right-click a work feature: change its definition.
     CmdEditWorkFeature => ("정의 편집", "Edit definition"),
+    /// Sketch ribbon, Modify panel: cuts a curve back to its nearest crossings.
+    ToolTrim => ("자르기", "Trim"),
+    /// Sketch ribbon, Modify panel: lengthens a line or arc to the next curve.
+    ToolExtend => ("연장", "Extend"),
+    /// Sketch ribbon: rounds the corner between two lines.
+    ToolFillet => ("모깎기", "Fillet"),
+    /// Dimension edit box: a driven (reference) dimension measures without constraining.
+    DimDriven => ("종속 치수", "Driven dimension"),
     /// Browser, right-click a component or subassembly: edit it in place.
     CmdEditInPlace => ("제자리 편집", "Edit"),
     /// Browser, right-click a component: group it into a new subassembly.

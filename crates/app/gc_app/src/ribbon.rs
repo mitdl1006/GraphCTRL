@@ -294,18 +294,6 @@ pub(crate) fn show(
                             ],
                         );
                     }
-                    // Project Cut Edges: a 2D sketch only.
-                    if ribbon_button(
-                        ui,
-                        Icon::CutEdges,
-                        tr!(lang, ToolCutEdges),
-                        false,
-                        sketching && !spatial,
-                    )
-                    .clicked()
-                    {
-                        action = Some(RibbonAction::ProjectCutEdges);
-                    }
                     // Point and Polygon (Inventor 2026 help, To Work with Points,
                     // GUID-D4A4288F-32F1-4E23-A382-930EBA152E87), small, with the Format panel's Center
                     // Point toggle: 2D sketches.
@@ -339,6 +327,17 @@ pub(crate) fn show(
                             if toggle.clicked() {
                                 // A refusal (a selected end point) shows in the status bar.
                                 drop(session.set_center_point(!on));
+                            }
+                            // Project Cut Edges, small to keep the tab within 1280 px: a 2D sketch only.
+                            let cut = gc_ui::ribbon_small_button(
+                                ui,
+                                Icon::CutEdges,
+                                tr!(lang, ToolCutEdges),
+                                false,
+                                sketching,
+                            );
+                            if cut.clicked() {
+                                action = Some(RibbonAction::ProjectCutEdges);
                             }
                         });
                     }
@@ -381,12 +380,15 @@ pub(crate) fn show(
                                     (ToolKind::Split, Icon::Text("-|-"), Msg::ToolSplit),
                                     (ToolKind::Move, Icon::Text("->"), Msg::ToolMove),
                                     (ToolKind::Scale, Icon::Text("[]+"), Msg::ToolScale),
+                                    (ToolKind::Trim, Icon::Text("-x-"), Msg::ToolTrim),
+                                    (ToolKind::Fillet, Icon::Text("(_"), Msg::ToolFillet),
                                 ],
                                 vec![
                                     (ToolKind::Chamfer, Icon::Text("/_"), Msg::ToolChamfer),
                                     (ToolKind::Copy, Icon::Text("+>"), Msg::ToolCopy),
                                     (ToolKind::Rotate, Icon::Text("@"), Msg::ToolRotate),
                                     (ToolKind::Stretch, Icon::Text("<->"), Msg::ToolStretch),
+                                    (ToolKind::Extend, Icon::Text("-->"), Msg::ToolExtend),
                                 ],
                             ];
                             for row in rows {
