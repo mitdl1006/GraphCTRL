@@ -913,33 +913,84 @@ fn construction_between(
     Ok(id)
 }
 
-/// Copies of the curves on the points `map` gives; circles keep their originals' radii.
-fn copy_curves(
-    sketch: &mut Sketch,
-    ids: &mut IdAlloc,
-    sources: &PatternSources,
-    map: &std::collections::BTreeMap<Id<SkPoint>, Id<SkPoint>>,
-    created: &mut Vec<Created>,
-) -> Result<Vec<Id<Curve>>, EditError> {
-    let at = |p: Id<SkPoint>| map.get(&p).copied().ok_or(EditError::Sketch(SketchError::MissingItem));
-    let mut copies = Vec::new();
-    for (original, curve) in &sources.curves {
-        let geom = match curve.geom {
-            gc_sketch::CurveGeom::Line { a, b } => gc_sketch::CurveGeom::Line { a: at(a)?, b: at(b)? },
-            gc_sketch::CurveGeom::Circle { c, r } => gc_sketch::CurveGeom::Circle { c: at(c)?, r },
-            gc_sketch::CurveGeom::Arc { c, s, e } => {
-                gc_sketch::CurveGeom::Arc { c: at(c)?, s: at(s)?, e: at(e)? }
+/// A pattern's copies as they are made: elements, places, copied points and circles.
+#[derive(Default)]
+struct PatternBuild {
+    elements: Vec<Vec<Id<Curve>>>,
+    places: Vec<[u32; 2]>,
+    copies: Vec<gc_sketch::PatternCopy>,
+    circles: Vec<(Id<Curve>, Id<Curve>)>,
+}
+
+impl PatternBuild {
+    /// One element: every original point moved by `place` (points that stay put are shared), and copies of
+    /// the curves on them. No constraints: the copies are held and placed by the sketch.
+    fn element(
+        &mut self,
+        sketch: &mut Sketch,
+        ids: &mut IdAlloc,
+        sources: &PatternSources,
+        at: [u32; 2],
+        place: impl Fn([f64; 3]) -> [f64; 3],
+        created: &mut Vec<Created>,
+    ) -> Result<(), EditError> {
+        let element = self.elements.len();
+        let mut map = std::collections::BTreeMap::new();
+        for point in &sources.points {
+            let p = sketch.pos(*point).ok_or(SketchError::MissingItem)?;
+            let q = place(p);
+            if q.iter().zip(p).all(|(a, b)| (a - b).abs() < 1e-12) {
+                // On a circular pattern's axis: every copy shares it.
+                map.insert(*point, *point);
+                continue;
             }
-        };
-        let id: Id<Curve> = ids.alloc();
-        sketch.curves.insert(id, Curve { geom, construction: curve.construction });
-        created.push(Created::Curve(id));
-        copies.push(id);
-        if matches!(curve.geom, gc_sketch::CurveGeom::Circle { .. }) {
-            require(sketch, ids, GeoConstraint::Equal(*original, id), created)?;
+            let copy = sketch.add_point(ids, q);
+            created.push(Created::Point(copy));
+            self.copies.push(gc_sketch::PatternCopy { element, original: *point, copy });
+            map.insert(*point, copy);
         }
+        let to = |p: Id<SkPoint>| map.get(&p).copied().ok_or(EditError::Sketch(SketchError::MissingItem));
+        let mut copies = Vec::new();
+        for (original, curve) in &sources.curves {
+            let geom = match curve.geom {
+                gc_sketch::CurveGeom::Line { a, b } => gc_sketch::CurveGeom::Line { a: to(a)?, b: to(b)? },
+                gc_sketch::CurveGeom::Circle { c, r } => gc_sketch::CurveGeom::Circle { c: to(c)?, r },
+                gc_sketch::CurveGeom::Arc { c, s, e } => {
+                    gc_sketch::CurveGeom::Arc { c: to(c)?, s: to(s)?, e: to(e)? }
+                }
+            };
+            let id: Id<Curve> = ids.alloc();
+            sketch.curves.insert(id, Curve { geom, construction: curve.construction });
+            created.push(Created::Curve(id));
+            copies.push(id);
+            if matches!(curve.geom, gc_sketch::CurveGeom::Circle { .. }) {
+                self.circles.push((*original, id));
+            }
+        }
+        self.elements.push(copies);
+        self.places.push(at);
+        Ok(())
     }
-    Ok(copies)
+
+    /// Keeps the pattern in the sketch.
+    fn finish(
+        self,
+        sketch: &mut Sketch,
+        definition: gc_sketch::PatternDefinition,
+        step: gc_sketch::PatternStep,
+        created: &[Created],
+    ) {
+        sketch.patterns.push(gc_sketch::SketchPattern {
+            definition,
+            elements: self.elements,
+            items: pattern_items(created),
+            suppressed: Vec::new(),
+            step,
+            places: self.places,
+            copies: self.copies,
+            circles: self.circles,
+        });
+    }
 }
 
 /// What a pattern added, as sketch items.
@@ -1491,69 +1542,63 @@ fn sketch_op(
                 ));
             }
             let originals = pattern_sources(sketch, curves)?;
-            // Copy (i, j) is made from (i - 1, j) along the first direction, or (i, j - 1) along the second.
+            let from = *originals.points.first().ok_or(SketchError::InvalidValue)?;
+            let start = sketch.pos(from).ok_or(SketchError::MissingItem)?;
+            // One construction step per direction from the first original point: parallel to the direction,
+            // carrying the spacing dimension. The copies follow the steps (gc_sketch `refresh_patterns`).
+            let mut ends = Vec::new();
+            for (axis, (dir, spacing, source, _)) in steps.iter().enumerate() {
+                let end = sketch
+                    .add_point(ids, [start[0] + dir[0] * spacing, start[1] + dir[1] * spacing, start[2]]);
+                created.push(Created::Point(end));
+                let step = construction_between(sketch, ids, from, end, &mut created)?;
+                require(sketch, ids, GeoConstraint::Parallel(step, directions[axis].line), &mut created)?;
+                let kind = DimKind::Distance { p: from, q: end };
+                let result = sketch.try_add_dimension(ids, kind, source, *spacing, [0.0; 2])?;
+                created.push(Created::Dimension(added(result)?));
+                ends.push(end);
+            }
+            let step =
+                gc_sketch::PatternStep::Translate { from, first: ends[0], second: ends.get(1).copied() };
             let counts = (steps[0].3, steps.get(1).map_or(1, |s| s.3));
-            let mut grid: std::collections::BTreeMap<
-                (u32, u32),
-                std::collections::BTreeMap<Id<SkPoint>, Id<SkPoint>>,
-            > = std::collections::BTreeMap::new();
-            grid.insert((0, 0), originals.points.iter().map(|p| (*p, *p)).collect());
-            let mut spacing_lines: Vec<Option<Id<Curve>>> = vec![None; steps.len()];
-            let mut elements = Vec::new();
+            let offset = |i: u32, j: u32| {
+                let mut v = [0.0; 2];
+                for (k, n) in [i, j].into_iter().enumerate() {
+                    if let Some((dir, spacing, _, _)) = steps.get(k) {
+                        v[0] += f64::from(n) * dir[0] * spacing;
+                        v[1] += f64::from(n) * dir[1] * spacing;
+                    }
+                }
+                v
+            };
+            let mut record = PatternBuild::default();
             for j in 0..counts.1 {
                 for i in 0..counts.0 {
                     if (i, j) == (0, 0) {
                         continue;
                     }
-                    let (from, axis) = if i > 0 { ((i - 1, j), 0) } else { ((i, j - 1), 1) };
-                    let (dir, spacing, source, _) = &steps[axis];
-                    let previous = grid.get(&from).cloned().ok_or(SketchError::MissingItem)?;
-                    let mut map = std::collections::BTreeMap::new();
-                    for point in &originals.points {
-                        let before = previous[point];
-                        let at = sketch.pos(before).ok_or(SketchError::MissingItem)?;
-                        let copy = sketch
-                            .add_point(ids, [at[0] + dir[0] * spacing, at[1] + dir[1] * spacing, at[2]]);
-                        created.push(Created::Point(copy));
-                        // A construction step from the previous copy: along the direction, as long as the
-                        // first step (which carries the spacing dimension).
-                        let step = construction_between(sketch, ids, before, copy, &mut created)?;
-                        require(
-                            sketch,
-                            ids,
-                            GeoConstraint::Parallel(step, directions[axis].line),
-                            &mut created,
-                        )?;
-                        match spacing_lines[axis] {
-                            Some(first_step) => {
-                                require(sketch, ids, GeoConstraint::Equal(step, first_step), &mut created)?;
-                            }
-                            None => {
-                                let (p, q) = sketch.line(step).ok_or(SketchError::MissingItem)?;
-                                let kind = DimKind::Distance { p, q };
-                                let result =
-                                    sketch.try_add_dimension(ids, kind, source, *spacing, [0.0; 2])?;
-                                created.push(Created::Dimension(added(result)?));
-                                spacing_lines[axis] = Some(step);
-                            }
-                        }
-                        map.insert(*point, copy);
-                    }
-                    elements.push(copy_curves(sketch, ids, &originals, &map, &mut created)?);
-                    grid.insert((i, j), map);
+                    let v = offset(i, j);
+                    record.element(
+                        sketch,
+                        ids,
+                        &originals,
+                        [i, j],
+                        |p| [p[0] + v[0], p[1] + v[1], p[2]],
+                        &mut created,
+                    )?;
                 }
             }
-            sketch.patterns.push(gc_sketch::SketchPattern {
-                definition: gc_sketch::PatternDefinition::Rectangular {
+            record.finish(
+                sketch,
+                gc_sketch::PatternDefinition::Rectangular {
                     curves: curves.clone(),
                     first: first.clone(),
                     second: second.clone(),
                     fitted: *fitted,
                 },
-                elements,
-                items: pattern_items(&created),
-                suppressed: Vec::new(),
-            });
+                step,
+                &created,
+            );
             "Rectangular pattern"
         }
         SketchOp::CircularPattern { curves, axis, count, angle, flip, fitted } => {
@@ -1574,53 +1619,39 @@ fn sketch_op(
                 return Err(SketchError::InvalidValue.into());
             }
             let originals = pattern_sources(sketch, curves)?;
-            let at_axis = |sketch: &Sketch, p: Id<SkPoint>| {
-                sketch.pos(p).is_some_and(|q| gc_math::fm::hypot(q[0] - centre[0], q[1] - centre[1]) < 1e-12)
-            };
-            // A construction radius from the axis to each original point.
-            let mut spokes: std::collections::BTreeMap<Id<SkPoint>, Id<Curve>> =
-                std::collections::BTreeMap::new();
-            for point in &originals.points {
-                if *point != *axis && !at_axis(sketch, *point) {
-                    spokes.insert(*point, construction_between(sketch, ids, *axis, *point, &mut created)?);
-                }
-            }
-            let mut previous_spokes = spokes.clone();
-            let mut elements = Vec::new();
-            for k in 1..*count {
+            let off_axis = |p: &[f64; 3]| gc_math::fm::hypot(p[0] - centre[0], p[1] - centre[1]) >= 1e-12;
+            // One spoke from the axis to an original point off it, and one as long turned by the step angle
+            // (it carries the angle dimension). The copies follow the turn (gc_sketch `refresh_patterns`).
+            let from = originals
+                .points
+                .iter()
+                .copied()
+                .find(|p| *p != *axis && sketch.pos(*p).is_some_and(|q| off_axis(&q)))
+                .ok_or(SketchError::InvalidValue)?;
+            let turn = |p: [f64; 3], k: u32| {
                 let (sin, cos) =
                     (gc_math::fm::sin(step * f64::from(k)), gc_math::fm::cos(step * f64::from(k)));
-                let mut map = std::collections::BTreeMap::new();
-                let mut these_spokes = std::collections::BTreeMap::new();
-                for point in &originals.points {
-                    let Some(spoke) = spokes.get(point) else {
-                        // On the axis: every copy shares it.
-                        map.insert(*point, *point);
-                        continue;
-                    };
-                    let p = sketch.pos(*point).ok_or(SketchError::MissingItem)?;
-                    let (x, y) = (p[0] - centre[0], p[1] - centre[1]);
-                    let copy = sketch
-                        .add_point(ids, [centre[0] + cos * x - sin * y, centre[1] + sin * x + cos * y, p[2]]);
-                    created.push(Created::Point(copy));
-                    let radius = construction_between(sketch, ids, *axis, copy, &mut created)?;
-                    require(sketch, ids, GeoConstraint::Equal(radius, *spoke), &mut created)?;
-                    // The turn from the previous copy, from the same angle expression.
-                    let from = previous_spokes[point];
-                    // Counter-clockwise from the earlier spoke (from the later one when turning the other way).
-                    let (l1, l2) = if step > 0.0 { (from, radius) } else { (radius, from) };
-                    let kind = DimKind::Angle { l1, rev1: false, l2, rev2: false };
-                    let value = step.abs();
-                    let result = sketch.try_add_dimension(ids, kind, &source, value, [0.0; 2])?;
-                    created.push(Created::Dimension(added(result)?));
-                    map.insert(*point, copy);
-                    these_spokes.insert(*point, radius);
-                }
-                elements.push(copy_curves(sketch, ids, &originals, &map, &mut created)?);
-                previous_spokes = these_spokes;
+                let (x, y) = (p[0] - centre[0], p[1] - centre[1]);
+                [centre[0] + cos * x - sin * y, centre[1] + sin * x + cos * y, p[2]]
+            };
+            let start = sketch.pos(from).ok_or(SketchError::MissingItem)?;
+            let spoke = construction_between(sketch, ids, *axis, from, &mut created)?;
+            let to = sketch.add_point(ids, turn(start, 1));
+            created.push(Created::Point(to));
+            let turned = construction_between(sketch, ids, *axis, to, &mut created)?;
+            require(sketch, ids, GeoConstraint::Equal(turned, spoke), &mut created)?;
+            // Counter-clockwise from the earlier spoke (from the later one when turning the other way).
+            let (l1, l2) = if step > 0.0 { (spoke, turned) } else { (turned, spoke) };
+            let kind = DimKind::Angle { l1, rev1: false, l2, rev2: false };
+            let result = sketch.try_add_dimension(ids, kind, &source, step.abs(), [0.0; 2])?;
+            created.push(Created::Dimension(added(result)?));
+            let mut record = PatternBuild::default();
+            for k in 1..*count {
+                record.element(sketch, ids, &originals, [k, 0], |p| turn(p, k), &mut created)?;
             }
-            sketch.patterns.push(gc_sketch::SketchPattern {
-                definition: gc_sketch::PatternDefinition::Circular {
+            record.finish(
+                sketch,
+                gc_sketch::PatternDefinition::Circular {
                     curves: curves.clone(),
                     axis: *axis,
                     count: *count,
@@ -1628,10 +1659,9 @@ fn sketch_op(
                     flip: *flip,
                     fitted: *fitted,
                 },
-                elements,
-                items: pattern_items(&created),
-                suppressed: Vec::new(),
-            });
+                gc_sketch::PatternStep::Rotate { axis: *axis, from, to },
+                &created,
+            );
             "Circular pattern"
         }
         SketchOp::EditSketchPattern { element, definition, suppressed } => {

@@ -219,6 +219,16 @@ impl Sketch {
         let report = self.report(&binding, &solved);
         if solved.status == Status::Solved {
             self.write_back(&binding.sys, &binding.points, &binding.radii);
+            // Pattern copies follow the solved originals; what hangs on the copies is solved again.
+            if self.refresh_patterns() {
+                let mut binding = self.bind(None)?;
+                let solved = binding.sys.solve();
+                let report = self.report(&binding, &solved);
+                if solved.status == Status::Solved {
+                    self.write_back(&binding.sys, &binding.points, &binding.radii);
+                }
+                return Ok(report);
+            }
         }
         Ok(report)
     }

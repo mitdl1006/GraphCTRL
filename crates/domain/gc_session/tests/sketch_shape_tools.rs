@@ -235,3 +235,51 @@ fn the_point_tool_shows_x_and_y_and_places_typed_coordinates() {
     assert!((placed.pos[0] - 0.01).abs() < 1e-12 && (placed.pos[1] + 0.005).abs() < 1e-12);
     assert!(session.tool_hud().iter().all(|s| s.locked.is_none()), "the next point starts afresh");
 }
+
+/// docs/KNOWN_ISSUES.md "직사각형 스케치 패턴 60×60 이상 지연": a 100 × 100 rectangular pattern is made,
+/// and its spacing edited, each within a second; the copies follow the spacing.
+#[test]
+fn large_rectangular_patterns_are_quick_to_make_and_to_edit() {
+    use gc_doc::{SketchOp, SketchPatternDirection};
+    for n in [60u32, 100] {
+        let mut session = new_session();
+        for (a, b) in [(mm(0.0, -50.0), mm(100.0, -50.0)), (mm(-50.0, 100.0), mm(-50.0, 200.0))] {
+            session.set_tool(ToolKind::Line);
+            click(&mut session, a);
+            click(&mut session, b);
+            session.tool_event(ToolEvent::Key(Key::Escape));
+        }
+        session.set_tool(ToolKind::Circle);
+        click(&mut session, mm(0.0, 0.0));
+        click(&mut session, mm(1.0, 0.0));
+        let (_, sketch) = session.active_sketch().unwrap();
+        let lines: Vec<Id<Curve>> =
+            sketch.curves.keys().copied().filter(|c| sketch.line(*c).is_some()).collect();
+        assert_eq!(lines.len(), 2);
+        let hole = *sketch.curves.keys().find(|c| sketch.round(**c).is_some()).unwrap();
+        let direction =
+            |line, count| SketchPatternDirection { line, count, spacing: "5".into(), flip: false };
+        let started = std::time::Instant::now();
+        session
+            .edit_active_sketch(SketchOp::RectangularPattern {
+                curves: vec![hole],
+                first: direction(lines[0], n),
+                second: Some(direction(lines[1], n)),
+                fitted: false,
+            })
+            .unwrap();
+        let made = started.elapsed();
+        assert!(made.as_secs_f64() < 1.0, "{n} × {n} made in {made:?}");
+        let (_, sketch) = session.active_sketch().unwrap();
+        let dimension = *sketch.dimensions.keys().next().unwrap();
+        let started = std::time::Instant::now();
+        session.edit_active_sketch(SketchOp::SetDimension { id: dimension, source: "6".into() }).unwrap();
+        let edited = started.elapsed();
+        assert!(edited.as_secs_f64() < 1.0, "{n} × {n} spacing edited in {edited:?}");
+        let (_, sketch) = session.active_sketch().unwrap();
+        let far = sketch.points.values().map(|p| p.pos[0].abs().max(p.pos[1].abs())).fold(0.0, f64::max);
+        // 5 mm apart before, 6 mm after (the drawn directions are near the axes).
+        assert!(far > 0.0058 * f64::from(n - 1), "{n}: the copies followed the new spacing ({far})");
+        println!("{n} × {n}: made {made:?}, spacing edited {edited:?}");
+    }
+}
