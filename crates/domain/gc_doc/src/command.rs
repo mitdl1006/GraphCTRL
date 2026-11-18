@@ -921,6 +921,8 @@ pub enum Created {
     StateVar(Id<crate::work::StateVar>),
     /// A task.
     Task(Id<crate::work::Task>),
+    /// A tool kit.
+    ToolKit(Id<crate::toolkit::ToolKit>),
     /// A subassembly made in the cell.
     Subassembly(crate::subassembly::SubassemblyId),
 }

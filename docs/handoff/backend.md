@@ -124,6 +124,51 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 툴 종류(ToolKit)·툴 동작·IO 이름표 (PLAN 9.4, GraphCTRL 고유)
+
+기존 `gc_doc::Tool { solid, placement }`(형상)과 `Robot`은 그대로다. 장치로서의 툴은 새 엔티티다.
+
+- `ToolKit { name, signals: Vec<IoSignal { name, direction: In|Out, pin }>, states: Vec<String>, actions: Vec<ToolAction> }` (`Kind::ToolKit`, `gc_doc::toolkit`).
+- `ToolAction { name, target: Option<Id<ObjectType>>, precondition, set: Option<(신호, bool)>, confirm: Option<(신호, bool)>, tool_state, target_state, duration, timeout }`.
+  - `precondition`은 조건식이고 여기서만 `tool.state`·`target.state`를 쓸 수 있다(작업 조건식에서 쓰면 `check_condition`이 오류). 그래서 객체 이름 `tool`·`target`은 `BadName`으로 거부한다.
+  - 검사: 이름 유일, `set`은 Out 신호·`confirm`은 In 신호, 같은 방향·같은 핀 중복 거부, `tool_state`는 툴 상태, `target_state`는 대상 타입의 상태, 시간은 0 이상.
+- 장착: `WorkOp::SetRobotTool { robot, kit: Option<_>, state: Option<String> }` → `Components.tool_kits`(`FittedTool`). 조회 `session.robot_tool_kit(robot) -> Option<(Id<ToolKit>, Option<상태>)>`(상태 생략 시 첫 상태).
+- 편집: `session.edit_work(WorkOp::{AddToolKit, SetToolKit, DeleteToolKit, SetRobotTool})`, 이름 바꾸기 `Command::Rename`. 각 Undo 1단계, 저장.
+  - `SetToolKit`: 동작(신호) 개수가 같으면 자리별로 이름이 달라진 것을 이름 바꾸기로 보고 작업 단계(`ToolAction.action`, `SetIo.name`)를 고친다(다른 툴 종류가 옛 이름을 아직 갖고 있으면 그대로 둠).
+  - 단계가 쓰는 동작·출력 신호를 없애면 `InUse`. 로봇에 장착된 툴 종류 삭제도 `InUse`. 동작의 대상 타입은 삭제가 거부된다.
+- 작업과의 연결(기존 `Step`·`Task` 타입 불변):
+  - 문서는 `ToolAction`·`SetIo`의 이름을 강제하지 않는다(툴 종류가 없는 예전 문서가 그대로 열리게). **툴 종류가 하나라도 있으면** `task_problems`가 "그 동작/출력 신호를 가진 툴이 없다", "대상 객체 타입이 다르다"를 알려 준다.
+  - `task_plan`: 툴 종류가 하나라도 있으면 그 로봇의 툴 종류에 동작·출력 신호가 있어야 한다(없으면 이유와 함께 실패 → `task_candidates`에서 뒤로). 동작의 `duration`이 `TaskPlan.waiting`에 더해진다.
+  - `schedule`: 로봇별 툴 상태를 추적한다. 로봇에 주기 전에 작업의 툴 동작을 순서대로 따져 전제조건(`tool.state`, `target.state`, 전역 상태)이 맞아야 하고, 할당하면 툴 상태가 바뀌며, 작업이 끝날 때 대상 객체 상태가 바뀐다(그 뒤 작업의 효과).
+- 없는 것: 실제 신호 송수신, 확인 신호·시간 초과 실패의 시뮬레이션, `WaitIo` 조건의 검사(글자 그대로), 아날로그 IO, 툴 교환.
+- 테스트: `gc_session/tests/tool_kits.rs`.
+- 다음 후보(리드 메모): 로봇 간 회피 — 다른 로봇을 그 시간대 자세로 장애물에 넣기.
+
+## 2026-11-18 — 작업 → 로봇별 계획(입찰)과 최소 스케줄러 (PLAN 9.4·9.5, GraphCTRL 고유)
+
+### 작업 계획 (`gc_session/src/cell.rs` 끝)
+
+- `session.task_plan(task, robot) -> Result<TaskPlan, String>` / `task_plan_from(task, robot, &start_joints)`: 작업 단계를 그 로봇의 동작으로 계획한다. 문서는 바뀌지 않는다.
+  - `MoveJ` → 자유 이동, `MoveL` → TCP 직선, `FollowPath(role)` → 경로 역할 그대로(시작점까지 자유 이동 + 추종). `Wait`는 시간만 더하고, `SetIo`·`WaitIo`·`ToolAction`은 0초(모델 없음).
+  - `TaskPlan { robot, segments: Vec<MotionPlan>, waiting, end }`, `duration()` = 동작 시간 + 대기.
+  - 기존 경로 계획 본체를 나눠 재사용한다: `robot_scene`(로봇·툴·장애물), `role_steps`, `waypoint_goal`, `run_steps`. 기본 플래너(`PLANNERS[0]`), 시드 1.
+  - **툴 TCP**: 목표는 TCP 자세이고 플랜지는 `scene.flange_target`으로 물러난다(테스트: 100 mm 툴이면 플랜지가 벽 앞 100 mm).
+  - **기준 좌표계**: 역할의 자세는 계획 시점의 스케치에서 읽는다 — 스케치가 컴포넌트 면·작업 평면 위에 있으면 그것을 따라가고, 역할의 `aim`이 작업 좌표계 기준이면 그 좌표계를 따른다. `Task.location`의 자세를 역할 자세에 **또 곱하지 않는다**(역할이 이미 월드에 고정돼 있어 두 번 옮기게 됨). `location`은 표시·`Location::Robot` 판정에만 쓴다.
+  - 이미 목표 자세에 서 있으면(1 µm·1 µrad) 다른 IK 해로 바꾸지 않고 그 자리에 머문다(`run_steps`, 기존 경로 계획에도 적용됨).
+  - 실패 이유는 단계 이름으로 시작한다(`W2: …`).
+- `session.task_robots(task)`: 할당 가능한 로봇(로봇 자신 작업이면 그 로봇, `Only`, `Any`, `When`은 조건이 참일 때 전부; 억제된 로봇 제외).
+- `session.task_candidates(task) -> Vec<TaskCandidate { robot, time: Result<f64, String> }>`: 현재 자세 기준 입찰. 빠른 순, 못 하는 로봇은 뒤에 이유와 함께.
+- 동기 호출이다(호출한 스레드에서 계획). 작업 스레드·캐시는 아직 없다 → 화면에서 매 프레임 부르지 말 것.
+
+### 최소 스케줄러 (`gc_session/src/schedule.rs`)
+
+- `session.schedule() -> Schedule { assignments: Vec<Assignment { task, robot, start, end }>, blocked: Vec<(Id<Task>, String)> }`, `makespan()`. 동기·결정적, 실행 없음, 문서 불변.
+- 규칙: 각 작업은 한 번. 매 시점 전제조건이 참인 작업을 우선순위(큰 것 먼저) → 만든 순서로 보고, **그때 비어 있는** 허용 로봇 중 입찰 시간이 가장 짧은 로봇(그 로봇이 그때 서 있는 관절값에서 계획)에 준다. 작업이 끝나는 시점에 효과를 상태에 적용하고 다시 본다. 진행 중인 작업이 없고 더 줄 것도 없으면 끝.
+- 막힌 작업의 이유: "its precondition does not hold", "no robot may do it", 또는 로봇의 계획 실패 이유.
+- 한계: 로봇끼리 서로를 피하지 않는다(각자 지금의 셀을 기준으로 계획, 다른 로봇은 현재 자세의 장애물도 아님). 공유 구역·시간 조정·재경매·복구 없음. 숫자 변수 효과는 값 대입만(증감 없음). 큰 셀에서는 입찰 계획 때문에 느리다.
+- `gc_session`이 `gc_expr`에 직접 의존하게 됐다(Cargo.lock 변경: 워크스페이스 내부 항목만).
+- 테스트: `gc_session/tests/task_schedule.rs`.
+
 ## 2026-11-18 — 작업 모델 첫 데이터층 (PLAN 9.4, GraphCTRL 고유, 원문 없음)
 
 데이터와 검증만이다. 스케줄러·실행·시뮬레이션, Tool/ToolAction 정의, IO 모델, 이벤트, 목표식, 복구는 없다.

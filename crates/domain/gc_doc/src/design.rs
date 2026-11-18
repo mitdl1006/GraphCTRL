@@ -715,6 +715,9 @@ pub struct Components {
     /// The iProperties of components (Summary, Project, density).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub properties: Vec<(Occurrence, crate::iproperties::IProperties)>,
+    /// The tool kits robots are fitted with (work model).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_kits: Vec<crate::toolkit::FittedTool>,
     /// User-defined browser folders.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub folders: Vec<crate::folder::BrowserFolder>,

@@ -197,6 +197,7 @@ impl StableHash for Kind {
             Self::WorkObject => 21,
             Self::StateVar => 22,
             Self::Task => 23,
+            Self::ToolKit => 24,
         };
         tag.stable_hash(hasher);
     }
