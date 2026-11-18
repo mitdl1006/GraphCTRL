@@ -3912,3 +3912,28 @@ fn the_application_options_switch_autoproject_of_face_edges() {
     harness.run();
     assert!(harness.state().session.autoproject_face_edges());
 }
+
+/// The autoproject choice of the Application Options is saved in the settings file and applied at the next
+/// start.
+#[test]
+fn the_autoproject_choice_is_saved_and_read_back() {
+    let directory = tempfile::tempdir().unwrap();
+    let options =
+        || RunOptions { settings_dir: Some(directory.path().to_path_buf()), ..RunOptions::default() };
+    let mut harness =
+        egui_kittest::Harness::builder().with_size(SIZE).build_eframe(|cc| GraphCtrlApp::new(cc, options()));
+    harness.run();
+    harness.get_by_label("파일").click();
+    harness.run();
+    harness.get_by_label("응용 프로그램 옵션").click();
+    harness.run_steps(3);
+    harness.get_by_label("스케치 작성·편집 시 모서리 자동 투영").click();
+    harness.run();
+    assert!(!harness.state().session.autoproject_face_edges());
+    assert!(gc_persist::places::load_settings(directory.path()).autoproject_edges_off);
+
+    // The next start reads it.
+    let again =
+        egui_kittest::Harness::builder().with_size(SIZE).build_eframe(|cc| GraphCtrlApp::new(cc, options()));
+    assert!(!again.state().session.autoproject_face_edges());
+}
