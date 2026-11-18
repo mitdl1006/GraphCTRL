@@ -310,6 +310,7 @@ impl Sketch {
         constraint: GeoConstraint,
     ) -> Result<AddResult<GeoConstraint>, SketchError> {
         let mut binding = self.bind(None)?;
+        binding.prepare(self, &constraint)?;
         let lowered = binding.lower_constraint(self, &constraint)?;
         let id: Id<GeoConstraint> = alloc.alloc();
         let outcome = binding.sys.try_add(solver_id(id), lowered);

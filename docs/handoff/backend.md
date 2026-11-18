@@ -54,6 +54,34 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 2D 구속·치수 원문 대조(리드 다음 ①, 시작 전)
+
+원문: To Apply Geometric Constraints GUID-A85A7A30-7D81-4C75-8769-CAD034EEA930, Sketch Dimension Reference GUID-3F4E5140-259E-45F1-AD6B-2D31416E1138,
+To Work with Sketch Dimensions GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185.
+
+| 원문 | 지금 | 할 일 |
+|---|---|---|
+| Fix: "click a curve, center point, midpoint, or point". 선은 위치·각도, 원·호는 중심·반지름, 타원은 위치·크기·방향 | 점만 | **아래에서 완료** |
+| Collinear·Parallel·Perpendicular·Horizontal·Vertical: "lines or ellipse axes" | 타원 축은 H/V(점 쌍)만 | 타원 주축을 선으로 |
+| Symmetric: "selected lines or curves … about a selected line" | 점 쌍만 | 선·원·호 쌍 |
+| Tangent: 곡선 2개(타원·스플라인 포함) | 선·원·호 | 타원·스플라인 |
+| Smooth (G2): 스플라인과 끝점의 곡선 | 없음 | 스플라인 끝 조건 필요(마지막) |
+| Equal: 원·호·선 | 있음 | — |
+| 치수: 선형(한 요소·두 요소)·정렬·각도(두 모서리·세 점·내/외각·기준선)·반지름·지름 | 있음(각도는 사분면 선택) | — |
+| Flip Direction 대상의 "line to an arc (the arc itself)"·"between 2 arcs" 거리 | 없음 | 선-호·호-호 거리 치수 |
+| 구동 치수 토글 | 있음(`SketchOp::SetDriving`) | — |
+
+## 2026-11-18 — Fix를 곡선에(① 1번)
+
+- `GeoConstraint::FixCurve(curve)`:
+  - 선은 지금 자리의 숨은 고정 복사선에 동일선상(끝점은 미끄러짐, 자유도 4→2).
+  - 원·호는 중심·반지름(호 끝은 원 위로 미끄러짐), 타원은 중심·축 끝·단반경, 스플라인은 모든 맞춤점.
+  - 3D 스케치는 곡선의 점 전부.
+- 이미 고정된 곡선에 다시 걸면 거부된다(중복).
+- 구속 도구 Fix가 곡선 클릭을 받는다(`ConstraintKind::Fix` + 곡선 1개). 뷰포트 글리프 "fix"는 곡선 가운데에.
+- Move·Rotate 등 변형: 엄격 모드에서는 고정 곡선을 움직이지 못하고, Relax(Always)에서는 그 Fix를 지운다(점 Fix와 같은 규칙). 복사본에는 Fix를 옮기지 않는다.
+- 테스트: `gc_session/tests/sketch_fix_curve.rs`.
+
 ## 2026-11-18 — QA: 불러오기 경고가 다음 문서로 넘어감
 
 - `new_document`·`open_recovered`가 이전 `open`의 `load_warnings`를 그대로 두던 것을 고침. 문서를 바꿀 때(`replace_document`) 비우고, `open_recovered`는 복구 파일 자체의 경고로 채운다.

@@ -13,6 +13,8 @@ pub(crate) struct Binding {
     pub sys: System,
     pub points: BTreeMap<Id<SkPoint>, Vec<ParamId>>,
     pub radii: BTreeMap<Id<Curve>, ParamId>,
+    /// For each line with a Fix constraint: the line where it lies now, as two held points it keeps to.
+    fixed_lines: BTreeMap<Id<Curve>, Line2>,
 }
 
 /// The solver id of a sketch item: its document-wide raw id. Blame from the solver maps straight back.
@@ -140,9 +142,56 @@ impl Binding {
         })
     }
 
+    /// What a constraint needs in the system before it is lowered: a fixed line's held copy (two points
+    /// held where the line's ends are now).
+    pub fn prepare(&mut self, sketch: &Sketch, c: &GeoConstraint) -> Result<(), SketchError> {
+        if let GeoConstraint::FixCurve(curve) = *c
+            && !sketch.is_spatial()
+            && !self.fixed_lines.contains_key(&curve)
+            && let Some((a, b)) = sketch.line(curve)
+        {
+            let (pa, pb) = (
+                sketch.pos(a).ok_or(SketchError::MissingPoint)?,
+                sketch.pos(b).ok_or(SketchError::MissingPoint)?,
+            );
+            let held = Line2 { a: self.sys.add_point2(pa[0], pa[1]), b: self.sys.add_point2(pb[0], pb[1]) };
+            let params = vec![held.a[0], held.a[1], held.b[0], held.b[1]];
+            self.sys.add(solver_id(curve), Constraint::Fix(params));
+            self.fixed_lines.insert(curve, held);
+        }
+        Ok(())
+    }
+
+    /// A Fix on a curve: a 2D line keeps to its held copy (its ends slide along it); anything else holds
+    /// its points and radius.
+    fn fix_curve(&self, sketch: &Sketch, curve: Id<Curve>) -> Result<Constraint, SketchError> {
+        if let Some(held) = self.fixed_lines.get(&curve) {
+            return Ok(Constraint::Collinear(self.line(sketch, curve)?, *held));
+        }
+        let geom = &sketch.curves.get(&curve).ok_or(SketchError::MissingCurve)?.geom;
+        let points: Vec<Id<SkPoint>> = match *geom {
+            // Arc ends slide along the circle; the centre and radius hold.
+            CurveGeom::Arc { c, .. } if !sketch.is_spatial() => vec![c],
+            CurveGeom::Ellipse { c, major, .. } => vec![c, major],
+            CurveGeom::Line { .. }
+            | CurveGeom::Circle { .. }
+            | CurveGeom::Arc { .. }
+            | CurveGeom::Spline { .. } => sketch.curves[&curve].points(),
+        };
+        let mut params = Vec::new();
+        for p in points {
+            params.extend_from_slice(self.params(p)?);
+        }
+        if let Some(r) = self.radii.get(&curve) {
+            params.push(*r);
+        }
+        Ok(Constraint::Fix(params))
+    }
+
     pub fn lower_constraint(&self, sketch: &Sketch, c: &GeoConstraint) -> Result<Constraint, SketchError> {
         let spatial = sketch.is_spatial();
         Ok(match *c {
+            GeoConstraint::FixCurve(curve) => self.fix_curve(sketch, curve)?,
             GeoConstraint::Coincident(p, q) if spatial => Constraint::Coincident3(self.p3(p)?, self.p3(q)?),
             GeoConstraint::Coincident(p, q) => Constraint::Coincident(self.p2(p)?, self.p2(q)?),
             // A 3D sketch has lines only; their relations are written in space (Inventor 2026 help, To Apply
@@ -320,7 +369,12 @@ impl Binding {
 impl Sketch {
     /// Builds the solver system. `skip` leaves out one constraint or dimension (the one being edited).
     pub(crate) fn bind(&self, skip: Option<ConstraintId>) -> Result<Binding, SketchError> {
-        let mut binding = Binding { sys: System::new(), points: BTreeMap::new(), radii: BTreeMap::new() };
+        let mut binding = Binding {
+            sys: System::new(),
+            points: BTreeMap::new(),
+            radii: BTreeMap::new(),
+            fixed_lines: BTreeMap::new(),
+        };
         let spatial = self.is_spatial();
         for (id, point) in &self.points {
             let params = if spatial {
@@ -400,6 +454,7 @@ impl Sketch {
         }
         for (id, constraint) in &self.constraints {
             if Some(solver_id(*id)) != skip {
+                binding.prepare(self, constraint)?;
                 let lowered = binding.lower_constraint(self, constraint)?;
                 binding.sys.add(solver_id(*id), lowered);
             }

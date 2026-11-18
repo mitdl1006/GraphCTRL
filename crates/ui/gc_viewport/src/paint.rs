@@ -555,6 +555,7 @@ pub(crate) fn glyph_spots(
             GeoConstraint::Concentric(_, b) => ("O", middle(b)),
             GeoConstraint::Symmetric { p, .. } => ("sym", point(p)),
             GeoConstraint::Fix(p) => ("fix", point(p)),
+            GeoConstraint::FixCurve(curve) => ("fix", middle(curve)),
             GeoConstraint::AlongAxis { q, axis, .. } => (["ax X", "ax Y", "ax Z"][axis % 3], point(q)),
             GeoConstraint::OnPlane { p, .. } => ("pl", point(p)),
         };
