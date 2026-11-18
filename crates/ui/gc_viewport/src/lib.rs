@@ -4,6 +4,7 @@
 //! is painted under that image and sketches, dimensions, traces and tool previews over it with egui's
 //! painter, through the same camera. Without a GPU everything still works; only the solids are missing.
 
+mod altdrag;
 mod dof;
 mod freemove;
 mod gizmo;
@@ -123,6 +124,12 @@ pub struct Viewport {
     /// Where the view has stood (F5 goes back, Shift + F5 forward), the one shown now, and when the
     /// camera last changed.
     views: ViewHistory,
+    /// Whether Alt was held when the primary button last went down.
+    alt_at_press: bool,
+    /// An Alt + drag that places a Mate constraint.
+    alt_drag: Option<altdrag::AltDrag>,
+    /// A constraint Alt + drag asks for: the component's geometry, then the one it goes to.
+    quick_constrain: Option<(gc_doc::Selection, gc_doc::Selection)>,
     /// A Grip Snap in progress.
     grip: Option<grip::Grip>,
     /// The marking menu of the graphics window and the commands it offers.
@@ -247,6 +254,9 @@ impl Viewport {
             free_tool: None,
             free_drag: None,
             placing: None,
+            alt_at_press: false,
+            alt_drag: None,
+            quick_constrain: None,
             grip: None,
             views: ViewHistory::default(),
             select_priority: SelectPriority::default(),
@@ -1299,6 +1309,92 @@ impl Viewport {
         self.free_tool = None;
     }
 
+    /// The constraint the last Alt + drag asked for, once: the dragged component's geometry and the
+    /// geometry it was dropped on.
+    pub fn take_quick_constrain(&mut self) -> Option<(gc_doc::Selection, gc_doc::Selection)> {
+        self.quick_constrain.take()
+    }
+
+    /// Alt + drag: press on a face or cylinder with Alt held, drag onto another component's face or
+    /// cylinder, release to place the Mate (see [`altdrag`]). True while it runs.
+    fn alt_drag_step(
+        &mut self,
+        ui: &egui::Ui,
+        response: &egui::Response,
+        session: &mut Session,
+        size: [f64; 2],
+        to_view: &impl Fn(egui::Pos2) -> [f64; 2],
+    ) -> bool {
+        if self.alt_drag.is_none() {
+            // Alt is read when the button goes down: the drag starts a few frames later.
+            ui.input(|i| {
+                for event in &i.events {
+                    if let egui::Event::PointerButton {
+                        button: PointerButton::Primary,
+                        pressed: true,
+                        modifiers,
+                        ..
+                    } = event
+                    {
+                        self.alt_at_press = modifiers.alt || i.modifiers.alt;
+                    }
+                }
+            });
+            let alt = self.alt_at_press;
+            if alt
+                && response.drag_started_by(PointerButton::Primary)
+                && let Some(press) = ui.input(|i| i.pointer.press_origin()).map(to_view)
+                && let Some((item, feature)) = self.pick_feature(session, press, size)
+                && let Some(first) = altdrag::selection_of(item, &feature)
+            {
+                self.alt_drag = Some(altdrag::AltDrag { first, from: press, target: None });
+            }
+            return self.alt_drag.is_some();
+        }
+        let Some(mut drag) = self.alt_drag else { return false };
+        if ui.input(|i| i.key_pressed(Key::Escape)) {
+            self.alt_drag = None;
+            return true;
+        }
+        if let Some(at) = response.hover_pos().or_else(|| ui.input(|i| i.pointer.latest_pos())) {
+            let at = to_view(at);
+            drag.target = self
+                .pick_feature(session, at, size)
+                .and_then(|(item, feature)| altdrag::selection_of(item, &feature))
+                .filter(|second| altdrag::offers(session, &drag.first, second))
+                .map(|second| (second, at));
+            ui.ctx().request_repaint();
+        }
+        if response.drag_stopped_by(PointerButton::Primary) {
+            if let Some((second, _)) = drag.target {
+                self.quick_constrain = Some((drag.first, second));
+            }
+            self.alt_drag = None;
+            return true;
+        }
+        // The pull from the pressed geometry to the cursor, and the target it would be constrained to.
+        let painter = ui.painter_at(self.rect);
+        let origin = self.rect.min.to_vec2();
+        #[allow(clippy::cast_possible_truncation, reason = "screen coordinates fit f32")]
+        let pos = |p: [f64; 2]| egui::pos2(p[0] as f32, p[1] as f32) + origin;
+        let colour = if drag.target.is_some() {
+            egui::Color32::from_rgb(0x2e, 0x9e, 0x4f)
+        } else {
+            egui::Color32::from_rgb(0x88, 0x88, 0x88)
+        };
+        let stroke = egui::Stroke::new(1.6, colour);
+        let end = drag.target.map(|(_, at)| at).or_else(|| response.hover_pos().map(to_view));
+        if let Some(end) = end {
+            painter.line_segment([pos(drag.from), pos(end)], stroke);
+            painter.circle_stroke(pos(drag.from), 6.0, stroke);
+            if drag.target.is_some() {
+                painter.circle_stroke(pos(end), 9.0, stroke);
+            }
+        }
+        self.alt_drag = Some(drag);
+        true
+    }
+
     /// Starts Grip Snap: pick an edge, then two points.
     pub fn start_grip_snap(&mut self) {
         self.grip = Some(grip::Grip::new());
@@ -1503,6 +1599,9 @@ impl Viewport {
         };
         if session.hover_item(hovered) {
             ui.ctx().request_repaint();
+        }
+        if !on_handles && self.alt_drag_step(ui, response, session, size, &to_view) {
+            return;
         }
         // Free Move / Free Rotate: drag a component.
         if let Some(tool) = self.free_tool.filter(|_| !on_handles) {

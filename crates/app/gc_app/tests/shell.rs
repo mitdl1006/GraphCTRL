@@ -5033,3 +5033,122 @@ fn f5_walks_the_views_and_s_makes_a_sketch() {
     harness.run_steps(3);
     assert!(harness.state().session.active_sketch().is_some(), "S made a sketch on XY");
 }
+
+/// Tab demotes the selected component into a new subassembly, Shift + Tab promotes it again (Inventor 2026
+/// help, shortcut table GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E).
+#[test]
+fn tab_demotes_and_shift_tab_promotes_the_selected_component() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.05; 3] };
+    let app = harness.state_mut();
+    app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    let body = app.session.add_body(solid, gc_doc::Placement::default()).unwrap();
+    app.session.select_item(Some(gc_session::CellItem::Body(body)));
+    harness.run();
+    harness.key_press(egui::Key::Tab);
+    harness.run_steps(3);
+    harness.get_by_label("확인").click();
+    harness.run_steps(3);
+    let occurrence = gc_doc::Occurrence::Item(body.erase());
+    assert!(harness.state().session.doc().subassembly_of(occurrence).is_some(), "demoted");
+    harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Tab);
+    harness.run_steps(3);
+    assert!(harness.state().session.doc().subassembly_of(occurrence).is_none(), "promoted to the top");
+}
+
+/// Alt + drag from a face of a component onto a face of another places a Mate (Inventor 2026 help, To
+/// Place Mate or Flush Constraints in Assemblies, GUID-0F500089-4F69-41C5-AFE8-B58AC9E8E15E: "Hold down
+/// ALT, and then click the component to drag ... release the mouse to place the mate constraint").
+#[test]
+fn alt_drag_places_a_mate_between_two_faces() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.1; 3] };
+    let app = harness.state_mut();
+    app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    let free = gc_doc::Placement { xyz: [0.4, 0.0, 0.0], rpy: [0.0; 3] };
+    app.session.add_body(solid, free).unwrap();
+    app.fit_view();
+    app.viewport_mut().camera.pan([0.0, 0.0], [-250.0, 0.0], [1280.0, 700.0]);
+    harness.run();
+    let from = harness.state().viewport().screen_of(gc_math::DVec3::new(0.4, 0.0, 0.05)).unwrap();
+    let to = harness.state().viewport().screen_of(gc_math::DVec3::new(0.0, 0.0, 0.05)).unwrap();
+    let alt = egui::Modifiers::ALT;
+    harness.event(egui::Event::PointerMoved(from));
+    harness.run_steps(2);
+    harness.event(egui::Event::PointerButton {
+        pos: from,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: alt,
+    });
+    harness.run_steps(2);
+    for step in 1..=4 {
+        harness.event(egui::Event::PointerMoved(from + (to - from) * (step as f32 / 4.0)));
+        harness.run_steps(2);
+    }
+    assert_eq!(harness.state().session.relationships().len(), 0, "nothing until the release");
+    harness.event(egui::Event::PointerButton {
+        pos: to,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: alt,
+    });
+    harness.run_steps(3);
+    assert_eq!(harness.state().session.relationships().len(), 1, "the Mate was placed");
+}
+
+/// Ctrl+C then Ctrl+V pastes a copy of the selected body that hangs on the cursor; a click sets it down
+/// (shortcut table GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E).
+#[test]
+fn ctrl_c_and_ctrl_v_paste_a_copy_of_the_selected_body() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let app = harness.state_mut();
+    let body =
+        app.session.add_body(gc_doc::Solid::Box { size: [0.1; 3] }, gc_doc::Placement::default()).unwrap();
+    app.session.select_item(Some(gc_session::CellItem::Body(body)));
+    harness.run();
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::C);
+    harness.run_steps(2);
+    assert_eq!(harness.state().session.doc().bodies().iter().count(), 1);
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::V);
+    harness.run_steps(3);
+    assert_eq!(harness.state().session.doc().bodies().iter().count(), 2, "a copy was made");
+    assert!(harness.state().viewport().is_placing(), "it hangs on the cursor");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(3);
+    harness.event(egui::Event::PointerMoved(egui::pos2(600.0, 400.0)));
+    harness.run_steps(2);
+    assert!(harness.state().session.doc().bodies().iter().count() >= 1);
+}
+
+/// F10 shows or hides the sketch (shortcut table GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E).
+#[test]
+fn f10_toggles_the_visibility_of_the_latest_sketch() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let sketch = harness.state_mut().session.create_sketch("XY").unwrap();
+    harness.state_mut().session.finish_sketch();
+    harness.run();
+    assert!(harness.state().session.is_visible(sketch.erase()));
+    harness.key_press(egui::Key::F10);
+    harness.run_steps(2);
+    assert!(!harness.state().session.is_visible(sketch.erase()), "hidden");
+    harness.key_press(egui::Key::F10);
+    harness.run_steps(2);
+    assert!(harness.state().session.is_visible(sketch.erase()), "shown again");
+}

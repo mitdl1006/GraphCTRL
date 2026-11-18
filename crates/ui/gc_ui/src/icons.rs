@@ -75,6 +75,14 @@ pub enum Icon {
     Ground,
     /// A padlock: a locked joint.
     Lock,
+    /// A slanted plane with its centre marked: a work plane.
+    WorkPlane,
+    /// A long centre line with its end points: a work axis.
+    WorkAxis,
+    /// A point in a ring with a cross: a work point.
+    WorkPoint,
+    /// A block moving along a reference line: Grip Snap.
+    GripSnap,
     /// A short text, for constraint symbols.
     Text(&'static str),
 }
@@ -195,6 +203,41 @@ impl Icon {
                 line(at(0.25, 0.6), at(0.75, 0.6));
                 dot(at(0.25, 0.6));
                 dot(at(0.75, 0.6));
+            }
+            Self::WorkPlane => {
+                let corners = [at(0.12, 0.7), at(0.62, 0.7), at(0.88, 0.3), at(0.38, 0.3)];
+                painter.add(egui::Shape::closed_line(corners.to_vec(), stroke));
+                dot(at(0.5, 0.5));
+            }
+            Self::WorkAxis => {
+                // A centre line: long dash, short dash, long dash, with the end points.
+                line(at(0.12, 0.88), at(0.4, 0.6));
+                line(at(0.46, 0.54), at(0.54, 0.46));
+                line(at(0.6, 0.4), at(0.88, 0.12));
+                dot(at(0.12, 0.88));
+                dot(at(0.88, 0.12));
+            }
+            Self::WorkPoint => {
+                painter.circle_stroke(at(0.5, 0.5), rect.width() * 0.2, stroke);
+                dot(at(0.5, 0.5));
+                line(at(0.5, 0.12), at(0.5, 0.26));
+                line(at(0.5, 0.74), at(0.5, 0.88));
+                line(at(0.12, 0.5), at(0.26, 0.5));
+                line(at(0.74, 0.5), at(0.88, 0.5));
+            }
+            Self::GripSnap => {
+                painter.rect_stroke(
+                    Rect::from_min_max(at(0.14, 0.18), at(0.5, 0.52)),
+                    1.0,
+                    stroke,
+                    egui::StrokeKind::Inside,
+                );
+                // The reference line below with an arrow along it.
+                line(at(0.1, 0.78), at(0.9, 0.78));
+                line(at(0.9, 0.78), at(0.78, 0.68));
+                line(at(0.9, 0.78), at(0.78, 0.88));
+                dot(at(0.32, 0.52));
+                line(at(0.32, 0.52), at(0.32, 0.78));
             }
             Self::Lock => {
                 painter.rect_stroke(
