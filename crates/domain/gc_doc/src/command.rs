@@ -984,6 +984,13 @@ pub enum EditError {
     /// A relationship would take freedom away from this protected joint (Protect).
     #[error("the protected joint {0} would lose its motion")]
     Protected(String),
+    /// The edit needs the Primary positional representation to be the active one (Inventor 2026 help,
+    /// Positional representations in assemblies, GUID-C728DFAC-1B45-4879-A004-45A8DC991954: "You can
+    /// perform the following operations only when the Primary representation is active: Add, delete,
+    /// or reorder components. Restructure the assembly. Change the count of a pattern. Create or delete
+    /// work features").
+    #[error("only possible while the Primary positional representation is active")]
+    PrimaryOnly,
     /// Another item of the same kind already has this name.
     #[error("the name is already taken")]
     NameTaken,
@@ -1133,8 +1140,12 @@ fn params_of(doc: &Document) -> BTreeMap<String, Quantity> {
         }
     }
     // Constraint parameters: the offset or angle of each assembly constraint.
-    for (_, param, angle) in doc.relation_params() {
-        let quantity = if angle { Quantity::angle(param.value) } else { Quantity::length(param.value) };
+    for (_, param, _) in doc.relation_params() {
+        let quantity = match param.dim {
+            crate::relparam::ParamDim::Angle => Quantity::angle(param.value),
+            crate::relparam::ParamDim::Length => Quantity::length(param.value),
+            crate::relparam::ParamDim::Ratio => Quantity::scalar(param.value),
+        };
         scope.entry(param.name.clone()).or_insert(quantity);
     }
     scope

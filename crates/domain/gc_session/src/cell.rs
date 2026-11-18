@@ -679,6 +679,24 @@ pub(crate) fn tool_shapes(
     })
 }
 
+/// The file holding the mirror image of the mesh in `file` across its own coordinate plane square to
+/// `axis`: written into `dir` when it is not there yet, named after the content of the reflected mesh so
+/// that the same mirror image is one file however often it is asked for.
+pub(crate) fn mirrored_mesh_file(file: &str, axis: usize, dir: &std::path::Path) -> Result<String, String> {
+    let reflected = read_mesh_file(file)?.mirrored(axis);
+    let source = std::path::Path::new(file);
+    let stem = source.file_stem().and_then(|s| s.to_str()).unwrap_or("mesh");
+    let letter = ["x", "y", "z"].get(axis).copied().unwrap_or("n");
+    let name = format!("{stem}.mirror-{letter}-{:016x}.stl", reflected.content_hash());
+    let path = dir.join(name);
+    if !path.exists() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        std::fs::write(&path, gc_mesh::stl::to_binary(&reflected))
+            .map_err(|e| format!("{}: {e}", path.display()))?;
+    }
+    path.to_str().map(str::to_owned).ok_or_else(|| format!("{}: not a valid path text", path.display()))
+}
+
 /// The collision shape of a body's solid.
 pub(crate) fn shape_of(solid: &Solid, meshes: &BTreeMap<String, MeshRef>) -> Option<ShapeDesc> {
     Some(match solid {
@@ -1578,6 +1596,135 @@ impl Session {
             })
     }
 
+    /// The smallest motion along one of a component's open degrees of freedom (a slide along a free
+    /// direction, a turn about a free axis) that takes it out of a contact: its pose there. `depth_at`
+    /// gives how deep it overlaps at a pose; `floor` is the depth that counts as clear. `None` when no
+    /// free motion clears it.
+    fn freedom_clear_of(
+        &self,
+        item: gc_core::AnyId,
+        pose: &DPose3,
+        hit: &gc_collide::Penetration,
+        floor: f64,
+        depth_at: &dyn Fn(&DPose3) -> f64,
+    ) -> Option<DPose3> {
+        let symbol = self.doc.dof_symbol(item)?;
+        let normal = DVec3::from_array(hit.normal);
+        // (size of the motion in metres or radians × a comparable length, the pose it gives)
+        let mut best: Option<(f64, DPose3)> = None;
+        let mut offer = |size: f64, at: DPose3| {
+            if best.as_ref().is_none_or(|(s, _)| size < *s) {
+                best = Some((size, at));
+            }
+        };
+        for direction in &symbol.translations {
+            let along = DVec3::from_array(*direction);
+            let facing = normal.dot(along);
+            if facing.abs() < 1e-3 {
+                continue;
+            }
+            // Far enough along the free direction to cover the overlap along the normal.
+            let step = (hit.depth + 1e-6) / facing;
+            let at = DPose3::from_parts(pose.translation + along * step, pose.rotation);
+            if step.abs() <= 1.0 && depth_at(&at) <= floor {
+                offer(step.abs(), at);
+            }
+        }
+        for axis in &symbol.rotations {
+            let (point, direction) = (DVec3::from_array(axis.point), DVec3::from_array(axis.direction));
+            let turned = |angle: f64| {
+                let turn = gc_math::DQuat::from_axis_angle(direction, angle);
+                DPose3::from_parts(
+                    point + turn * (pose.translation - point),
+                    (turn * pose.rotation).normalize(),
+                )
+            };
+            for sign in [1.0, -1.0] {
+                // Doubling angles until it is clear, then halving back to where it just is.
+                let mut reached = None;
+                let mut angle = 1e-3;
+                let mut below = 0.0;
+                while angle <= 0.6 {
+                    if depth_at(&turned(sign * angle)) <= floor {
+                        reached = Some(angle);
+                        break;
+                    }
+                    below = angle;
+                    angle *= 2.0;
+                }
+                let Some(mut clear) = reached else { continue };
+                for _ in 0..8 {
+                    let middle = 0.5 * (below + clear);
+                    if depth_at(&turned(sign * middle)) <= floor {
+                        clear = middle;
+                    } else {
+                        below = middle;
+                    }
+                }
+                // An angle weighs as the arc at the component's distance from the axis (at least 0.1 m).
+                let arm = (pose.translation - point).length().max(0.1);
+                offer(clear * arm, turned(sign * clear));
+            }
+        }
+        best.map(|(_, at)| at)
+    }
+
+    /// Where a component that relationships hold, but not completely, goes when contact pushes it to
+    /// `target`: the relationships are solved with the moving components held where they are shown, and
+    /// the pushed one (with whatever is tied to it) settles along its open degrees of freedom. `None`
+    /// when it is grounded, fully constrained, or the relationships cannot be met.
+    fn push_along_freedom(
+        &self,
+        item: gc_core::AnyId,
+        target: &DPose3,
+        imposed: &BTreeMap<gc_core::AnyId, DPose3>,
+        pushed: &BTreeMap<gc_core::AnyId, DPose3>,
+    ) -> Option<Vec<(gc_core::AnyId, DPose3)>> {
+        let doc = &self.doc;
+        let grounded = |i: gc_core::AnyId| {
+            i.kind == gc_core::Kind::WorkFeature
+                || doc.component_flag(gc_doc::Occurrence::Item(i), gc_doc::ComponentFlag::Grounded)
+        };
+        if !matches!(item.kind, gc_core::Kind::Body | gc_core::Kind::Assembly)
+            || grounded(item)
+            || doc.component_dof(item).is_none_or(|d| d.total == 0)
+        {
+            return None;
+        }
+        let mut trial = doc.clone();
+        let placed = |pose: &DPose3| Placement {
+            xyz: pose.translation.to_array(),
+            rpy: gc_math::rpy_from_quat(pose.rotation),
+        };
+        // The components as they are shown right now, the pushed one at its target.
+        let shown = pushed.iter().chain(imposed).map(|(i, p)| (*i, *p)).chain([(item, *target)]);
+        for (other, pose) in shown {
+            let op = CellOp::FreeMove { item: other, placement: placed(&pose) };
+            gc_doc::apply(&mut trial, &Command::Cell(op)).ok()?;
+        }
+        // Relationships between components that cannot give way here take no part (the one being
+        // driven is among them: its value is on its way to another).
+        let fixed = |i: gc_core::AnyId| imposed.contains_key(&i) || grounded(i);
+        let idle: Vec<gc_core::AnyId> = trial
+            .relationships()
+            .iter()
+            .filter(|(_, r)| fixed(r.first.occurrence.owner()) && fixed(r.second.occurrence.owner()))
+            .map(|(id, _)| id.erase())
+            .collect();
+        for id in idle {
+            let op = CellOp::SetSuppressed { item: id, suppressed: true };
+            gc_doc::apply(&mut trial, &Command::Cell(op)).ok()?;
+        }
+        let held: Vec<gc_core::AnyId> = imposed.keys().copied().collect();
+        let moves = trial.solve_relationships_holding(&held).ok()?;
+        let mut out: Vec<(gc_core::AnyId, DPose3)> =
+            moves.into_iter().filter(|(i, _)| !imposed.contains_key(i)).collect();
+        if !out.iter().any(|(i, _)| *i == item) {
+            out.push((item, *target));
+        }
+        Some(out)
+    }
+
     /// Settles contact among the participants with `moves` imposed: overlapped free components are
     /// pushed out (added to `pushed`); `Err` with the pair when something that cannot give way is hit.
     fn resolve_contacts(
@@ -1622,11 +1769,48 @@ impl Session {
                     if hit.depth <= self.stored_depth(a, b) + TOLERANCE {
                         continue;
                     }
-                    if imposed.contains_key(&b) || !self.pushable(b) {
+                    if imposed.contains_key(&b) {
+                        // Something pushed earlier that the moving component runs into again gives way
+                        // when that component's own turn comes (whatever order they are listed in).
+                        if !imposed.contains_key(&a) {
+                            continue;
+                        }
                         return Err((a, b));
                     }
                     let shift = DVec3::from_array(hit.normal) * (hit.depth + TOLERANCE);
-                    pushed.insert(b, DPose3::from_parts(pose_b.translation + shift, pose_b.rotation));
+                    let target = DPose3::from_parts(pose_b.translation + shift, pose_b.rotation);
+                    if !self.pushable(b) {
+                        // Held by relationships, but with freedom left ("the second part, which has open
+                        // degrees of freedom, moves in response"): it gives way along what is free, as
+                        // long as that takes it out of the way.
+                        // Half the tolerance, so that what the relationships' solve adds stays clear.
+                        let floor = self.stored_depth(a, b) + 0.5 * TOLERANCE;
+                        let clear = |at: &DPose3| {
+                            self.contact_geometry(b, at)
+                                .and_then(|g| geometry_a.penetration(&g, TOLERANCE).ok().flatten())
+                                .map_or(0.0, |p| p.depth)
+                        };
+                        let Some(freed) = self.freedom_clear_of(b, &pose_b, &hit, floor, &clear) else {
+                            return Err((a, b));
+                        };
+                        let Some(gave) = self.push_along_freedom(b, &freed, &imposed, pushed) else {
+                            return Err((a, b));
+                        };
+                        let after = gave
+                            .iter()
+                            .find(|(item, _)| *item == b)
+                            .and_then(|(_, at)| self.contact_geometry(b, at))
+                            .and_then(|g| geometry_a.penetration(&g, TOLERANCE).ok().flatten())
+                            .map_or(0.0, |p| p.depth);
+                        if after > hit.depth - 1e-7 {
+                            return Err((a, b));
+                        }
+                        pushed.extend(gave);
+                        last = Some((a, b));
+                        changed = true;
+                        continue;
+                    }
+                    pushed.insert(b, target);
                     last = Some((a, b));
                     changed = true;
                 }

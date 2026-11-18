@@ -124,6 +124,113 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 거울상 메시: 쓰는 위치와 컴포넌트별 상태(리드 수정 요청)
+
+- **쓰는 위치**(원본 옆에는 쓰지 않는다): 문서에 파일이 있으면 프로젝트의 파일 폴더 `<이름>_files/`에 바로, 아직 저장 전이면 앱 캐시(`gc_persist::places::cache_dir()/mirrored` — Windows `%LOCALAPPDATA%\GraphCTRL\cache`, 그 밖 `$XDG_CACHE_HOME/graphctrl` 또는 `~/.cache/graphctrl`; `session.set_asset_cache(Some(dir))`로 바꿀 수 있다)에 쓴다. 저장(Save As 포함)하면 기존 프로젝트 묶기(`packed_for`)가 프로젝트 밖 메시 파일을 `<이름>_files/`로 복사하고 상대 경로로 적으므로 거울상 파일도 같이 들어간다.
+  - 리드가 말한 `<문서이름>.assets/` 대신 **기존 규칙 `<이름>_files/`**를 썼다(메시·로봇 파일이 이미 그 폴더에 들어가고 열 때도 그 규칙으로 푼다 — 폴더를 둘로 나누지 않으려고). 이름을 바꾸길 원하면 `project::files_dir` 한 곳이다.
+  - 저장 뒤에도 메모리의 문서는 캐시 경로를 가리킨다(저장 파일에는 상대 경로). 다시 열면 프로젝트 폴더의 것을 쓴다. 캐시 파일은 지우지 않는다.
+- **컴포넌트별 상태, 실행 취소 1단계**: `session.mirror_components_mixed(&[(item, MirrorState::{Mirror, Reuse})], plane, relationships, ground) -> MirrorOutcome`. Exclude는 목록에서 빼면 된다. `mirror_components_reflected`는 전부 Mirror인 경우의 줄임이다.
+- 테스트: `gc_session/tests/mirror_reflected.rs`(캐시에 쓰기 → 저장 → 파일에 상대 경로 → 다시 열기 → 저장된 프로젝트에서는 `_files`에 바로 쓰기, 섞인 상태 1단계 실행 취소).
+
+## 2026-11-18 — 원뿔 선택 기하(Tangent·축), 메시의 원뿔면 인식
+
+근거: Place Tangent constraints in assemblies(`GUID-FF270566-CA9E-420A-A00A-F52DD0FDFD8E`) — "A Tangent constraint positions faces, planes, cylinders, spheres, cones, and ruled splines tangent to one another."
+
+- `Geometry::Cone { apex, direction, half_angle }`(추가): 꼭짓점, 꼭짓점에서 원뿔 안쪽으로 향하는 축 방향, 축과 면 사이 각(0 < 각 < 90°).
+  - Tangent: 원뿔–평면(원뿔이 평면에 모선 하나로 눕는다: 축이 평면에서 원뿔 각만큼 기울고 꼭짓점이 평면에서 `offset`만큼), 원뿔–구(구 중심이 원뿔 면에서 반지름 + `offset`). Inside는 반대쪽. 원뿔–원통, 원뿔–원뿔은 풀지 않는다(`BadValue`).
+  - 축으로 쓰기: Mate(축 일치)·Angle·Motion·패턴 축에서 원통처럼 쓴다(`selection_axis`는 꼭짓점과 축). Assemble의 `possible_relations`는 원뿔에도 Tangent를 내놓는다.
+- 메시에서 고르기: `gc_mesh::region::conical_region(mesh, triangle, bend, tolerance) -> Option<ConeRegion { triangles, apex, axis, half_angle, span }>`(`conical_region_in`은 인접 정보 재사용). 잘린 원뿔도 된다(꼭짓점이 면 밖). 평면·원통·불규칙 면은 `None`.
+  - **프런트/리드 몫**: 뷰포트 픽(`gc_scene`의 `cylindrical_region_in` 부르는 곳, lib.rs:471 근처)에서 원통이 아니면 `conical_region_in`을 시도해 `Geometry::Cone`을 만들면 된다. 렌더 레이어라 백엔드는 건드리지 않았다.
+- `gc_session/src/look.rs`(Look At)의 Geometry match에 원뿔 한 줄을 더했다(축을 바라봄).
+- 하지 않은 것: 토러스(원문에서 Tangent 대상이 아니고, "Midplane of Torus"·"Center Point of Torus"는 작업 피처 종류라 토러스 면 인식 + 작업 피처 종류 추가가 필요), ruled spline.
+- 테스트: `gc_mesh` `region::tests::a_frustum_side_is_a_cone_and_a_cylinder_or_a_cube_is_not`, `gc_doc/tests/relate.rs::a_cone_is_tangent_to_a_plane_and_to_a_sphere`.
+
+## 2026-11-18 — 미러의 Mirror 상태: 진짜 거울상 메시 (리드 결정 방식)
+
+근거: Mirror Components: Reference(`GUID-7B19CA69-8D14-40DA-9543-115A8AFE6336`) — 상태 Mirror "Creates a mirrored component and saves it in a new file", Reuse "Adds a component instance …".
+
+- 방식(렌더·충돌 변경 없음, 음수 행렬식 변환 없음): 거울상 메시 파일을 새로 만들고 복사본의 `Solid::Mesh`가 그 파일을 가리킨다.
+  - `gc_mesh::MeshData::mirrored(axis)`: 그 축 좌표 부호 반전 + 삼각형 감기 순서 뒤집기 + (있으면) 정점 법선 반사.
+  - 파일: 원본 옆에 `<이름>.mirror-<x|y|z>-<내용 해시 16자리>.stl`(이진 STL). 같은 거울상은 이름이 같아 한 번만 쓴다. 원본이 STL이 아니어도(여러 부분으로 된 파일은 합쳐서) STL로 쓴다.
+  - 어느 축인가: `doc.mirror_axis(item, &plane)` — 미러가 그 컴포넌트의 대칭면으로 잡는 로컬 좌표 평면(미러 법선에 가장 가까운 것). 복사본 자세는 지금과 같고(R′ = M·R·F), 형상을 로컬에서 F로 뒤집으면 월드에서 정확한 거울상이 된다.
+- API:
+
+| 무엇 | 호출 |
+|---|---|
+| Mirror 상태로 미러 | `session.mirror_components_reflected(&items, plane, relationships, ground) -> Result<MirrorOutcome { suppressed, not_reflected }, EditError>` — 실행 취소 1단계 |
+| Reuse 상태(같은 형상을 돌려 놓기) | 기존 `session.mirror_components(...)` 그대로 |
+| 문서 op | `CellOp::MirrorComponentsWith { items, plane, relationships, ground, mirrored: Vec<(Id<Body>, Solid)> }`(추가) |
+
+- `not_reflected`: 로봇·가져온 어셈블리(형상을 뒤집지 않는다), 파일을 못 읽거나 못 쓴 바디 — Reuse처럼 놓인다. 박스·원통·구는 자기 자신이 거울상이라 그대로 맞다.
+- 주의: 실행 취소해도 써 둔 거울상 파일은 남는다(다시 쓰일 수 있는 캐시). 프런트는 상태 단추를 Mirror/Reuse/Exclude로 두고 Mirror면 이 함수, Reuse면 기존 함수, Exclude면 `items`에서 빼면 된다(컴포넌트마다 섞으려면 두 번 호출).
+- 테스트: `gc_session/tests/mirror_reflected.rs`.
+
+## 2026-11-18 — QA 관찰 2건: 구속 걸린 컴포넌트 삭제, Accept 표시 즉시 재평가
+
+- **동작 변화**: `DeleteBody`·`DeleteRobot`·`DeleteAssembly`가 그 컴포넌트를 쓰는 관계(셋째 선택 — 대칭면·각도 기준 포함)를 같이 지운다. 전에는 거부(참조 무결성 오류)였다. 한 실행 취소 단계로 컴포넌트·관계·구속 매개변수가 함께 돌아온다. 그 구속 이름을 쓰던 식에는 값이 대신 들어간다(기존 규칙).
+  - 근거: 리드의 인벤터 관찰. 2026 도움말에서 "컴포넌트를 지우면 관계도 지워진다"는 문장은 찾지 못했다(어셈블리 관계·컴포넌트 관련 68쪽 검색; Delete assembly relationships `GUID-0E2BD426…`에는 관계 삭제 절차만 있다) → **원문 미확인**으로 표시.
+  - 로봇은 웨이포인트·경로가 쓰고 있으면 여전히 `InUse`. 작업 피처(`DeleteWorkFeature`)는 관계가 쓰면 여전히 `InUse`.
+  - 고친 테스트(리드 승인): `gc_doc/tests/relate.rs`의 두 곳("Deleting a constrained component …", "The plane's component …").
+- `DeleteRelationship`(과 컴포넌트 삭제) 직후 Accept된 구속을 바로 다시 시도한다 — 풀리면 그 명령 안에서 표시가 사라지고 같이 풀린다. 억제(`SetSuppressed`)는 원래 즉시였다. 오류 구속이 없으면 삭제는 전처럼 아무것도 다시 풀지 않는다.
+- 지워진 관계의 `motion_refs` 찌꺼기도 정리한다.
+- `(3 + 4) mm`: 스케치 치수와 같은 파서를 쓰므로 그대로 둔다(리드 확인).
+
+## 2026-11-18 — 접촉 솔버: 관계에 묶였지만 자유도가 남은 컴포넌트는 그 자유도로 밀린다
+
+근거: About the Contact Solver and Component Collision(`GUID-0BBD4ACE-7BD1-40BF-A011-74416B229035`) — "One part moves and comes into contact with another and the second part, which has open degrees of freedom, moves in response", 예: "a trip sensor … wheel … on the end of the sensor arm … when a cam surface comes in contact".
+
+- 전: 밀리는 것은 관계가 하나도 없는 바디·어셈블리뿐이었고(병진만), 관계가 있으면 무조건 정지였다.
+- 지금: 접지가 아니고 `component_dof(b).total > 0`이면 그 컴포넌트의 열린 자유도(`dof_symbol`의 자유 병진 방향·자유 회전축)로 움직여 본다. 병진은 겹침을 법선 방향으로 덮는 만큼, 회전은 1 mrad부터 두 배씩 키워 겹침이 풀리는 각을 찾고 이분으로 "막 풀리는" 각까지 줄인다. 가장 작은 움직임을 고른 뒤 관계를 다시 풀어(움직이는 쪽은 잡아 둠) 묶인 다른 컴포넌트도 따라오게 한다. 어떤 자유 운동으로도 안 풀리면 지금처럼 정지(`contact_stop`).
+- 드래그(`preview_body`)와 Drive(`drive_relationship`) 둘 다 같은 경로다. 놓으면 밀린 것까지 한 실행 취소 단계(기존대로).
+- 같이 고친 것: 앞서 밀린 컴포넌트의 id가 움직이는 컴포넌트보다 작으면, 계속 밀 때 "밀린 것이 움직이는 것에 부딪혔다"로 보고 정지하던 순서 의존(자유 박스에도 있던 문제) — 이제 움직이는 쪽 차례에 처리한다.
+- 한계: 접촉점이 아니라 자유도 후보를 시험하는 방식이라, 회전은 0.6 rad(한 번의 접촉 처리당)까지, 병진은 1 m까지만 찾는다. 자유도 축은 문서에 저장된 자세 기준이다(움직이는 부모에 달린 축은 근사). 접촉마다 문서 사본에서 관계를 한 번 푼다.
+- 테스트: `gc_session/tests/contact.rs::a_pushed_lever_turns_about_its_pivot`.
+
+## 2026-11-18 — 미러 패턴(연관 미러); 미러/복사의 컴포넌트별 상태 검토
+
+근거: Mirror Components: Reference(`GUID-7B19CA69-8D14-40DA-9543-115A8AFE6336`, What's New 2026) — "Create mirror pattern: Enables to mirror the geometry and position of the source components while preserving the associativity between the source and target components. This feature also creates the Mirror browser node." / "Create flat structure: Creates only mirrored geometry and has no associativity". 상태: Mirror / Reuse / Exclude / Mixed. Copy assembly components(`GUID-5AAA6CB1-7BB2-4AF0-9A3D-AB729E5160C5`) — 상태: Copy / Reuse / Exclude.
+
+- **미러 패턴**: `PatternLayout::Mirror { plane: Selection }` — `CellOp::AddPattern { name, parents, layout }`로 만든다. 요소 하나(소스들의 거울상)가 생기고 소스나 미러 평면이 움직이면 따라간다(패턴과 같은 갱신). 브라우저에는 패턴 노드로 나온다(`doc.patterns()`), 독립·억제·삭제도 패턴과 같다. 기존 `CellOp::MirrorComponents`는 "Create flat structure"(연관 없음)에 해당하고 그대로다.
+- **컴포넌트별 상태**:
+  - Exclude = 그 컴포넌트를 `items`(또는 패턴의 `parents`)에 넣지 않으면 된다. 가져온 어셈블리는 한 인스턴스라서 그 안의 부품만 따로 제외할 수는 없다(부품 파일이 없다).
+  - Mirror와 Reuse는 여기서 같은 결과다(셀에는 부품 파일이 없어 "새 파일로 저장된 거울상 부품"이 없다). 박스·원통·구는 자기 대칭면이 있어 정확하고, 메시·어셈블리·로봇은 돌려 놓을 뿐 형상이 뒤집히지 않는다. 진짜 거울상 형상(Mirror 상태)을 내려면 `Solid::Mesh`에 "뒤집힘" 표시와 렌더·충돌 쪽 지원이 필요하다 — 여러 크레이트를 건드리므로 리드 결정 사항으로 남긴다.
+  - Copy의 Copy/Reuse도 같은 이유로 구분이 없다.
+- 테스트: `gc_doc/tests/pattern.rs::a_mirror_pattern_follows_its_sources`.
+
+## 2026-11-18 — Motion 구속의 비·거리도 모델 매개변수 (리드 요청)
+
+- `relation_params` 대상에 `Rotation.ratio`(단위 없음)와 `RotationTranslation.distance`(길이)를 넣었다. `SetRelationValue`로 편집한다(`teeth = 36 / 12`, `teeth * 8 mm`). 비율 칸에 길이를 넣으면 `EditError::Expr`(차원 불일치), 0이면 `BadValue`.
+- `RelationParam`에 `dim: ParamDim { Length, Angle, Ratio }` 추가(serde default Length). 매개변수 표에서 단위를 정할 때 쓴다. `relation_params()`의 bool은 그대로 "각도인가"다(비율은 false이므로 `param.dim == ParamDim::Ratio`를 따로 본다).
+- 식에서 쓰이던 구속이 지워지면 값이 대신 들어가는데, 비율은 단위 없이 `(4)`로 들어간다.
+- 테스트: `gc_doc/tests/relation_params.rs::motion_ratio_and_distance_are_parameters`.
+
+## 2026-11-18 — 간섭 분석 옵션: Treat subassemblies as components
+
+근거: To Analyze Interference Among Components(`GUID-80DED0A6-AC65-4C7C-AD85-0144EE6DAB5B`) — "Select Treat subassemblies as components to treat sub-assemblies as single components and ignore the interferences within the sub-assemblies."
+
+- `session.interference_with(&set1, &set2, InterferenceOptions { subassemblies_as_components })` — 켜면 같은 최상위 서브어셈블리에 든 컴포넌트끼리의 간섭은 보고하지 않는다(중첩된 서브어셈블리도 맨 위 것 기준). 기존 `interference(...)`는 옵션 꺼짐과 같다(변화 없음).
+- 원문의 나머지: 나사산 정밀 분석·Content Center·AnyCAD 필터는 해당 없음(나사산·콘텐츠 센터 없음). 무시/무시 해제, "이 값보다 작은 부피 모두 무시", 합계 부피, 복사·인쇄는 결과 목록에 대한 화면 동작이라 프런트 몫이다(행마다 `overlap.volume`이 있다).
+- 테스트: `gc_session/tests/measure.rs::interference_within_a_subassembly_is_left_out_when_it_counts_as_one_component`.
+
+## 2026-11-18 — Planar 조인트 (**원문 미확인, 일반 정의**)
+
+- 리드 지시: 도움말에서 한 번 더 찾고(조인트·관계·자유도 관련 35쪽을 다시 받아 "Planar joint"/"joint types"/"Gap" 검색 — 없음), 없으면 일반 정의로 구현하고 "원문 미확인"으로 표시.
+- `RelationKind::Planar { flip }`: 두 조인트 원점의 Z축이 한 방향(기본 반대, `flip`이면 같은 방향)이고 첫 원점이 둘째 원점을 지나 그 Z에 수직인 평면 위에 있다. 평면 위 병진 2 + Z 둘레 회전 1이 남는다(`component_dof` 합계 3, 회전 1).
+- 한계(Limits)·Drive는 없다(`takes_limits` false, `driven` `BadValue`). Lock·Protect는 다른 조인트와 같다. Automatic은 Planar를 고르지 않는다(원문 규칙에 없음) — 유형을 직접 고른다.
+- Gap, Ball 한계: 원문 확인 전까지 보류(리드 결정). parity 문서(`docs/ux/inventor-assembly-parity.md` "Planar 조인트" 줄)에 같은 표시를 남겼다.
+- 테스트: `gc_doc/tests/relate.rs::a_planar_joint_leaves_sliding_on_the_plane_and_turning_about_its_normal`.
+
+## 2026-11-18 — 리드 결정 반영: 새 뷰 표현은 만들자마자 활성, "Primary가 활성일 때만" 규칙
+
+근거: To Create, Edit, and Restore View Representations(`GUID-397F9263-12C3-47A1-B6A6-16FC05EDEF47`) — "A new ViewRep node is added … It becomes the active View representation, as designated by a check mark." Positional representations in assemblies(`GUID-C728DFAC-1B45-4879-A004-45A8DC991954`) — "You can perform the following operations only when the Primary representation is active: Add, delete, or reorder components. Restructure the assembly. Change the count of a pattern. Create or delete work features. …"
+
+- **동작 변화 1**: `AddViewRepresentation`이 새 뷰를 활성으로 만든다. 활성·잠기지 않은 뷰는 표시 편집을 받으므로, "뷰를 만든 뒤 표시를 바꾸고 다시 활성화하면 복원"하려면 그 뷰를 잠그거나(Lock) 다른 뷰가 활성이어야 한다.
+  - 고친 테스트(리드 승인): `gc_doc/tests/relate.rs::view_representations_restore_what_is_shown`(만든 뒤 Lock), `gc_session/tests/qa_representations.rs::a_view_representation_restores_visibility`(만든 뒤 Lock, 유령 항목 검사 전에 해제), `gc_session/tests/occurrence_selection.rs::the_representations_folder_lists…`(숨기기를 "Hidden" 뷰를 만든 뒤로), `gc_app/tests/shell.rs::a_view_representation_restores_the_camera_and_the_section`(둘째 뷰를 만든 뒤 첫째를 다시 활성화 — 브라우저는 이미 활성인 행의 클릭을 무시한다).
+- **동작 변화 2**: 위치 표현이 활성인 동안 다음은 `EditError::PrimaryOnly`(새 변형)로 거부한다 — `AddBody`, `AddRobot`, `AddAssembly`, `MirrorComponents`, `CopyComponents`, `ReplaceComponents`, `AddPattern`, `RestorePatternElement`, `DeleteBody`, `DeleteRobot`, `DeleteAssembly`, `DeletePattern`, `MoveInTree`, `AddWorkFeature`, `DeleteWorkFeature`, `Subassembly(Demote | Move | Dissolve | Paste)`, 개수가 바뀌는 `SetPattern`. 배치·관계 값·억제·가시성·매개변수는 그대로 된다(위치 표현의 용도).
+  - 메시지: `Msg::ErrPrimaryOnly`("Primary 위치 표현이 활성일 때만 할 수 있습니다"), gc_panels의 오류 표시 match에 한 줄 추가.
+  - 작업 좌표계(`AddFrame`/`DeleteFrame`)와 스케치는 막지 않았다(원문 목록의 "work features"는 작업 평면·축·점으로 읽었다).
+- 테스트: `gc_doc/tests/relate.rs::components_are_added_and_deleted_only_in_the_primary_position`.
+
 ## 2026-11-18 — 패턴 요소 억제·독립 요소 복원, BOM에서 억제 컴포넌트 제외 (대조 목록 10); 재구성(12)은 이미 있음
 
 근거: Suppress elements in assembly patterns(`GUID-FDD20E41-93A5-479D-B547-BA9956E9966B`) — "Suppressed pattern elements are not shown in the graphics window and are not calculated when the assembly is updated … also excluded from a bill of materials", "The suppression of elements is persistent". About Assembly Components in Patterns(`GUID-ABC5607F-6128-40C8-BF28-44D918E5803C`) — "You can restore an independent element to the pattern, but the copied components created when the element was made independent are not automatically deleted".

@@ -3629,9 +3629,13 @@ fn a_view_representation_restores_the_camera_and_the_section() {
     let stored = harness.state().session.representations().views[0].clone();
     assert!(stored.camera.is_some() && stored.section.is_some());
 
-    // Move away: another camera and no section.
+    // Move away: another camera and no section. A new view is the active one (Inventor 2026 help, To
+    // Create, Edit, and Restore View Representations, GUID-397F9263-12C3-47A1-B6A6-16FC05EDEF47), so a
+    // second view is made there and the first one is activated again.
     harness.state_mut().viewport_mut().camera.distance = 7.0;
     harness.state_mut().viewport_mut().section = None;
+    harness.run();
+    harness.get_by_label("새 뷰 표현").click();
     harness.run();
     harness.get_by_label("View:1").click();
     harness.run();

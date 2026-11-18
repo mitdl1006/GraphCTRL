@@ -1590,6 +1590,7 @@ messages! {
     ToolStretch => ("신축", "Stretch"),
     HudScale => ("축척 비율", "Scale factor"),
     ErrProtected => ("보호된 조인트의 움직임을 막아 거부했습니다", "Refused: it would stop a protected joint's motion"),
+    ErrPrimaryOnly => ("Primary 위치 표현이 활성일 때만 할 수 있습니다", "Only possible while the Primary positional representation is active"),
     AutoDimTitle => ("자동 치수", "Auto Dimension"),
     AutoDimDimensions => ("치수", "Dimensions"),
     AutoDimConstraints => ("구속", "Constraints"),

@@ -57,6 +57,15 @@ pub enum PatternLayout {
         /// Spread both ways from the parent.
         midplane: bool,
     },
+    /// A mirror pattern (Inventor 2026 help, Mirror Components: Reference,
+    /// GUID-7B19CA69-8D14-40DA-9543-115A8AFE6336, What's New 2026: "Create mirror pattern: Enables to
+    /// mirror the geometry and position of the source components while preserving the associativity
+    /// between the source and target components. This feature also creates the Mirror browser node"):
+    /// one occurrence, the sources mirrored across the plane; it follows them when they move.
+    Mirror {
+        /// The mirror plane (a work plane, planar face or origin plane).
+        plane: Selection,
+    },
 }
 
 /// A component pattern: its parent components and, per occurrence after the parent, the copies.
@@ -101,6 +110,9 @@ impl PatternLayout {
                     && self.count() <= 1000
             }
             PatternLayout::Circular { count, angle, .. } => (2..=1000).contains(count) && angle.is_finite(),
+            PatternLayout::Mirror { plane } => {
+                matches!(plane.geometry, crate::relate::Geometry::Plane { .. }) && plane.geometry.is_finite()
+            }
         }
     }
 
@@ -111,6 +123,7 @@ impl PatternLayout {
                 column.count.saturating_mul(row.map_or(1, |r| r.count))
             }
             PatternLayout::Circular { count, .. } => *count,
+            PatternLayout::Mirror { .. } => 2,
         }
     }
 }
@@ -154,6 +167,8 @@ impl crate::document::Document {
                 // Rotation about the axis line through `point`.
                 Some(DPose3::from_parts(point - turn * point, turn))
             }
+            // A mirrored pose depends on the component itself: see `copy_pose`.
+            PatternLayout::Mirror { .. } => None,
         }
     }
 
@@ -161,6 +176,9 @@ impl crate::document::Document {
     /// move it round the axis without turning it).
     fn copy_pose(&self, layout: &PatternLayout, index: u32, parent: AnyId) -> Option<DPose3> {
         let parent_pose = self.owner_pose(parent)?;
+        if let PatternLayout::Mirror { plane } = layout {
+            return self.mirrored_pose(plane, &parent_pose);
+        }
         let transform = self.pattern_transform(layout, index)?;
         let moved = transform * parent_pose;
         Some(match layout {

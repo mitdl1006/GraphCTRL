@@ -182,3 +182,46 @@ fn pattern_elements_can_be_suppressed_and_independent_ones_restored() {
     let twice = CellOp::RestorePatternElement { index: 0, element: 3 };
     assert!(apply(&mut doc, &Command::Cell(twice)).is_err());
 }
+
+/// Create mirror pattern (Inventor 2026 help, Mirror Components: Reference,
+/// GUID-7B19CA69-8D14-40DA-9543-115A8AFE6336): the mirrored components keep following their sources.
+#[test]
+fn a_mirror_pattern_follows_its_sources() {
+    let (mut doc, mut history) = (Document::new(), History::default());
+    let floor = body(&mut doc, &mut history, [0.0; 3]);
+    let part = body(&mut doc, &mut history, [1.0, 0.3, 0.2]);
+    let plane = Selection {
+        occurrence: Occurrence::Item(floor.erase()),
+        geometry: Geometry::Plane { point: [0.0; 3], normal: [1.0, 0.0, 0.0] },
+    };
+    let layout = PatternLayout::Mirror { plane };
+    let depth = history.undo_depth();
+    let created = run(
+        &mut doc,
+        &mut history,
+        CellOp::AddPattern { name: "Mirror1".into(), parents: vec![part.erase()], layout },
+    );
+    assert_eq!(created.len(), 1);
+    assert_eq!(history.undo_depth(), depth + 1);
+    let copy = doc.patterns()[0].elements[0].items[0];
+    assert!(close(at(&doc, copy), DVec3::new(-1.0, 0.3, 0.2)));
+    // The source moves and turns: the mirrored one follows, a mirror image of it.
+    let mut moved = doc.get(part).unwrap().clone();
+    moved.placement = Placement { xyz: [2.0, -0.5, 0.2], rpy: [0.0, 0.0, 0.4] };
+    run(&mut doc, &mut history, CellOp::SetBody { id: part, body: moved });
+    assert!(close(at(&doc, copy), DVec3::new(-2.0, -0.5, 0.2)));
+    let yaw = doc.get(Id::<Body>::from_raw(copy.raw)).unwrap().placement.rpy[2];
+    assert!(
+        (yaw.abs() - 0.4).abs() < 1e-9 || (yaw.abs() - (std::f64::consts::PI - 0.4)).abs() < 1e-9,
+        "{yaw}"
+    );
+    // The mirror plane moves with the floor.
+    let mut shifted = doc.get(floor).unwrap().clone();
+    shifted.placement.xyz = [0.5, 0.0, 0.0];
+    run(&mut doc, &mut history, CellOp::SetBody { id: floor, body: shifted });
+    assert!(close(at(&doc, copy), DVec3::new(-1.0, -0.5, 0.2)));
+    // A plane is needed.
+    let axis = PatternLayout::Mirror { plane: axis_of(floor, 0) };
+    let bad = CellOp::AddPattern { name: "Bad".into(), parents: vec![part.erase()], layout: axis };
+    assert!(apply(&mut doc, &Command::Cell(bad)).is_err());
+}

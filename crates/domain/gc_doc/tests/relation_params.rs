@@ -196,3 +196,52 @@ fn an_angle_is_an_angle_parameter_and_a_units_change_keeps_sizes() {
     assert_eq!((param.source.as_str(), param.value), ("25 mm", 0.025));
     assert_eq!(bench.doc.relation_param(id).unwrap().source, "10 + 5");
 }
+
+/// A Motion constraint's ratio (no unit) and distance (a length) are parameters too.
+#[test]
+fn motion_ratio_and_distance_are_parameters() {
+    use gc_doc::ParamDim;
+    let (mut bench, [a, b], _) = bench();
+    let axis = |body: Id<Body>, direction: [f64; 3]| Selection {
+        occurrence: Occurrence::Item(body.erase()),
+        geometry: Geometry::Axis { point: [0.0; 3], direction },
+    };
+    let add = |bench: &mut Bench, kind: RelationKind, second: [f64; 3]| {
+        let relationship = Relationship::new("Motion", kind, axis(a, [0.0, 0.0, 1.0]), axis(b, second));
+        let Created::Relationship(id) = bench.cell(CellOp::AddRelationship(relationship)).unwrap()[0] else {
+            panic!()
+        };
+        id
+    };
+    let gears = add(&mut bench, RelationKind::Rotation { ratio: 2.0, reverse: true }, [0.0, 0.0, 1.0]);
+    let rack =
+        add(&mut bench, RelationKind::RotationTranslation { distance: 0.1, reverse: false }, [1.0, 0.0, 0.0]);
+    let row = |bench: &Bench, id: Id<Relationship>| {
+        let p = bench.doc.relation_param(id).unwrap();
+        (p.name.clone(), p.source.clone(), p.value, p.dim)
+    };
+    assert_eq!(row(&bench, gears), ("d2".to_owned(), "2".to_owned(), 2.0, ParamDim::Ratio));
+    assert_eq!(row(&bench, rack), ("d3".to_owned(), "100 mm".to_owned(), 0.1, ParamDim::Length));
+    // A ratio takes numbers and expressions without a unit; a length is refused, and so is zero.
+    bench.cell(CellOp::SetRelationValue { id: gears, source: "teeth = 36 / 12".into() }).unwrap();
+    assert_eq!(bench.doc.get(gears).unwrap().kind, RelationKind::Rotation { ratio: 3.0, reverse: true });
+    assert_eq!(row(&bench, gears), ("teeth".to_owned(), "36 / 12".to_owned(), 3.0, ParamDim::Ratio));
+    let length = CellOp::SetRelationValue { id: gears, source: "5 mm".into() };
+    assert!(matches!(bench.cell(length), Err(EditError::Expr { .. })));
+    let zero = CellOp::SetRelationValue { id: gears, source: "0".into() };
+    assert_eq!(bench.cell(zero), Err(EditError::BadValue));
+    // The distance is a length and may use the ratio.
+    bench.cell(CellOp::SetRelationValue { id: rack, source: "teeth * 8 mm".into() }).unwrap();
+    let RelationKind::RotationTranslation { distance, .. } = bench.doc.get(rack).unwrap().kind else {
+        panic!()
+    };
+    assert!((distance - 0.024).abs() < 1e-12);
+    bench.cell(CellOp::SetRelationValue { id: gears, source: "4".into() }).unwrap();
+    let RelationKind::RotationTranslation { distance, .. } = bench.doc.get(rack).unwrap().kind else {
+        panic!()
+    };
+    assert!((distance - 0.032).abs() < 1e-12);
+    // When the gears go, the distance keeps its size with the number written in.
+    bench.cell(CellOp::DeleteRelationship(gears)).unwrap();
+    assert_eq!(bench.doc.relation_param(rack).unwrap().source, "(4) * 8 mm");
+}

@@ -49,7 +49,8 @@ use gc_sketch::{Curve, DimKind, Dimension, FrameOutcome, Item, SkPoint, SketchDr
 use gc_tools::{Preview, Prompt, Tool, ToolEvent, ToolKind, ToolOutput};
 pub use look::{LookItem, LookTarget};
 pub use measure::{
-    Feature, FeaturePair, InterferenceRow, ItemMeasure, PairMeasure, angle_at, measure_features,
+    Feature, FeaturePair, InterferenceOptions, InterferenceRow, ItemMeasure, PairMeasure, angle_at,
+    measure_features,
 };
 pub use physical::PhysicalProperties;
 pub use schedule::{Assignment, Detour, MAX_ASSIGNMENTS, ParkMove, Schedule, Wait};
@@ -106,6 +107,8 @@ pub struct Session {
     offer: Option<ReferenceOffer>,
     last_error: Option<EditError>,
     path: Option<PathBuf>,
+    /// Where files made for a document without a file are kept (`None`: the application's cache).
+    asset_cache: Option<PathBuf>,
     saved_revision: Revision,
     /// True for work recovered from an automatic save until it is saved.
     recovered: bool,
@@ -143,6 +146,25 @@ impl Default for Session {
     }
 }
 
+/// A component's status in the Mirror Components dialog.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MirrorState {
+    /// A true mirror image (a reflected mesh for a mesh body).
+    Mirror,
+    /// Another instance of the same shape, turned into place.
+    Reuse,
+}
+
+/// What [`Session::mirror_components_mixed`] did.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MirrorOutcome {
+    /// Names of the relationships made suppressed (their orientation was ambiguous or they could not be
+    /// satisfied).
+    pub suppressed: Vec<String>,
+    /// Components placed as the same shape turned round instead of a mirror image.
+    pub not_reflected: Vec<gc_core::AnyId>,
+}
+
 impl Session {
     /// A session with a new, empty document.
     pub fn new() -> Self {
@@ -166,6 +188,7 @@ impl Session {
             offer: None,
             last_error: None,
             path: None,
+            asset_cache: None,
             saved_revision: Revision::default(),
             recovered: false,
             cell: cell::CellState::default(),
@@ -1052,6 +1075,93 @@ impl Session {
             relationships,
             ground,
         })
+    }
+
+    /// Mirror Components with true mirror images for every component (the dialog's Mirror status): see
+    /// [`Session::mirror_components_mixed`].
+    pub fn mirror_components_reflected(
+        &mut self,
+        items: &[gc_core::AnyId],
+        plane: gc_doc::Selection,
+        relationships: bool,
+        ground: bool,
+    ) -> Result<MirrorOutcome, EditError> {
+        let all: Vec<(gc_core::AnyId, MirrorState)> =
+            items.iter().map(|i| (*i, MirrorState::Mirror)).collect();
+        self.mirror_components_mixed(&all, plane, relationships, ground)
+    }
+
+    /// Where mirror-image mesh files are written: the project's own files folder (`<name>_files` next
+    /// to the project file) once the document has a file, before that the application's cache (or the
+    /// folder given with [`Session::set_asset_cache`]). Saving copies what the document uses from the
+    /// cache into the project and writes paths relative to it, like every other mesh file.
+    fn mirror_folder(&self) -> Option<PathBuf> {
+        match &self.path {
+            Some(path) => Some(project::files_dir(path)),
+            None => self
+                .asset_cache
+                .clone()
+                .or_else(|| gc_persist::places::cache_dir().map(|dir| dir.join("mirrored"))),
+        }
+    }
+
+    /// Sets the folder that files made for a document without a file of its own are kept in (the
+    /// default is the application's cache folder).
+    pub fn set_asset_cache(&mut self, dir: Option<PathBuf>) {
+        self.asset_cache = dir;
+    }
+
+    /// Mirror Components with a status per component, as the dialog has it (Inventor 2026 help, Mirror
+    /// Components: Reference, GUID-7B19CA69-8D14-40DA-9543-115A8AFE6336: Mirror "Creates a mirrored
+    /// component and saves it in a new file", Reuse "Adds a component instance"; a component set to
+    /// Exclude is simply left out). One undo step for all of them.
+    ///
+    /// Mirror: for a body whose shape is a mesh file, the reflected mesh is written as
+    /// `<name>.mirror-<x|y|z>-<content hash>.stl` (once: the same mirror image is found again by its
+    /// name) into the project's files folder, or the cache while the document has no file, and the copy
+    /// points to it. Boxes, cylinders and spheres are their own mirror images. Robots, imported
+    /// assemblies and bodies whose file cannot be read or written are placed as with Reuse (the same
+    /// shape, turned) and are returned in `not_reflected`.
+    pub fn mirror_components_mixed(
+        &mut self,
+        items: &[(gc_core::AnyId, MirrorState)],
+        plane: gc_doc::Selection,
+        relationships: bool,
+        ground: bool,
+    ) -> Result<MirrorOutcome, EditError> {
+        let folder = self.mirror_folder();
+        let mut mirrored = Vec::new();
+        let mut not_reflected = Vec::new();
+        for (item, state) in items {
+            if *state == MirrorState::Reuse {
+                continue;
+            }
+            if item.kind != gc_core::Kind::Body {
+                not_reflected.push(*item);
+                continue;
+            }
+            let id = Id::<gc_doc::Body>::from_raw(item.raw);
+            let Some(gc_doc::Solid::Mesh { file, scale }) = self.doc.get(id).map(|b| b.solid.clone()) else {
+                continue;
+            };
+            let reflected = self
+                .doc
+                .mirror_axis(*item, &plane)
+                .zip(folder.as_deref())
+                .and_then(|(axis, folder)| cell::mirrored_mesh_file(&file, axis, folder).ok());
+            match reflected {
+                Some(file) => mirrored.push((id, gc_doc::Solid::Mesh { file, scale })),
+                None => not_reflected.push(*item),
+            }
+        }
+        let suppressed = self.replicate(gc_doc::CellOp::MirrorComponentsWith {
+            items: items.iter().map(|(item, _)| *item).collect(),
+            plane,
+            relationships,
+            ground,
+            mirrored,
+        })?;
+        Ok(MirrorOutcome { suppressed, not_reflected })
     }
 
     /// Copy Components, moved by `offset`. One undo step. Returns the names of the relationships made

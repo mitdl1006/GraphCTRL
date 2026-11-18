@@ -69,8 +69,11 @@ fn the_representations_folder_lists_views_and_positions_with_the_active_ones() {
     assert_eq!((folder.positions[0].name.as_str(), folder.positions[0].active), ("Primary", true));
 
     session.add_view_representation("All", Some("camera".into())).unwrap();
-    session.set_component(Occurrence::Item(body.erase()), ComponentFlag::Visible, false).unwrap();
+    // A new view is the active one and takes display edits (Inventor 2026 help, To Create, Edit, and
+    // Restore View Representations, GUID-397F9263-12C3-47A1-B6A6-16FC05EDEF47), so the body is hidden
+    // after "Hidden" was made.
     session.add_view_representation("Hidden", None).unwrap();
+    session.set_component(Occurrence::Item(body.erase()), ComponentFlag::Visible, false).unwrap();
     session.add_positional_representation("Open").unwrap();
     assert!(session.add_positional_representation("Primary").is_err());
     session.activate_view_representation(0).unwrap();

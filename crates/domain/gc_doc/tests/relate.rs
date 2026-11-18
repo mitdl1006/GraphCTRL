@@ -253,8 +253,17 @@ fn a_constrained_component_cannot_be_deleted_while_constrained() {
             second: on(table, top(1.0)),
         })
         .unwrap();
-    // Deleting a constrained component takes nothing with it silently: it is in use.
-    assert!(bench.cell(CellOp::DeleteBody(block)).is_err());
+    // Deleting a constrained component deletes its relationships with it, as Inventor does; one undo
+    // step brings both back (lead-approved test change).
+    let depth = bench.history.undo_depth();
+    bench.cell(CellOp::DeleteBody(block)).unwrap();
+    assert_eq!(bench.history.undo_depth(), depth + 1);
+    assert!(bench.doc.get(block).is_none() && bench.doc.relationships().is_empty());
+    assert!(bench.doc.relation_params().is_empty());
+    bench.history.undo(&mut bench.doc).unwrap();
+    assert!(bench.doc.get(block).is_some());
+    assert_eq!(bench.doc.relationships().iter().count(), 1);
+    assert_eq!(bench.doc.relation_params().len(), 1);
 }
 
 fn table_frame() -> Geometry {
@@ -558,8 +567,9 @@ fn symmetry_mirrors_one_component_across_a_plane() {
         "{:?}",
         bench.pose(right).translation
     );
-    // The plane's component cannot be deleted while it is used.
-    assert!(bench.cell(CellOp::DeleteBody(table)).is_err());
+    // Deleting the plane's component deletes the relationship that used it (lead-approved test change).
+    bench.cell(CellOp::DeleteBody(table)).unwrap();
+    assert!(bench.doc.relationships().iter().all(|(_, r)| !r.references(table.erase())));
 }
 
 #[test]
@@ -688,6 +698,10 @@ fn view_representations_restore_what_is_shown() {
             section: None,
         })
         .unwrap();
+    // A new view is the active one and takes display edits (To Create, Edit, and Restore View
+    // Representations, GUID-397F9263-12C3-47A1-B6A6-16FC05EDEF47); locked, it keeps what it has.
+    assert_eq!(bench.doc.representations().active_view, Some(0));
+    bench.cell(CellOp::LockViewRepresentation { index: 0, locked: true }).unwrap();
     let show = Command::SetComponent {
         occurrence: Occurrence::Item(block.erase()),
         flag: ComponentFlag::Visible,
@@ -939,12 +953,8 @@ fn the_active_view_follows_the_display_until_it_is_locked() {
     };
     let hidden = |bench: &Bench, view: usize| bench.doc.representations().views[view].hidden.clone();
     bench.cell(CellOp::AddViewRepresentation { name: "View1".into(), camera: None, section: None }).unwrap();
-    // Not active yet: display edits leave it alone.
-    shown(&mut bench, block, false);
-    assert!(hidden(&bench, 0).is_empty());
-    shown(&mut bench, block, true);
-    // Active: hiding the block is saved in it, in the same undo step.
-    bench.cell(CellOp::ActivateViewRepresentation(0)).unwrap();
+    // A new view is the active one: hiding the block is saved in it, in the same undo step.
+    assert_eq!(bench.doc.representations().active_view, Some(0));
     let depth = bench.history.undo_depth();
     shown(&mut bench, block, false);
     assert_eq!(bench.history.undo_depth(), depth + 1);
@@ -1052,7 +1062,11 @@ fn a_relationship_that_cannot_be_solved_can_be_accepted_with_an_error() {
     // Treatments. Suppressing the first mate lets the accepted one be satisfied: the mark goes and the
     // block moves to 0.3 m above the table.
     bench.cell(CellOp::SetSuppressed { item: first.erase(), suppressed: true }).unwrap();
-    bench.cell(CellOp::UpdateAssembly).unwrap();
+    assert!(bench.doc.sick_relationships().is_empty());
+    // The same at once when the relationship in its way is deleted instead.
+    bench.history.undo(&mut bench.doc).unwrap();
+    assert!(bench.doc.is_sick(second));
+    bench.cell(CellOp::DeleteRelationship(first)).unwrap();
     assert!(bench.doc.sick_relationships().is_empty());
     assert!(
         (bench.pose(block).translation.z - bench.pose(table).translation.z - 0.5 - 0.3 - 0.1).abs() < 1e-7
@@ -1172,4 +1186,151 @@ fn motion_constraints_tie_turning_and_travel_together() {
         Some(std::f64::consts::TAU * 0.02)
     );
     assert_eq!(Document::motion_default(&on(driver, axis([0.0, 0.0, 1.0])), &large, false), Some(1.0));
+}
+
+/// Inventor 2026 help, Positional representations in assemblies
+/// (GUID-C728DFAC-1B45-4879-A004-45A8DC991954): "You can perform the following operations only when the
+/// Primary representation is active: Add, delete, or reorder components. Restructure the assembly.
+/// Change the count of a pattern. Create or delete work features."
+#[test]
+fn components_are_added_and_deleted_only_in_the_primary_position() {
+    let mut bench = Bench::new();
+    let (table, block) = table_and_box(&mut bench);
+    bench.cell(CellOp::AddPositionalRepresentation("Open".into())).unwrap();
+    bench.cell(CellOp::ActivatePositionalRepresentation(Some(0))).unwrap();
+    let extra = Body {
+        name: "Extra".into(),
+        placement: Placement { xyz: [0.0, 0.0, 3.0], rpy: [0.0; 3] },
+        solid: Solid::Box { size: [0.1; 3] },
+        look: Default::default(),
+    };
+    let before = bench.doc.clone();
+    assert_eq!(bench.cell(CellOp::AddBody(extra.clone())), Err(EditError::PrimaryOnly));
+    assert_eq!(bench.cell(CellOp::DeleteBody(block)), Err(EditError::PrimaryOnly));
+    assert!(bench.doc.same_content(&before));
+    // Moving a component and changing a relationship are what a position is for.
+    let mut moved = bench.doc.get(block).unwrap().clone();
+    moved.placement.xyz = [0.5, 0.0, 2.0];
+    bench.cell(CellOp::SetBody { id: block, body: moved }).unwrap();
+    let mate = Relationship::new(
+        "Mate:1",
+        RelationKind::Mate { offset: 0.0, sense: AxisSense::Opposed },
+        on(block, bottom(0.2)),
+        on(table, top(1.0)),
+    );
+    bench.relate(mate).unwrap();
+    // Back in Primary everything is possible again.
+    bench.cell(CellOp::ActivatePositionalRepresentation(None)).unwrap();
+    bench.cell(CellOp::AddBody(extra)).unwrap();
+}
+
+/// A planar joint by the general definition (not described in the Inventor 2026 help pages found): the
+/// component slides on the plane both ways and turns about its normal; nothing else.
+#[test]
+fn a_planar_joint_leaves_sliding_on_the_plane_and_turning_about_its_normal() {
+    let mut bench = Bench::new();
+    let (table, block) = table_and_box(&mut bench);
+    let frame = |origin: [f64; 3], z: [f64; 3]| Geometry::Frame { origin, z, x: [1.0, 0.0, 0.0] };
+    let joint = Relationship::new(
+        "Planar:1",
+        RelationKind::Planar { flip: false },
+        on(block, frame([0.0, 0.0, -0.1], [0.0, 0.0, -1.0])),
+        on(table, frame([0.0, 0.0, 0.5], [0.0, 0.0, 1.0])),
+    );
+    let id = bench.relate(joint).unwrap();
+    // The tilted block stands upright on the table top, about where it was across the table.
+    let pose = bench.pose(block);
+    assert!(close(pose.rotation * DVec3::Z, DVec3::Z));
+    assert!((pose.translation.z - 1.1).abs() < 1e-7);
+    assert!((pose.translation.x - 0.3).abs() < 0.1 && (pose.translation.y - 0.2).abs() < 0.1);
+    assert_eq!(bench.doc.component_dof(block.erase()).unwrap().total, 3);
+    assert_eq!(bench.doc.component_dof(block.erase()).unwrap().rotation(), 1);
+    // Slid across and turned about the vertical: it stays. Lifted and tipped: it comes back down.
+    let mut moved = bench.doc.get(block).unwrap().clone();
+    moved.placement = Placement { xyz: [-0.6, 0.3, 1.1], rpy: [0.0, 0.0, 0.7] };
+    bench.cell(CellOp::SetBody { id: block, body: moved.clone() }).unwrap();
+    assert_eq!(bench.doc.get(block).unwrap().placement, moved.placement);
+    moved.placement = Placement { xyz: [-0.6, 0.3, 1.6], rpy: [0.3, 0.0, 0.7] };
+    bench.cell(CellOp::SetBody { id: block, body: moved }).unwrap();
+    let pose = bench.pose(block);
+    assert!((pose.translation.z - 1.1).abs() < 1e-7 && close(pose.rotation * DVec3::Z, DVec3::Z));
+    // Flip turns it over; a planar joint takes no limits and cannot be driven.
+    let flipped =
+        Relationship { kind: RelationKind::Planar { flip: true }, ..bench.doc.get(id).unwrap().clone() };
+    bench.cell(CellOp::SetRelationship { id, relationship: flipped }).unwrap();
+    assert!(close(bench.pose(block).rotation * DVec3::Z, -DVec3::Z));
+    assert!(!gc_doc::takes_limits(&RelationKind::Planar { flip: false }, true));
+    assert!(bench.doc.driven(id, 0.1).is_err());
+}
+
+/// Tangent takes cones (Inventor 2026 help, Place Tangent constraints in assemblies,
+/// GUID-FF270566-CA9E-420A-A00A-F52DD0FDFD8E: "positions faces, planes, cylinders, spheres, cones, and
+/// ruled splines tangent to one another"): a cone lies on a plane along one of its lines; a sphere sits
+/// against a cone's surface.
+#[test]
+fn a_cone_is_tangent_to_a_plane_and_to_a_sphere() {
+    let mut bench = Bench::new();
+    let (table, block) = table_and_box(&mut bench);
+    let angle = 30f64.to_radians();
+    let cone = Geometry::Cone { apex: [0.0, 0.0, 0.1], direction: [0.0, 0.0, -1.0], half_angle: angle };
+    let tangent = |offset: f64| Relationship {
+        limits: None,
+        name: "Tangent:1".into(),
+        kind: RelationKind::Tangent { offset, inside: false },
+        first: on(block, cone),
+        second: on(table, top(1.0)),
+    };
+    let id = bench.relate(tangent(0.0)).unwrap();
+    let lies = |bench: &Bench, offset: f64| {
+        let pose = bench.pose(block);
+        let apex = pose.translation + pose.rotation * DVec3::new(0.0, 0.0, 0.1);
+        let axis = pose.rotation * -DVec3::Z;
+        // The apex on the plane (or `offset` above it), the axis leaning out of it by the cone's angle.
+        assert!((apex.z - 1.0 - offset).abs() < 1e-7, "{apex:?}");
+        assert!((axis.z - gc_math::fm::sin(angle)).abs() < 1e-7, "{axis:?}");
+    };
+    lies(&bench, 0.0);
+    bench.cell(CellOp::SetRelationship { id, relationship: tangent(0.02) }).unwrap();
+    lies(&bench, 0.02);
+    // It has a model parameter like any offset, and mates by its axis.
+    assert_eq!(bench.doc.relation_param(id).unwrap().source, "20 mm");
+    let axis = bench.doc.selection_axis(&on(block, cone)).unwrap().1;
+    assert!((axis.z - gc_math::fm::sin(angle)).abs() < 1e-7);
+
+    // A ball against the cone: its centre one radius off the cone's surface.
+    let ball = bench.body("Ball", [0.1; 3], Placement { xyz: [1.0, 0.5, 2.0], rpy: [0.0; 3] });
+    let sphere = Geometry::Sphere { centre: [0.0; 3], radius: 0.05 };
+    let touch = Relationship::new(
+        "Tangent:2",
+        RelationKind::Tangent { offset: 0.0, inside: false },
+        on(ball, sphere),
+        on(block, cone),
+    );
+    bench.relate(touch).unwrap();
+    let pose = bench.pose(block);
+    let (apex, axis) =
+        (pose.translation + pose.rotation * DVec3::new(0.0, 0.0, 0.1), pose.rotation * -DVec3::Z);
+    let centre = bench.pose(ball).translation - apex;
+    let along = centre.dot(axis);
+    let away = (centre - axis * along).length() * gc_math::fm::cos(angle) - along * gc_math::fm::sin(angle);
+    assert!((away - 0.05).abs() < 1e-7, "{away}");
+    // Not against a cylinder or another cone; a cone needs an angle between 0 and a quarter turn.
+    let cylinder = Geometry::Cylinder { point: [0.0; 3], direction: [0.0, 0.0, 1.0], radius: 0.05 };
+    for other in [cylinder, cone] {
+        let bad = Relationship::new(
+            "Bad",
+            RelationKind::Tangent { offset: 0.0, inside: false },
+            on(ball, other),
+            on(block, cone),
+        );
+        assert_eq!(bench.relate(bad), Err(EditError::BadValue));
+    }
+    let flat = Geometry::Cone { apex: [0.0; 3], direction: [0.0, 0.0, 1.0], half_angle: 1.6 };
+    let bad = Relationship::new(
+        "Flat",
+        RelationKind::Tangent { offset: 0.0, inside: false },
+        on(block, flat),
+        on(table, top(1.0)),
+    );
+    assert_eq!(bench.relate(bad), Err(EditError::BadValue));
 }
