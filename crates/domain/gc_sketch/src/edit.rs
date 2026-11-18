@@ -304,12 +304,61 @@ impl Sketch {
         }
     }
 
+    /// Adds a spline's Tangent or Smooth: the spline's end must be joined to an end of the other curve (a
+    /// line, arc or open spline), and that end must not be shaped already (a second condition there is
+    /// redundant).
+    fn add_spline_shaping(
+        &mut self,
+        alloc: &mut IdAlloc,
+        constraint: GeoConstraint,
+    ) -> Result<AddResult<GeoConstraint>, SketchError> {
+        let (a, b) = match constraint {
+            GeoConstraint::Tangent { a, b, .. } | GeoConstraint::Smooth(a, b) => (a, b),
+            _ => return Err(SketchError::InvalidValue),
+        };
+        let is_spline =
+            |c: Id<Curve>| matches!(self.curves.get(&c).map(|k| &k.geom), Some(CurveGeom::Spline { .. }));
+        // The spline whose end is shaped: the first that is a spline (Smooth names the spline first).
+        let (spline, other) = if is_spline(a) { (a, b) } else { (b, a) };
+        let (end, _, _) = self.spline_joint(spline, other).ok_or(SketchError::InvalidValue)?;
+        let taken: Vec<Id<GeoConstraint>> = self
+            .constraints
+            .iter()
+            .filter(|(_, c)| self.shapes_spline(c))
+            .filter(|(_, c)| {
+                let (x, y) = match **c {
+                    GeoConstraint::Tangent { a, b, .. } | GeoConstraint::Smooth(a, b) => (a, b),
+                    _ => return false,
+                };
+                let partner = if x == spline {
+                    y
+                } else if y == spline {
+                    x
+                } else {
+                    return false;
+                };
+                self.spline_joint(spline, partner).is_some_and(|(e, _, _)| e == end)
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        if !taken.is_empty() {
+            return Ok(AddResult::Redundant(taken.into_iter().map(Item::Constraint).collect()));
+        }
+        let id: Id<GeoConstraint> = alloc.alloc();
+        self.constraints.insert(id, constraint);
+        let report = self.solve()?;
+        Ok(AddResult::Added { id, report })
+    }
+
     /// Adds a geometric constraint if it is consistent and removes freedom.
     pub fn try_add_constraint(
         &mut self,
         alloc: &mut IdAlloc,
         constraint: GeoConstraint,
     ) -> Result<AddResult<GeoConstraint>, SketchError> {
+        if self.shapes_spline(&constraint) {
+            return self.add_spline_shaping(alloc, constraint);
+        }
         let mut binding = self.bind(None)?;
         binding.prepare(self, &constraint)?;
         let lowered = binding.lower_constraint(self, &constraint)?;

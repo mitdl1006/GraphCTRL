@@ -137,8 +137,9 @@ pub(crate) fn over(
             && (if sketch.is_spatial() { vis.sketches_3d } else { vis.sketches })
         {
             let stroke = Stroke::new(1.2, colors::inactive());
-            for curve in sketch.curves.values() {
-                curve_path(&view, &plane, curve, |p| sketch.pos(p), None, stroke, sketch.is_spatial());
+            for (id, curve) in &sketch.curves {
+                let ends = sketch.spline_ends(*id);
+                curve_path(&view, &plane, curve, |p| sketch.pos(p), None, stroke, sketch.is_spatial(), ends);
             }
         }
     }
@@ -301,6 +302,7 @@ fn curve_path(
     radius: Option<f64>,
     stroke: Stroke,
     spatial: bool,
+    ends: (gc_sketch::SplineEnd, gc_sketch::SplineEnd),
 ) {
     const SEGMENTS: usize = 72;
     let tau = std::f64::consts::TAU;
@@ -329,7 +331,8 @@ fn curve_path(
                     fit.pop();
                     gc_sketch::closed_spline_points3(&fit, 24)
                 } else {
-                    gc_sketch::spline_points3(&fit, 24)
+                    // Tangent and Smooth ends shape it.
+                    gc_sketch::shaped_spline_points3(&fit, 24, ends.0, ends.1)
                 };
                 view.polyline(line.iter().map(|p| plane.world(*p)), stroke);
             }
@@ -385,6 +388,7 @@ fn active_sketch(view: &View<'_>, plane: &SketchPlane, sketch: &Sketch, session:
             colors::constrained()
         };
         let width = if selection.contains(&Item::Curve(*id)) { 2.6 } else { 1.8 };
+        let ends = sketch.spline_ends_with(*id, &pos);
         curve_path(
             view,
             plane,
@@ -393,6 +397,7 @@ fn active_sketch(view: &View<'_>, plane: &SketchPlane, sketch: &Sketch, session:
             session.radius(*id),
             Stroke::new(width, color),
             sketch.is_spatial(),
+            ends,
         );
     }
     for id in sketch.points.keys() {
@@ -567,6 +572,7 @@ pub(crate) fn glyph_spots(
             GeoConstraint::Perpendicular(_, b) => ("_|_", middle(b)),
             GeoConstraint::Collinear(_, b) => ("col", middle(b)),
             GeoConstraint::Tangent { b, .. } => ("T", middle(b)),
+            GeoConstraint::Smooth(_, b) => ("G2", middle(b)),
             GeoConstraint::Equal(_, b) => ("=", middle(b)),
             GeoConstraint::Concentric(_, b) => ("O", middle(b)),
             GeoConstraint::Symmetric { p, .. } => ("sym", point(p)),
@@ -798,7 +804,8 @@ fn preview(view: &View<'_>, plane: &SketchPlane, session: &Session) {
             && let Some(curve) = sketch.curves.get(id)
         {
             let picked = Stroke::new(3.0, colors::PREVIEW);
-            curve_path(view, plane, curve, |p| session.point_pos(p), None, picked, false);
+            let ends = sketch.spline_ends(*id);
+            curve_path(view, plane, curve, |p| session.point_pos(p), None, picked, false, ends);
         }
         if let Item::Point(p) = item
             && let Some(at) = session.point_pos(*p).and_then(|p| view.screen(plane.world(p)))

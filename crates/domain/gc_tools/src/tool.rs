@@ -157,6 +157,8 @@ pub enum ConstraintKind {
     Midpoint,
     Fix,
     Symmetric,
+    /// Smooth (G2): a spline and the curve attached to its end point.
+    Smooth,
     /// 3D: the line or the two points lie along X, Y or Z.
     AlongX,
     AlongY,
@@ -549,6 +551,8 @@ fn dimension_for(sketch: &Sketch, picks: &[Item]) -> Option<DimKind> {
 fn constraint_for(sketch: &Sketch, kind: ConstraintKind, picks: &[Item]) -> Option<GeoConstraint> {
     use ConstraintKind as K;
     let line = |c: Id<Curve>| sketch.line(c);
+    let spline =
+        |c: Id<Curve>| matches!(sketch.curves.get(&c).map(|k| &k.geom), Some(CurveGeom::Spline { .. }));
     match (kind, picks) {
         (K::Coincident, [Item::Point(p), Item::Point(q)]) if p != q => {
             Some(GeoConstraint::Coincident(*p, *q))
@@ -575,6 +579,17 @@ fn constraint_for(sketch: &Sketch, kind: ConstraintKind, picks: &[Item]) -> Opti
         (K::Equal, [Item::Curve(a), Item::Curve(b)]) if a != b => Some(GeoConstraint::Equal(*a, *b)),
         (K::Concentric, [Item::Curve(a), Item::Curve(b)]) if a != b => {
             Some(GeoConstraint::Concentric(*a, *b))
+        }
+        // A spline's end: it runs on from the curve attached there (the spline named first).
+        (K::Tangent | K::Smooth, [Item::Curve(a), Item::Curve(b)])
+            if a != b && (spline(*a) || spline(*b)) =>
+        {
+            let (first, second) = if spline(*a) { (*a, *b) } else { (*b, *a) };
+            Some(if kind == K::Smooth {
+                GeoConstraint::Smooth(first, second)
+            } else {
+                GeoConstraint::Tangent { a: first, b: second, side: 1.0, external: true }
+            })
         }
         (K::Tangent, [Item::Curve(a), Item::Curve(b)]) if a != b => {
             // Put the line first, and capture on which side the circle lies or how the circles touch.

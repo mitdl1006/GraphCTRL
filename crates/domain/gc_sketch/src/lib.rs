@@ -19,6 +19,7 @@ mod drag;
 mod edit;
 mod model;
 mod pattern;
+mod spline_ends;
 mod transform;
 
 pub use arc3::Arc3;
@@ -32,4 +33,5 @@ pub use model::{
     spline_points3,
 };
 pub use pattern::{PatternCopy, PatternDefinition, PatternDirection, PatternStep, SketchPattern};
+pub use spline_ends::{SplineEnd, shaped_spline_points3};
 pub use transform::{CopyResult, MoveRules, copied_items};
