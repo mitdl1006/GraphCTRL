@@ -993,10 +993,11 @@ impl Session {
         self.add_robot_from(&name, &package.urdf()?, &package.resource_dir())
     }
 
-    fn add_robot_from(&mut self, name: &str, urdf: &str, resource_dir: &str) -> Result<Id<Robot>, String> {
+    /// A robot record read from a description: the planning chain, the link tree, zero joint values.
+    fn robot_record(&self, name: &str, urdf: &str, resource_dir: &str) -> Result<Robot, String> {
         let dir = self.cell.resolve(resource_dir);
         let (loaded, base_link, tip_link) = load(urdf, None, self.cell.resources.as_ref(), &dir)?;
-        let robot = Robot {
+        Ok(Robot {
             name: name.to_owned(),
             urdf: urdf.to_owned(),
             resource_dir: resource_dir.to_owned(),
@@ -1010,11 +1011,62 @@ impl Session {
             tool: None,
             acm_overrides: Vec::new(),
             links: link_tree(&loaded.model, &loaded.chain),
-        };
+        })
+    }
+
+    fn add_robot_from(&mut self, name: &str, urdf: &str, resource_dir: &str) -> Result<Id<Robot>, String> {
+        let robot = self.robot_record(name, urdf, resource_dir)?;
         match self.cell_op(CellOp::AddRobot(robot)).map_err(|e| e.to_string())?.first() {
             Some(Created::Robot(id)) => Ok(*id),
             _ => Err("the robot was not created".to_owned()),
         }
+    }
+
+    /// Replace (Inventor 2026 help, Replace assembly components,
+    /// GUID-E5FAA224-7332-4AC6-A78E-793FDACFEEDD: "The new component … [is] placed in the same location
+    /// as the original … If possible, relationships are retained"): the robot takes another description
+    /// and name. It stays where it stood and keeps its tool, tool centre point, look, waypoints and
+    /// paths (planned again when asked for); its joint values are kept when the new arm has as many
+    /// joints. Relationships on its links go to the links of the same name; the names of those that
+    /// could not be kept (now suppressed) are returned. With `all`, every robot with the same
+    /// description is replaced. Refused when a waypoint of the robot is given as joint values and the
+    /// new arm has another number of joints. One undo step.
+    pub fn replace_robot(
+        &mut self,
+        robot: Id<Robot>,
+        name: &str,
+        urdf: &str,
+        resource_dir: &str,
+        all: bool,
+    ) -> Result<Vec<String>, String> {
+        let record = self.robot_record(name, urdf, resource_dir)?;
+        self.replace_component(robot.erase(), gc_doc::Replacement::Robot(Box::new(record)), all)
+            .map_err(|e| e.to_string())
+    }
+
+    /// [`Session::replace_robot`] with a description file (URDF).
+    pub fn replace_robot_file(
+        &mut self,
+        robot: Id<Robot>,
+        path: &std::path::Path,
+        all: bool,
+    ) -> Result<Vec<String>, String> {
+        let urdf = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let name =
+            path.file_stem().map_or_else(|| "Robot".to_owned(), |stem| stem.to_string_lossy().into_owned());
+        let dir = path.parent().map(|dir| dir.to_string_lossy().into_owned()).unwrap_or_default();
+        self.replace_robot(robot, &name, &urdf, &dir, all).map_err(|e| format!("{}:\n{e}", path.display()))
+    }
+
+    /// [`Session::replace_robot`] with a package of the robot library.
+    pub fn replace_library_robot(
+        &mut self,
+        robot: Id<Robot>,
+        package: &crate::library::Package,
+        all: bool,
+    ) -> Result<Vec<String>, String> {
+        let name = format!("{}_{}", package.info.name, self.doc.robots().len());
+        self.replace_robot(robot, &name, &package.urdf()?, &package.resource_dir(), all)
     }
 
     /// Adds a body with a name that is not taken yet.
