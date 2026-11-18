@@ -590,6 +590,62 @@
 - 하지 않은 것: 원문의 폴더 트리·상태 기호 순환·"Isolate connected components"·"충돌하는 관계만 표시", Place/Edit 오류 대화상자의 "Diagnose" 단추(브라우저 메뉴로만 연다).
 - 테스트: `constrain.rs`의 `motion_takes_a_ratio_or_a_distance_and_a_direction`, 셸의 `the_conflict_analysis_checks_with_a_relationship_broken`.
 
+## Planar 조인트·위치 표현 중 비활성·새 뷰 즉시 활성 (백엔드 28233a2)
+
+- Joint 대화상자 유형에 "평면 (Planar)"(`RelationKind::Planar{flip}`; 원문 미확인·일반 정의이므로 백엔드 doc의 설명 그대로). 이름 기본값 "Planar:N".
+- 위치 표현이 [Primary]가 아닐 때(`representations().active_position.is_some()`) 컴포넌트를 더하거나 지우는 명령은 백엔드가 `PrimaryOnly`로 거부한다. 리본의 컴포넌트 배치·Replace·패턴·Mirror·Copy·작업 평면/축/점(3D 모델 탭)을 비활성으로 하고 큰 단추에는 툴팁("Primary 위치 표현이 활성일 때만 할 수 있습니다"), 브라우저 컴포넌트 행의 삭제 단추·우클릭 삭제 항목도 비활성. 근거: Positional representations in assemblies GUID-C728DFAC-1B45-4879-A004-45A8DC991954(백엔드 handoff).
+- 아직 비활성 처리 안 한 것: 서브어셈블리 메뉴(Demote·Dissolve·Move), 패턴·작업 피처 삭제 단추, 끌어 놓기로 트리 이동, 붙여넣기 — 눌러도 상태 줄에 같은 문구가 뜬다.
+- 새 뷰 표현이 만들자마자 활성: 표현 UI 테스트 영향 없음(전체 통과).
+- 테스트: `a_position_representation_disables_removing_components_and_the_joint_dialog_offers_planar`.
+
+## Motion 비·거리 매개변수 (백엔드 e0b77f5)
+
+- Constrain 모션 탭의 비율(단위 없음)·거리(mm) 칸이 식 입력이 된다: 비율은 `Unit::Scalar`로 평가(길이를 넣으면 거부, 0 거부), 만든 뒤 `SetRelationValue`로 식을 그대로 저장. 브라우저 값 칸과 매개변수 표도 Rotation/RotationTranslation 행을 다룬다(표의 단위는 `param.dim`: Length=mm, Angle=deg, Ratio=빈 칸).
+- 바로잡음: 브라우저 값 칸이 각도 구속을 mm로 평가하던 것을(단위 이름을 "°"로 비교하던 실수) 구속 종류로 판단하게 고쳤다.
+- 테스트: `motion_takes_a_ratio_or_a_distance_and_a_direction`(식·단위 거부 추가).
+
+## 간섭 분석 옵션·남은 PrimaryOnly 비활성 (백엔드 e0b77f5)
+
+- 간섭 분석 대화상자에 "서브어셈블리를 컴포넌트로 취급"(`interference_with(.., InterferenceOptions{subassemblies_as_components})`; 근거 GUID-80DED0A6, 백엔드 doc 기준).
+- 위치 표현이 [Primary]가 아닐 때 비활성(툴팁 "Primary 위치 표현이 활성일 때만…")을 브라우저의 서브어셈블리·컴포넌트 메뉴(Demote·Move to top·Dissolve), 패턴·작업 피처 삭제 단추·메뉴, 붙여넣기 항목·Ctrl+V, 서브어셈블리 머리글에 끌어 놓기로 넓혔다. 아직: "다른 서브어셈블리로 이동" 목록, 폴더로 끌기(폴더는 트리 이동이 아니라 영향 없을 수 있음), 서브어셈블리 만들기 이름 입력 확인.
+- 테스트: `the_interference_dialog_has_the_subassembly_option`.
+
+## Mirror: 미러 패턴 / 평평한 구조 (백엔드 36e2759)
+
+근거: Mirror Components: Reference GUID-7B19CA69-8D14-40DA-9543-115A8AFE6336.
+
+- 미러 대화상자에 "평평한 구조 만들기 (Create flat structure)"(기본, 기존 `mirror_components`)와 "미러 패턴 만들기 (Create mirror pattern)"(`add_pattern(.., PatternLayout::Mirror{plane})`, 연관 유지, 브라우저 패턴 노드 "Mirror:N")를 고른다. 패턴이면 "관계 유지·고정" 체크는 숨긴다. 컴포넌트별 Exclude는 목록에서 체크를 빼는 것으로.
+- 하지 않은 것: Mirror/Reuse/Exclude/Mixed 상태 열(백엔드가 Mirror=Reuse로 처리), 미러 패턴 노드 전용 아이콘.
+- 테스트: `replicate.rs`의 `a_mirror_pattern_is_made_instead_of_a_flat_copy`.
+
+## Mirror 상태 Mirror/Reuse (백엔드 767f380)
+
+근거: Mirror Components: Reference GUID-7B19CA69-8D14-40DA-9543-115A8AFE6336(Mirror = 새 파일의 거울상, Reuse = 인스턴스 추가).
+
+- "평평한 구조"에서 선택한 컴포넌트마다 미러/재사용 단추(기본 미러). 미러 = `mirror_components_reflected`(거울상 메시 파일을 원본 옆에 씀), 재사용 = 기존 `mirror_components`. 섞여 있으면 두 번 호출(실행 취소 2단계).
+- 거울상을 못 만든 것(로봇·가져온 어셈블리·파일 실패 = `not_reflected`)은 대화상자에 "같은 형상을 돌려 놓았습니다: 이름…"으로 알리고 열어 둔다. 상태 줄이 아니라 대화상자에 두었다.
+- 하지 않은 것: 상태 "Exclude"(체크 해제)·"Mixed" 표시, 저장 위치 안내(백엔드가 문서 assets 폴더로 바꾸면 API는 같다).
+- 테스트: `replicate.rs`의 `a_flat_mirror_runs_with_mirror_and_reuse_states`.
+
+## 원뿔 면 픽 (백엔드 c798662)
+
+근거: Place Tangent constraints in assemblies GUID-FF270566-CA9E-420A-A00A-F52DD0FDFD8E.
+
+- `gc_scene::SurfaceHit.cone`(apex, 축, 반각): 원통이 아닌 곡면에서 `conical_region_in`이 맞으면 채운다(굽힘 20°, 허용 1 %, 평면보다 넓을 때만). `gc_session::Feature::Cone`을 더했다(백엔드 파일 — 새 변형 하나, 측정은 원뿔을 측정하지 않음).
+- 뷰포트 `pick_feature_with(.., cones)`: Alt 끌기 맞춤(altdrag)은 원뿔을 `Geometry::Cone`으로 선택하고(Tangent 대상), Measure·Grip은 기존처럼 원뿔을 고르지 않는다.
+- 하지 않은 것: 호버 하이라이트에 원뿔 윤곽 표시, Constrain 대화상자의 뷰 선택(지금 대화상자는 원점 요소·작업 피처만 받는다 — 메시 면 선택 자체가 아직 없다). 원뿔 메시로 만든 끝단 테스트도 없다(컴파일·기존 테스트만 통과).
+
+## Constrain·Joint 대화상자: 뷰에서 면·모서리·점·원통·원뿔 선택
+
+근거: To Place Mate or Flush Constraints in Assemblies GUID-0F500089-4F69-41C5-AFE8-B58AC9E8E15E, To Place Angle Constraints GUID-AD4679FD-EE9B-47C0-9E32-04B990BDD29E(선택은 "면 또는 모서리"를 그래픽 창에서 고른다), Place Tangent GUID-FF270566-CA9E-420A-A00A-F52DD0FDFD8E.
+
+- 구속 대화상자(Constrain·Assemble·Joint·Mirror 평면)가 열려 있으면 뷰 클릭이 `pick_feature_with(.., cones=true)`로 평면(면)·원통 축·원뿔·직선 모서리(Axis)·점(Point)을 골라 `Selection`으로 채운다. 지오메트리는 세계 좌표에서 컴포넌트 원점 프레임으로 바꾼다(`altdrag::selection_of(session, …)`; Alt 끌기가 세계 좌표를 그대로 넘기던 오류도 같이 고쳤다). 선택 후 다음 선택으로 자동 이동(기존 slot 규칙). Joint는 면→Z가 면 바깥인 조인트 원점 프레임, 모서리·축→방향이 Z, 점→Z 위로. Mirror는 평면 면만.
+- 호버 하이라이트: 면=법선 화살표+원, 원통·원뿔=축 선, 모서리=선, 점=원.
+- 우선순위: 작업 피처 > (사용자가 보이게 한) 원점 요소 > 면·모서리 등 > (이 모드가 제공하기만 한) 원점 평면. 원점 축·점은 좌표계 위에 그려지므로 클릭이 그 가까이면 계속 이긴다.
+- Predict 미리보기·Apply/OK는 이전과 같다(두 선택이 차면 `predict_relationship`).
+- 한계: 원(Circle) 모서리·구 면은 아직 골라지지 않는다(Feature에 없음): Insert의 원형 모서리와 Tangent 구는 원점/작업 피처로만. 면의 윤곽 하이라이트는 없음. 뷰에서 면의 어느 쪽(법선 방향)을 고르는지는 보이는 면의 법선으로 정한다.
+- 테스트: `the_constrain_dialog_picks_faces_in_the_view`(두 상자의 윗면을 클릭해 Flush가 만들어지고 지오메트리가 면의 평면). QA 시나리오는 같은 흐름으로 쓸 수 있다.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

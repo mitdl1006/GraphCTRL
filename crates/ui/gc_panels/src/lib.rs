@@ -233,6 +233,8 @@ fn relation_value_text(kind: &gc_doc::RelationKind) -> Option<String> {
         | RelationKind::Insert { offset, .. }
         | RelationKind::Tangent { offset, .. } => Some(show(offset * 1000.0)),
         RelationKind::Angle { angle, .. } => Some(show(angle.to_degrees())),
+        RelationKind::Rotation { ratio, .. } => Some(show(*ratio)),
+        RelationKind::RotationTranslation { distance, .. } => Some(show(distance * 1000.0)),
         _ => None,
     }
 }
@@ -246,6 +248,8 @@ fn relation_unit_name(kind: &gc_doc::RelationKind) -> Option<&'static str> {
         | RelationKind::Insert { .. }
         | RelationKind::Tangent { .. } => Some("mm"),
         RelationKind::Angle { .. } => Some("°"),
+        RelationKind::RotationTranslation { .. } => Some("mm"),
+        RelationKind::Rotation { .. } => Some("×"),
         _ => None,
     }
 }
@@ -494,7 +498,7 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
                             text: &text,
                             selected: false,
                             visible: None,
-                            delete: Some(&delete),
+                            delete: (!primary_blocked(session)).then_some(&delete),
                             edit: None,
                             focus: false,
                             dim: false,
@@ -502,7 +506,7 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
                         let result = gc_ui::panel::tree_row(ui, row);
                         let remove = gc_doc::CellOp::DeletePattern { index, keep_copies: false };
                         result.row.context_menu(|ui| {
-                            if ui.button(delete.as_str()).clicked() {
+                            if guarded_button(ui, lang, primary_blocked(session), delete.as_str()).clicked() {
                                 action = Some(BrowserAction::Edit(Box::new(gc_doc::Command::Cell(
                                     remove.clone(),
                                 ))));
@@ -720,7 +724,7 @@ fn work_features(ui: &mut Ui, session: &Session, lang: Lang, action: &mut Option
                 text: &feature.name,
                 selected: false,
                 visible: Some((&mut visible, show.as_str())),
-                delete: Some(&delete),
+                delete: (!primary_blocked(session)).then_some(&delete),
                 edit: None,
                 focus: false,
                 dim: false,
@@ -746,7 +750,7 @@ fn work_features(ui: &mut Ui, session: &Session, lang: Lang, action: &mut Option
                     }))));
                     ui.close();
                 }
-                if ui.button(delete.as_str()).clicked() {
+                if guarded_button(ui, lang, primary_blocked(session), delete.as_str()).clicked() {
                     *action =
                         Some(BrowserAction::Edit(Box::new(Command::Cell(CellOp::DeleteWorkFeature(id)))));
                     ui.close();
@@ -986,6 +990,18 @@ fn folder_menu(
 }
 
 #[allow(clippy::too_many_arguments, reason = "the browser's shared state")]
+/// Whether a positional representation other than [Primary] is active: the commands that add, remove or
+/// reorganize components are refused then (`EditError::PrimaryOnly`) and are shown disabled.
+fn primary_blocked(session: &Session) -> bool {
+    session.representations().active_position.is_some()
+}
+
+/// A menu button that is disabled, with the reason as its tooltip, while `blocked`.
+fn guarded_button(ui: &mut Ui, lang: Lang, blocked: bool, text: &str) -> egui::Response {
+    let response = ui.add_enabled(!blocked, egui::Button::new(text));
+    if blocked { response.on_disabled_hover_text(tr!(lang, ErrPrimaryOnly)) } else { response }
+}
+
 /// Copy and Paste in a row's menu (Paste is offered once something was copied).
 fn copy_paste_items(
     ui: &mut Ui,
@@ -998,7 +1014,13 @@ fn copy_paste_items(
         *action = Some(BrowserAction::Copy(keys));
         ui.close();
     }
-    if ui.add_enabled(!session.clipboard().is_empty(), egui::Button::new(tr!(lang, CmdPaste))).clicked() {
+    if ui
+        .add_enabled(
+            !session.clipboard().is_empty() && !primary_blocked(session),
+            egui::Button::new(tr!(lang, CmdPaste)),
+        )
+        .clicked()
+    {
         *action = Some(BrowserAction::Paste);
         ui.close();
     }
@@ -1085,7 +1107,7 @@ fn component_rows_in(
                 if let Some(dropped) = header.dnd_release_payload::<Vec<gc_doc::TreeKey>>() {
                     let members: Vec<gc_doc::TreeKey> =
                         dropped.iter().copied().filter(|k| *k != row.key).collect();
-                    if !members.is_empty() {
+                    if !members.is_empty() && !primary_blocked(session) {
                         *action =
                             Some(BrowserAction::Subassembly(SubassemblyOp::Move { members, into: Some(id) }));
                     }
@@ -1117,18 +1139,21 @@ fn component_rows_in(
                         ui.close();
                     }
                     // Folders nest without dragging: demote this one into a new subassembly.
-                    if ui.button(tr!(lang, CmdDemote)).clicked() {
+                    let blocked = primary_blocked(session);
+                    if guarded_button(ui, lang, blocked, tr!(lang, CmdDemote)).clicked() {
                         state.group_name = Some(GroupName::Demote(vec![row.key], String::new()));
                         ui.close();
                     }
-                    if row.parent.is_some() && ui.button(tr!(lang, CmdMoveToTop)).clicked() {
+                    if row.parent.is_some()
+                        && guarded_button(ui, lang, blocked, tr!(lang, CmdMoveToTop)).clicked()
+                    {
                         *action = Some(BrowserAction::Subassembly(SubassemblyOp::Move {
                             members: vec![row.key],
                             into: None,
                         }));
                         ui.close();
                     }
-                    if ui.button(tr!(lang, CmdDissolve)).clicked() {
+                    if guarded_button(ui, lang, blocked, tr!(lang, CmdDissolve)).clicked() {
                         *action = Some(BrowserAction::Subassembly(SubassemblyOp::Dissolve(id)));
                         ui.close();
                     }
@@ -1266,7 +1291,8 @@ fn browser_section(
                         *action = Some(BrowserAction::EditComponent(key));
                         ui.close();
                     }
-                    if ui.button(tr!(lang, CmdDemote)).clicked() {
+                    let blocked = primary_blocked(session);
+                    if guarded_button(ui, lang, blocked, tr!(lang, CmdDemote)).clicked() {
                         ask = Some(GroupName::Demote(vec![key], String::new()));
                         ui.close();
                     }
@@ -1278,7 +1304,9 @@ fn browser_section(
                             into,
                         }))
                     };
-                    if current.is_some() && ui.button(tr!(lang, CmdMoveToTop)).clicked() {
+                    if current.is_some()
+                        && guarded_button(ui, lang, blocked, tr!(lang, CmdMoveToTop)).clicked()
+                    {
                         *action = move_to(None);
                         ui.close();
                     }
@@ -1574,6 +1602,16 @@ fn node_row(
     let inactive = suppressed_now || out_of_scope || !enabled || (groundable && !visible);
     let show_label = tr!(lang, ShowItem, node.name);
     let delete_label = tr!(lang, CmdDeleteItem, node.name);
+    // Removing a component is refused while a positional representation other than [Primary] is active.
+    let delete_blocked = session.representations().active_position.is_some()
+        && matches!(
+            node.delete,
+            gc_doc::Command::Cell(
+                gc_doc::CellOp::DeleteBody(_)
+                    | gc_doc::CellOp::DeleteRobot(_)
+                    | gc_doc::CellOp::DeleteAssembly(_)
+            )
+        );
     let renaming = state.rename.as_ref().is_some_and(|(id, _)| *id == node.any);
     let fresh = renaming && std::mem::take(&mut state.rename_fresh);
     let row = TreeRow {
@@ -1582,7 +1620,7 @@ fn node_row(
         selected: node.selected
             || (groundable && state.marked.contains(&gc_doc::TreeKey::Component(occurrence))),
         visible: Some((&mut visible, show_label.as_str())),
-        delete: Some(&delete_label),
+        delete: (!delete_blocked).then_some(&delete_label),
         edit: state.rename.as_mut().filter(|_| renaming).map(|(_, text)| text),
         focus: fresh,
         dim: inactive,
@@ -1746,7 +1784,10 @@ fn node_row(
                 ui.close();
             }
         }
-        if ui.button(delete_label.as_str()).clicked() {
+        let delete = ui.add_enabled(!delete_blocked, egui::Button::new(delete_label.as_str()));
+        let delete =
+            if delete_blocked { delete.on_disabled_hover_text(tr!(lang, ErrPrimaryOnly)) } else { delete };
+        if delete.clicked() {
             *action = Some(BrowserAction::Edit(Box::new(node.delete.clone())));
             ui.close();
         }

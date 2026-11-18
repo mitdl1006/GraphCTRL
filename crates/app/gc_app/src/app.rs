@@ -979,7 +979,9 @@ impl GraphCtrlApp {
                         drop(self.session.copy_to_clipboard(&[gc_doc::TreeKey::Component(occurrence)]));
                     }
                 }
-                egui::Key::V if command && !sketching => {
+                egui::Key::V
+                    if command && !sketching && self.session.representations().active_position.is_none() =>
+                {
                     // The paste waits for the click that gives its place: one undo step.
                     self.viewport.start_paste(&self.session);
                 }
@@ -2016,6 +2018,18 @@ impl eframe::App for GraphCtrlApp {
         }
         if self.place_origin_picking && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.place_origin_picking = false;
+        }
+        // A face, edge, point, cylinder or cone clicked in the view fills the active selection of the dialog.
+        if let Some(selection) = self.viewport.take_constrain_selection() {
+            if self.assemble.picking() {
+                self.assemble.pick_selection(&self.session, selection);
+            } else if self.replicate.picking() {
+                self.replicate.pick_selection(selection);
+            } else if self.joint.open {
+                self.joint.pick_selection(selection);
+            } else if self.constrain.picking() {
+                self.constrain.pick_selection(&self.session, selection);
+            }
         }
         if let Some((occurrence, element)) = self.viewport.take_constrain_pick() {
             if self.place_origin_picking {

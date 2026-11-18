@@ -100,6 +100,10 @@ pub struct Viewport {
     constrain_pick: Option<(gc_doc::Occurrence, gc_doc::OriginElement)>,
     /// The work feature the last click picked for a relationship dialog.
     constrain_work: Option<gc_core::Id<gc_doc::WorkFeature>>,
+    /// A face, edge, point, cylinder or cone clicked while a constraint dialog is picking.
+    constrain_selection: Option<gc_doc::Selection>,
+    /// What the pointer is over while a constraint dialog is picking (shown highlighted).
+    constrain_hover: Option<gc_session::Feature>,
     /// The navigation tool chosen on the navigation bar: it works with the left button until it ends.
     nav_tool: Option<NavTool>,
     /// The origin element (plane, axis, point) of a component that is selected in the view or the browser.
@@ -480,6 +484,8 @@ impl Viewport {
             constrain_mode: false,
             constrain_pick: None,
             constrain_work: None,
+            constrain_selection: None,
+            constrain_hover: None,
             nav_tool: None,
             origin_selected: None,
             work_selected: None,
@@ -1022,6 +1028,9 @@ impl Viewport {
                 self.constrain_mode,
             );
             dof::paint(&ui.painter_at(rect), &screen, session, camera.distance * 0.12);
+            if let Some(feature) = &self.constrain_hover {
+                paint_pick(&ui.painter_at(rect), &screen, feature, camera.distance * 0.1);
+            }
             workfeat::paint(
                 &self.visibility,
                 &ui.painter_at(rect),
@@ -1197,6 +1206,11 @@ impl Viewport {
 
     /// The work feature the last click picked for the Constrain or Assemble dialog, once (Inventor 2026
     /// help, GUID-0F500089-4F69-41C5-AFE8-B58AC9E8E15E: a work feature is selectable geometry).
+    /// The face, edge, point, cylinder or cone a click picked for a constraint dialog, in its component's frame.
+    pub fn take_constrain_selection(&mut self) -> Option<gc_doc::Selection> {
+        self.constrain_selection.take()
+    }
+
     pub fn take_constrain_work(&mut self) -> Option<gc_core::Id<gc_doc::WorkFeature>> {
         self.constrain_work.take()
     }
@@ -1854,6 +1868,18 @@ impl Viewport {
         at: [f64; 2],
         size: [f64; 2],
     ) -> Option<(gc_session::CellItem, gc_session::Feature)> {
+        self.pick_feature_with(session, at, size, false)
+    }
+
+    /// [`Viewport::pick_feature`], with conical faces reported as `Feature::Cone` when `cones` is set (the picks
+    /// that become constraint geometry; Measure does not measure cones).
+    pub fn pick_feature_with(
+        &mut self,
+        session: &Session,
+        at: [f64; 2],
+        size: [f64; 2],
+        cones: bool,
+    ) -> Option<(gc_session::CellItem, gc_session::Feature)> {
         use gc_session::Feature;
         let scene = Scene::of(session);
         let hit = self.picker.pick_surface(&scene, &self.camera.ray(at, size))?;
@@ -1864,6 +1890,10 @@ impl Viewport {
         if let Some((centre, axis, radius, length)) = hit.cylinder {
             let feature =
                 Feature::Cylinder { centre: centre.to_array(), axis: axis.to_array(), radius, length };
+            return Some((hit.owner, feature));
+        }
+        if let Some((apex, axis, half_angle)) = hit.cone.filter(|_| cones) {
+            let feature = Feature::Cone { apex: apex.to_array(), axis: axis.to_array(), half_angle };
             return Some((hit.owner, feature));
         }
         let Some((normal, point, area, outline)) = hit.face else {
@@ -2058,8 +2088,8 @@ impl Viewport {
             if alt
                 && response.drag_started_by(PointerButton::Primary)
                 && let Some(press) = ui.input(|i| i.pointer.press_origin()).map(to_view)
-                && let Some((item, feature)) = self.pick_feature(session, press, size)
-                && let Some(first) = altdrag::selection_of(item, &feature)
+                && let Some((item, feature)) = self.pick_feature_with(session, press, size, true)
+                && let Some(first) = altdrag::selection_of(session, item, &feature)
             {
                 self.alt_drag = Some(altdrag::AltDrag { first, from: press, target: None });
             }
@@ -2073,8 +2103,8 @@ impl Viewport {
         if let Some(at) = response.hover_pos().or_else(|| ui.input(|i| i.pointer.latest_pos())) {
             let at = to_view(at);
             drag.target = self
-                .pick_feature(session, at, size)
-                .and_then(|(item, feature)| altdrag::selection_of(item, &feature))
+                .pick_feature_with(session, at, size, true)
+                .and_then(|(item, feature)| altdrag::selection_of(session, item, &feature))
                 .filter(|second| altdrag::offers(session, &drag.first, second))
                 .map(|second| (second, at));
             ui.ctx().request_repaint();
@@ -2702,6 +2732,15 @@ impl Viewport {
             };
             self.request = Some(ViewportRequest::EditUnit(gc_doc::Occurrence::Item(any)));
         }
+        self.constrain_hover = if self.constrain_mode {
+            response
+                .hover_pos()
+                .map(to_view)
+                .and_then(|at| self.pick_feature_with(session, at, size, true))
+                .map(|(_, feature)| feature)
+        } else {
+            None
+        };
         if self.constrain_mode && response.clicked_by(PointerButton::Primary) {
             let at = response.interact_pointer_pos().map(to_view);
             // Work features that are shown come before the origin geometry.
@@ -2714,6 +2753,23 @@ impl Viewport {
             } else {
                 at.and_then(|at| origin::pick(&self.visibility, &self.camera, size, session, at, true))
             };
+            // A face, edge, point, cylinder or cone of a component under the cursor wins over an origin plane that
+            // this mode only offers (origin planes of every component are pickable here); a plane the user has
+            // shown stays pickable.
+            if let Some(at) = at
+                && self.constrain_work.is_none()
+                && matches!(self.constrain_pick, None | Some((_, gc_doc::OriginElement::Plane(_))))
+            {
+                let shown = origin::pick(&self.visibility, &self.camera, size, session, at, false);
+                if shown.is_some() {
+                    self.constrain_pick = shown;
+                } else if let Some((item, feature)) = self.pick_feature_with(session, at, size, true)
+                    && let Some(selection) = altdrag::selection_of(session, item, &feature)
+                {
+                    self.constrain_selection = Some(selection);
+                    self.constrain_pick = None;
+                }
+            }
         } else if self.measure_features && response.clicked_by(PointerButton::Primary) {
             let at = response.interact_pointer_pos().map(to_view);
             self.measure_pick = Some(at.and_then(|at| self.pick_feature(session, at, size)));
@@ -3129,4 +3185,43 @@ fn apply_dimension_text(session: &mut Session, id: Id<gc_sketch::Dimension>, tex
         }
     }
     session.edit_dimension(id, text).is_ok()
+}
+
+/// The highlight of what a constraint dialog would pick: an arrow out of a face, the axis of a cylinder or cone, an
+/// edge, a point.
+fn paint_pick(
+    painter: &egui::Painter,
+    screen: &dyn Fn(DVec3) -> Option<egui::Pos2>,
+    feature: &gc_session::Feature,
+    length: f64,
+) {
+    use gc_session::Feature;
+    let colour = colors::SELECTED;
+    let stroke = egui::Stroke::new(2.5, colour);
+    let line = |a: DVec3, b: DVec3| {
+        if let (Some(a), Some(b)) = (screen(a), screen(b)) {
+            painter.line_segment([a, b], stroke);
+        }
+    };
+    let v = DVec3::from_array;
+    match *feature {
+        Feature::Point(p) => {
+            if let Some(at) = screen(v(p)) {
+                painter.circle(at, 5.0, colour, egui::Stroke::new(1.5, egui::Color32::WHITE));
+            }
+        }
+        Feature::Edge(a, b) => line(v(a), v(b)),
+        Feature::Cylinder { centre, axis, length: l, .. } => {
+            line(v(centre) - v(axis) * l / 2.0, v(centre) + v(axis) * l / 2.0);
+        }
+        Feature::Cone { apex, axis, .. } => line(v(apex), v(apex) + v(axis) * length * 3.0),
+        Feature::Face { point, normal, .. } => {
+            if let (Some(a), Some(b)) = (screen(v(point)), screen(v(point) + v(normal) * length)) {
+                painter.arrow(a, b - a, stroke);
+            }
+            if let Some(at) = screen(v(point)) {
+                painter.circle_stroke(at, 6.0, stroke);
+            }
+        }
+    }
 }

@@ -3242,7 +3242,7 @@ fn free_move_and_free_rotate_drag_a_component() {
         });
         harness.run_steps(2);
     };
-    let on_body = harness.state().viewport().screen_of(gc_math::DVec3::new(0.0, 0.0, 0.05)).unwrap();
+    let on_body = harness.state().viewport().screen_of(gc_math::DVec3::new(0.03, 0.0, 0.05)).unwrap();
     let depth = harness.state().session.history().undo_depth();
 
     harness.state_mut().viewport_mut().free_tool = Some(gc_viewport::FreeTool::Move);
@@ -5095,7 +5095,7 @@ fn alt_drag_places_a_mate_between_two_faces() {
     app.viewport_mut().camera.pan([0.0, 0.0], [-250.0, 0.0], [1280.0, 700.0]);
     harness.run();
     let from = harness.state().viewport().screen_of(gc_math::DVec3::new(0.4, 0.0, 0.05)).unwrap();
-    let to = harness.state().viewport().screen_of(gc_math::DVec3::new(0.0, 0.0, 0.05)).unwrap();
+    let to = harness.state().viewport().screen_of(gc_math::DVec3::new(0.03, 0.0, 0.05)).unwrap();
     let alt = egui::Modifiers::ALT;
     harness.event(egui::Event::PointerMoved(from));
     harness.run_steps(2);
@@ -7487,4 +7487,139 @@ fn the_conflict_analysis_checks_with_a_relationship_broken() {
     harness.get_by_label("확인 (Check)").click();
     harness.run_steps(2);
     harness.get_by_label("충돌 없음");
+}
+
+/// While a positional representation other than [Primary] is active, removing a component is refused: its menu
+/// item is disabled. The Joint dialog offers Planar.
+#[test]
+fn a_position_representation_disables_removing_components_and_the_joint_dialog_offers_planar() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let body = harness
+        .state_mut()
+        .session
+        .add_body(gc_doc::Solid::Box { size: [0.05; 3] }, gc_doc::Placement::default())
+        .unwrap();
+    harness
+        .state_mut()
+        .session
+        .execute(&gc_doc::Command::Cell(gc_doc::CellOp::AddPositionalRepresentation("Position:1".into())))
+        .unwrap();
+    harness
+        .state_mut()
+        .session
+        .execute(&gc_doc::Command::Cell(gc_doc::CellOp::ActivatePositionalRepresentation(Some(0))))
+        .unwrap();
+    harness.run_steps(3);
+    let name = harness.state().session.doc().get(body).unwrap().name.clone();
+    let at =
+        harness.get_all_by_label_contains(&name).find(|n| n.rect().min.x < 100.0).unwrap().rect().center();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run_steps(2);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+    harness.run_steps(3);
+    harness.get_all_by_label(&format!("{name} 삭제")).last().unwrap().click();
+    harness.run_steps(3);
+    assert!(harness.state().session.doc().get(body).is_some(), "the component was not removed");
+
+    // The Joint dialog has Planar.
+    harness
+        .state_mut()
+        .session
+        .execute(&gc_doc::Command::Cell(gc_doc::CellOp::ActivatePositionalRepresentation(None)))
+        .unwrap();
+    harness.get_by_label("조립").click();
+    harness.run_steps(3);
+    harness.get_by_label("조인트").click();
+    harness.run_steps(3);
+    harness.get_by_label("평면 (Planar)");
+}
+
+/// The Analyze Interference dialog offers "Treat subassemblies as components" (Inventor 2026 help,
+/// GUID-80DED0A6).
+#[test]
+fn the_interference_dialog_has_the_subassembly_option() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness
+        .state_mut()
+        .session
+        .add_body(gc_doc::Solid::Box { size: [0.05; 3] }, gc_doc::Placement::default())
+        .unwrap();
+    harness.run();
+    harness.get_by_label("검사").click();
+    harness.run();
+    harness.get_by_label("간섭 분석").click();
+    harness.run_steps(3);
+    harness.get_by_label("서브어셈블리를 컴포넌트로 취급");
+}
+
+/// The Constrain dialog takes faces from the view (Inventor 2026 help, To Place Mate or Flush Constraints in Assemblies,
+/// GUID-0F500089-4F69-41C5-AFE8-B58AC9E8E15E: "select the first face ... select the second face"): a click on a
+/// component's face fills the first selection, the next click the second, and OK makes the Flush constraint.
+#[test]
+fn the_constrain_dialog_picks_faces_in_the_view() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.1, 0.1, 0.1] };
+    let app = harness.state_mut();
+    app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    app.session.add_body(solid, gc_doc::Placement { xyz: [0.3, 0.0, 0.05], rpy: [0.0; 3] }).unwrap();
+    harness.run();
+    harness.state_mut().fit_view();
+    harness.run_steps(3);
+    // Where the top faces are on the screen (the first box's top at z = 50 mm, the second's at z = 100 mm).
+    let top_a = harness.state().viewport().screen_of(gc_math::DVec3::new(0.03, 0.0, 0.05)).unwrap();
+    let top_b = harness.state().viewport().screen_of(gc_math::DVec3::new(0.33, 0.0, 0.1)).unwrap();
+    harness.get_by_label("조립").click();
+    harness.run_steps(3);
+    harness.get_all_by_label("구속").next().unwrap().click();
+    harness.run_steps(3);
+    harness.get_by_label("플러시").click();
+    harness.run_steps(2);
+    let click = |h: &mut egui_kittest::Harness<'_, GraphCtrlApp>, at: egui::Pos2| {
+        h.event(egui::Event::PointerMoved(at));
+        h.run_steps(2);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            h.run_steps(1);
+        }
+        h.run_steps(3);
+    };
+    click(&mut harness, top_a);
+    click(&mut harness, top_b);
+    assert_eq!(harness.query_all_by_label_contains("뷰에서 선택").count(), 0, "both selections are filled");
+    assert_eq!(harness.state().session.relationships().len(), 0);
+    harness.get_by_label("확인").click();
+    harness.run_steps(3);
+    let relationships = harness.state().session.relationships();
+    assert_eq!(relationships.len(), 1, "a Flush constraint of the two top faces");
+    // The geometry is the faces' (a plane 50 mm up the box), not the origin planes the view also offers.
+    match relationships[0].1.first.geometry {
+        gc_doc::Geometry::Plane { point, normal } => {
+            assert!((point[2] - 0.05).abs() < 1e-6 && normal[2] > 0.99, "{point:?} {normal:?}");
+        }
+        other => panic!("{other:?}"),
+    }
 }

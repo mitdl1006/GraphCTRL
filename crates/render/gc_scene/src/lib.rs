@@ -416,6 +416,8 @@ pub struct SurfaceHit {
     /// The cylindrical surface around the hit, when it is one, in the world: centre, unit axis, radius
     /// and length.
     pub cylinder: Option<(DVec3, DVec3, f64, f64)>,
+    /// A conical surface: the apex, the unit axis away from it and the angle between axis and surface.
+    pub cone: Option<(DVec3, DVec3, f64)>,
 }
 
 impl Picker {
@@ -458,7 +460,7 @@ impl Picker {
                     .or_insert_with(|| Arc::new(gc_mesh::region::Adjacency::of(mesh))),
             )
         });
-        let (face, cylinder) = match (mesh.as_ref(), adjacency.as_ref()) {
+        let (face, cylinder, cone) = match (mesh.as_ref(), adjacency.as_ref()) {
             (Some(mesh), Some(adjacency)) => {
                 let face = gc_mesh::region::planar_region_in(
                     mesh,
@@ -476,9 +478,22 @@ impl Picker {
                     0.01,
                 )
                 .filter(|c| c.triangles.len() > face.as_ref().map_or(0, |f| f.triangles.len()));
-                (face, cylinder)
+                // A cone when it is not a cylinder (Tangent takes a cone against a plane or a sphere).
+                let cone = if cylinder.is_some() {
+                    None
+                } else {
+                    gc_mesh::region::conical_region_in(
+                        mesh,
+                        adjacency,
+                        hit.triangle,
+                        20_f64.to_radians(),
+                        0.01,
+                    )
+                    .filter(|c| c.triangles.len() > face.as_ref().map_or(0, |f| f.triangles.len()))
+                };
+                (face, cylinder, cone)
             }
-            _ => (None, None),
+            _ => (None, None, None),
         };
         Some(SurfaceHit {
             owner: solid.owner?,
@@ -488,6 +503,7 @@ impl Picker {
                 (pose.rotation * f.normal, pose * f.point, f.area, outline)
             }),
             cylinder: cylinder.map(|c| (pose * c.centre, pose.rotation * c.axis, c.radius, c.length)),
+            cone: cone.map(|c| (pose * c.apex, pose.rotation * c.axis, c.half_angle)),
         })
     }
 

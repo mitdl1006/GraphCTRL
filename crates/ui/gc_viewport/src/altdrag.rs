@@ -19,21 +19,48 @@ pub(crate) struct AltDrag {
     pub(crate) target: Option<(Selection, [f64; 2])>,
 }
 
-/// The geometry a face or cylinder picked in the view stands for (edges and points are not used here).
-pub(crate) fn geometry_of(feature: &Feature) -> Option<Geometry> {
+/// The geometry a picked face, cylinder, cone, edge or point stands for, as the world sees it.
+fn world_geometry_of(feature: &Feature) -> Option<Geometry> {
     match *feature {
         Feature::Face { point, normal, .. } => Some(Geometry::Plane { point, normal }),
         Feature::Cylinder { centre, axis, radius, .. } => {
             Some(Geometry::Cylinder { point: centre, direction: axis, radius })
         }
-        Feature::Point(_) | Feature::Edge(..) => None,
+        Feature::Cone { apex, axis, half_angle } => {
+            Some(Geometry::Cone { apex, direction: axis, half_angle })
+        }
+        Feature::Edge(a, b) => {
+            let direction =
+                (gc_math::DVec3::from_array(b) - gc_math::DVec3::from_array(a)).try_normalize()?;
+            Some(Geometry::Axis { point: a, direction: direction.to_array() })
+        }
+        Feature::Point(p) => Some(Geometry::Point(p)),
     }
 }
 
-/// The selection a pick of the component stands for.
-pub(crate) fn selection_of(item: CellItem, feature: &Feature) -> Option<Selection> {
+/// The selection a pick of the component stands for: the geometry is turned from the world into the component's
+/// own frame, as a Selection holds it (Inventor 2026 help, Place Constraints: faces, edges, points and axes are
+/// picked in the graphics window).
+pub(crate) fn selection_of(session: &Session, item: CellItem, feature: &Feature) -> Option<Selection> {
+    use gc_math::DVec3;
     let any = crate::grip::component_of(item)?;
-    Some(Selection { occurrence: Occurrence::Item(any), geometry: geometry_of(feature)? })
+    let occurrence = Occurrence::Item(any);
+    let pose = session.component_origin(occurrence)?.pose.inverse();
+    let p = |v: [f64; 3]| (pose.translation + pose.rotation * DVec3::from_array(v)).to_array();
+    let d = |v: [f64; 3]| (pose.rotation * DVec3::from_array(v)).to_array();
+    let geometry = match world_geometry_of(feature)? {
+        Geometry::Plane { point, normal } => Geometry::Plane { point: p(point), normal: d(normal) },
+        Geometry::Axis { point, direction } => Geometry::Axis { point: p(point), direction: d(direction) },
+        Geometry::Point(point) => Geometry::Point(p(point)),
+        Geometry::Cylinder { point, direction, radius } => {
+            Geometry::Cylinder { point: p(point), direction: d(direction), radius }
+        }
+        Geometry::Cone { apex, direction, half_angle } => {
+            Geometry::Cone { apex: p(apex), direction: d(direction), half_angle }
+        }
+        other => other,
+    };
+    Some(Selection { occurrence, geometry })
 }
 
 /// Whether `second` can be constrained to `first` (another component, geometry that goes together).
