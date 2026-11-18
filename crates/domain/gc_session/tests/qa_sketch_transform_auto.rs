@@ -285,8 +285,27 @@ fn copying_a_fixed_curve_leaves_the_original() {
             transform(vec![l], Motion::Translate { by: [0.0, 0.02] }, true, relax),
         );
     }
-    refused_or_sane(&mut s, k, "rotate, relax", transform(vec![l], rotate([0.0, 0.0], 20.0), false, true));
     assert_eq!(ends(&s, l), before);
+}
+
+/// Help (To Copy, Move, or Rotate 2D Sketch Geometry, GUID-F8114270): geometric constraints "Always"
+/// "Deletes only fixed constraints that are associated with the selected geometry": a relaxed move or
+/// rotate of a fixed curve moves it and drops its Fix.
+#[test]
+fn relaxed_move_of_a_fixed_curve_deletes_its_fix() {
+    for motion in [Motion::Translate { by: [0.0, 0.02] }, rotate([0.0, 0.0], 20.0)] {
+        let (mut s, k) = setup();
+        let l = line(&mut s, k, [0.01, 0.0], [0.03, 0.0]);
+        let (a, b) = s.active_sketch().unwrap().1.line(l).unwrap();
+        for p in [a, b] {
+            run(&mut s, k, SketchOp::AddConstraint(GeoConstraint::Fix(p))).unwrap();
+        }
+        let before = ends(&s, l);
+        run(&mut s, k, transform(vec![l], motion, false, true)).unwrap();
+        assert_ne!(ends(&s, l), before, "{motion:?}: the relaxed curve did not move");
+        let sk = s.active_sketch().unwrap().1;
+        assert!(!sk.constraints.values().any(|c| matches!(c, GeoConstraint::Fix(_))), "{motion:?}: Fix kept");
+    }
 }
 
 /// A move of one curve whose end is held to another by a coincident constraint: without relax the move is

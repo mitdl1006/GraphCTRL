@@ -185,6 +185,16 @@ impl Sketch {
             if moving.iter().any(fixed) {
                 return Err(SketchError::Unsolved(Status::Inconsistent));
             }
+        } else {
+            // Relaxed ("Always"): the Fix constraints of what moves are deleted; reference points still
+            // cannot move.
+            if moving
+                .iter()
+                .any(|p| self.points.get(p).is_some_and(|q| matches!(q.kind, PointKind::External(_))))
+            {
+                return Err(SketchError::Unsolved(Status::Inconsistent));
+            }
+            self.constraints.retain(|_, c| !matches!(c, GeoConstraint::Fix(p) if moving.contains(p)));
         }
         let dimension_touches = |pts: &[Id<SkPoint>], cvs: &[Id<Curve>]| {
             let inside = pts.iter().any(|p| moving.contains(p)) || cvs.iter().any(|c| selected.contains(c));

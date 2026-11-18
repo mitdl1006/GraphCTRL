@@ -62,6 +62,12 @@
   근거: To Copy, Move, or Rotate 2D Sketch Geometry(GUID-F8114270-18F7-4C7A-947E-AC489EDACFA9)의 기하 구속 "Never"인
   "The operation obeys all existing geometric constraints".
 - `copy_placed`: 곡선 목록의 중복을 없애고 복사한다(한 번만 복사).
+- relax(기하 구속 "Always")로 이동하면 원문 "Deletes only fixed constraints that are associated with the selected geometry"대로
+  움직이는 점의 Fix 구속을 지우고 움직인다. 참조점(`External`)은 relax여도 거부한다.
+  QA 테스트 `copying_a_fixed_curve_leaves_the_original`의 "rotate, relax 후 제자리" 가정은 원문과 달라서 뺐다.
+  대신 `relaxed_move_of_a_fixed_curve_deletes_its_fix`를 추가했다.
+  아직 원문과 다른 점: "Always"에서 선택·비선택 사이 구속을 지울 때 Move는 Parallel·Perpendicular·Equal을, Rotate는 Equal을 남겨야 하는데,
+  지금은 수평·수직만 따로 다룬다(`break_level`).
 - `gc_session/tests/qa_sketch_transform_auto.rs`의 `#[ignore]` 3개를 풀었다.
 
 ## 2026-11-18 — QA 버그 2건(qa.md 151행): 패턴 방향선 삭제, HUD 식
