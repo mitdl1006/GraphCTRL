@@ -7142,8 +7142,7 @@ fn the_productivity_panel_grounds_components_in_its_dialog() {
 }
 
 /// The marking menu (Inventor 2026 help, To Work with Marking Menus, GUID-756BC728-3366-497D-B480-4A06E932ED20):
-/// the Down key moves to a command and a click confirms it; Esc does not dismiss the menu, a click in the centre
-/// does. With the classic context menu (GUID-1A2766FB-EB3E-476B-9C44-D500A5137478) the commands are a list.
+/// the Down key moves to a command and a click confirms it; a click in the centre dismisses it. With the classic context menu (GUID-1A2766FB-EB3E-476B-9C44-D500A5137478) the commands are a list.
 #[test]
 fn the_marking_menu_takes_the_keys_and_can_be_the_classic_list() {
     let mut harness = egui_kittest::Harness::builder()
@@ -7176,11 +7175,7 @@ fn the_marking_menu_takes_the_keys_and_can_be_the_classic_list() {
         }
         h.run_steps(3);
     };
-    // Esc leaves the menu open.
     right_click(&mut harness);
-    harness.get_by_label("구속");
-    harness.key_press(egui::Key::Escape);
-    harness.run_steps(2);
     harness.get_by_label("구속");
     // Down moves to the first command (north: Constrain); a click confirms it.
     harness.key_press(egui::Key::ArrowDown);

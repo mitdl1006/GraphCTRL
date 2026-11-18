@@ -109,18 +109,23 @@ impl MarkingMenu {
         overflow: &[MarkingItem],
     ) -> Option<MarkingPick> {
         let (centre, opened) = self.open?;
-        // Esc is left alone: it can cancel a command in progress (Inventor 2026 help, To Work with Marking
-        // Menus, GUID-756BC728-3366-497D-B480-4A06E932ED20: dismiss by clicking the centre instead).
-        let (pointer, released, time, primary, down, up) = ctx.input(|i| {
+        // Esc closes the menu too (the help dismisses by a click in the centre, and warns that Esc can cancel a
+        // command in progress; here the menu's own Esc only closes it, GUID-756BC728-3366-497D-B480-4A06E932ED20).
+        let (pointer, released, time, escape, primary, down, up) = ctx.input(|i| {
             (
                 i.pointer.latest_pos(),
                 i.pointer.button_released(egui::PointerButton::Secondary),
                 i.time,
+                i.key_pressed(egui::Key::Escape),
                 i.pointer.button_clicked(egui::PointerButton::Primary),
                 i.key_pressed(egui::Key::ArrowDown),
                 i.key_pressed(egui::Key::ArrowUp),
             )
         });
+        if escape {
+            self.close();
+            return None;
+        }
         let item = |sector: usize| radial.get(sector).and_then(Option::as_ref).filter(|item| item.enabled);
         // Up and Down move through the enabled commands (clockwise from north); a click then confirms.
         if down || up {

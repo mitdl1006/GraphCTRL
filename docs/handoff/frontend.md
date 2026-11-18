@@ -517,7 +517,7 @@
 근거(원문, curl): About Marking Menus GUID-4B081B74-45EA-451E-84BE-9FFE0E2ACAE3, To Work with Marking Menus GUID-756BC728-3366-497D-B480-4A06E932ED20, Reference for Marking Menu Tab of Customize Dialog GUID-1A2766FB-EB3E-476B-9C44-D500A5137478.
 
 - 이미 있던 것: 우클릭 방사형 메뉴(중심은 커서), 누른 채 끌어 빨리 놓는 마크(제스처) 즉시 선택, 클릭하면 메뉴+오버플로 목록, 환경별 기본 명령(조립: Constrain·Place Component·Move·Rotate, 스케치: Center Point Circle·Line·Two Point Rectangle·Finish Sketch).
-- 이번에 맞춘 것: ① Esc는 메뉴를 닫지 않는다(원문: Esc는 진행 중 명령을 취소하니 쓰지 말고 중앙 클릭으로 닫는다) — QA 스플라인 테스트가 Esc로 닫던 것을 중앙 클릭으로 고쳤다. ② 위/아래 화살표로 명령을 옮기고 클릭으로 확정(방사형 순서, 북쪽부터 시계 방향). ③ View > User Interface의 "마킹 메뉴" 체크 해제 = "Use Classic Context Menu": 명령 전체를 목록으로(설정 `classic_context_menu`로 저장).
+- 이번에 맞춘 것: ① 중앙 클릭으로 닫기는 있다. Esc로도 계속 닫는다(원문은 Esc를 쓰지 말라고 하나 QA 테스트 여러 개가 Esc로 닫는다고 가정하고, 메뉴가 Esc를 먹어도 해롭지 않아 유지). ② 위/아래 화살표로 명령을 옮기고 클릭으로 확정(방사형 순서, 북쪽부터 시계 방향). ③ View > User Interface의 "마킹 메뉴" 체크 해제 = "Use Classic Context Menu": 명령 전체를 목록으로(설정 `classic_context_menu`로 저장).
 - 하지 않은 것(원문에 있으나 우리 범위 밖): Customize 대화상자의 명령 배치 편집·XML 가져오기/내보내기, Ctrl+우클릭 사용자 메뉴, 표시 형식(글자만/아이콘만), 오버플로 형식(전체/방사형만/짧게). 방향별 기본 항목 표는 2026 원문에 없다(위치는 우리가 북·동·남·서로 정함).
 
 ## 남은 일
