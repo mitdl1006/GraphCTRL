@@ -326,7 +326,8 @@ impl JointRange {
     /// What the joint is asked to be, given where it is: Current when set, otherwise the value kept within
     /// the range.
     fn target(&self, value: f64) -> f64 {
-        self.current.unwrap_or_else(|| value.clamp(self.start, self.end))
+        // Never panics, whatever a damaged file holds (Start past End, NaN).
+        self.current.unwrap_or_else(|| gc_math::clamp_between(value, self.start, self.end))
     }
 }
 
@@ -2029,7 +2030,9 @@ impl Document {
         if let (true, Some(condition)) = (is_joint_kind(&relationship.kind), ranged) {
             let (mut angular, mut linear) = (condition.angular, condition.linear);
             match (&mut angular, &mut linear) {
-                (Some(r), _) | (None, Some(r)) => r.current = Some(value.clamp(r.start, r.end)),
+                (Some(r), _) | (None, Some(r)) => {
+                    r.current = Some(gc_math::clamp_between(value, r.start, r.end))
+                }
                 (None, None) => {}
             }
             crate::apply(&mut preview, &Command::Cell(CellOp::SetJointLimits { id, angular, linear }))?;

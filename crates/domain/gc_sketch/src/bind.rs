@@ -84,7 +84,7 @@ impl Binding {
         b: Id<Curve>,
     ) -> Result<Option<Constraint>, SketchError> {
         let ends = |curve: Id<Curve>| -> Vec<Id<SkPoint>> {
-            match sketch.curves.get(&curve).map(|c| c.geom) {
+            match sketch.curves.get(&curve).map(|c| c.geom.clone()) {
                 Some(CurveGeom::Line { a, b }) => vec![a, b],
                 Some(CurveGeom::Arc { s, e, .. }) => vec![s, e],
                 _ => Vec::new(),
@@ -103,10 +103,11 @@ impl Binding {
         else {
             return Ok(None);
         };
-        let arc_end = |curve: Id<Curve>, at: Id<SkPoint>| match sketch.curves.get(&curve).map(|c| c.geom) {
-            Some(CurveGeom::Arc { c, s, .. }) => Some((c, if at == s { 1.0 } else { -1.0 })),
-            _ => None,
-        };
+        let arc_end =
+            |curve: Id<Curve>, at: Id<SkPoint>| match sketch.curves.get(&curve).map(|c| c.geom.clone()) {
+                Some(CurveGeom::Arc { c, s, .. }) => Some((c, if at == s { 1.0 } else { -1.0 })),
+                _ => None,
+            };
         Ok(match (self.line(sketch, a), self.line(sketch, b)) {
             (Ok(line), Err(_)) => {
                 let Some((_, leaving)) = arc_end(b, pb) else { return Ok(None) };
@@ -345,7 +346,11 @@ impl Sketch {
                 CurveGeom::Circle { r, .. } => {
                     binding.radii.insert(*id, binding.sys.add_radius(r));
                 }
-                CurveGeom::Ellipse { .. } if spatial => return Err(SketchError::WrongSpace),
+                CurveGeom::Ellipse { .. } | CurveGeom::Spline { .. } if spatial => {
+                    return Err(SketchError::WrongSpace);
+                }
+                // A spline follows its fit points; it adds nothing to solve.
+                CurveGeom::Spline { .. } => {}
                 CurveGeom::Ellipse { c, major, minor, arc } => {
                     let r = binding.sys.add_radius(minor);
                     binding.radii.insert(*id, r);

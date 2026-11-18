@@ -1168,6 +1168,12 @@ messages! {
     PromptEllipseAxis => ("첫째 축의 끝을 클릭하십시오", "Click the end of the first axis"),
     PromptEllipseMinor => ("타원 위의 한 점을 클릭하십시오", "Click a point on the ellipse"),
     ToolEllipse => ("타원", "Ellipse"),
+    PromptSplineFirst => ("스플라인의 첫 맞춤점을 클릭하십시오", "Click the first fit point of the spline"),
+    PromptSplineNext => (
+        "다음 맞춤점을 클릭하십시오(Enter 또는 마지막 점 다시 클릭으로 마침)",
+        "Click the next fit point (Enter, or the last point again, to finish)"
+    ),
+    ToolSpline => ("스플라인(보간)", "Spline (Interpolation)"),
     PromptTangentCircleLine => ("원이 접할 선을 클릭하십시오(3개)", "Click a line the circle touches (three)"),
     ToolMidpointLine => ("중점 선", "Midpoint Line"),
     ToolCenterRectangle => ("2점 중심 직사각형", "Two Point Center Rectangle"),

@@ -333,6 +333,15 @@ pub enum SketchOp {
         #[serde(default)]
         centre_snap: EndSnap,
     },
+    /// Adds an interpolation spline through fit points (Inventor 2026 help, Spline (Interpolation): click
+    /// the fit points, then finish). Each fit point may be snapped (coincident with a point, on a curve).
+    AddSpline {
+        /// The fit points, first to last.
+        points: Vec<[f64; 3]>,
+        /// What each fit point was snapped to (missing entries: nothing).
+        #[serde(default)]
+        snaps: Vec<EndSnap>,
+    },
     /// Adds an arc, counter-clockwise from `start` to `end`.
     AddArc {
         /// Centre.
@@ -1130,7 +1139,7 @@ fn pattern_sources(sketch: &Sketch, curves: &[Id<Curve>]) -> Result<PatternSourc
     let mut points = Vec::new();
     let mut out = Vec::new();
     for id in curves {
-        let curve = *sketch.curves.get(id).ok_or(SketchError::MissingCurve)?;
+        let curve = sketch.curves.get(id).ok_or(SketchError::MissingCurve)?.clone();
         for p in curve.points() {
             if !points.contains(&p) {
                 points.push(p);
@@ -1200,6 +1209,9 @@ impl PatternBuild {
                 gc_sketch::CurveGeom::Arc { c, s, e } => {
                     gc_sketch::CurveGeom::Arc { c: to(c)?, s: to(s)?, e: to(e)? }
                 }
+                gc_sketch::CurveGeom::Spline { ref points } => gc_sketch::CurveGeom::Spline {
+                    points: points.iter().map(|p| to(*p)).collect::<Result<_, _>>()?,
+                },
                 gc_sketch::CurveGeom::Ellipse { c, major, minor, arc } => gc_sketch::CurveGeom::Ellipse {
                     c: to(c)?,
                     major: to(major)?,
@@ -1402,7 +1414,7 @@ fn auto_dimension(
     // Sizes first, then where things are: from the sketch's origin point.
     let mut candidates: Vec<DimKind> = Vec::new();
     for curve in curves {
-        match sketch.curves.get(curve).map(|c| c.geom) {
+        match sketch.curves.get(curve).map(|c| c.geom.clone()) {
             Some(gc_sketch::CurveGeom::Line { a, b }) => candidates.push(DimKind::Distance { p: a, q: b }),
             Some(gc_sketch::CurveGeom::Circle { .. }) => candidates.push(DimKind::Diameter(*curve)),
             Some(gc_sketch::CurveGeom::Arc { .. }) => candidates.push(DimKind::Radius(*curve)),
@@ -1411,7 +1423,8 @@ fn auto_dimension(
                 candidates.push(DimKind::Distance { p: c, q: major });
                 candidates.push(DimKind::Radius(*curve));
             }
-            None => {}
+            // A spline's fit points are placed by their own dimensions.
+            Some(gc_sketch::CurveGeom::Spline { .. }) | None => {}
         }
     }
     let origin = sketch.points.iter().find_map(|(id, p)| {
@@ -1542,7 +1555,9 @@ pub(crate) fn leaving_direction(sketch: &Sketch, curve: Id<Curve>, at: Id<SkPoin
                 None
             }
         }
-        gc_sketch::CurveGeom::Circle { .. } | gc_sketch::CurveGeom::Ellipse { .. } => None,
+        gc_sketch::CurveGeom::Circle { .. }
+        | gc_sketch::CurveGeom::Ellipse { .. }
+        | gc_sketch::CurveGeom::Spline { .. } => None,
     }
 }
 
@@ -1803,10 +1818,11 @@ fn sketch_op(
             let far = sketch.add_arc(ids, [c2[0], c2[1], 0.0], p(c2, -1.0), p(c2, 1.0))?;
             let near = sketch.add_arc(ids, [c1[0], c1[1], 0.0], p(c1, 1.0), p(c1, -1.0))?;
             created.extend([bottom, far, top, near, centre_line].map(Created::Curve));
-            let arc_points = |sketch: &Sketch, arc: Id<Curve>| match sketch.curves.get(&arc).map(|c| c.geom) {
-                Some(gc_sketch::CurveGeom::Arc { c, s, e }) => Some((c, s, e)),
-                _ => None,
-            };
+            let arc_points =
+                |sketch: &Sketch, arc: Id<Curve>| match sketch.curves.get(&arc).map(|c| c.geom.clone()) {
+                    Some(gc_sketch::CurveGeom::Arc { c, s, e }) => Some((c, s, e)),
+                    _ => None,
+                };
             let (Some((fc, fs, fe)), Some((nc, ns, ne)), Some((la, lb)), Some((ba, bb)), Some((ta, tb))) = (
                 arc_points(sketch, far),
                 arc_points(sketch, near),
@@ -1861,7 +1877,7 @@ fn sketch_op(
             }
             created
                 .extend([outer, end_cap, inner, start_cap, middle, radius_s, radius_e].map(Created::Curve));
-            let arc = |sketch: &Sketch, id: Id<Curve>| match sketch.curves.get(&id).map(|c| c.geom) {
+            let arc = |sketch: &Sketch, id: Id<Curve>| match sketch.curves.get(&id).map(|c| c.geom.clone()) {
                 Some(gc_sketch::CurveGeom::Arc { c, s, e }) => Some((c, s, e)),
                 _ => None,
             };
@@ -1928,7 +1944,7 @@ fn sketch_op(
             let off_line = |p: [f64; 3]| ((p[0] - a[0]) * uy - (p[1] - a[1]) * ux).abs() > 1e-9;
             let originals: Vec<Curve> = curves
                 .iter()
-                .map(|c| sketch.curves.get(c).copied().ok_or(SketchError::MissingCurve))
+                .map(|c| sketch.curves.get(c).cloned().ok_or(SketchError::MissingCurve))
                 .collect::<Result<_, _>>()?;
             // Each point once: its copy (or itself on the mirror line).
             let mut copies: std::collections::BTreeMap<Id<SkPoint>, Id<SkPoint>> =
@@ -1955,6 +1971,9 @@ fn sketch_op(
                     gc_sketch::CurveGeom::Arc { c, s, e } => {
                         gc_sketch::CurveGeom::Arc { c: map(c)?, s: map(e)?, e: map(s)? }
                     }
+                    gc_sketch::CurveGeom::Spline { ref points } => gc_sketch::CurveGeom::Spline {
+                        points: points.iter().map(|p| map(*p)).collect::<Result<_, _>>()?,
+                    },
                     // Like an arc, an elliptical arc runs back from the copied end.
                     gc_sketch::CurveGeom::Ellipse { c, major, minor, arc } => gc_sketch::CurveGeom::Ellipse {
                         c: map(c)?,
@@ -2234,6 +2253,21 @@ fn sketch_op(
                 infer(sketch, ids, constraint, &mut created);
             }
             "Circle"
+        }
+        SketchOp::AddSpline { points, snaps } => {
+            let spline = sketch.add_spline(ids, points)?;
+            created.push(Created::Curve(spline));
+            let fit = if let Some(gc_sketch::CurveGeom::Spline { points }) =
+                sketch.curves.get(&spline).map(|c| &c.geom)
+            {
+                points.clone()
+            } else {
+                Vec::new()
+            };
+            for (point, snap) in fit.into_iter().zip(snaps) {
+                snap_constraint(sketch, ids, point, snap, &mut created);
+            }
+            "Spline"
         }
         SketchOp::AddEllipse { centre, major, minor, centre_snap } => {
             let ellipse = sketch.add_ellipse(ids, *centre, *major, *minor)?;

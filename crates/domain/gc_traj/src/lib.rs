@@ -113,7 +113,7 @@ impl Trapezoid {
         if self.duration <= 0.0 {
             return (1.0, 0.0, 0.0);
         }
-        let t = t.clamp(0.0, self.duration);
+        let t = crate::clamp_between(t, 0.0, self.duration);
         let peak = self.accel * self.ramp;
         if t < self.ramp {
             (0.5 * self.accel * t * t, self.accel * t, self.accel)
@@ -315,7 +315,7 @@ impl<State> Trajectory<State> {
                 None => timed.sample(t),
             };
         }
-        let t = t.clamp(0.0, self.computed_duration());
+        let t = crate::clamp_between(t, 0.0, self.computed_duration());
         // The segment that contains t: the last one starting at or before it.
         let segment = self
             .times
@@ -336,6 +336,16 @@ impl<State> Trajectory<State> {
             qdd: (0..dof).map(|k| delta(k) * dds).collect(),
         }
     }
+}
+
+/// `value` kept between `a` and `b` in either order without panicking (unlike `f64::clamp` with bounds
+/// out of order or NaN, which bad input could give): with a NaN bound the value is left as it is.
+pub(crate) fn clamp_between(value: f64, a: f64, b: f64) -> f64 {
+    if a.is_nan() || b.is_nan() {
+        return value;
+    }
+    let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+    value.max(lo).min(hi)
 }
 
 #[cfg(test)]

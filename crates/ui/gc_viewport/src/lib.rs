@@ -908,7 +908,9 @@ impl Viewport {
                         Some((0..24).map(|i| (*id, along(i), along(i + 1))).collect())
                     })()
                     .unwrap_or_default(),
-                    CurveGeom::Circle { .. } | CurveGeom::Ellipse { .. } => Vec::new(),
+                    CurveGeom::Circle { .. } | CurveGeom::Ellipse { .. } | CurveGeom::Spline { .. } => {
+                        Vec::new()
+                    }
                 };
                 segments
             })
@@ -1426,6 +1428,14 @@ fn select_in_box(session: &mut Session, a: [f64; 2], b: [f64; 2], crossing: bool
                 let r = session.radius(*id).unwrap_or(0.0);
                 pos(c).map(|c| ([c[0] - r, c[1] - r], [c[0] + r, c[1] + r], None))
             }
+            // Bounded by the box of the points along it.
+            CurveGeom::Spline { .. } => sketch.spline_outline(&curve.geom, 16).and_then(|line| {
+                let first = *line.first()?;
+                let (min, max) = line.iter().fold((first, first), |(lo, hi), p| {
+                    ([lo[0].min(p[0]), lo[1].min(p[1])], [hi[0].max(p[0]), hi[1].max(p[1])])
+                });
+                Some((min, max, None))
+            }),
             // Bounded by the circle of its larger radius.
             CurveGeom::Ellipse { c, major, minor, .. } => pos(c).zip(pos(major)).map(|(c, m)| {
                 let r = ((m[0] - c[0]).powi(2) + (m[1] - c[1]).powi(2)).sqrt().max(minor.abs());

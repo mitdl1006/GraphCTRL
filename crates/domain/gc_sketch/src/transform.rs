@@ -96,11 +96,14 @@ impl Sketch {
         let to = |p: Id<SkPoint>| point_map.get(&p).copied().ok_or(SketchError::MissingPoint);
         let mut curve_map = BTreeMap::new();
         for id in curves {
-            let curve = self.curves[id];
+            let curve = self.curves[id].clone();
             let geom = match curve.geom {
                 CurveGeom::Line { a, b } => CurveGeom::Line { a: to(a)?, b: to(b)? },
                 CurveGeom::Circle { c, r } => CurveGeom::Circle { c: to(c)?, r: r * radius },
                 CurveGeom::Arc { c, s, e } => CurveGeom::Arc { c: to(c)?, s: to(s)?, e: to(e)? },
+                CurveGeom::Spline { points } => {
+                    CurveGeom::Spline { points: points.iter().map(|p| to(*p)).collect::<Result<_, _>>()? }
+                }
                 CurveGeom::Ellipse { c, major, minor, arc } => CurveGeom::Ellipse {
                     c: to(c)?,
                     major: to(major)?,

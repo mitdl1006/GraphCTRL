@@ -59,7 +59,7 @@ impl<'a> NumericIk<'a> {
 
     fn clamp(&self, q: &mut [f64]) {
         for (value, (lower, upper)) in q.iter_mut().zip(self.chain.lower().iter().zip(self.chain.upper())) {
-            *value = value.clamp(*lower, *upper);
+            *value = gc_math::clamp_between(*value, *lower, *upper);
         }
     }
 
