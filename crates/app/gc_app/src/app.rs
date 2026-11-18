@@ -258,8 +258,6 @@ pub struct GraphCtrlApp {
     interference: crate::interference::Interference,
     /// The Drive dialog.
     drive: crate::drive::Drive,
-    /// The body Ctrl+C copied.
-    clipboard: Option<gc_core::Id<gc_doc::Body>>,
     /// The Constrain dialog.
     constrain: crate::constrain::Constrain,
     assemble: crate::assemble::Assemble,
@@ -370,7 +368,6 @@ impl GraphCtrlApp {
             measure: crate::measure::Measure::default(),
             interference: crate::interference::Interference::default(),
             drive: crate::drive::Drive::default(),
-            clipboard: None,
             constrain: crate::constrain::Constrain::default(),
             assemble: crate::assemble::Assemble::default(),
             work_feature: crate::work_feature::WorkFeatureDialog::default(),
@@ -758,28 +755,16 @@ impl GraphCtrlApp {
                 // shortcut table GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E). Without relationships, as Copy
                 // Components has them off by default.
                 egui::Key::C if command && !sketching => {
-                    if let Some(gc_session::CellItem::Body(body)) = self.session.selected_item() {
-                        self.clipboard = Some(body);
+                    // The selected component (a body, a robot with its tool, an imported assembly); a
+                    // refusal (nothing copyable selected) changes nothing.
+                    if let Some(occurrence) = self.session.selected_occurrence() {
+                        drop(self.session.copy_to_clipboard(&[gc_doc::TreeKey::Component(occurrence)]));
                     }
                 }
                 egui::Key::V if command && !sketching => {
-                    if let Some(body) = self.clipboard.filter(|b| self.session.doc().get(*b).is_some()) {
-                        let before: Vec<gc_core::AnyId> =
-                            self.session.doc().bodies().iter().map(|(id, _)| id.erase()).collect();
-                        if self
-                            .session
-                            .copy_components(&[body.erase()], gc_doc::Placement::default(), false, false)
-                            .is_ok()
-                            && let Some(copy) = self
-                                .session
-                                .doc()
-                                .bodies()
-                                .iter()
-                                .map(|(id, _)| id)
-                                .find(|id| !before.contains(&id.erase()))
-                        {
-                            self.viewport.start_placing(gc_session::CellItem::Body(copy), true);
-                        }
+                    // New instances in place, one undo step, hung on the cursor to be set down.
+                    if let Ok(created) = self.session.paste(gc_doc::Placement::default()) {
+                        self.viewport.start_placing_group(&self.session, &created);
                     }
                 }
                 // F10 shows or hides the sketch being edited, else the latest sketch (Inventor 2026 help,

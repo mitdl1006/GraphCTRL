@@ -117,6 +117,8 @@ pub struct Viewport {
     /// A component being dragged with it.
     free_drag: Option<freemove::FreeDrag>,
     placing: Option<place::Placing>,
+    /// A pasted group hanging on the cursor.
+    placing_group: Option<place::GroupPlacing>,
     /// What a plain click selects (the Select command's priority menu, opened with Shift + right click).
     pub select_priority: SelectPriority,
     /// Where the Select menu is open.
@@ -254,6 +256,7 @@ impl Viewport {
             free_tool: None,
             free_drag: None,
             placing: None,
+            placing_group: None,
             alt_at_press: false,
             alt_drag: None,
             quick_constrain: None,
@@ -1560,9 +1563,31 @@ impl Viewport {
         true
     }
 
+    /// Hangs pasted components on the cursor (Ctrl+V): a click sets them down (one more undo step), Esc or a
+    /// right click takes the paste back. `created` is what `Session::paste` made.
+    pub fn start_placing_group(&mut self, session: &Session, created: &[gc_doc::Created]) {
+        let members: Vec<(gc_core::AnyId, DPose3)> = created
+            .iter()
+            .filter_map(|c| match c {
+                gc_doc::Created::Body(id) => Some(id.erase()),
+                gc_doc::Created::Robot(id) => Some(id.erase()),
+                gc_doc::Created::Assembly(id) => Some(id.erase()),
+                _ => None,
+            })
+            .filter_map(|item| {
+                let pose = session.doc().component_origin(gc_doc::Occurrence::Item(item))?.pose;
+                Some((item, pose))
+            })
+            .collect();
+        if !members.is_empty() {
+            self.placing_group = Some(place::GroupPlacing { members });
+            self.free_tool = None;
+        }
+    }
+
     /// Whether a component hangs on the cursor.
     pub fn is_placing(&self) -> bool {
-        self.placing.is_some()
+        self.placing.is_some() || self.placing_group.is_some()
     }
 
     /// Another copy of the component just set down, to hang on the cursor next. Only bodies are copied.
@@ -1644,6 +1669,29 @@ impl Viewport {
             self.open_select_other(session, at, size, &to_view);
         }
         if self.grip_step(ui, response, session, size, &to_view, lang) {
+            return;
+        }
+        // Paste: the new components hang on the cursor; a click sets them down, Esc takes the paste back.
+        if let Some(group) = self.placing_group.clone() {
+            if ui.input(|i| i.key_pressed(egui::Key::Escape)) || response.secondary_clicked() {
+                session.end_component_preview();
+                session.undo();
+                self.placing_group = None;
+                return;
+            }
+            if let Some(at) = response.hover_pos() {
+                group.follow(&self.camera, size, session, to_view(at));
+                ui.ctx().request_repaint();
+            }
+            if response.clicked_by(PointerButton::Primary)
+                && let Some(at) = response.interact_pointer_pos()
+                && let Some((_, first)) = group.members.first()
+                && let Some(point) = place::ground_hit(&self.camera, size, to_view(at), first.translation)
+            {
+                session.end_component_preview();
+                drop(session.grip_snap_commit(&group.moved_to(point), false));
+                self.placing_group = None;
+            }
             return;
         }
         // Place Component: the component hangs on the cursor; a click sets it down and attaches a copy.
