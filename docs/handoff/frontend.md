@@ -182,12 +182,18 @@
 - **구속 대화상자 "더 보기"**: 이름, 최대·최소(체크+값, mm), "오프셋을 휴지 위치로" → `Relationship.limits`. 원문 GUID-0F500089-4F69-41C5-AFE8-B58AC9E8E15E("To change the name of the constraint or set limits, click the More button… Check Maximum… Check Minimum… Use Offset As Resting Position"). 최소>최대나 숫자가 아닌 값이면 확인이 막힌다. 테스트 `the_constrain_dialogs_more_section_sets_the_name_and_limits`. 원문과 차이: 값은 오프셋(mm)만, 각도 구속의 한계는 아직 UI 없음, 체크를 풀어도 값이 유지되는("inactive state") 동작은 대화상자를 닫으면 사라진다.
 - **조인트 대화상자에 "조인트 / 한계" 탭**(GUID-21DC3336-5C51-42C1-90FB-4299CD66E0C6 Limits 탭): 만들 때 한계 탭의 값은 조인트가 만들어진 뒤 `set_joint_limits`로 함께 저장. 브라우저 우클릭 "한계…"는 같은 대화상자를 한계 탭으로 연다(이미 있는 조인트는 원점·종류 읽기 전용, 한계만 수정). 별도 "조인트 한계" 창은 없앴다. 테스트 `a_rotational_joint_gets_angular_limits_from_its_dialog`, `the_joint_dialogs_limits_tab_goes_with_a_new_rotational_joint`.
 - **리본 큰/작은 버튼**: 인벤터처럼 패널마다 가장 쓰는 명령은 큰 버튼, 나머지는 아이콘+이름 작은 버튼 세로 묶음(`gc_ui::ribbon_stack`, 최대 3줄). 조립 탭: 배치 / 패턴 / 구속·조인트는 큰 버튼, 교체 / 미러·복사 / 어셈블·구동 / 그립 스냅·접지는 작은 버튼. 3D 모델 탭: 작업 평면 큰 버튼, 작업 축·점 작은 버튼. 1280 px 단언은 그대로 통과. 증거 `docs/evidence/img/review-59-*.png`. 접근성 이름은 이전과 같다(버튼 이름 = 라벨).
-- 원문과 차이: 다른 탭(스케치·로봇·검사·뷰)은 이 규칙으로 아직 정리하지 않았다.
+- 스케치 탭은 원래 큰+작은 혼합 구성이라 그대로 두었다.
 
 ### 열기 경고 토스트 / 스플라인 화면 점검
 
 - 파일을 열 때(열기·복구 모두) `Session::load_warnings()`가 비어 있지 않으면 상태 표시줄에 "열었지만 쓸 수 없는 데이터 N건을 버렸습니다: …"를 보인다(수리 안내보다 우선). 테스트 `opening_a_file_with_a_damaged_joint_range_reports_the_warning`(조인트 한계 시작>끝으로 손상시킨 파일).
 - 스플라인(보간): 스케치 탭 선▾에서 고르고, 클릭으로 맞춤점, Enter로 마침 — 점들을 지나는 매끄러운 곡선이 그려진다(테스트 `the_spline_tool_is_in_the_line_split_button_and_draws_a_curve`, 증거 `docs/evidence/img/review-60-spline.png`). 이상 없음. 참고: 아이콘은 글자 "~"(전용 아이콘 아님).
+
+### 글자 아이콘을 벡터로 / 로봇·검사·뷰 탭의 큰·작은 버튼
+
+- 스케치 탭의 글자 아이콘(`-+-`, `~`, `(/)`, `[+]`, 슬롯 변형, 분할·이동·축척·트림·모깎기·모따기·복사·회전·늘이기·연장 등 20개)을 직접 그린 벡터 `Icon`으로 교체했다(인벤터 그림 사용 안 함). 구속 기호(`::`, `--`, `(o)` 등)와 `fx`, `x`는 글자 그대로 둔다(인벤터도 구속 기호는 글자 모양 아이콘).
+- 로봇 탭: 로봇 추가·경로 만들기·계획·재생은 큰 버튼, 가져오기 2개 / 모양 3개 / 웨이포인트 추가 3종 / 좌표계·스케치 경로는 작은 버튼 묶음. 검사 탭: 측정·간섭 분석 큰 버튼, 접촉 솔버 작은 버튼(`ribbon_stack_responses`로 메뉴 유지). 뷰 탭: 홈·전체 보기·자유도·단면 삭제 큰 버튼, 정면·평면·우측 / 직교·원근 / 단면 3종 / 패널 토글은 작은 버튼. 1280 px 단언 유지. 증거 `docs/evidence/img/review-61-ribbon-tabs.png`.
+- 접근성 이름은 그대로(버튼 이름 = 라벨).
 
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate

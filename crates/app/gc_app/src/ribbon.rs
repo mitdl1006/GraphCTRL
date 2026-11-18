@@ -253,8 +253,8 @@ pub(crate) fn show(
                             Msg::ToolLine,
                             &[
                                 (ToolKind::Line, Icon::Line, Msg::ToolLine),
-                                (ToolKind::MidpointLine, Icon::Text("-+-"), Msg::ToolMidpointLine),
-                                (ToolKind::Spline, Icon::Text("~"), Msg::ToolSpline),
+                                (ToolKind::MidpointLine, Icon::MidLine, Msg::ToolMidpointLine),
+                                (ToolKind::Spline, Icon::Spline, Msg::ToolSpline),
                             ],
                         );
                         split(
@@ -263,8 +263,8 @@ pub(crate) fn show(
                             Msg::ToolCircle,
                             &[
                                 (ToolKind::Circle, Icon::Circle, Msg::ToolCircle),
-                                (ToolKind::TangentCircle, Icon::Text("(/)"), Msg::ToolTangentCircle),
-                                (ToolKind::Ellipse, Icon::Text("( )"), Msg::ToolEllipse),
+                                (ToolKind::TangentCircle, Icon::TangentCircle, Msg::ToolTangentCircle),
+                                (ToolKind::Ellipse, Icon::Ellipse, Msg::ToolEllipse),
                             ],
                         );
                         split(
@@ -284,8 +284,8 @@ pub(crate) fn show(
                             &[
                                 (ToolKind::Rectangle, Icon::Rectangle, Msg::ToolRectangle),
                                 (ToolKind::Rectangle3, Icon::Rectangle, Msg::ToolRectangle3),
-                                (ToolKind::CenterRectangle, Icon::Text("[+]"), Msg::ToolCenterRectangle),
-                                (ToolKind::CenterRectangle3, Icon::Text("<+>"), Msg::ToolCenterRectangle3),
+                                (ToolKind::CenterRectangle, Icon::CenterRect, Msg::ToolCenterRectangle),
+                                (ToolKind::CenterRectangle3, Icon::CenterRect3, Msg::ToolCenterRectangle3),
                             ],
                         );
                         split(
@@ -294,20 +294,20 @@ pub(crate) fn show(
                             Msg::ToolSlot,
                             &[
                                 (ToolKind::Slot(SlotKind::CenterToCenter), Icon::Slot, Msg::ToolSlot),
-                                (ToolKind::Slot(SlotKind::Overall), Icon::Text("(=)"), Msg::ToolSlotOverall),
+                                (ToolKind::Slot(SlotKind::Overall), Icon::SlotOverall, Msg::ToolSlotOverall),
                                 (
                                     ToolKind::Slot(SlotKind::CenterPoint),
-                                    Icon::Text("(+)"),
+                                    Icon::SlotCentre,
                                     Msg::ToolSlotCenterPoint,
                                 ),
                                 (
                                     ToolKind::ArcSlot(ArcSlotKind::ThreePoint),
-                                    Icon::Text("(~)"),
+                                    Icon::SlotArc3,
                                     Msg::ToolSlotThreePointArc,
                                 ),
                                 (
                                     ToolKind::ArcSlot(ArcSlotKind::CenterPoint),
-                                    Icon::Text("(c)"),
+                                    Icon::SlotArcCentre,
                                     Msg::ToolSlotCenterPointArc,
                                 ),
                             ],
@@ -396,18 +396,18 @@ pub(crate) fn show(
                             let rows = [
                                 vec![
                                     (ToolKind::Offset, Icon::Offset, Msg::ToolOffset),
-                                    (ToolKind::Split, Icon::Text("-|-"), Msg::ToolSplit),
-                                    (ToolKind::Move, Icon::Text("->"), Msg::ToolMove),
-                                    (ToolKind::Scale, Icon::Text("[]+"), Msg::ToolScale),
-                                    (ToolKind::Trim, Icon::Text("-x-"), Msg::ToolTrim),
-                                    (ToolKind::Fillet, Icon::Text("(_"), Msg::ToolFillet),
+                                    (ToolKind::Split, Icon::Split, Msg::ToolSplit),
+                                    (ToolKind::Move, Icon::Move, Msg::ToolMove),
+                                    (ToolKind::Scale, Icon::Scale, Msg::ToolScale),
+                                    (ToolKind::Trim, Icon::Trim, Msg::ToolTrim),
+                                    (ToolKind::Fillet, Icon::Fillet, Msg::ToolFillet),
                                 ],
                                 vec![
-                                    (ToolKind::Chamfer, Icon::Text("/_"), Msg::ToolChamfer),
-                                    (ToolKind::Copy, Icon::Text("+>"), Msg::ToolCopy),
-                                    (ToolKind::Rotate, Icon::Text("@"), Msg::ToolRotate),
-                                    (ToolKind::Stretch, Icon::Text("<->"), Msg::ToolStretch),
-                                    (ToolKind::Extend, Icon::Text("-->"), Msg::ToolExtend),
+                                    (ToolKind::Chamfer, Icon::Chamfer, Msg::ToolChamfer),
+                                    (ToolKind::Copy, Icon::Copy, Msg::ToolCopy),
+                                    (ToolKind::Rotate, Icon::Rotate, Msg::ToolRotate),
+                                    (ToolKind::Stretch, Icon::Stretch, Msg::ToolStretch),
+                                    (ToolKind::Extend, Icon::Extend, Msg::ToolExtend),
                                 ],
                             ];
                             for row in rows {
@@ -531,25 +531,26 @@ pub(crate) fn show(
                     // Inventor: Inspect tab > Interference panel > Activate Contact Solver; the modes are the
                     // Interactive Contact choices of the document settings.
                     let mode = session.doc().contact_solver();
-                    let button = ribbon_button(
-                        ui,
-                        Icon::Cuboid,
-                        tr!(lang, CmdContactSolver),
-                        mode != ContactSolver::Off,
-                        true,
-                    );
-                    egui::Popup::menu(&button).show(|ui| {
-                        for (this, label) in [
-                            (ContactSolver::Off, tr!(lang, ContactOff)),
-                            (ContactSolver::ContactSet, tr!(lang, ContactSetOnly)),
-                            (ContactSolver::All, tr!(lang, ContactAll)),
-                        ] {
-                            if ui.selectable_label(mode == this, label).clicked() {
-                                drop(session.set_contact_solver(this));
-                                ui.close();
+                    let rows = [gc_ui::StackRow {
+                        icon: Icon::Cuboid,
+                        label: tr!(lang, CmdContactSolver),
+                        selected: mode != ContactSolver::Off,
+                        enabled: true,
+                    }];
+                    if let Some(button) = gc_ui::ribbon_stack_responses(ui, &rows).first() {
+                        egui::Popup::menu(button).show(|ui| {
+                            for (this, label) in [
+                                (ContactSolver::Off, tr!(lang, ContactOff)),
+                                (ContactSolver::ContactSet, tr!(lang, ContactSetOnly)),
+                                (ContactSolver::All, tr!(lang, ContactAll)),
+                            ] {
+                                if ui.selectable_label(mode == this, label).clicked() {
+                                    drop(session.set_contact_solver(this));
+                                    ui.close();
+                                }
                             }
-                        }
-                    });
+                        });
+                    }
                 });
             }
             Tab::Manage => {
@@ -561,15 +562,28 @@ pub(crate) fn show(
             }
             Tab::View => {
                 ribbon_group(ui, tr!(lang, GroupViews), |ui| {
-                    for (view, label, icon) in [
-                        (StandardView::Iso, Msg::ViewHome, Icon::Home),
-                        (StandardView::Front, Msg::ViewFront, Icon::View),
-                        (StandardView::Top, Msg::ViewTop, Icon::View),
-                        (StandardView::Right, Msg::ViewRight, Icon::View),
-                    ] {
-                        if ribbon_button(ui, icon, label.text(lang), false, true).clicked() {
-                            viewport.look(view);
-                        }
+                    // Home and Fit All are the large buttons; the three standard views are stacked.
+                    if ribbon_button(ui, Icon::Home, tr!(lang, ViewHome), false, true).clicked() {
+                        viewport.look(StandardView::Iso);
+                    }
+                    let views = [
+                        (StandardView::Front, Msg::ViewFront),
+                        (StandardView::Top, Msg::ViewTop),
+                        (StandardView::Right, Msg::ViewRight),
+                    ];
+                    let rows: Vec<gc_ui::StackRow<'_>> = views
+                        .iter()
+                        .map(|(_, label)| gc_ui::StackRow {
+                            icon: Icon::View,
+                            label: label.text(lang),
+                            selected: false,
+                            enabled: true,
+                        })
+                        .collect();
+                    if let Some(index) = gc_ui::ribbon_stack(ui, &rows)
+                        && let Some((view, _)) = views.get(index)
+                    {
+                        viewport.look(*view);
                     }
                     if ribbon_button(ui, Icon::Rectangle, tr!(lang, ViewFit), false, true).clicked() {
                         viewport.fit(session, [1000.0, 700.0]);
@@ -577,25 +591,45 @@ pub(crate) fn show(
                 });
                 ribbon_group(ui, tr!(lang, GroupProjection), |ui| {
                     let ortho = viewport.camera.ortho;
-                    if ribbon_button(ui, Icon::View, tr!(lang, ViewOrtho), ortho, true).clicked() {
-                        viewport.camera.ortho = true;
-                    }
-                    if ribbon_button(ui, Icon::Perspective, tr!(lang, ViewPerspective), !ortho, true)
-                        .clicked()
-                    {
-                        viewport.camera.ortho = false;
+                    let rows = [
+                        gc_ui::StackRow {
+                            icon: Icon::View,
+                            label: tr!(lang, ViewOrtho),
+                            selected: ortho,
+                            enabled: true,
+                        },
+                        gc_ui::StackRow {
+                            icon: Icon::Perspective,
+                            label: tr!(lang, ViewPerspective),
+                            selected: !ortho,
+                            enabled: true,
+                        },
+                    ];
+                    match gc_ui::ribbon_stack(ui, &rows) {
+                        Some(0) => viewport.camera.ortho = true,
+                        Some(1) => viewport.camera.ortho = false,
+                        _ => {}
                     }
                 });
                 ribbon_group(ui, tr!(lang, GroupAppearance), |ui| {
-                    for (kind, label) in [
+                    let kinds = [
                         (gc_viewport::SectionKind::Half, Msg::SectionHalf),
                         (gc_viewport::SectionKind::Quarter, Msg::SectionQuarter),
                         (gc_viewport::SectionKind::ThreeQuarter, Msg::SectionThreeQuarter),
-                    ] {
-                        let active = viewport.section.as_ref().is_some_and(|s| s.kind == kind);
-                        if ribbon_button(ui, Icon::LookAt, label.text(lang), active, true).clicked() {
-                            viewport.section = Some(gc_viewport::Section::new(kind));
-                        }
+                    ];
+                    let rows: Vec<gc_ui::StackRow<'_>> = kinds
+                        .iter()
+                        .map(|(kind, label)| gc_ui::StackRow {
+                            icon: Icon::LookAt,
+                            label: label.text(lang),
+                            selected: viewport.section.as_ref().is_some_and(|s| s.kind == *kind),
+                            enabled: true,
+                        })
+                        .collect();
+                    if let Some(index) = gc_ui::ribbon_stack(ui, &rows)
+                        && let Some((kind, _)) = kinds.get(index)
+                    {
+                        viewport.section = Some(gc_viewport::Section::new(*kind));
                     }
                     if ribbon_button(
                         ui,
@@ -625,13 +659,24 @@ pub(crate) fn show(
                     }
                 });
                 ribbon_group(ui, tr!(lang, GroupPanels), |ui| {
-                    if ribbon_button(ui, Icon::View, tr!(lang, ViewPanelsSeeThrough), *translucent, true)
-                        .clicked()
-                    {
-                        *translucent = !*translucent;
-                    }
-                    if ribbon_button(ui, Icon::View, tr!(lang, ViewDarkTheme), *dark, true).clicked() {
-                        *dark = !*dark;
+                    let rows = [
+                        gc_ui::StackRow {
+                            icon: Icon::View,
+                            label: tr!(lang, ViewPanelsSeeThrough),
+                            selected: *translucent,
+                            enabled: true,
+                        },
+                        gc_ui::StackRow {
+                            icon: Icon::View,
+                            label: tr!(lang, ViewDarkTheme),
+                            selected: *dark,
+                            enabled: true,
+                        },
+                    ];
+                    match gc_ui::ribbon_stack(ui, &rows) {
+                        Some(0) => *translucent = !*translucent,
+                        Some(1) => *dark = !*dark,
+                        _ => {}
                     }
                 });
             }
@@ -812,14 +857,28 @@ fn robot_tab(
                 }
             }
         });
-        if ribbon_button(ui, Icon::Import, tr!(lang, CmdImportRobot), false, robot.is_none()).clicked() {
-            action = Some(RibbonAction::ImportRobot);
-        }
-        if ribbon_button(ui, Icon::Import, tr!(lang, CmdImportMesh), false, true).clicked() {
-            action = Some(RibbonAction::ImportMesh);
+        // The imports are stacked beside the large Add button, then the three shapes.
+        let rows = [
+            gc_ui::StackRow {
+                icon: Icon::Import,
+                label: tr!(lang, CmdImportRobot),
+                selected: false,
+                enabled: robot.is_none(),
+            },
+            gc_ui::StackRow {
+                icon: Icon::Import,
+                label: tr!(lang, CmdImportMesh),
+                selected: false,
+                enabled: true,
+            },
+        ];
+        match gc_ui::ribbon_stack(ui, &rows) {
+            Some(0) => action = Some(RibbonAction::ImportRobot),
+            Some(1) => action = Some(RibbonAction::ImportMesh),
+            _ => {}
         }
         let at = |x: f64, z: f64| Placement { xyz: [x, 0.0, z], rpy: [0.0; 3] };
-        for (icon, label, solid, placement) in [
+        let shapes = [
             (Icon::Cuboid, Msg::CmdAddBox, Solid::Box { size: [0.1, 0.1, 1.4] }, at(0.55, 0.7)),
             (
                 Icon::Cylinder,
@@ -828,65 +887,30 @@ fn robot_tab(
                 at(0.0, 0.4),
             ),
             (Icon::Sphere, Msg::CmdAddSphere, Solid::Sphere { radius: 0.1 }, at(0.0, 0.1)),
-        ] {
-            if ribbon_button(ui, icon, label.text(lang), false, true).clicked() {
-                // New bodies are spread out sideways so that they do not hide each other.
-                let offset = 0.3 * session.doc().bodies().len() as f64;
-                let placement = Placement {
-                    xyz: [placement.xyz[0], placement.xyz[1] - offset, placement.xyz[2]],
-                    ..placement
-                };
-                drop(session.add_body(solid, placement));
-                viewport.fit(session, [1000.0, 700.0]);
-            }
+        ];
+        let rows: Vec<gc_ui::StackRow<'_>> = shapes
+            .iter()
+            .map(|(icon, label, _, _)| gc_ui::StackRow {
+                icon: *icon,
+                label: label.text(lang),
+                selected: false,
+                enabled: true,
+            })
+            .collect();
+        if let Some(index) = gc_ui::ribbon_stack(ui, &rows)
+            && let Some((_, _, solid, placement)) = shapes.get(index)
+        {
+            // New bodies are spread out sideways so that they do not hide each other.
+            let offset = 0.3 * session.doc().bodies().len() as f64;
+            let placement = Placement {
+                xyz: [placement.xyz[0], placement.xyz[1] - offset, placement.xyz[2]],
+                ..*placement
+            };
+            drop(session.add_body(solid.clone(), placement));
+            viewport.fit(session, [1000.0, 700.0]);
         }
     });
     ribbon_group(ui, tr!(lang, GroupPath), |ui| {
-        if ribbon_button(ui, Icon::Waypoint, tr!(lang, CmdAddWaypoint), false, robot.is_some()).clicked()
-            && let Some(robot) = robot
-        {
-            drop(session.add_waypoint_here(robot));
-        }
-        // One selected point of the sketch being edited can become a waypoint that follows the sketch.
-        let point = match (session.active_sketch(), session.selection().iter().next()) {
-            (Some((sketch, _)), Some(Item::Point(point))) if session.selection().len() == 1 => {
-                Some((sketch, *point))
-            }
-            _ => None,
-        };
-        let enabled = robot.is_some() && point.is_some();
-        if ribbon_button(ui, Icon::Waypoint, tr!(lang, CmdWaypointAtPoint), false, enabled).clicked()
-            && let (Some(robot), Some((sketch, point))) = (robot, point)
-        {
-            drop(session.add_waypoint(robot, WaypointTarget::SketchPoint { sketch, point }));
-        }
-        // One to three selected points, fully constrained, become a work frame. In the order they were
-        // picked: the origin, the point the X axis points to, a point on the positive-Y side of XY.
-        let order = session.selection_order();
-        let frame_points: Vec<_> = order
-            .iter()
-            .filter_map(|item| match item {
-                Item::Point(point) => Some(*point),
-                _ => None,
-            })
-            .collect();
-        let frame_sketch = session
-            .active_sketch()
-            .map(|(id, _)| id)
-            .filter(|_| (1..=3).contains(&frame_points.len()) && frame_points.len() == order.len());
-        if ribbon_button(ui, Icon::Frame, tr!(lang, CmdWorkFrame), false, frame_sketch.is_some()).clicked()
-            && let Some(sketch) = frame_sketch
-        {
-            // A refusal (a point can still move, or the points give no axes) is explained in the status bar.
-            cell.frame = session.add_work_frame_by_points(sketch, &frame_points).ok();
-        }
-        let frame = cell.active_frame(session);
-        let enabled = robot.is_some() && frame.is_some();
-        if ribbon_button(ui, Icon::Waypoint, tr!(lang, CmdWaypointInFrame), false, enabled).clicked()
-            && let (Some(robot), Some(frame)) = (robot, frame)
-        {
-            drop(session.add_waypoint_in_frame(robot, frame));
-        }
         let waypoints: Vec<_> = session
             .doc()
             .waypoints()
@@ -894,25 +918,12 @@ fn robot_tab(
             .filter(|(_, w)| Some(w.robot) == robot)
             .map(|(id, _)| id)
             .collect();
+        // The large buttons: make the path, plan it, play it.
         if ribbon_button(ui, Icon::Path, tr!(lang, CmdMakePath), false, !waypoints.is_empty()).clicked()
             && let Some(robot) = robot
         {
             // The new path becomes the one the panel works on.
             cell.path = session.add_path(robot, waypoints).ok();
-        }
-        // The sketch being edited, else the newest one, becomes a path along its lines.
-        let sketch = session
-            .active_sketch()
-            .map(|(id, _)| id)
-            .or_else(|| session.doc().sketches().iter().last().map(|(id, _)| id))
-            .filter(|id| {
-                session.doc().get(*id).is_some_and(|s| s.curves.keys().any(|c| s.line(*c).is_some()))
-            });
-        let enabled = robot.is_some() && sketch.is_some();
-        if ribbon_button(ui, Icon::Sketch, tr!(lang, CmdPathFromSketch), false, enabled).clicked()
-            && let (Some(robot), Some(sketch)) = (robot, sketch)
-        {
-            cell.path = session.path_from_sketch(robot, sketch).ok();
         }
         // While a plan is being computed the same button cancels it.
         let planning = session.is_planning();
@@ -936,6 +947,100 @@ fn robot_tab(
             if cell.playing {
                 session.set_playback(Some((path, 0.0)));
             }
+        }
+        // One selected point of the sketch being edited can become a waypoint that follows the sketch.
+        let point = match (session.active_sketch(), session.selection().iter().next()) {
+            (Some((sketch, _)), Some(Item::Point(point))) if session.selection().len() == 1 => {
+                Some((sketch, *point))
+            }
+            _ => None,
+        };
+        let frame = cell.active_frame(session);
+        // The ways to add a waypoint are stacked: here, at a sketch point, in a work frame.
+        let rows = [
+            gc_ui::StackRow {
+                icon: Icon::Waypoint,
+                label: tr!(lang, CmdAddWaypoint),
+                selected: false,
+                enabled: robot.is_some(),
+            },
+            gc_ui::StackRow {
+                icon: Icon::Waypoint,
+                label: tr!(lang, CmdWaypointAtPoint),
+                selected: false,
+                enabled: robot.is_some() && point.is_some(),
+            },
+            gc_ui::StackRow {
+                icon: Icon::Waypoint,
+                label: tr!(lang, CmdWaypointInFrame),
+                selected: false,
+                enabled: robot.is_some() && frame.is_some(),
+            },
+        ];
+        match (gc_ui::ribbon_stack(ui, &rows), robot) {
+            (Some(0), Some(robot)) => drop(session.add_waypoint_here(robot)),
+            (Some(1), Some(robot)) => {
+                if let Some((sketch, point)) = point {
+                    drop(session.add_waypoint(robot, WaypointTarget::SketchPoint { sketch, point }));
+                }
+            }
+            (Some(2), Some(robot)) => {
+                if let Some(frame) = frame {
+                    drop(session.add_waypoint_in_frame(robot, frame));
+                }
+            }
+            _ => {}
+        }
+        // One to three selected points, fully constrained, become a work frame. In the order they were
+        // picked: the origin, the point the X axis points to, a point on the positive-Y side of XY.
+        let order = session.selection_order();
+        let frame_points: Vec<_> = order
+            .iter()
+            .filter_map(|item| match item {
+                Item::Point(point) => Some(*point),
+                _ => None,
+            })
+            .collect();
+        let frame_sketch = session
+            .active_sketch()
+            .map(|(id, _)| id)
+            .filter(|_| (1..=3).contains(&frame_points.len()) && frame_points.len() == order.len());
+        // The sketch being edited, else the newest one, becomes a path along its lines.
+        let sketch = session
+            .active_sketch()
+            .map(|(id, _)| id)
+            .or_else(|| session.doc().sketches().iter().last().map(|(id, _)| id))
+            .filter(|id| {
+                session.doc().get(*id).is_some_and(|s| s.curves.keys().any(|c| s.line(*c).is_some()))
+            });
+        let rows = [
+            gc_ui::StackRow {
+                icon: Icon::Frame,
+                label: tr!(lang, CmdWorkFrame),
+                selected: false,
+                enabled: frame_sketch.is_some(),
+            },
+            gc_ui::StackRow {
+                icon: Icon::Sketch,
+                label: tr!(lang, CmdPathFromSketch),
+                selected: false,
+                enabled: robot.is_some() && sketch.is_some(),
+            },
+        ];
+        match gc_ui::ribbon_stack(ui, &rows) {
+            Some(0) => {
+                if let Some(sketch) = frame_sketch {
+                    // A refusal (a point can still move, or the points give no axes) is explained in the
+                    // status bar.
+                    cell.frame = session.add_work_frame_by_points(sketch, &frame_points).ok();
+                }
+            }
+            Some(1) => {
+                if let (Some(robot), Some(sketch)) = (robot, sketch) {
+                    cell.path = session.path_from_sketch(robot, sketch).ok();
+                }
+            }
+            _ => {}
         }
     });
     action
