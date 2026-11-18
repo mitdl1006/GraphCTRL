@@ -466,3 +466,48 @@ fn only_a_robot_that_stands_in_the_way_is_sent_to_its_park_pose() {
     assert_eq!(schedule.blocked.len(), 1);
     assert_eq!(schedule.blocked[0].0, reach);
 }
+
+/// Left reaches low across the wall and then stands there for half a minute; right's own way to a point
+/// above it crosses left's motion. Going round is much sooner than waiting, so right goes round.
+#[test]
+fn a_robot_goes_round_a_moving_one_when_that_is_sooner_than_waiting() {
+    let Cell { mut s, left, right, sketch, points, roles } = cell();
+    let op = SketchOp::SetCoords {
+        points: vec![(points[0], [0.5, 0.35, 0.0]), (points[1], [0.4, 0.65, 0.0])],
+        radii: Vec::new(),
+    };
+    s.execute(&Command::Sketch { sketch, op }).unwrap();
+    let mut low = task("Left low", roles[0]);
+    low.steps.push(Step::Wait { seconds: 30.0 });
+    low.robots = RobotChoice::Only(vec![left]);
+    low.priority = 5;
+    let mut high = task("Right high", roles[1]);
+    high.robots = RobotChoice::Only(vec![right]);
+    let low = add(&mut s, low);
+    let high = add(&mut s, high);
+
+    let schedule = s.schedule();
+    assert!(schedule.blocked.is_empty() && schedule.waits.is_empty(), "{:?}", schedule.blocked);
+    assert_eq!(schedule.detours, vec![gc_session::Detour { task: high, robot: right, around: left }]);
+    let of = |task: Id<Task>| schedule.assignments.iter().find(|x| x.task == task).unwrap();
+    assert_eq!((of(low).start, of(high).start), (0.0, 0.0), "both start at once");
+    assert!(of(high).end < 5.0 && of(low).end > 30.0, "right is done long before left");
+    // All the way the two keep the padding between them (measured here every 20 ms on the robots as the
+    // playback shows them).
+    s.request_schedule();
+    let end = of(high).end;
+    let mut t = 0.0;
+    let mut nearest = f64::INFINITY;
+    while t <= end {
+        s.set_schedule_playback(Some(t));
+        let pair = s
+            .measure_pair(gc_session::CellItem::Robot(left), gc_session::CellItem::Robot(right))
+            .and_then(|pair| pair.minimum)
+            .unwrap();
+        nearest = nearest.min(pair.distance);
+        t += 0.02;
+    }
+    assert!(nearest >= gc_session::PADDING * 0.5, "{nearest}");
+    assert!(nearest < 0.5, "they do come near each other: {nearest}");
+    s.set_schedule_playback(None);
+}
