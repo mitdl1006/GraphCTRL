@@ -20,7 +20,7 @@
 | 8 | ~~Automatic Dimensions and Constraints~~ **완료** | 126 (P2) | — | 아래 작업 기록 |
 | 9 | ~~치수 방향 뒤집기(Flip)~~ **완료** | 124 (P3) | 선-호·호-호 거리 치수 종류는 없음 | 아래 작업 기록 |
 | 10 | ~~타원~~(**완료**)·~~스플라인~~(**보간·열린 곡선 완료**, Smooth G2·제어점은 P3) | 60, 61, 108 (P3) | `CurveGeom`에 없음 | 새 곡선 종류 — 영향 큼 |
-| 11 | 어셈블리: ~~서브어셈블리 계층·활성화~~(**완료**, 단위 이동·Flexible 포함), ~~조인트 Lock/Protect~~(**완료**), ~~3D 그립 스냅~~(**계산 완료**, 드래그 UI는 FE), ~~어셈블리 스케치 소유자~~(**완료**), 작업 축(선·모서리 위, 원 중심, 회전 면, 두 평면 교선) | 어셈블리 43, 90, 61, 98, 157 | 작업 축은 두 점·평면 법선만 | 행마다 원문 확인 후 범위 결정 |
+| 11 | 어셈블리: ~~서브어셈블리 계층·활성화~~(**완료**, 단위 이동·Flexible 포함), ~~조인트 Lock/Protect~~(**완료**), ~~3D 그립 스냅~~(**계산 완료**, 드래그 UI는 FE), ~~어셈블리 스케치 소유자~~(**완료**), ~~작업 피처 종류~~(**완료**: 평면 8종·축 6종·점 5종) | 어셈블리 43, 90, 61, 98, 157 | 회전 면 축·토러스·접평면은 없음 | 행마다 원문 확인 후 범위 결정 |
 
 ## 현황 — 완료
 
@@ -53,6 +53,35 @@
 | 모션(오래된 남은 일) | 맨 아래 "남은 일(백엔드)" 절 그대로 |
 
 # 작업 기록(최신 순)
+
+## 2026-11-18 — 작업 피처 종류 확장(리드 다음 ①)
+
+근거: To Create Work Features, GUID-38A9748E-FA2D-44D3-928C-DFE1326A9385(작업 평면·축·점 유형 목록). 인용 예: "Midplane Between Two Planes. … Select two
+parallel planar faces or work planes. The new work plane … has the same outward normal of the first selected plane." / "Normal to Axis Through Point.
+… The positive X axis is oriented from the intersection of the plane and axis to the point."
+
+새 `WorkGeometry` 변형(FE 대화상자에 바로 붙일 수 있게 입력이 곧 필드):
+
+| 변형 | 입력 | 원문 유형 |
+|---|---|---|
+| `PlaneParallelThrough { base, through }` | 평면, 점 | Parallel to Plane Through Point |
+| `PlaneMidplane { planes: [_; 2] }` | 평행한 두 평면(첫 평면의 법선) | Midplane Between Two Planes |
+| `PlaneAngleToPlane { base, line, angle }` | 평면, 그에 평행한 선, 각(rad; 0=평행, π/2=직각) | Angle to Plane Around Edge |
+| `PlaneLineAndPoint { line, through }` | 선, 선 밖의 점 | Plane(모서리+점) |
+| `PlaneNormalToLine { line, through }` | 선, 점(X축은 교점→점) | Normal to Axis Through Point |
+| `PlaneNormalToCurve { curve, at }` | 스케치 호·원·타원·스플라인, 곡선 위 점 | Normal to Curve at Point(원문은 Part 전용) |
+| `PointLinesIntersection { lines: [_; 2] }` | 두 선(1 µm 안에서 만나야 함) | Intersection of Two Lines |
+| `PointPlaneLine { plane, line }` | 평면, 평행하지 않은 선 | Intersection of Plane and Line(원문은 Part 전용) |
+| `PointThreePlanes { planes: [_; 3] }` | 세 평면 | Intersection of Three Planes |
+| `PointCurveCentre { curve }` | 원·호·타원 | (리드 요청: 원 중심) |
+| `AxisThroughCircle`가 타원도 받음 | | Through Center of Circular or Elliptical Shape |
+
+- 새 참조 `LineRef::{Sketch(CurveRef), Work(축 id), Origin(OriginAxis), Component(Occurrence, OriginAxis)}`, `OriginAxis::{X, Y, Z}`. `WorkGeometry::{lines(), is_axis()}`.
+- 풀리지 않는 정의(평행하지 않은 두 평면의 중간, 꼬인 두 선, 평면과 평행한 선, 곡선 밖의 점 등)는 `AddWorkFeature`/`SetWorkFeature`에서 거부(기존 규칙).
+- 참조된 작업 축은 지울 수 없다(`refs`에 `LineRef::Work`·컴포넌트 포함). 저장·불러오기 됨.
+- FE: `gc_app/src/work_feature.rs` 대화상자에 새 `Kind`를 붙이면 된다. 지금은 편집 시 `_ => return`이 새 변형을 건너뛴다.
+- 없음: Midplane of Torus, Tangent to Surface 계열, Two Coplanar Edges, Through Revolved Face, Center of Torus/Sphere, 컴포넌트 면(메시 면) 기준.
+- 테스트: `gc_session/tests/work_feature_kinds.rs`(3개).
 
 ## 2026-11-18 — 붙여넣기 고스트 미리보기(리드 요청)
 

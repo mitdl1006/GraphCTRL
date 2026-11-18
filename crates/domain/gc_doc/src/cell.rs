@@ -892,7 +892,7 @@ fn work_feature_ok(
     feature: &crate::design::WorkFeature,
     itself: Option<Id<crate::design::WorkFeature>>,
 ) -> Result<(), EditError> {
-    use crate::design::{PlaneRef, PointRef, WorkGeometry};
+    use crate::design::{LineRef, PlaneRef, PointRef, WorkGeometry};
     let doc = txn.doc();
     if !feature.geometry.is_finite() {
         return Err(EditError::BadValue);
@@ -920,6 +920,12 @@ fn work_feature_ok(
             }
         })
     };
+    let line_ok = |line: &LineRef| match line {
+        LineRef::Sketch(r) => curve_ok(r, true),
+        LineRef::Work(id) => Some(*id) != itself && doc.get(*id).is_some_and(|w| w.geometry.is_axis()),
+        LineRef::Origin(_) => true,
+        LineRef::Component(occurrence, _) => doc.component_origin(*occurrence).is_some(),
+    };
     let ok = match &feature.geometry {
         WorkGeometry::PlaneOffset { base, .. } => plane_ok(base),
         WorkGeometry::PlaneThroughPoints { points } => points.iter().all(point_ok),
@@ -930,8 +936,24 @@ fn work_feature_ok(
         WorkGeometry::AxisPlanesIntersection { planes } => {
             planes.iter().all(plane_ok) && planes[0] != planes[1]
         }
-        WorkGeometry::AxisThroughCircle { curve } => curve_ok(curve, false),
+        WorkGeometry::AxisThroughCircle { curve } | WorkGeometry::PointCurveCentre { curve } => {
+            curve_ok(curve, false)
+        }
         WorkGeometry::Point { at } => point_ok(at),
+        WorkGeometry::PlaneParallelThrough { base, through } => plane_ok(base) && point_ok(through),
+        WorkGeometry::PlaneMidplane { planes } => planes.iter().all(plane_ok) && planes[0] != planes[1],
+        WorkGeometry::PlaneAngleToPlane { base, line, .. } => plane_ok(base) && line_ok(line),
+        WorkGeometry::PlaneLineAndPoint { line, through }
+        | WorkGeometry::PlaneNormalToLine { line, through } => line_ok(line) && point_ok(through),
+        WorkGeometry::PlaneNormalToCurve { curve, at } => curve_ok(curve, false) && point_ok(at),
+        WorkGeometry::PointLinesIntersection { lines } => lines.iter().all(line_ok) && lines[0] != lines[1],
+        WorkGeometry::PointPlaneLine { plane, line } => plane_ok(plane) && line_ok(line),
+        WorkGeometry::PointThreePlanes { planes } => {
+            planes.iter().all(plane_ok)
+                && planes[0] != planes[1]
+                && planes[1] != planes[2]
+                && planes[0] != planes[2]
+        }
     };
     if ok { Ok(()) } else { Err(EditError::BadValue) }
 }
