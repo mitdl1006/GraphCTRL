@@ -58,6 +58,17 @@ impl Binding {
         Ok(Round { c: [c[0], c[1]], r })
     }
 
+    /// An ellipse's centre, major axis end and minor radius parameter.
+    fn ellipse(
+        &self,
+        sketch: &Sketch,
+        curve: Id<Curve>,
+    ) -> Result<(P2, P2, gc_solver::ParamId), SketchError> {
+        let (c, major, _) = sketch.ellipse(curve).ok_or(SketchError::WrongCurveKind)?;
+        let minor = *self.radii.get(&curve).ok_or(SketchError::WrongCurveKind)?;
+        Ok((self.p2(c)?, self.p2(major)?, minor))
+    }
+
     fn round(&self, sketch: &Sketch, curve: Id<Curve>) -> Result<Round, SketchError> {
         let (centre, _) = sketch.round(curve).ok_or(SketchError::WrongCurveKind)?;
         let r = *self.radii.get(&curve).ok_or(SketchError::WrongCurveKind)?;
@@ -165,6 +176,10 @@ impl Binding {
                 if spatial =>
             {
                 return Err(SketchError::WrongSpace);
+            }
+            GeoConstraint::PointOnCurve(p, curve) if sketch.ellipse(curve).is_some() => {
+                let (c, major, minor) = self.ellipse(sketch, curve)?;
+                Constraint::PointOnEllipse { p: self.p2(p)?, c, major, minor }
             }
             GeoConstraint::PointOnCurve(p, curve) => match self.line(sketch, curve) {
                 Ok(line) => Constraint::PointOnLine(self.p2(p)?, line),
@@ -280,6 +295,12 @@ impl Binding {
             DimKind::Diameter(curve) if sketch.is_spatial() => {
                 Constraint::Diameter { round: self.radius_only(sketch, curve)?, value }
             }
+            // An ellipse's radius dimension is its minor radius (the major one is the distance from the
+            // centre to the major axis end).
+            DimKind::Radius(curve) if sketch.ellipse(curve).is_some() => {
+                let (c, _, minor) = self.ellipse(sketch, curve)?;
+                Constraint::Radius { round: Round { c, r: minor }, value }
+            }
             DimKind::Radius(curve) => Constraint::Radius { round: self.round(sketch, curve)?, value },
             DimKind::Diameter(curve) => Constraint::Diameter { round: self.round(sketch, curve)?, value },
             DimKind::PlaneDistance { p, axis, side } if axis < 3 => {
@@ -318,6 +339,10 @@ impl Sketch {
                 }
                 CurveGeom::Circle { r, .. } => {
                     binding.radii.insert(*id, binding.sys.add_radius(r));
+                }
+                CurveGeom::Ellipse { .. } if spatial => return Err(SketchError::WrongSpace),
+                CurveGeom::Ellipse { minor, .. } => {
+                    binding.radii.insert(*id, binding.sys.add_radius(minor));
                 }
                 CurveGeom::Arc { s, e, .. } => {
                     let (_, radius) = self.round(*id).ok_or(SketchError::MissingPoint)?;
@@ -382,7 +407,11 @@ impl Sketch {
             }
         }
         for (id, param) in radii {
-            if let Some(Curve { geom: CurveGeom::Circle { r, .. }, .. }) = self.curves.get_mut(id) {
+            if let Some(Curve {
+                geom: CurveGeom::Circle { r, .. } | CurveGeom::Ellipse { minor: r, .. },
+                ..
+            }) = self.curves.get_mut(id)
+            {
                 let value = sys.value(*param);
                 changed |= r.to_bits() != value.to_bits();
                 *r = value;
@@ -435,7 +464,10 @@ impl Sketch {
                 gc_math::fm::atan2(u[0] * w[1] - u[1] * w[0], u[0] * w[0] + u[1] * w[1])
                     .rem_euclid(std::f64::consts::TAU)
             }
-            DimKind::Radius(curve) => self.round(curve)?.1,
+            DimKind::Radius(curve) => match self.ellipse(curve) {
+                Some((_, _, minor)) => minor,
+                None => self.round(curve)?.1,
+            },
             DimKind::Diameter(curve) => 2.0 * self.round(curve)?.1,
             DimKind::PlaneDistance { p, axis, side } => side * *pos(p)?.get(axis)?,
         })

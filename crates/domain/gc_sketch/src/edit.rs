@@ -186,6 +186,29 @@ impl Sketch {
         Ok(id)
     }
 
+    /// Adds an ellipse with its own centre and major axis end points and the given minor radius.
+    pub fn add_ellipse(
+        &mut self,
+        alloc: &mut IdAlloc,
+        centre: [f64; 3],
+        major: [f64; 3],
+        minor: f64,
+    ) -> Result<Id<Curve>, SketchError> {
+        if self.is_spatial() {
+            return Err(SketchError::WrongSpace);
+        }
+        let a = ((major[0] - centre[0]).powi(2) + (major[1] - centre[1]).powi(2)).sqrt();
+        let finite = centre.iter().chain(&major).all(|v| v.is_finite());
+        if !(finite && a > 1e-9 && minor.is_finite() && minor > 1e-9) {
+            return Err(SketchError::InvalidValue);
+        }
+        let c = self.add_point(alloc, centre);
+        let major = self.add_point(alloc, major);
+        let id = alloc.alloc();
+        self.curves.insert(id, Curve { geom: CurveGeom::Ellipse { c, major, minor }, construction: false });
+        Ok(id)
+    }
+
     /// Adds an arc (counter-clockwise from `start` to `end`) with its own three points. The end point is
     /// moved onto the circle through `start`.
     pub fn add_arc(

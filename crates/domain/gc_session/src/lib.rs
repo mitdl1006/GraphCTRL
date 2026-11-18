@@ -310,6 +310,16 @@ impl Session {
                             preview.circles.push((c, r));
                         }
                     }
+                    Some(gc_sketch::CurveGeom::Ellipse { c, major, minor }) => {
+                        if let (Some(c), Some(m)) = (at(c), at(major))
+                            && let Some(points) =
+                                gc_sketch::ellipse_points(c, m, minor * motion.radius_factor(), 64)
+                        {
+                            for (k, p) in points.iter().enumerate() {
+                                preview.lines.push((*p, points[(k + 1) % points.len()]));
+                            }
+                        }
+                    }
                     Some(gc_sketch::CurveGeom::Arc { c, s, e }) => {
                         if let (Some(c), Some(s), Some(e)) = (at(c), at(s), at(e)) {
                             let angle = |p: [f64; 2]| gc_math::fm::atan2(p[1] - c[1], p[0] - c[0]);

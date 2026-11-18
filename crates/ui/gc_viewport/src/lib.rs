@@ -908,7 +908,7 @@ impl Viewport {
                         Some((0..24).map(|i| (*id, along(i), along(i + 1))).collect())
                     })()
                     .unwrap_or_default(),
-                    CurveGeom::Circle { .. } => Vec::new(),
+                    CurveGeom::Circle { .. } | CurveGeom::Ellipse { .. } => Vec::new(),
                 };
                 segments
             })
@@ -1426,6 +1426,11 @@ fn select_in_box(session: &mut Session, a: [f64; 2], b: [f64; 2], crossing: bool
                 let r = session.radius(*id).unwrap_or(0.0);
                 pos(c).map(|c| ([c[0] - r, c[1] - r], [c[0] + r, c[1] + r], None))
             }
+            // Bounded by the circle of its larger radius.
+            CurveGeom::Ellipse { c, major, minor } => pos(c).zip(pos(major)).map(|(c, m)| {
+                let r = ((m[0] - c[0]).powi(2) + (m[1] - c[1]).powi(2)).sqrt().max(minor.abs());
+                ([c[0] - r, c[1] - r], [c[0] + r, c[1] + r], None)
+            }),
         };
         let Some((min, max, ends)) = bounds else { continue };
         let hit = if crossing {

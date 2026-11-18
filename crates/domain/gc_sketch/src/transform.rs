@@ -101,6 +101,9 @@ impl Sketch {
                 CurveGeom::Line { a, b } => CurveGeom::Line { a: to(a)?, b: to(b)? },
                 CurveGeom::Circle { c, r } => CurveGeom::Circle { c: to(c)?, r: r * radius },
                 CurveGeom::Arc { c, s, e } => CurveGeom::Arc { c: to(c)?, s: to(s)?, e: to(e)? },
+                CurveGeom::Ellipse { c, major, minor } => {
+                    CurveGeom::Ellipse { c: to(c)?, major: to(major)?, minor: minor * radius }
+                }
             };
             let copy: Id<Curve> = alloc.alloc();
             self.curves.insert(copy, Curve { geom, construction: curve.construction });
@@ -222,7 +225,11 @@ impl Sketch {
         // Circles of the selection grow with a scale.
         if (rules.radius - 1.0).abs() > 1e-15 {
             for id in curves {
-                if let Some(Curve { geom: CurveGeom::Circle { r, .. }, .. }) = self.curves.get_mut(id) {
+                if let Some(Curve {
+                    geom: CurveGeom::Circle { r, .. } | CurveGeom::Ellipse { minor: r, .. },
+                    ..
+                }) = self.curves.get_mut(id)
+                {
                     *r *= rules.radius;
                 }
             }

@@ -212,6 +212,8 @@ pub enum ToolKind {
     CenterRectangle,
     /// Three Point Center Rectangle: the centre, the middle of a side, then the other half-size.
     CenterRectangle3,
+    /// Draw an ellipse: centre, an axis end, then a point that sets the minor radius.
+    Ellipse,
     /// Tangent Circle: three lines it touches.
     TangentCircle,
     /// Split a curve at the crossing nearest the click.
@@ -322,6 +324,9 @@ pub enum Prompt {
     CenterRectCorner,
     CenterRectSide,
     CenterRectWidth,
+    EllipseCentre,
+    EllipseAxis,
+    EllipseMinor,
     TangentCircleLine,
     SplitPick,
     ChamferFirst,
@@ -447,6 +452,8 @@ fn dimension_for(sketch: &Sketch, picks: &[Item]) -> Option<DimKind> {
             CurveGeom::Line { a, b } => Some(DimKind::Distance { p: a, q: b }),
             CurveGeom::Circle { .. } => Some(DimKind::Diameter(curve)),
             CurveGeom::Arc { .. } => Some(DimKind::Radius(curve)),
+            // The minor radius (the major one is dimensioned from the centre to the axis end).
+            CurveGeom::Ellipse { .. } => Some(DimKind::Radius(curve)),
         },
         [Item::Point(p)] if sketch.is_spatial() => {
             // The distance of a point from the XY plane, on the side it is on now.
@@ -608,7 +615,7 @@ fn curve_between(sketch: &Sketch, p: [f64; 2], q: [f64; 2]) -> Option<(Id<Curve>
         let (a, b) = match curve.geom {
             CurveGeom::Line { a, b } => (a, b),
             CurveGeom::Arc { s, e, .. } => (s, e),
-            CurveGeom::Circle { .. } => return None,
+            CurveGeom::Circle { .. } | CurveGeom::Ellipse { .. } => return None,
         };
         if near(a, p) && near(b, q) {
             Some((*id, b))
@@ -723,6 +730,7 @@ impl Tool {
                 | ToolKind::MidpointLine
                 | ToolKind::CenterRectangle
                 | ToolKind::CenterRectangle3
+                | ToolKind::Ellipse
                 | ToolKind::TangentCircle
                 | ToolKind::Split
                 | ToolKind::Chamfer
@@ -1103,6 +1111,7 @@ impl Tool {
                         | ToolKind::MidpointLine
                         | ToolKind::CenterRectangle
                         | ToolKind::CenterRectangle3
+                        | ToolKind::Ellipse
                         | ToolKind::TangentCircle
                         | ToolKind::Split
                         | ToolKind::Chamfer
@@ -1256,7 +1265,7 @@ impl Tool {
                         let (a, b) = match sketch.curves.get(&curve)?.geom {
                             CurveGeom::Line { a, b } => (a, b),
                             CurveGeom::Arc { s, e, .. } => (s, e),
-                            CurveGeom::Circle { .. } => return None,
+                            CurveGeom::Circle { .. } | CurveGeom::Ellipse { .. } => return None,
                         };
                         Some(if other == a { b } else { a })
                     })
@@ -1369,6 +1378,7 @@ impl Tool {
             | ToolKind::MidpointLine
             | ToolKind::CenterRectangle
             | ToolKind::CenterRectangle3
+            | ToolKind::Ellipse
             | ToolKind::TangentCircle
             | ToolKind::Split
             | ToolKind::Chamfer

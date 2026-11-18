@@ -1114,7 +1114,8 @@ pub fn properties(ui: &mut Ui, session: &mut Session, lang: Lang, expression: &m
             Some(CurveGeom::Arc { .. }) => {
                 ui.label(tr!(lang, PropArc, length(session.radius(*c).unwrap_or(0.0))));
             }
-            None => {}
+            // No property line for an ellipse yet (frontend).
+            Some(CurveGeom::Ellipse { .. }) | None => {}
         },
         [Item::Constraint(_)] => {
             ui.label(tr!(lang, PropConstraint));
@@ -1182,6 +1183,9 @@ fn prompt_text(lang: Lang, prompt: Prompt) -> &'static str {
         Prompt::CenterRectCorner => Msg::PromptCenterRectCorner,
         Prompt::CenterRectSide => Msg::PromptCenterRectSide,
         Prompt::CenterRectWidth => Msg::PromptCenterRectWidth,
+        Prompt::EllipseCentre => Msg::PromptEllipseCentre,
+        Prompt::EllipseAxis => Msg::PromptEllipseAxis,
+        Prompt::EllipseMinor => Msg::PromptEllipseMinor,
         Prompt::TangentCircleLine => Msg::PromptTangentCircleLine,
         Prompt::SplitPick => Msg::PromptSplitPick,
         Prompt::ChamferFirst => Msg::PromptChamferFirst,

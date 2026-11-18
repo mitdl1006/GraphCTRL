@@ -39,7 +39,9 @@ impl Sketch {
         let solver_grab = match grab {
             SketchGrab::Point(p) => p2(p).map(Grab::Point),
             SketchGrab::Curve(curve) => match self.curves.get(&curve).map(|c| c.geom) {
-                Some(CurveGeom::Line { a, b }) => p2(a).zip(p2(b)).map(|(a, b)| Grab::Body(vec![a, b])),
+                Some(CurveGeom::Line { a, b } | CurveGeom::Ellipse { c: a, major: b, .. }) => {
+                    p2(a).zip(p2(b)).map(|(a, b)| Grab::Body(vec![a, b]))
+                }
                 Some(CurveGeom::Circle { c, .. } | CurveGeom::Arc { c, .. }) => p2(c)
                     .zip(binding.radii.get(&curve))
                     .map(|(c, r)| Grab::Rim(gc_solver::Round { c, r: *r })),

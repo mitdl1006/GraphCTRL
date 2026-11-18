@@ -41,6 +41,7 @@ pub(super) fn is_shape_tool(kind: ToolKind) -> bool {
             | ToolKind::MidpointLine
             | ToolKind::CenterRectangle
             | ToolKind::CenterRectangle3
+            | ToolKind::Ellipse
             | ToolKind::TangentCircle
             | ToolKind::Split
             | ToolKind::Chamfer
@@ -107,6 +108,15 @@ fn draw_new(preview: &mut Preview, before: &Sketch, op: &SketchOp) {
             CurveGeom::Line { a, b } => {
                 if let (Some(a), Some(b)) = (at(a), at(b)) {
                     preview.lines.push((a, b));
+                }
+            }
+            CurveGeom::Ellipse { c, major, minor } => {
+                if let (Some(c), Some(m)) = (at(c), at(major))
+                    && let Some(points) = gc_sketch::ellipse_points(c, m, minor, 64)
+                {
+                    for (k, p) in points.iter().enumerate() {
+                        preview.lines.push((*p, points[(k + 1) % points.len()]));
+                    }
                 }
             }
             CurveGeom::Circle { c, r } => {
@@ -211,6 +221,9 @@ impl Tool {
             ToolKind::CenterRectangle => Prompt::CenterRectCorner,
             ToolKind::CenterRectangle3 if self.second.is_none() => Prompt::CenterRectSide,
             ToolKind::CenterRectangle3 => Prompt::CenterRectWidth,
+            ToolKind::Ellipse if self.anchor.is_none() => Prompt::EllipseCentre,
+            ToolKind::Ellipse if self.second.is_none() => Prompt::EllipseAxis,
+            ToolKind::Ellipse => Prompt::EllipseMinor,
             ToolKind::TangentCircle => Prompt::TangentCircleLine,
             ToolKind::Split => Prompt::SplitPick,
             ToolKind::Move | ToolKind::Copy | ToolKind::Stretch if self.anchor.is_none() => Prompt::MoveBase,
@@ -315,6 +328,19 @@ impl Tool {
                 width: xyz(cursor),
                 snap_centre: self.anchor_snap.as_ref().map(end_snap).unwrap_or_default(),
             }),
+            // The minor radius is the cursor's distance from the first axis.
+            ToolKind::Ellipse => {
+                let (c, m) = (self.anchor?, self.second?.pos);
+                let (dx, dy) = (m[0] - c[0], m[1] - c[1]);
+                let a = fm::hypot(dx, dy);
+                let minor = ((cursor[0] - c[0]) * -dy + (cursor[1] - c[1]) * dx).abs() / a;
+                (a > 1e-12 && minor > 1e-12 && minor.is_finite()).then(|| SketchOp::AddEllipse {
+                    centre: xyz(c),
+                    major: xyz(m),
+                    minor,
+                    centre_snap: self.anchor_snap.as_ref().map(end_snap).unwrap_or_default(),
+                })
+            }
             _ => None,
         }
     }
@@ -419,7 +445,9 @@ impl Tool {
             }
             return;
         }
-        if let (ToolKind::CenterRectangle3, Some(c), None) = (self.kind, self.anchor, self.second) {
+        if let (ToolKind::CenterRectangle3 | ToolKind::Ellipse, Some(c), None) =
+            (self.kind, self.anchor, self.second)
+        {
             preview.lines.push((c, cursor));
             return;
         }
@@ -568,7 +596,7 @@ impl Tool {
                 self.reset();
                 out.into_iter().collect()
             }
-            ToolKind::CenterRectangle3 => {
+            ToolKind::CenterRectangle3 | ToolKind::Ellipse => {
                 let here = self.place(sketch, pos, px, None, modifier);
                 match (self.anchor, self.second) {
                     (None, _) => {

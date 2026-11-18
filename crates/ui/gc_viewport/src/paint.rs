@@ -314,6 +314,14 @@ fn curve_path(
                 view.polyline(ring(c, radius.unwrap_or(r), 0.0, tau), stroke);
             }
         }
+        CurveGeom::Ellipse { c, major, minor } => {
+            if let (Some(c), Some(m)) = (pos(c), pos(major))
+                && let Some(points) = gc_sketch::ellipse_points([c[0], c[1]], [m[0], m[1]], minor, 96)
+            {
+                let closed = points.iter().chain(points.first()).map(|p| plane.world([p[0], p[1], 0.0]));
+                view.polyline(closed, stroke);
+            }
+        }
         // In a 3D sketch an arc lies in the plane of its three points (`gc_sketch::Arc3`).
         CurveGeom::Arc { c, s, e } if spatial => {
             if let Some(arc) =
@@ -508,6 +516,7 @@ pub(crate) fn glyph_spots(
                 let r = session.radius(curve)?;
                 Some(point(c)? + (plane.u + plane.v) * (r * std::f64::consts::FRAC_1_SQRT_2))
             }
+            CurveGeom::Ellipse { major, .. } => point(major),
         }
     };
     let mut used: std::collections::BTreeMap<(i32, i32), f32> = std::collections::BTreeMap::new();

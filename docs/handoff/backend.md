@@ -19,7 +19,7 @@
 | 7 | Auto-project — **면 스케치의 면 윤곽 자동 투영 완료** / 그리기 중 문질러 투영 남음 | 68 (P2) | 문질러 투영(rubbing)은 뷰포트 스냅 작업 | 아래 작업 기록 |
 | 8 | ~~Automatic Dimensions and Constraints~~ **완료** | 126 (P2) | — | 아래 작업 기록 |
 | 9 | ~~치수 방향 뒤집기(Flip)~~ **완료** | 124 (P3) | 선-호·호-호 거리 치수 종류는 없음 | 아래 작업 기록 |
-| 10 | 타원·스플라인(+ Smooth G2) | 60, 61, 108 (P3) | `CurveGeom`에 없음 | 새 곡선 종류 — 영향 큼 |
+| 10 | ~~타원~~(**완료**)·스플라인(+ Smooth G2, 보류) | 60, 61, 108 (P3) | `CurveGeom`에 없음 | 새 곡선 종류 — 영향 큼 |
 | 11 | 어셈블리: ~~서브어셈블리 계층·활성화~~(**완료**, 단위 이동 포함), ~~조인트 Lock/Protect~~(**완료**), ~~3D 그립 스냅~~(**계산 완료**, 드래그 UI는 FE), ~~어셈블리 스케치 소유자~~(**완료**), 작업 축(선·모서리 위, 원 중심, 회전 면, 두 평면 교선) | 어셈블리 43, 90, 61, 98, 157 | 작업 축은 두 점·평면 법선만 | 행마다 원문 확인 후 범위 결정 |
 
 ## 현황 — 완료
@@ -53,6 +53,36 @@
 | 모션(오래된 남은 일) | 맨 아래 "남은 일(백엔드)" 절 그대로 |
 
 # 작업 기록(최신 순)
+
+## 2026-11-18 — 타원(리드 ④)
+
+근거: To Create 2D Shape Geometry(GUID-D489CE6D-7299-4211-A43A-F3580A4BA357)의 Ellipse.
+1=중심, 2=첫 축 끝, 3=타원 위 점(둘째 축 길이).
+
+**모델·솔버**
+- `CurveGeom::Ellipse{c, major, minor}`: 중심 점, 장축 끝 점(장반경 = 둘의 거리, 축 방향), 단반경 값.
+  `Curve::points()` = [c, major]. 3D 스케치에서는 `WrongSpace`.
+- gc_solver: `Constraint::PointOnEllipse{p, c, major, minor}`, 행 `RowKind::PointEllipse`.
+  잔차는 `(|(x/a, y/b)| − 1)·b`(길이 단위)이고, 장반경이나 단반경이 0에 가까우면 퇴화로 표시한다. 기울기 검사 테스트에 넣었다.
+- 단반경은 원 반지름처럼 반지름 변수다(`binding.radii`).
+  - `DimKind::Radius(ellipse)` = 단반경 치수. 장반경은 `DimKind::Distance{c, major}`로 잰다.
+  - `Sketch::round()`는 타원에 `None`을 돌려준다. 그래서 접선·지름 치수는 거부된다.
+- 구속: 중심 일치(점), `PointOnCurve(p, ellipse)` → 점-타원 위, 주축 수평·수직 = `Horizontal`·`Vertical(c, major)`.
+- 미지원(거부하거나 무시): Trim·Extend·Split·Fillet·Chamfer·Offset의 타원, 교점 스냅, 사분점 스냅, 타원 접선. 원문은 "You can trim and extend ellipses like any other curve"라서 Trim·Extend는 원문과 다른 점이다.
+- 복사·패턴·미러·이동·축척은 점을 옮긴다(축척은 단반경도 곱한다). 자동 치수는 장반경 거리와 단반경 반지름을 넣는다.
+- `gc_sketch::ellipse_points(c, m, b, n)`, `Sketch::ellipse(id)`, `Sketch::ellipse_outline(id, n)`: 그리기·피킹용 점열.
+
+**문서·도구·UI**
+- `SketchOp::AddEllipse{centre, major, minor, centre_snap}`: 축 길이가 0이거나, 단반경이 0 이하이거나, 값이 유한하지 않으면 `InvalidValue`.
+- `ToolKind::Ellipse`(shapes.rs 흐름): 중심 → 첫 축 끝(중심선 미리보기) → 커서(타원 미리보기) → 클릭.
+  단반경은 커서와 첫 축 사이 거리다. 프롬프트 `EllipseCentre/Axis/Minor`, i18n `PromptEllipse*`, `ToolEllipse`.
+- 리본: 원▾ split에 한 줄 넣었다(리드 지시대로). 프론트엔드 화면 쪽은 최소한만 넣었다.
+  - `gc_viewport` 그리기·상자 선택: 큰 반경의 원 상자로 잡는다.
+  - `gc_panels` 속성 줄은 없음.
+- 저장: 모델을 그대로 직렬화한다. 새 변이 하나이고, 타원이 없는 옛 파일은 그대로 열린다.
+- 테스트: `gc_persist/tests/ellipse.rs`(구속으로 완전 정의, 수직 축, 점-위 유지, 거부, save∘load),
+  `gc_session/tests/ellipse_tool.rs`(세 클릭, 미리보기, 프롬프트, Esc).
+- 스플라인은 리드 결정대로 보류했다.
 
 ## 2026-11-18 — 서브어셈블리 통째 이동(리드 ③)
 
