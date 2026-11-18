@@ -147,6 +147,24 @@ impl MeshData {
         hasher.finish()
     }
 
+    /// The mirror image of the mesh across the coordinate plane square to `axis` (0 = X, 1 = Y, 2 = Z;
+    /// any other value leaves it as it is): the coordinate is negated, every triangle's winding is turned
+    /// round so that its outside stays outside, and vertex normals (when there are any) are reflected.
+    pub fn mirrored(&self, axis: usize) -> Self {
+        if axis > 2 {
+            return self.clone();
+        }
+        let reflect = |v: &[f32; 3]| {
+            let mut out = *v;
+            out[axis] = -out[axis];
+            out
+        };
+        let positions = self.positions.iter().map(reflect).collect();
+        let normals = self.normals.iter().map(reflect).collect();
+        let indices = self.indices.chunks_exact(3).flat_map(|t| [t[0], t[2], t[1]]).collect();
+        Self { positions, normals, indices }
+    }
+
     /// The mesh with every position multiplied by `factor` (e.g. 0.001 for a file in millimetres).
     /// Returns an error when a scaled coordinate is no longer finite.
     pub fn scaled(&self, factor: f32) -> Result<Self, MeshError> {

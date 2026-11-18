@@ -544,6 +544,23 @@ pub enum CellOp {
         /// Ground New Components.
         ground: bool,
     },
+    /// [`CellOp::MirrorComponents`] with the mirror images of some bodies' shapes: the copy of a body
+    /// listed in `mirrored` takes that solid (a mesh reflected in the body's own frame across the plane
+    /// that [`crate::Document::mirror_axis`] names), so that it is a true mirror image and not the
+    /// same shape turned round (Inventor 2026 help, Mirror Components: Reference,
+    /// GUID-7B19CA69-8D14-40DA-9543-115A8AFE6336, status Mirror: "Creates a mirrored component").
+    MirrorComponentsWith {
+        /// The components (bodies, robots, assemblies).
+        items: Vec<AnyId>,
+        /// The mirror plane.
+        plane: crate::relate::Selection,
+        /// Mirror Relationships.
+        relationships: bool,
+        /// Ground New Components.
+        ground: bool,
+        /// Bodies among `items` with the solid their mirror image takes.
+        mirrored: Vec<(Id<Body>, Solid)>,
+    },
     /// Copies components, moved by `offset` (a world transform); relationships between them copied when
     /// asked.
     CopyComponents {
@@ -1232,6 +1249,7 @@ fn needs_primary(doc: &crate::Document, op: &CellOp) -> bool {
         | CellOp::AddRobot { .. }
         | CellOp::AddAssembly { .. }
         | CellOp::MirrorComponents { .. }
+        | CellOp::MirrorComponentsWith { .. }
         | CellOp::CopyComponents { .. }
         | CellOp::ReplaceComponents { .. }
         | CellOp::AddPattern { .. }
@@ -1693,8 +1711,11 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
         CellOp::DeleteRepresentation { view, position } => {
             crate::representation::delete(txn, *view, *position)
         }
+        CellOp::MirrorComponentsWith { items, plane, relationships, ground, mirrored } => {
+            crate::replicate::mirror(txn, items, plane, *relationships, *ground, mirrored)
+        }
         CellOp::MirrorComponents { items, plane, relationships, ground } => {
-            crate::replicate::mirror(txn, items, plane, *relationships, *ground)
+            crate::replicate::mirror(txn, items, plane, *relationships, *ground, &[])
         }
         CellOp::CopyComponents { items, offset, relationships, ground } => {
             crate::replicate::copy(txn, items, offset, *relationships, *ground)

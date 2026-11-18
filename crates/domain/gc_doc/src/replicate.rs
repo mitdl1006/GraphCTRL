@@ -367,6 +367,17 @@ fn check_items(doc: &Document, items: &[AnyId]) -> Result<(), EditError> {
 
 /// Mirrors components across a plane (a planar face, work plane or origin plane on any component).
 impl Document {
+    /// The axis of a component's own frame (0 = X, 1 = Y, 2 = Z) that Mirror Components takes as its
+    /// plane of symmetry for this mirror plane: the copy stands as if the component were reflected
+    /// across the mirror plane and then across that plane of its own. A shape reflected along this axis
+    /// in the component's frame makes the copy a true mirror image. `None` when the component or the
+    /// plane does not resolve.
+    pub fn mirror_axis(&self, item: AnyId, plane: &Selection) -> Option<usize> {
+        let (point, normal) = self.selection_axis(plane)?;
+        let pose = self.owner_pose(item)?;
+        (point.is_finite() && normal.is_finite()).then(|| mirrored(&pose, &Mirror { point, normal }).1)
+    }
+
     /// Where a component at `pose` stands mirrored across a plane (as Mirror Components places a reused
     /// component); `None` when the plane no longer resolves.
     pub(crate) fn mirrored_pose(&self, plane: &Selection, pose: &DPose3) -> Option<DPose3> {
@@ -381,8 +392,12 @@ pub(crate) fn mirror(
     plane: &Selection,
     relationships: bool,
     ground: bool,
+    shapes: &[(Id<Body>, Solid)],
 ) -> Result<(Vec<Created>, &'static str), EditError> {
     check_items(txn.doc(), items)?;
+    if shapes.iter().any(|(body, solid)| !solid.is_valid() || !items.contains(&body.erase())) {
+        return Err(EditError::BadValue);
+    }
     if !matches!(plane.geometry, Geometry::Plane { .. }) || !plane.geometry.is_finite() {
         return Err(EditError::BadValue);
     }
@@ -397,6 +412,11 @@ pub(crate) fn mirror(
         let pose = txn.doc().owner_pose(*item).ok_or(EditError::BadValue)?;
         let (at, axis) = mirrored(&pose, &mirror);
         let copy = instance(txn, *item, &at, &mut created)?;
+        // A true mirror image: the copy takes the reflected shape.
+        if let Some((_, solid)) = shapes.iter().find(|(body, _)| body.erase() == *item) {
+            let solid = solid.clone();
+            txn.modify(Id::<Body>::from_raw(copy.raw), |b: &mut Body, _| b.solid = solid)?;
+        }
         copy_states(txn, *item, copy, ground)?;
         copies.push((*item, copy, Mapping { flipped: Some(axis) }));
     }
