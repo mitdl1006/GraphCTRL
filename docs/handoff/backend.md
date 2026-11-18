@@ -71,6 +71,38 @@ To Work with Sketch Dimensions GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185.
 | Flip Direction 대상의 "line to an arc (the arc itself)"·"between 2 arcs" 거리 | 없음 | 선-호·호-호 거리 치수 |
 | 구동 치수 토글 | 있음(`SketchOp::SetDriving`) | — |
 
+## 2026-11-18 — iProperties 기초(리드 다음 ②)
+
+근거:
+- iProperties Reference, GUID-8ABF17C5-B9EB-47B5-92CF-9FBD335334E3(Summary·Project 탭: "to classify and manage files, search for files, create reports").
+- iProperties - Physical Tab - Reference, GUID-877564AC-78CE-4216-9913-003A2DE8D698 — "Calculates mass, surface area, and volume", "Center of Gravity …
+  relative to the assembly origin", "The density of the default material is 1 kg/m^3", 질량·부피 사용자 재정의.
+
+데이터(저장·실행 취소):
+- `gc_doc::IProperties`
+  - Summary: `title`, `subject`, `author`, `company`, `comments`
+  - Project: `part_number`, `description`, `revision`, `project`, `designer`, `vendor`
+  - Physical: `density: Option<f64>`(kg/m³, 없으면 1), `mass_override: Option<f64>`(kg)
+- 문서 것은 Timeline, 컴포넌트 것은 `Components.properties`. 컴포넌트가 지워지면 다음 쓰기 때 정리된다(다른 상태와 같은 규칙).
+- `CellOp::SetProperties { target: Option<Occurrence>, properties }`(유효성 검사, 한 번의 실행 취소), `Document::properties(target)`.
+
+세션 API:
+- `Session::{properties, set_properties, part_number}`. `part_number`는 비어 있으면 이름(원문: 파일 이름).
+- `Session::physical_properties(target: Option<Occurrence>) -> Option<PhysicalProperties { mass, volume, area, centre, density, overridden }>`
+  - 바디: 기본형은 해석식, 메시는 발산 정리(부호 사면체)로 부피·무게중심, 면적은 삼각형 합.
+  - 로봇: 링크 시각 형상을 지금 자세로 합산.
+  - 문서(`None`): 모든 바디·로봇을 각자 밀도·재정의로 합산하고 질량 가중 무게중심.
+  - 메시를 아직 못 읽었거나 가져온 어셈블리·파트·링크 단위면 `None`.
+
+FE 대화상자 필드: Summary(Title, Subject, Author, Company, Comments), Project(Part Number, Description, Revision Number, Project, Designer, Vendor), Physical(Density, Mass 재정의, 읽기 전용 Mass·Volume·Area·Center of Gravity — `physical_properties`, 단위는 `DocSettings::format_length` 등).
+
+차이·없음: Material 라이브러리(밀도만 입력), Requested Accuracy와 상대 오차 표시, 관성 모멘트, 가져온 어셈블리 메시, Custom·Status 탭, 부피 재정의, Clipboard 보고서.
+
+고친 것: `Components::is_empty`가 관절 조건·서브어셈블리·배치·스케치 소유자를 빠뜨려서, 그것들만 있는 문서는 저장할 때 상태가 통째로 빠질 수 있었다. 모든 필드를 보도록 고쳤다.
+
+- 테스트: `gc_session/tests/iproperties.rs`(저장·불러오기, 실행 취소, 거부, 기본형·재정의·문서 합산, 로봇).
+- QA 브랜치 영향: 없음(`Components` 구조체 리터럴 없음; 새 `CellOp` 변형).
+
 ## 2026-11-18 — 문서 설정(Document Settings, 리드 다음 ①)
 
 근거:

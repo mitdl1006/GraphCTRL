@@ -442,6 +442,21 @@ impl Document {
         self.timelines.iter().next()
     }
 
+    /// The iProperties of a component, or of the document (`None`); empty ones when none are kept.
+    pub fn properties(&self, target: Option<crate::design::Occurrence>) -> crate::iproperties::IProperties {
+        let Some((_, t)) = self.timeline() else { return crate::iproperties::IProperties::default() };
+        match target {
+            None => t.properties.clone(),
+            Some(o) => t
+                .components
+                .properties
+                .iter()
+                .find(|(p, _)| *p == o)
+                .map(|(_, p)| p.clone())
+                .unwrap_or_default(),
+        }
+    }
+
     /// The Document Settings (the defaults for a document that has none saved).
     pub fn settings(&self) -> crate::settings::DocSettings {
         self.timeline().map(|(_, t)| t.settings).unwrap_or_default()

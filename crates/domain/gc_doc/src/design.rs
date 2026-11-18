@@ -603,6 +603,9 @@ pub struct Timeline {
     /// View and positional representations.
     #[serde(default, skip_serializing_if = "crate::representation::Representations::is_empty")]
     pub representations: crate::representation::Representations,
+    /// The document's own iProperties.
+    #[serde(default, skip_serializing_if = "crate::iproperties::IProperties::is_empty")]
+    pub properties: crate::iproperties::IProperties,
     /// Document Settings (units, dimension display, sketch settings).
     #[serde(default, skip_serializing_if = "crate::settings::DocSettings::is_default")]
     pub settings: crate::settings::DocSettings,
@@ -709,6 +712,9 @@ pub struct Components {
     /// The next subassembly id: ids only grow, so one of a dissolved subassembly is never reused.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub next_subassembly: u32,
+    /// The iProperties of components (Summary, Project, density).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub properties: Vec<(Occurrence, crate::iproperties::IProperties)>,
 }
 
 fn is_zero(n: &u32) -> bool {
@@ -758,6 +764,12 @@ impl Components {
             && self.contact_solver.is_off()
             && self.dof_shown.is_empty()
             && !self.dof_all
+            && self.joint_conditions.is_empty()
+            && self.subassemblies.is_empty()
+            && self.placed_in.is_empty()
+            && self.sketch_owners.is_empty()
+            && self.next_subassembly == 0
+            && self.properties.is_empty()
     }
 }
 
