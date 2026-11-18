@@ -71,7 +71,7 @@ impl Entity for SkPoint {
 }
 
 /// The shape of a curve.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum CurveGeom {
     /// A segment from `a` to `b`.
     Line {
@@ -110,10 +110,16 @@ pub enum CurveGeom {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         arc: Option<(Id<SkPoint>, Id<SkPoint>)>,
     },
+    /// An interpolation spline (Inventor 2026 help, Spline (Interpolation)): an open, smooth curve through
+    /// its fit points, which are sketch points (two or more, in order).
+    Spline {
+        /// The fit points, first to last.
+        points: Vec<Id<SkPoint>>,
+    },
 }
 
 /// A curve of a sketch.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Curve {
     /// The shape.
     pub geom: CurveGeom,
@@ -135,6 +141,7 @@ impl Curve {
             CurveGeom::Arc { c, s, e } => vec![c, s, e],
             CurveGeom::Ellipse { c, major, arc: None, .. } => vec![c, major],
             CurveGeom::Ellipse { c, major, arc: Some((s, e)), .. } => vec![c, major, s, e],
+            CurveGeom::Spline { ref points } => points.clone(),
         }
     }
 }
@@ -372,6 +379,14 @@ impl Sketch {
         self.ellipse_geom_outline(&self.curves.get(&curve)?.geom, segments)
     }
 
+    /// Points along a spline (its fit points' positions through [`spline_points`]); `None` for another
+    /// curve or a missing point.
+    pub fn spline_outline(&self, geom: &CurveGeom, per_span: usize) -> Option<Vec<[f64; 2]>> {
+        let CurveGeom::Spline { points } = geom else { return None };
+        let fit: Option<Vec<[f64; 2]>> = points.iter().map(|p| self.pos(*p).map(|q| [q[0], q[1]])).collect();
+        Some(spline_points(&fit?, per_span))
+    }
+
     /// [`Sketch::ellipse_outline`] for a curve's shape (`None` when it is not an ellipse).
     pub fn ellipse_geom_outline(&self, geom: &CurveGeom, segments: usize) -> Option<(Vec<[f64; 2]>, bool)> {
         let CurveGeom::Ellipse { c, major, minor, arc } = *geom else { return None };
@@ -387,7 +402,10 @@ impl Sketch {
     pub fn ellipse_arc(&self, curve: Id<Curve>) -> Option<(Id<SkPoint>, Id<SkPoint>)> {
         match self.curves.get(&curve)?.geom {
             CurveGeom::Ellipse { arc, .. } => arc,
-            CurveGeom::Line { .. } | CurveGeom::Circle { .. } | CurveGeom::Arc { .. } => None,
+            CurveGeom::Line { .. }
+            | CurveGeom::Circle { .. }
+            | CurveGeom::Arc { .. }
+            | CurveGeom::Spline { .. } => None,
         }
     }
 
@@ -395,7 +413,10 @@ impl Sketch {
     pub fn ellipse(&self, curve: Id<Curve>) -> Option<(Id<SkPoint>, Id<SkPoint>, f64)> {
         match self.curves.get(&curve)?.geom {
             CurveGeom::Ellipse { c, major, minor, .. } => Some((c, major, minor)),
-            CurveGeom::Line { .. } | CurveGeom::Circle { .. } | CurveGeom::Arc { .. } => None,
+            CurveGeom::Line { .. }
+            | CurveGeom::Circle { .. }
+            | CurveGeom::Arc { .. }
+            | CurveGeom::Spline { .. } => None,
         }
     }
 
@@ -408,7 +429,7 @@ impl Sketch {
                 let squares = (0..3).map(|k| (start[k] - centre[k]).powi(2)).sum::<f64>();
                 Some((c, squares.sqrt()))
             }
-            CurveGeom::Line { .. } | CurveGeom::Ellipse { .. } => None,
+            CurveGeom::Line { .. } | CurveGeom::Ellipse { .. } | CurveGeom::Spline { .. } => None,
         }
     }
 
@@ -505,4 +526,64 @@ pub fn ellipse_points(
             ((0..=segments).map(|k| at(start + sweep * k as f64 / n)).collect(), false)
         }
     })
+}
+
+/// Points along the interpolation spline through `fit` (a natural cubic through each fit point, spaced by
+/// the chord lengths between them), `per_span` steps between neighbours, the first and last fit points
+/// included. Two fit points give the straight segment; fewer give nothing.
+pub fn spline_points(fit: &[[f64; 2]], per_span: usize) -> Vec<[f64; 2]> {
+    let n = fit.len();
+    if n < 2 || per_span == 0 {
+        return fit.to_vec();
+    }
+    // Chord-length parameters.
+    let mut t = vec![0.0; n];
+    for i in 1..n {
+        let d = gc_math::fm::hypot(fit[i][0] - fit[i - 1][0], fit[i][1] - fit[i - 1][1]);
+        t[i] = t[i - 1] + d.max(1e-12);
+    }
+    // Second derivatives of a natural cubic spline, per coordinate (tridiagonal solve).
+    let second = |k: usize| -> Vec<f64> {
+        let mut m = vec![0.0; n];
+        if n < 3 {
+            return m;
+        }
+        let h: Vec<f64> = (0..n - 1).map(|i| t[i + 1] - t[i]).collect();
+        let mut diag = vec![0.0; n];
+        let mut rhs = vec![0.0; n];
+        for i in 1..n - 1 {
+            diag[i] = 2.0 * (h[i - 1] + h[i]);
+            rhs[i] = 6.0 * ((fit[i + 1][k] - fit[i][k]) / h[i] - (fit[i][k] - fit[i - 1][k]) / h[i - 1]);
+        }
+        // Forward sweep over the inner rows (the ends are zero: natural).
+        for i in 2..n - 1 {
+            let w = h[i - 1] / diag[i - 1];
+            diag[i] -= w * h[i - 1];
+            rhs[i] -= w * rhs[i - 1];
+        }
+        for i in (1..n - 1).rev() {
+            let next = if i + 1 < n - 1 { h[i] * m[i + 1] } else { 0.0 };
+            m[i] = (rhs[i] - next) / diag[i];
+        }
+        m
+    };
+    let (mx, my) = (second(0), second(1));
+    let mut out = Vec::with_capacity((n - 1) * per_span + 1);
+    for i in 0..n - 1 {
+        let h = t[i + 1] - t[i];
+        for step in 0..per_span {
+            #[allow(clippy::cast_precision_loss, reason = "a few dozen steps")]
+            let s = h * step as f64 / per_span as f64;
+            let (a, b) = ((h - s) / h, s / h);
+            let value = |p0: f64, p1: f64, m0: f64, m1: f64| {
+                a * p0 + b * p1 + ((a * a * a - a) * m0 + (b * b * b - b) * m1) * h * h / 6.0
+            };
+            out.push([
+                value(fit[i][0], fit[i + 1][0], mx[i], mx[i + 1]),
+                value(fit[i][1], fit[i + 1][1], my[i], my[i + 1]),
+            ]);
+        }
+    }
+    out.push(fit[n - 1]);
+    out
 }

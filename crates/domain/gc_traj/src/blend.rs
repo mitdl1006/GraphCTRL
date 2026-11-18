@@ -134,7 +134,7 @@ impl BlendedPath {
 
     /// Position and its first and second derivative with respect to `s`.
     pub(crate) fn eval(&self, s: f64) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
-        let s = s.clamp(0.0, self.length());
+        let s = crate::clamp_between(s, 0.0, self.length());
         let index =
             self.starts.partition_point(|start| *start <= s).saturating_sub(1).min(self.pieces.len() - 1);
         self.pieces[index].eval(s - self.starts[index])
@@ -296,7 +296,7 @@ impl Timed {
             // Kept a hair below the corner the search found, so that rounding in the search never asks the
             // forward pass for a speed it cannot hold.
             let highest = max_x(&rows).ok_or(TimingError::Infeasible)?;
-            reach[i] = (highest * (1.0 - 1e-7) - 1e-12).clamp(0.0, cap[i]);
+            reach[i] = crate::clamp_between(highest * (1.0 - 1e-7) - 1e-12, 0.0, cap[i]);
         }
 
         // Forwards: from rest, the hardest acceleration that stays within the limits and those speeds.
@@ -352,7 +352,7 @@ impl Timed {
     }
 
     pub(crate) fn sample(&self, t: f64) -> Sample {
-        let t = t.clamp(0.0, self.duration);
+        let t = crate::clamp_between(t, 0.0, self.duration);
         let index =
             self.stages.partition_point(|stage| stage.t <= t).saturating_sub(1).min(self.stages.len() - 1);
         let stage = self.stages[index];

@@ -19,7 +19,7 @@
 | 7 | Auto-project — **면 스케치의 면 윤곽 자동 투영 완료** / 그리기 중 문질러 투영 남음 | 68 (P2) | 문질러 투영(rubbing)은 뷰포트 스냅 작업 | 아래 작업 기록 |
 | 8 | ~~Automatic Dimensions and Constraints~~ **완료** | 126 (P2) | — | 아래 작업 기록 |
 | 9 | ~~치수 방향 뒤집기(Flip)~~ **완료** | 124 (P3) | 선-호·호-호 거리 치수 종류는 없음 | 아래 작업 기록 |
-| 10 | ~~타원~~(**완료**)·스플라인(+ Smooth G2, 보류) | 60, 61, 108 (P3) | `CurveGeom`에 없음 | 새 곡선 종류 — 영향 큼 |
+| 10 | ~~타원~~(**완료**)·~~스플라인~~(**보간·열린 곡선 완료**, Smooth G2·제어점은 P3) | 60, 61, 108 (P3) | `CurveGeom`에 없음 | 새 곡선 종류 — 영향 큼 |
 | 11 | 어셈블리: ~~서브어셈블리 계층·활성화~~(**완료**, 단위 이동 포함), ~~조인트 Lock/Protect~~(**완료**), ~~3D 그립 스냅~~(**계산 완료**, 드래그 UI는 FE), ~~어셈블리 스케치 소유자~~(**완료**), 작업 축(선·모서리 위, 원 중심, 회전 면, 두 평면 교선) | 어셈블리 43, 90, 61, 98, 157 | 작업 축은 두 점·평면 법선만 | 행마다 원문 확인 후 범위 결정 |
 
 ## 현황 — 완료
@@ -53,6 +53,47 @@
 | 모션(오래된 남은 일) | 맨 아래 "남은 일(백엔드)" 절 그대로 |
 
 # 작업 기록(최신 순)
+
+## 2026-11-18 — 긴급: 손상된 조인트 범위로 인한 패닉(QA)
+
+- 원인: `JointRange::target`이 `f64::clamp(start, end)`를 썼다. 손상·손편집된 파일에서 Start > End(또는 NaN)면 패닉했다.
+- `gc_math::clamp_between(value, a, b)`: 경계 순서와 상관없고, 경계가 NaN이면 값을 그대로 둔다. 패닉하지 않는다.
+  데이터에서 오는 경계를 쓰는 곳을 이것으로 바꿨다.
+  - 조인트 범위의 목표, 조인트 Drive.
+  - 로봇 관절 한계로 깎기(`gc_session` 두 곳, `gc_robot/src/ik.rs`). URDF가 손상돼 lower > upper일 수 있다.
+  - 재생 시간·궤적 시간·호 길이(`gc_session` 재생, `gc_traj` 다섯 곳). 길이가 NaN일 때 대비.
+  - `gc_traj`는 `gc_math` 의존이 없어서 같은 함수를 crate 안에 두었다(Cargo.lock 변화 없음).
+- 불러오기: `gc_persist::load`가 조인트 범위의 `is_valid()`를 검사한다. 잘못된 범위는 버리고(한계 없음) `Loaded.warnings`에 남긴다.
+  열기는 계속한다. 세션 `load_warnings()`(상태 표시줄용, 프론트엔드).
+- 검색 결과: 나머지 `.clamp(`는 상수 경계뿐이다(0..1, -1..1, 개수 상한 등).
+- 테스트: `gc_session/tests/joint_limits.rs::a_damaged_joint_range_in_a_file_is_dropped_not_a_panic`, `gc_math` `clamp_between_never_panics`.
+  QA 테스트 `qa_joint_limits.rs::a_damaged_joint_range…`는 리드 브랜치에 아직 없어서 못 돌렸다.
+
+## 2026-11-18 — 스플라인(보간, 리드 다음 ②)
+
+근거: To Create, Lock Spline Length, and Edit Splines(GUID-DB15C479-66F2-456A-9E54-40A60F83DC92).
+- 보간 스플라인은 맞춤점들을 지난다.
+- 첫 점은 클릭하거나 기존 점을 클릭한다. 이어서 클릭하면 맞춤점이 된다.
+- 스플라인 점에는 구속을 일부 또는 전부 걸 수 있다.
+
+**범위(리드 결정대로)**: 열린 보간 스플라인 하나, 맞춤점 = 스케치 점. 끝 접선 핸들·제어점 스플라인은 P3다.
+
+**모델**
+- `CurveGeom::Spline{points: Vec<Id<SkPoint>>}`. 그래서 `CurveGeom`과 `Curve`에서 `Copy`를 뺐다
+  (`.clone()` 10여 곳, `map(|c| c.geom.clone())`).
+- `Curve::points()`는 맞춤점 전부다. 그래서 지우기·이동·복사·패턴·미러가 맞춤점을 따라간다.
+- 모양: `gc_sketch::spline_points(fit, per_span)`. 현 길이 매개변수의 자연 3차 스플라인이고 맞춤점을 정확히 지난다(점 2개면 선분).
+  `Sketch::spline_outline(geom, n)`.
+- 솔버: 스플라인은 맞춤점이 정하므로 따로 더할 것이 없다(맞춤점마다 자유도 2). 3D 스케치에서는 `WrongSpace`.
+- 미지원(거부하거나 무시): Trim·Extend·Split·Fillet·Offset·교점 스냅·접선, Close Curve, 핸들, Insert Point, Tension, 치수 직접(맞춤점에 건다).
+- `SketchOp::AddSpline{points, snaps}`: 점 2개 미만, 연속한 같은 점, 유한하지 않은 값은 `InvalidValue`. 맞춤점마다 스냅 구속을 건다.
+- 도구 `ToolKind::Spline`:
+  - 클릭할 때마다 맞춤점(스냅 포함). Enter나 마지막 점을 다시 클릭하면 마친다. Esc는 버린다.
+  - 미리보기는 지금까지의 점과 커서를 지나는 곡선이다.
+  - 프롬프트 `SplineFirst/Next`, i18n `ToolSpline`·`PromptSpline*`. 리본은 선▾ split에 한 줄 넣었다(아이콘 "~").
+- 그리기·피킹·상자 선택·드래그(맞춤점 전부를 몸통으로)를 지원한다.
+- 저장: 모델을 그대로 직렬화한다. 스플라인이 없는 옛 파일은 그대로 열린다.
+- 테스트: `gc_persist/tests/spline.rs`(맞춤점 통과, 자유도, 구속, 복사·삭제, 거부, save∘load), `gc_session/tests/spline_tool.rs`.
 
 ## 2026-11-18 — 타원 Trim·Extend, 교점·사분점 스냅(리드 다음 ①)
 

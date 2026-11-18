@@ -70,7 +70,7 @@ fn ends(curve: &Curve) -> Option<(Id<SkPoint>, Id<SkPoint>)> {
     match curve.geom {
         CurveGeom::Line { a, b } => Some((a, b)),
         CurveGeom::Arc { s, e, .. } => Some((s, e)),
-        CurveGeom::Circle { .. } | CurveGeom::Ellipse { .. } => None,
+        CurveGeom::Circle { .. } | CurveGeom::Ellipse { .. } | CurveGeom::Spline { .. } => None,
     }
 }
 

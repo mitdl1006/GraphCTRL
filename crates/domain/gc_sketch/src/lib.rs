@@ -28,7 +28,7 @@ pub use edit::{AddResult, Item, SketchError, SketchReport};
 pub use gc_solver::{DepKind, DragRefused, FrameOutcome, Status};
 pub use model::{
     Curve, CurveGeom, DimKind, Dimension, ExternalRef, GeoConstraint, PointKind, SkPoint, Sketch, Space,
-    ellipse_param, ellipse_points,
+    ellipse_param, ellipse_points, spline_points,
 };
 pub use pattern::{PatternCopy, PatternDefinition, PatternDirection, PatternStep, SketchPattern};
 pub use transform::{CopyResult, MoveRules, copied_items};

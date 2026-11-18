@@ -276,7 +276,7 @@ impl PlannedPath {
 
     /// The joint values at time `t` (clamped to the motion).
     pub fn sample(&self, t: f64) -> Vec<f64> {
-        let mut t = t.clamp(0.0, self.duration());
+        let mut t = gc_math::clamp_between(t, 0.0, self.duration());
         for segment in &self.segments {
             let duration = segment.trajectory.duration();
             if t <= duration {
@@ -2129,7 +2129,8 @@ impl Session {
             return;
         }
         let limits = loaded.chain.lower().iter().zip(loaded.chain.upper());
-        let clamped = joints.iter().zip(limits).map(|(q, (lo, hi))| q.clamp(*lo, *hi)).collect();
+        let clamped =
+            joints.iter().zip(limits).map(|(q, (lo, hi))| gc_math::clamp_between(*q, *lo, *hi)).collect();
         self.cell.playback = None;
         self.cell.jog = Some((robot, clamped));
     }
@@ -2142,7 +2143,8 @@ impl Session {
             return;
         }
         let limits = loaded.chain.lower().iter().zip(loaded.chain.upper());
-        let clamped = joints.iter().zip(limits).map(|(q, (lo, hi))| q.clamp(*lo, *hi)).collect();
+        let clamped =
+            joints.iter().zip(limits).map(|(q, (lo, hi))| gc_math::clamp_between(*q, *lo, *hi)).collect();
         self.cell.playback = None;
         self.cell.drive = Some((robot, clamped));
     }

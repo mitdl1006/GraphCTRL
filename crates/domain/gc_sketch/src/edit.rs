@@ -186,6 +186,25 @@ impl Sketch {
         Ok(id)
     }
 
+    /// Adds an interpolation spline through new fit points at `points` (two or more, finite, no two in a
+    /// row at the same place).
+    pub fn add_spline(&mut self, alloc: &mut IdAlloc, points: &[[f64; 3]]) -> Result<Id<Curve>, SketchError> {
+        if self.is_spatial() {
+            return Err(SketchError::WrongSpace);
+        }
+        let finite = points.iter().flatten().all(|v| v.is_finite());
+        let apart = points
+            .windows(2)
+            .all(|w| ((w[1][0] - w[0][0]).powi(2) + (w[1][1] - w[0][1]).powi(2)).sqrt() > 1e-9);
+        if points.len() < 2 || !finite || !apart {
+            return Err(SketchError::InvalidValue);
+        }
+        let fit: Vec<Id<SkPoint>> = points.iter().map(|p| self.add_point(alloc, *p)).collect();
+        let id = alloc.alloc();
+        self.curves.insert(id, Curve { geom: CurveGeom::Spline { points: fit }, construction: false });
+        Ok(id)
+    }
+
     /// Adds an ellipse with its own centre and major axis end points and the given minor radius.
     pub fn add_ellipse(
         &mut self,

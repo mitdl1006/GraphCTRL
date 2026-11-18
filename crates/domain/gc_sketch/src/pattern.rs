@@ -276,9 +276,10 @@ impl Sketch {
                 }
             }
             for (original, copy) in &pattern.circles {
-                if let (Some(CurveGeom::Circle { r, .. }), Some(CurveGeom::Circle { r: now, .. })) =
-                    (self.curves.get(original).map(|c| c.geom), self.curves.get(copy).map(|c| c.geom))
-                    && (r - now).abs() > 1e-13
+                if let (Some(CurveGeom::Circle { r, .. }), Some(CurveGeom::Circle { r: now, .. })) = (
+                    self.curves.get(original).map(|c| c.geom.clone()),
+                    self.curves.get(copy).map(|c| c.geom.clone()),
+                ) && (r - now).abs() > 1e-13
                 {
                     radii.push((*copy, r));
                 }

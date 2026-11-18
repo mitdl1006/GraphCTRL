@@ -215,6 +215,9 @@ pub enum ToolKind {
     CenterRectangle3,
     /// Draw an ellipse: centre, an axis end, then a point that sets the minor radius.
     Ellipse,
+    /// Draw an interpolation spline through clicked fit points (Enter or a second click on the last point
+    /// finishes).
+    Spline,
     /// Tangent Circle: three lines it touches.
     TangentCircle,
     /// Split a curve at the crossing nearest the click.
@@ -328,6 +331,8 @@ pub enum Prompt {
     EllipseCentre,
     EllipseAxis,
     EllipseMinor,
+    SplineFirst,
+    SplineNext,
     TangentCircleLine,
     SplitPick,
     ChamferFirst,
@@ -387,6 +392,8 @@ pub struct Tool {
     second: Option<Snap>,
     /// Line tool: the points of the chain drawn so far, start first.
     chain: Vec<[f64; 2]>,
+    /// The Spline tool: what each fit point in `chain` was snapped to.
+    spline_snaps: Vec<EndSnap>,
     /// Line tool: dragging an arc out of the chain's end.
     arc_drag: bool,
     /// Tangent arc: the end it starts from and the curve it continues.
@@ -455,6 +462,7 @@ fn dimension_for(sketch: &Sketch, picks: &[Item]) -> Option<DimKind> {
             CurveGeom::Arc { .. } => Some(DimKind::Radius(curve)),
             // The minor radius (the major one is dimensioned from the centre to the axis end).
             CurveGeom::Ellipse { .. } => Some(DimKind::Radius(curve)),
+            CurveGeom::Spline { .. } => None,
         },
         [Item::Point(p)] if sketch.is_spatial() => {
             // The distance of a point from the XY plane, on the side it is on now.
@@ -616,7 +624,7 @@ fn curve_between(sketch: &Sketch, p: [f64; 2], q: [f64; 2]) -> Option<(Id<Curve>
         let (a, b) = match curve.geom {
             CurveGeom::Line { a, b } => (a, b),
             CurveGeom::Arc { s, e, .. } => (s, e),
-            CurveGeom::Circle { .. } | CurveGeom::Ellipse { .. } => return None,
+            CurveGeom::Circle { .. } | CurveGeom::Ellipse { .. } | CurveGeom::Spline { .. } => return None,
         };
         if near(a, p) && near(b, q) {
             Some((*id, b))
@@ -654,6 +662,7 @@ impl Tool {
             anchor_snap: None,
             second: None,
             chain: Vec::new(),
+            spline_snaps: Vec::new(),
             arc_drag: false,
             tangent_from: None,
             construction: false,
@@ -732,6 +741,7 @@ impl Tool {
                 | ToolKind::CenterRectangle
                 | ToolKind::CenterRectangle3
                 | ToolKind::Ellipse
+                | ToolKind::Spline
                 | ToolKind::TangentCircle
                 | ToolKind::Split
                 | ToolKind::Chamfer
@@ -996,6 +1006,7 @@ impl Tool {
         self.picks.clear();
         self.pending = None;
         self.chain.clear();
+        self.spline_snaps.clear();
         self.arc_drag = false;
         self.tangent_from = None;
         self.fillet_first = None;
@@ -1114,6 +1125,7 @@ impl Tool {
                         | ToolKind::CenterRectangle
                         | ToolKind::CenterRectangle3
                         | ToolKind::Ellipse
+                        | ToolKind::Spline
                         | ToolKind::TangentCircle
                         | ToolKind::Split
                         | ToolKind::Chamfer
@@ -1267,7 +1279,9 @@ impl Tool {
                         let (a, b) = match sketch.curves.get(&curve)?.geom {
                             CurveGeom::Line { a, b } => (a, b),
                             CurveGeom::Arc { s, e, .. } => (s, e),
-                            CurveGeom::Circle { .. } | CurveGeom::Ellipse { .. } => return None,
+                            CurveGeom::Circle { .. }
+                            | CurveGeom::Ellipse { .. }
+                            | CurveGeom::Spline { .. } => return None,
                         };
                         Some(if other == a { b } else { a })
                     })
@@ -1381,6 +1395,7 @@ impl Tool {
             | ToolKind::CenterRectangle
             | ToolKind::CenterRectangle3
             | ToolKind::Ellipse
+            | ToolKind::Spline
             | ToolKind::TangentCircle
             | ToolKind::Split
             | ToolKind::Chamfer

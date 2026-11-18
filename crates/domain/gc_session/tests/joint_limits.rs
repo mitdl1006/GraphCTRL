@@ -126,3 +126,48 @@ fn limits_survive_lock_save_and_load_and_go_with_the_joint() {
     s.delete_relationship(hinge).unwrap();
     assert_eq!(s.joint_limits(hinge), (None, None));
 }
+
+/// A project file whose joint range is damaged (Start past End, edited by hand) opens: the range is dropped
+/// with a warning, and solving never panics (no input may make the app panic).
+#[test]
+fn a_damaged_joint_range_in_a_file_is_dropped_not_a_panic() {
+    let (mut s, _, hinge) = jointed(RelationKind::Rotational { flip: false });
+    s.set_joint_limits(hinge, range(-0.5, 0.5, None), None).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("cell.gcp");
+    s.save_as(&path).unwrap();
+    // Swap Start and End in the file, and make another value not a number.
+    let text = std::fs::read_to_string(&path).unwrap();
+    let mut json: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let mut changed = 0;
+    fn walk(v: &mut serde_json::Value, changed: &mut usize) {
+        match v {
+            serde_json::Value::Object(map) => {
+                if map.contains_key("start") && map.contains_key("end") {
+                    map.insert("start".into(), serde_json::json!(2.0));
+                    map.insert("end".into(), serde_json::json!(-2.0));
+                    *changed += 1;
+                }
+                for value in map.values_mut() {
+                    walk(value, changed);
+                }
+            }
+            serde_json::Value::Array(items) => items.iter_mut().for_each(|i| walk(i, changed)),
+            serde_json::Value::Null
+            | serde_json::Value::Bool(_)
+            | serde_json::Value::Number(_)
+            | serde_json::Value::String(_) => {}
+        }
+    }
+    walk(&mut json, &mut changed);
+    assert_eq!(changed, 1, "the range is in the file");
+    std::fs::write(&path, serde_json::to_string(&json).unwrap()).unwrap();
+    let mut t = Session::new();
+    t.open(&path).unwrap();
+    assert_eq!(t.joint_limits(hinge), (None, None), "the damaged range is dropped");
+    assert_eq!(t.load_warnings().len(), 1, "{:?}", t.load_warnings());
+    assert!(t.doc().solve_relationships().is_ok());
+    // Driving the joint (which reads limits) does not panic either.
+    t.drive_relationship(hinge, 0.3).unwrap();
+    t.end_drive_relationship();
+}
