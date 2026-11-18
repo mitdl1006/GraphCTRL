@@ -286,11 +286,13 @@ fn choice<T: Clone + PartialEq>(
 ) -> bool {
     let before = current.clone();
     let shown = options.iter().find(|(v, _)| *v == *current).map_or_else(String::new, |(_, n)| n.clone());
-    egui::ComboBox::from_id_salt(salt).selected_text(shown).show_ui(ui, |ui| {
+    let name = shown.clone();
+    let popup = egui::ComboBox::from_id_salt(salt).selected_text(shown).show_ui(ui, |ui| {
         for (value, name) in options {
             ui.selectable_value(current, value.clone(), name);
         }
     });
+    popup.response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ComboBox, true, name.as_str()));
     *current != before
 }
 
@@ -751,7 +753,13 @@ fn task_properties(ui: &mut Ui, session: &mut Session, lang: Lang, id: Id<Task>)
                 .get(*o)
                 .and_then(|object| session.doc().get(object.ty).and_then(|t| t.states.first().cloned()))
                 .unwrap_or_default(),
-            EffectTarget::Var(_) => "true".to_owned(),
+            // A variable takes a value of its own kind: yes for a yes/no, zero for a number, the first choice.
+            EffectTarget::Var(v) => match session.doc().get(*v).map(|var| &var.value) {
+                Some(StateValue::Int(_)) => "0".to_owned(),
+                Some(StateValue::Real(_)) => "0.0".to_owned(),
+                Some(StateValue::Enum { choices, .. }) => choices.first().cloned().unwrap_or_default(),
+                Some(StateValue::Bool(_)) | None => "true".to_owned(),
+            },
         };
         next.effects.push(Effect { target: *target, value });
         changed = true;
@@ -803,6 +811,37 @@ fn task_properties(ui: &mut Ui, session: &mut Session, lang: Lang, id: Id<Task>)
                 changed = true;
             }
         }
+    }
+    // Which robot would do it and how long it takes: planned when asked (the planning is not instant, so it
+    // is not done every frame).
+    let key = egui::Id::unique("gc_task_candidates").with(id);
+    if ui.button(tr!(lang, WorkCandidates)).clicked() {
+        let table: Vec<(String, Result<f64, String>)> = session
+            .task_candidates(id)
+            .into_iter()
+            .map(|c| {
+                (
+                    session.doc().get(c.robot).map_or_else(String::new, |r: &gc_doc::Robot| r.name.clone()),
+                    c.time,
+                )
+            })
+            .collect();
+        ui.data_mut(|d| d.insert_temp(key, table));
+    }
+    if let Some(table) = ui.data(|d| d.get_temp::<Vec<(String, Result<f64, String>)>>(key)) {
+        if table.is_empty() {
+            ui.weak(tr!(lang, WorkNoCandidates));
+        }
+        egui::Grid::new(("gc_task_candidates_grid", id)).num_columns(2).spacing([12.0, 3.0]).show(ui, |ui| {
+            for (robot, time) in &table {
+                ui.label(robot);
+                match time {
+                    Ok(seconds) => ui.label(format!("{seconds:.1} s")),
+                    Err(why) => ui.colored_label(gc_ui::colors::ERROR, why),
+                };
+                ui.end_row();
+            }
+        });
     }
     ui.horizontal(|ui| {
         ui.label(tr!(lang, WorkPriority));
@@ -1035,6 +1074,10 @@ fn kit_properties(ui: &mut Ui, session: &mut Session, lang: Lang, id: Id<gc_doc:
 /// the status bar.
 pub fn robot_tool_kit(ui: &mut Ui, session: &mut Session, lang: Lang, robot: Id<gc_doc::Robot>) {
     let fitted = session.robot_tool_kit(robot);
+    // Nothing to choose from while no kind of tool is defined.
+    if fitted.is_none() && session.doc().tool_kits().iter().next().is_none() {
+        return;
+    }
     let kits: Vec<(Option<Id<gc_doc::ToolKit>>, String)> =
         std::iter::once((None, tr!(lang, WorkNoKit).to_owned()))
             .chain(session.doc().tool_kits().iter().map(|(k, kit)| (Some(k), kit.name.clone())))

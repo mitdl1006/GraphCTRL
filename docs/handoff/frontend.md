@@ -420,6 +420,26 @@
 - 알려진 차이: 작업의 뷰 표시(위치 표시)·실행 상태·스케줄러 UI는 없음. 단계의 입출력 이름·툴 동작은 글자 그대로(백엔드도 검사 안 함). 텍스트 편집 도중 Esc로 되돌리기 없음.
 - 테스트: `the_browser_work_node_makes_and_deletes_tasks`, `selecting_a_task_shows_its_editor`(shell), `a_role_makes_a_task_from_its_browser_menu`(sketch_shape_tools).
 
+### 툴 종류·후보 로봇·스케줄 UI (계획 9.4·9.5, GraphCTRL 고유)
+
+- 브라우저 "작업" 아래 "툴 종류" 그룹(새로 만들기·이름 바꾸기·삭제), 편집기(`kit_properties`): 신호(이름·입력/출력·핀 번호, 추가·삭제), 툴 상태 목록, 동작 카드(이름, 설정 신호와 값, 확인 신호와 값, 툴 상태, 대상 객체 유형과 결과 상태, 조건식(`tool.state`·`target.state` 사용, 오류 인라인), 걸리는 시간·확인 대기). 거절(이름 중복·같은 핀·쓰는 동작 삭제)은 상태 줄.
+- 로봇을 선택하면 속성 패널에 "툴 종류 장착"(없음 포함 목록)과 툴 상태 선택(`WorkOp::SetRobotTool`).
+- 작업 편집기: 툴 종류가 하나라도 있으면 SetIo의 신호와 ToolAction의 동작을 그 목록에서 고른다(없으면 글자 입력 그대로). "후보 로봇 계산" 버튼 → `task_candidates` 결과 표(로봇, 예상 시간 또는 이유). 계획이 즉시 끝나지 않으므로 단추를 누를 때만 계산하고 다음 계산까지 표를 보인다(작업 id별로 임시 저장).
+- 스케줄 패널(도구 > 스케줄, 아래쪽에 상태 표시줄 위): "스케줄 계산" → `Session::schedule`; 로봇마다 한 줄의 간트(작업 막대, 호버하면 시작·끝), 전체 시간(makespan), "하지 못하는 작업"과 이유. 결과는 다음 계산까지 보인다. 백엔드가 `request_schedule`/`schedule_result`(작업 스레드)를 내면 그걸로 바꾼다.
+- 알려진 차이: 간트는 시간 눈금 없음, 작업 스레드 계산 아님(동기, 큰 셀에서는 눌렀을 때 멈출 수 있음), 신호·동작을 실제 로봇에 보내는 UI 없음.
+- 테스트: `a_tool_kind_is_edited_and_fitted_to_a_robot`, `the_schedule_panel_works_out_the_schedule_and_lists_blocked_tasks`(shell).
+
+### 스케줄 패널: 작업 스레드, 시간 눈금; 효과 추가 기본값 수정
+
+- 스케줄 패널이 `request_schedule`/`schedule_result`/`schedule_pending`을 쓴다(결과는 세션이 들고 있음): 계산 중에는 단추를 끄고 스피너와 "계산 중…", 문서가 바뀐 뒤의 결과는 흐리게 그리고 "문서가 바뀌었습니다 — 다시 계산하십시오". 간트 위에 초 눈금(1-2-5 간격).
+- QA 버그: 작업 편집기 "효과 추가"가 변수에 항상 `true`를 넣었다 → 변수 종류별 기본값(참/거짓=true, 정수=0, 실수=0.0, 열거=첫 선택지). QA `add_effect_works_for_an_integer_variable`의 `#[ignore]`를 풀었다.
+- 테스트: shell `the_schedule_panel_…`에 "오래된 결과" 단언 추가, qa_work_screens 7개 통과.
+
+### 스케줄 재생
+
+- 스케줄 패널에 "스케줄 재생/일시정지", "스케줄 원위치", 시각 슬라이더(0..=makespan, s), 간트 위 현재 시각 세로선. 재생 중에만 repaint(`unstable_dt`로 시각을 진행, 끝에서 멈춤). 슬라이더·재생은 `set_schedule_playback(Some(t))`, 원위치·패널 닫기는 `None`(로봇이 원래 자리로, 문서는 바뀌지 않음). 버튼 이름은 셀 패널의 "재생"과 겹치지 않게 "스케줄 …"로 했다.
+- 테스트: `the_schedule_panel_plays_the_schedule_and_resets`.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

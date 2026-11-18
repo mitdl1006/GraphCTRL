@@ -6657,3 +6657,86 @@ fn a_tool_kind_is_edited_and_fitted_to_a_robot() {
     assert!(harness.state().session.robot_tool_kit(robot).is_some());
     harness.get_by_label("툴 상태");
 }
+
+/// The schedule panel (Tools > Schedule): worked out when asked; a task no robot can do is listed as blocked.
+#[test]
+fn the_schedule_panel_works_out_the_schedule_and_lists_blocked_tasks() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let task = gc_doc::Task {
+        name: "Orphan".into(),
+        location: gc_doc::Location::None,
+        precondition: String::new(),
+        steps: vec![gc_doc::Step::Wait { seconds: 1.0 }],
+        effects: Vec::new(),
+        robots: gc_doc::RobotChoice::Any,
+        priority: 0,
+    };
+    harness.state_mut().session.edit_work(gc_doc::WorkOp::AddTask(task)).unwrap();
+    harness.get_by_label("도구").click();
+    harness.run();
+    harness.get_by_label("스케줄").click();
+    harness.run_steps(3);
+    harness.get_by_label("스케줄을 아직 계산하지 않았습니다.");
+    harness.get_by_label("스케줄 계산").click();
+    harness.run_steps(3);
+    // No robot in the cell: the task cannot be given to any.
+    harness.get_by_label("하지 못하는 작업");
+    harness.get_by_label("Orphan");
+    // The document changes: the result stays on screen, marked as out of date.
+    let second = gc_doc::Task {
+        name: "Second".into(),
+        location: gc_doc::Location::None,
+        precondition: String::new(),
+        steps: vec![gc_doc::Step::Wait { seconds: 1.0 }],
+        effects: Vec::new(),
+        robots: gc_doc::RobotChoice::Any,
+        priority: 0,
+    };
+    harness.state_mut().session.edit_work(gc_doc::WorkOp::AddTask(second)).unwrap();
+    harness.run_steps(3);
+    harness.get_by_label("문서가 바뀌었습니다 — 다시 계산하십시오");
+}
+
+/// Schedule playback: Play shows the cell at a moment of the schedule and moves on, Reset puts the robots back.
+#[test]
+fn the_schedule_panel_plays_the_schedule_and_resets() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("로봇").click();
+    harness.run();
+    harness.get_by_label("로봇 추가").click();
+    harness.run();
+    harness.get_by_label("UR5e 로봇").click();
+    harness.run();
+    let task = gc_doc::Task {
+        name: "Pause".into(),
+        location: gc_doc::Location::None,
+        precondition: String::new(),
+        steps: vec![gc_doc::Step::Wait { seconds: 2.0 }],
+        effects: Vec::new(),
+        robots: gc_doc::RobotChoice::Any,
+        priority: 0,
+    };
+    harness.state_mut().session.edit_work(gc_doc::WorkOp::AddTask(task)).unwrap();
+    harness.get_by_label("도구").click();
+    harness.run();
+    harness.get_by_label("스케줄").click();
+    harness.run_steps(3);
+    harness.get_by_label("스케줄 계산").click();
+    harness.run_steps(4);
+    assert!(harness.state().session.schedule_result().is_some_and(|(s, _)| s.makespan() >= 2.0));
+    assert!(harness.state().session.schedule_playback().is_none());
+    harness.get_by_label("스케줄 재생").click();
+    harness.run_steps(4);
+    assert!(harness.state().session.schedule_playback().is_some(), "the cell shows a moment of the schedule");
+    harness.get_by_label("스케줄 원위치").click();
+    harness.run_steps(3);
+    assert!(harness.state().session.schedule_playback().is_none(), "the robots are back where they were");
+}
