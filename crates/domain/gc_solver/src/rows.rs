@@ -32,6 +32,14 @@ pub(crate) enum RowKind {
     Cross { scale: f64 },
     /// Same inputs: `dot(b - a, d - c) / scale`.
     Dot { scale: f64 },
+    /// `[ax, ay, bx, by, cx, cy, mx, my, b]`: the line touches the ellipse with centre `c`, major axis end
+    /// `m` and minor radius `b`: the centre's signed distance from the line minus `side` times the
+    /// ellipse's reach towards the line, `sqrt((n·w)² + b²(d·w / |w|)²)` (`w = m - c`, `d` and `n` the
+    /// line's unit direction and left normal).
+    LineEllipseTangent { side: f64 },
+    /// `[ax, ay, bx, by, px, py, cx, cy, mx, my, b]`: the line runs along the ellipse at its point `p`: the
+    /// cosine between the line and the ellipse's normal there (`(x / a², y / b²)` in its axes), times `a`.
+    EndTangentEllipse,
     /// `[ax, ay, bx, by, cx, cy, r]`: signed distance of `c` from the line minus `side * (r + gap)` (zero gap:
     /// tangent; else the line keeps `gap` from the circle itself).
     LineCircleTangent { side: f64, gap: f64 },
@@ -109,6 +117,8 @@ impl RowKind {
             Self::PointEllipse => 7,
             Self::PointLine { .. } | Self::CircleCircle { .. } => 6,
             Self::LineCircleTangent { .. } => 7,
+            Self::LineEllipseTangent { .. } => 9,
+            Self::EndTangentEllipse => 11,
             Self::Cross { .. }
             | Self::Dot { .. }
             | Self::EqualLen
@@ -168,6 +178,41 @@ impl RowKind {
                 let len = length(&[dx, dy], size, degenerate);
                 let distance = if len.value() == 0.0 { cross } else { cross / len };
                 distance - c(side) * (v[6] + c(gap))
+            }
+            Self::LineEllipseTangent { side } => {
+                let (dx, dy) = (v[2] - v[0], v[3] - v[1]);
+                let l = length(&[dx, dy], size, degenerate);
+                let (wx, wy) = (v[6] - v[4], v[7] - v[5]);
+                let a = length(&[wx, wy], size, degenerate);
+                if l.value() == 0.0 || a.value() == 0.0 {
+                    return c(0.0);
+                }
+                let distance = (dx * (v[5] - v[1]) - dy * (v[4] - v[0])) / l;
+                let across = (dx * wy - dy * wx) / l;
+                let along = (dx * wx + dy * wy) / (l * a);
+                distance - c(side) * length(&[across, v[8] * along], size, degenerate)
+            }
+            Self::EndTangentEllipse => {
+                let (dx, dy) = (v[2] - v[0], v[3] - v[1]);
+                let l = length(&[dx, dy], size, degenerate);
+                let (wx, wy) = (v[8] - v[6], v[9] - v[7]);
+                let a = length(&[wx, wy], size, degenerate);
+                let b = v[10];
+                if l.value() == 0.0 || a.value() == 0.0 || b.value().abs() <= DEGENERATE * size {
+                    *degenerate = true;
+                    return c(0.0);
+                }
+                let (ux, uy) = (wx / a, wy / a);
+                let (px, py) = (v[4] - v[6], v[5] - v[7]);
+                let (x, y) = (px * ux + py * uy, py * ux - px * uy);
+                let (nx_local, ny_local) = (x / (a * a), y / (b * b));
+                // The normal back in the sketch: along u and the left of u.
+                let (nx, ny) = (ux * nx_local - uy * ny_local, uy * nx_local + ux * ny_local);
+                let n = length(&[nx, ny], size, degenerate);
+                if n.value() == 0.0 {
+                    return c(0.0);
+                }
+                (dx * nx + dy * ny) / (l * n) * a
             }
             Self::CircleCircle { external, sign, gap } => {
                 let apart = length(&[v[3] - v[0], v[4] - v[1]], size, degenerate);
@@ -273,7 +318,7 @@ mod tests {
 
     #[test]
     fn analytic_gradients_match_finite_differences() {
-        let eight = [0.1, 0.2, 2.3, 1.1, -0.4, 0.9, 1.7, 2.6];
+        let eight = [0.1, 0.2, 2.3, 1.1, -0.4, 0.9, 1.7, 2.6, 0.6, 0.15, 0.4];
         let kinds = [
             RowKind::Value { target: 0.3 },
             RowKind::Diff { target: 0.3 },
@@ -288,6 +333,9 @@ mod tests {
             RowKind::Dot { scale: 2.0 },
             RowKind::LineCircleTangent { side: -1.0, gap: 0.0 },
             RowKind::LineCircleTangent { side: 1.0, gap: 0.3 },
+            RowKind::LineEllipseTangent { side: 1.0 },
+            RowKind::LineEllipseTangent { side: -1.0 },
+            RowKind::EndTangentEllipse,
             RowKind::CircleCircle { external: true, sign: 1.0, gap: 0.0 },
             RowKind::CircleCircle { external: false, sign: -1.0, gap: 0.0 },
             RowKind::CircleCircle { external: true, sign: 1.0, gap: 0.2 },

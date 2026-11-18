@@ -71,6 +71,19 @@ To Work with Sketch Dimensions GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185.
 | Flip Direction 대상의 "line to an arc (the arc itself)"·"between 2 arcs" 거리 | 없음 | 선-호·호-호 거리 치수 |
 | 구동 치수 토글 | 있음(`SketchOp::SetDriving`) | — |
 
+## 2026-11-18 — 선과 타원의 Tangent(① 5번)
+
+근거: GUID-A85A7A30-7D81-4C75-8769-CAD034EEA930(Tangent: "click the first curve … Click the second curve").
+
+- `GeoConstraint::Tangent`가 선 + 타원(타원 호 포함)을 받는다.
+  - 떨어진 선: 타원 중심의 선까지 부호 거리 = 선 쪽으로의 타원 도달 거리. 솔버 `TangentLineEllipse`, 행 `LineEllipseTangent`(지지 함수 `sqrt((n·w)² + b²(d·w/|w|)²)`).
+  - 선 끝이 타원 위(호 끝, 그와 일치, 또는 점-타원 위 구속): 그 점에서 타원 법선과 직각(`EndTangentEllipse`). 일반 식은 공유점에서 미분이 0이라 자유도를 못 줄이기 때문(원과 같은 이유).
+- 접선 도구가 선 + 타원 클릭에서 타원이 선 어느 쪽인지 잡아 건다.
+- 기울기 검사(`analytic_gradients_match_finite_differences`)에 두 행을 더함.
+- 없음: 원-타원, 타원-타원 접선. 스플라인 접선은 스플라인 끝 조건이 필요해 Smooth(G2)와 함께 한다(6번).
+- 테스트: `gc_session/tests/sketch_ellipse_tangent.rs`.
+- QA 브랜치 영향: 없음(새 솔버 변형; QA 테스트에 타원 접선 거부 단언 없음).
+
 ## 2026-11-18 — 선-호·호-호 거리 치수(① 4번)
 
 근거: To Work with Sketch Dimensions, GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185 — Flip Direction이 받는 치수 종류에 "Distance from a line to an arc (the

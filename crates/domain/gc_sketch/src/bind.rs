@@ -88,6 +88,49 @@ impl Binding {
 
     /// Tangency of two curves that meet at an end (a shared point or two coincident end points): the
     /// joint form, or `None` when they do not meet at an end.
+    /// A line tangent to an ellipse or elliptical arc (To Apply Geometric Constraints,
+    /// GUID-A85A7A30-7D81-4C75-8769-CAD034EEA930: Tangent takes two curves): where a line end lies on the
+    /// ellipse (an arc end, or a point held on it), the line runs along the ellipse there; otherwise it
+    /// touches the ellipse on the `side` it is on. `None` when the pair is not a line and an ellipse.
+    fn ellipse_tangent(
+        &self,
+        sketch: &Sketch,
+        a: Id<Curve>,
+        b: Id<Curve>,
+        side: f64,
+    ) -> Result<Option<Constraint>, SketchError> {
+        let (line_id, e) = if sketch.line(a).is_some() && sketch.ellipse(b).is_some() {
+            (a, b)
+        } else if sketch.line(b).is_some() && sketch.ellipse(a).is_some() {
+            (b, a)
+        } else {
+            return Ok(None);
+        };
+        let (c, major, _) = sketch.ellipse(e).ok_or(SketchError::WrongCurveKind)?;
+        let minor = *self.radii.get(&e).ok_or(SketchError::WrongCurveKind)?;
+        let line = self.line(sketch, line_id)?;
+        let (la, lb) = sketch.line(line_id).ok_or(SketchError::WrongCurveKind)?;
+        let arc_ends: Vec<Id<SkPoint>> = match sketch.curves.get(&e).map(|k| &k.geom) {
+            Some(CurveGeom::Ellipse { arc: Some((s, t)), .. }) => vec![*s, *t],
+            Some(_) | None => Vec::new(),
+        };
+        let on_ellipse = |p: Id<SkPoint>| {
+            arc_ends.contains(&p)
+                || sketch.constraints.values().any(|k| match *k {
+                    GeoConstraint::PointOnCurve(q, curve) => q == p && curve == e,
+                    GeoConstraint::Coincident(x, y) => {
+                        (x == p && arc_ends.contains(&y)) || (y == p && arc_ends.contains(&x))
+                    }
+                    _ => false,
+                })
+        };
+        let (c, major) = (self.p2(c)?, self.p2(major)?);
+        Ok(Some(match [la, lb].into_iter().find(|p| on_ellipse(*p)) {
+            Some(at) => Constraint::EndTangentEllipse { line, at: self.p2(at)?, c, major, minor },
+            None => Constraint::TangentLineEllipse { line, c, major, minor, side },
+        }))
+    }
+
     fn end_tangent(
         &self,
         sketch: &Sketch,
@@ -264,6 +307,9 @@ impl Binding {
                 // square to the line" (or "the radii are in line" for two arcs). The general form, the
                 // centre's distance from the line, has a zero derivative at a shared point, so it would
                 // remove no freedom there.
+                if let Some(ellipse) = self.ellipse_tangent(sketch, a, b, side)? {
+                    return Ok(ellipse);
+                }
                 if let Some(joined) = self.end_tangent(sketch, a, b)? {
                     return Ok(joined);
                 }

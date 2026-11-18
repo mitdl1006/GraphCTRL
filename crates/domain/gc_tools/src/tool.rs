@@ -576,6 +576,13 @@ fn constraint_for(sketch: &Sketch, kind: ConstraintKind, picks: &[Item]) -> Opti
         (K::Tangent, [Item::Curve(a), Item::Curve(b)]) if a != b => {
             // Put the line first, and capture on which side the circle lies or how the circles touch.
             let (first, second) = if line(*b).is_some() { (*b, *a) } else { (*a, *b) };
+            // A line and an ellipse: on which side of the line the ellipse lies.
+            if let (Some((p, q)), Some((centre, _, _))) = (line(first), sketch.ellipse(second)) {
+                let (p, q, centre) = (xy(sketch, p)?, xy(sketch, q)?, xy(sketch, centre)?);
+                let cross = (q[0] - p[0]) * (centre[1] - p[1]) - (q[1] - p[1]) * (centre[0] - p[0]);
+                let side = if cross >= 0.0 { 1.0 } else { -1.0 };
+                return Some(GeoConstraint::Tangent { a: first, b: second, side, external: true });
+            }
             let (centre, radius) = sketch.round(second)?;
             let centre = xy(sketch, centre)?;
             let (side, external) = match line(first) {
