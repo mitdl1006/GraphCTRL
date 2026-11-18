@@ -1500,6 +1500,11 @@ impl eframe::App for GraphCtrlApp {
         if self.measure.open {
             self.measure.window(&ctx, &self.session, lang);
         }
+        // The browser row under the pointer is boxed in the view, from the next frame on.
+        if !self.left_open {
+            self.params.hovered = None;
+        }
+        self.viewport.browser_hover = self.params.hovered;
         let opaque = !self.translucent;
         side_panel(
             &ctx,

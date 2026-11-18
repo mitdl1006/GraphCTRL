@@ -157,6 +157,8 @@ pub struct Viewport {
     /// The ground plane (the floor grid) is shown; a sketch's own grid stays (View tab, Appearance panel;
     /// on and off are session-based).
     pub show_ground: bool,
+    /// The browser row the pointer is over: its component's bounding box is drawn.
+    pub browser_hover: Option<gc_core::AnyId>,
     /// The ViewCube is shown (View tab, Windows panel, User Interface); the navigation bar keeps its own.
     pub show_view_cube: bool,
     /// The navigation bar is shown.
@@ -241,6 +243,32 @@ impl ViewHistory {
         self.seen = None;
         Some(camera)
     }
+}
+
+/// The body or robot an id stands for.
+fn cell_item(any: gc_core::AnyId) -> Option<gc_session::CellItem> {
+    match any.kind {
+        gc_core::Kind::Body => Some(gc_session::CellItem::Body(gc_core::Id::from_raw(any.raw))),
+        gc_core::Kind::RobotInstance => Some(gc_session::CellItem::Robot(gc_core::Id::from_raw(any.raw))),
+        _ => None,
+    }
+}
+
+/// A box around everything drawn for a body or robot, in the world.
+fn item_bounds(session: &Session, item: gc_session::CellItem) -> Aabb {
+    let scene = Scene::of(session);
+    let mut bounds = Aabb::EMPTY;
+    for solid in scene.solids.iter().filter(|solid| solid.owner == Some(item)) {
+        let local = solid.shape.local_bounds();
+        for x in [local.min.x, local.max.x] {
+            for y in [local.min.y, local.max.y] {
+                for z in [local.min.z, local.max.z] {
+                    bounds = bounds.including(solid.pose * DVec3::new(x, y, z));
+                }
+            }
+        }
+    }
+    bounds
 }
 
 /// Object Visibility (Inventor 2026 help, To set visibility of work features, annotations, and other display
@@ -424,6 +452,7 @@ impl Viewport {
             show_constraints: true,
             style: VisualStyle::default(),
             show_ground: true,
+            browser_hover: None,
             show_view_cube: true,
             show_nav_bar: true,
             visibility: ObjectVisibility::default(),
@@ -466,23 +495,8 @@ impl Viewport {
     /// GUID-36AE9264-912D-4D3C-BB24-7EC16FA8777E: "the selected objects are found, zoomed, and centered in the
     /// graphics window"): frames the body or robot. False when it has nothing to show.
     pub fn find_in_window(&mut self, session: &Session, any: gc_core::AnyId) -> bool {
-        let item = match any.kind {
-            gc_core::Kind::Body => gc_session::CellItem::Body(gc_core::Id::from_raw(any.raw)),
-            gc_core::Kind::RobotInstance => gc_session::CellItem::Robot(gc_core::Id::from_raw(any.raw)),
-            _ => return false,
-        };
-        let scene = Scene::of(session);
-        let mut bounds = Aabb::EMPTY;
-        for solid in scene.solids.iter().filter(|solid| solid.owner == Some(item)) {
-            let local = solid.shape.local_bounds();
-            for x in [local.min.x, local.max.x] {
-                for y in [local.min.y, local.max.y] {
-                    for z in [local.min.z, local.max.z] {
-                        bounds = bounds.including(solid.pose * DVec3::new(x, y, z));
-                    }
-                }
-            }
-        }
+        let Some(item) = cell_item(any) else { return false };
+        let bounds = item_bounds(session, item);
         if bounds.is_empty() {
             return false;
         }
@@ -866,6 +880,43 @@ impl Viewport {
                 camera.distance * 0.6,
                 self.work_selected,
             );
+        }
+        // Hovering a browser row shows the component's bounding box in the graphics.
+        if let Some(item) = self.browser_hover.and_then(cell_item) {
+            let bounds = item_bounds(session, item);
+            if !bounds.is_empty() {
+                let painter = ui.painter_at(rect);
+                let corner = |i: usize| {
+                    let p = DVec3::new(
+                        if i & 1 == 0 { bounds.min.x } else { bounds.max.x },
+                        if i & 2 == 0 { bounds.min.y } else { bounds.max.y },
+                        if i & 4 == 0 { bounds.min.z } else { bounds.max.z },
+                    );
+                    self.camera.project(p, size).map(|q| {
+                        #[allow(clippy::cast_possible_truncation, reason = "screen coordinates fit f32")]
+                        egui::pos2(rect.left() + q[0] as f32, rect.top() + q[1] as f32)
+                    })
+                };
+                let stroke = egui::Stroke::new(1.2, colors::ACCENT);
+                for (a, b) in [
+                    (0, 1),
+                    (2, 3),
+                    (4, 5),
+                    (6, 7),
+                    (0, 2),
+                    (1, 3),
+                    (4, 6),
+                    (5, 7),
+                    (0, 4),
+                    (1, 5),
+                    (2, 6),
+                    (3, 7),
+                ] {
+                    if let (Some(a), Some(b)) = (corner(a), corner(b)) {
+                        painter.line_segment([a, b], stroke);
+                    }
+                }
+            }
         }
         if let Some(section) = &self.section {
             let camera = self.camera;

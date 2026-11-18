@@ -6098,3 +6098,35 @@ fn the_bom_dialog_lists_components_selects_and_exports_csv() {
     assert!(text.starts_with("Item,Part Number,Quantity,Description,BOM Structure"), "{text}");
     assert!(text.contains(&rows[0].part_number));
 }
+
+/// Hovering a component row of the browser draws its bounding box in the view (the view is told which row).
+#[test]
+fn hovering_a_browser_row_boxes_the_component_in_the_view() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let body = harness
+        .state_mut()
+        .session
+        .add_body(gc_doc::Solid::Box { size: [0.1; 3] }, gc_doc::Placement { xyz: [0.0; 3], rpy: [0.0; 3] })
+        .unwrap();
+    harness.run();
+    assert!(harness.state().viewport().browser_hover.is_none());
+    let name = harness.state().session.components().first().map(|n| n.name.clone()).unwrap();
+    // The row's name is painted text; its show/hide box carries the name and spans the row.
+    let toggle = harness
+        .get_all_by_label_contains(&name)
+        .find(|n| n.rect().min.x < 100.0)
+        .expect("the row's show/hide box");
+    let row = toggle;
+    let at = row.rect().center();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run_steps(3);
+    assert_eq!(harness.state().viewport().browser_hover, Some(gc_core::Id::<gc_doc::Body>::erase(body)));
+    // Away from the browser the box goes.
+    harness.event(egui::Event::PointerMoved(egui::pos2(900.0, 600.0)));
+    harness.run_steps(3);
+    assert!(harness.state().viewport().browser_hover.is_none());
+}

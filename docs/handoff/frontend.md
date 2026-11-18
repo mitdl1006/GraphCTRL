@@ -344,6 +344,12 @@
 - 원문과 차이: 더블클릭이 아니라 드롭다운. 문서 설정의 Bill of Materials 탭(기본 BOM 구조)·열 편집·정렬·Excel 내보내기·BOM 편집 중 부품 번호 수정은 없음(설명·부품 번호 편집은 iProperties 대화상자에서).
 - 테스트: `the_bom_dialog_lists_components_selects_and_exports_csv`; shell 113개 통과.
 
+### 브라우저 노드 호버 경계 상자
+
+- 근거: docs/ux/inventor-assembly-parity.md(기록): "브라우저 노드에 커서를 올리면 경계 상자가 그래픽에 표시"(2026 도움말의 해당 쪽은 읽지 못함).
+- 브라우저의 바디·로봇 행 위에 커서를 올리면 `ParamsUi.hovered` → `Viewport.browser_hover`로 전달되어 뷰에 그 컴포넌트의 경계 상자(월드 축 정렬, 12개 모서리)를 강조색으로 그린다. 브라우저를 벗어나거나 접으면 사라진다. 경계 계산은 `find_in_window`와 같은 함수(`item_bounds`)를 쓴다.
+- 테스트: `hovering_a_browser_row_boxes_the_component_in_the_view`.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹
