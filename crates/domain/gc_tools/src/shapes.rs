@@ -15,6 +15,10 @@
 //!   GUID-4F861674-F74C-474E-869A-4C190ED6EC4B).
 //! - Center rectangles: the centre, then a corner; or the centre, a side's middle and the other half-size.
 //! - Tangent Circle: three lines, the circle touching them nearest the clicks.
+//! - Split: a curve, cut at the crossing nearest the click (To Split, Trim, or Extend Curves,
+//!   GUID-DD00037F-6BBA-4B95-AA90-4F99DCEB667D).
+//! - Chamfer: two lines, bevelled as the 2D Chamfer dialog says (Create Chamfers in To Create 2D Shape
+//!   Geometry).
 
 use gc_doc::{ArcSlotKind, SketchOp, preview_sketch_op};
 use gc_math::fm;
@@ -38,6 +42,8 @@ pub(super) fn is_shape_tool(kind: ToolKind) -> bool {
             | ToolKind::CenterRectangle
             | ToolKind::CenterRectangle3
             | ToolKind::TangentCircle
+            | ToolKind::Split
+            | ToolKind::Chamfer
     )
 }
 
@@ -134,7 +140,20 @@ impl Tool {
         tool.polygon_circumscribed = self.polygon_circumscribed;
         tool.offset_loop = self.offset_loop;
         tool.offset_constrain = self.offset_constrain;
+        tool.chamfer = self.chamfer.clone();
+        tool.chamfer_dimensions = self.chamfer_dimensions;
         tool
+    }
+
+    /// The 2D Chamfer dialog: the type with its sizes, and Create Dimensions.
+    pub fn chamfer_options(&self) -> (gc_doc::ChamferKind, bool) {
+        (self.chamfer.clone(), self.chamfer_dimensions)
+    }
+
+    /// Sets the 2D Chamfer dialog's values.
+    pub fn set_chamfer_options(&mut self, kind: gc_doc::ChamferKind, dimensions: bool) {
+        self.chamfer = kind;
+        self.chamfer_dimensions = dimensions;
     }
 
     /// Sets the Center Point toggle.
@@ -187,6 +206,9 @@ impl Tool {
             ToolKind::CenterRectangle3 if self.second.is_none() => Prompt::CenterRectSide,
             ToolKind::CenterRectangle3 => Prompt::CenterRectWidth,
             ToolKind::TangentCircle => Prompt::TangentCircleLine,
+            ToolKind::Split => Prompt::SplitPick,
+            ToolKind::Chamfer if self.fillet_first.is_none() => Prompt::ChamferFirst,
+            ToolKind::Chamfer => Prompt::ChamferSecond,
             ToolKind::Offset if self.offset_pick.is_none() => Prompt::OffsetPick,
             _ => Prompt::OffsetPlace,
         }
@@ -285,7 +307,41 @@ impl Tool {
         }
     }
 
+    fn chamfer_op(&self, second: (gc_core::Id<gc_sketch::Curve>, [f64; 2])) -> Option<SketchOp> {
+        let first = self.fillet_first?;
+        (first.0 != second.0).then(|| SketchOp::Chamfer {
+            lines: [first, second],
+            kind: self.chamfer.clone(),
+            dimensions: self.chamfer_dimensions,
+        })
+    }
+
     pub(super) fn shape_preview(&self, sketch: &Sketch, preview: &mut Preview) {
+        if let (ToolKind::Split, Some((curve, at))) = (self.kind, self.hover) {
+            preview.picks.push(gc_sketch::Item::Curve(curve));
+            if let Some(p) = sketch.split_preview(curve, at) {
+                // A small cross where the curve would be cut.
+                let span = match sketch.line(curve) {
+                    Some((a, b)) => {
+                        sketch.pos(a).zip(sketch.pos(b)).map(|(a, b)| distance([a[0], a[1]], [b[0], b[1]]))
+                    }
+                    None => sketch.round(curve).map(|(_, r)| r),
+                };
+                let size = span.unwrap_or(0.01) * 0.03;
+                preview.lines.push(([p[0] - size, p[1] - size], [p[0] + size, p[1] + size]));
+                preview.lines.push(([p[0] - size, p[1] + size], [p[0] + size, p[1] - size]));
+            }
+            return;
+        }
+        if self.kind == ToolKind::Chamfer {
+            if let Some((first, _)) = self.fillet_first {
+                preview.picks.push(gc_sketch::Item::Curve(first));
+            }
+            if let Some(op) = self.hover.and_then(|h| self.chamfer_op(h)) {
+                draw_new(preview, sketch, &op);
+            }
+            return;
+        }
         let Some(cursor) = self.cursor.map(|c| c.pos) else { return };
         if let (ToolKind::Slot(_) | ToolKind::ArcSlot(_), Some(a), None) =
             (self.kind, self.anchor, self.second)
@@ -478,6 +534,26 @@ impl Tool {
                     })]);
                 }
                 Vec::new()
+            }
+            ToolKind::Split => {
+                let Some((curve, _)) = nearest_curve(sketch, pos, px, &[]) else { return Some(Vec::new()) };
+                self.hover = None;
+                vec![ToolOutput::Edit(SketchOp::Split { curve, at: pos })]
+            }
+            ToolKind::Chamfer => {
+                let hit = nearest_curve(sketch, pos, px, &[]).filter(|(c, _)| sketch.line(*c).is_some());
+                let Some((curve, _)) = hit else { return Some(Vec::new()) };
+                match self.chamfer_op((curve, pos)) {
+                    Some(op) => {
+                        self.fillet_first = None;
+                        self.hover = None;
+                        vec![ToolOutput::Edit(op)]
+                    }
+                    None => {
+                        self.fillet_first = Some((curve, pos));
+                        Vec::new()
+                    }
+                }
             }
             ToolKind::Offset => {
                 if self.offset_pick.is_none() {

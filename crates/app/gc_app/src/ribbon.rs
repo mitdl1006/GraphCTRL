@@ -337,20 +337,34 @@ pub(crate) fn show(
                             }
                         });
                     });
-                    // Inventor's Modify panel: Offset (Trim, Extend and Fillet are tools of their own).
+                    // Inventor's Modify panel: Offset, Split; Chamfer next to them (Create panel in Inventor; small
+                    // icons in two rows to keep the tab within 1280 px).
                     ribbon_group(ui, tr!(lang, GroupModify), |ui| {
-                        let offset = ToolKind::Offset;
-                        if ribbon_button(
-                            ui,
-                            Icon::Offset,
-                            tr!(lang, ToolOffset),
-                            current == offset,
-                            sketching,
-                        )
-                        .clicked()
-                        {
-                            session.set_tool(offset);
-                        }
+                        ui.vertical(|ui| {
+                            let rows = [
+                                vec![
+                                    (ToolKind::Offset, Icon::Offset, Msg::ToolOffset),
+                                    (ToolKind::Split, Icon::Text("-|-"), Msg::ToolSplit),
+                                ],
+                                vec![(ToolKind::Chamfer, Icon::Text("/_"), Msg::ToolChamfer)],
+                            ];
+                            for row in rows {
+                                ui.horizontal(|ui| {
+                                    for (kind, icon, label) in row {
+                                        let button = gc_ui::ribbon_small_button(
+                                            ui,
+                                            icon,
+                                            label.text(lang),
+                                            current == kind,
+                                            sketching,
+                                        );
+                                        if button.clicked() {
+                                            session.set_tool(kind);
+                                        }
+                                    }
+                                });
+                            }
+                        });
                     });
                 }
                 ribbon_group(ui, tr!(lang, GroupConstrain), |ui| {

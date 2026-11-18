@@ -1097,6 +1097,16 @@ impl Session {
         self.tool.set_offset_options(loop_select, constrain);
     }
 
+    /// The 2D Chamfer dialog: the type with its sizes, and Create Dimensions.
+    pub fn chamfer_options(&self) -> (gc_doc::ChamferKind, bool) {
+        self.tool.chamfer_options()
+    }
+
+    /// Sets the 2D Chamfer dialog's values (kept for the next chamfers, as Inventor does).
+    pub fn set_chamfer_options(&mut self, kind: gc_doc::ChamferKind, dimensions: bool) {
+        self.tool.set_chamfer_options(kind, dimensions);
+    }
+
     /// Applies an edit to the sketch being edited (the Mirror and Pattern dialogs). One undo step.
     pub fn edit_active_sketch(&mut self, op: SketchOp) -> Result<Vec<Created>, EditError> {
         if self.active.is_none() {

@@ -72,6 +72,22 @@ pub enum ArcSlotKind {
     CenterPoint,
 }
 
+/// The 2D Chamfer dialog's types; sizes are expressions (millimetres, degrees by default).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum ChamferKind {
+    /// Equal Distance: the same distance back from the corner along both lines.
+    Equal(String),
+    /// Unequal Distance: a distance along the first line and one along the second.
+    Unequal(String, String),
+    /// Distance and Angle: the angle from the first line and the distance along the second.
+    DistanceAngle {
+        /// Along the second line.
+        distance: String,
+        /// From the first line.
+        angle: String,
+    },
+}
+
 /// One direction of a sketch rectangular pattern (kept in the sketch's pattern record).
 pub use gc_sketch::PatternDirection as SketchPatternDirection;
 
@@ -367,6 +383,25 @@ pub enum SketchOp {
         lines: [(Id<Curve>, [f64; 2]); 2],
         /// The radius as typed, e.g. `"5 mm"`.
         radius: String,
+    },
+    /// Split (Inventor 2026 help, To Split, Trim, or Extend Curves, GUID-DD00037F-6BBA-4B95-AA90-4F99DCEB667D):
+    /// cuts a line or arc in two at its crossing with another curve nearest `at`.
+    Split {
+        /// The curve.
+        curve: Id<Curve>,
+        /// Where it was clicked.
+        at: [f64; 2],
+    },
+    /// 2D Chamfer (To Create 2D Shape Geometry, GUID-D489CE6D-7299-4211-A43A-F3580A4BA357): bevels the
+    /// corner of two lines. With `dimensions`, a construction point at the corner (held on both lines)
+    /// carries the chamfer's sizes as dimensions (Inventor's Create Dimensions).
+    Chamfer {
+        /// The two lines and where each was clicked (each keeps that side of the corner).
+        lines: [(Id<Curve>, [f64; 2]); 2],
+        /// The kind and sizes.
+        kind: ChamferKind,
+        /// Add dimensions for the sizes.
+        dimensions: bool,
     },
     /// Adds fixed lines (sketch coordinates), as projected reference geometry: Project Cut Edges puts the
     /// edges where the sketch plane cuts the model into the sketch this way. One undo step.
@@ -2292,6 +2327,94 @@ fn sketch_op(
         SketchOp::Trim { curve, at } => {
             push_cut(&mut created, &sketch.trim(ids, *curve, *at)?);
             "Trim"
+        }
+        SketchOp::Split { curve, at } => {
+            push_cut(&mut created, &sketch.split_at(ids, *curve, *at)?);
+            "Split"
+        }
+        SketchOp::Chamfer { lines, kind, dimensions } => {
+            let length = |text: &str| -> Result<f64, EditError> {
+                let v = evaluate(text, scope, Unit::Mm)?;
+                if v.is_finite() && v > 0.0 { Ok(v) } else { Err(SketchError::InvalidValue.into()) }
+            };
+            let distances = match kind {
+                ChamferKind::Equal(d) => [length(d)?; 2],
+                ChamferKind::Unequal(d1, d2) => [length(d1)?, length(d2)?],
+                ChamferKind::DistanceAngle { distance, angle } => {
+                    let d2 = length(distance)?;
+                    let alpha = evaluate(angle, scope, Unit::Deg)?;
+                    // The corner's angle, from where the lines were picked.
+                    // (A tiny cut, only to find the corner.)
+                    let (corner, _) =
+                        sketch.chamfer_plan(*lines, [1e-9, 1e-9]).ok_or(SketchError::InvalidValue)?;
+                    let towards = |(line, at): (Id<Curve>, [f64; 2])| -> Option<[f64; 2]> {
+                        let (a, b) = sketch.line(line)?;
+                        let (a, b) = (sketch.pos(a)?, sketch.pos(b)?);
+                        let d = [b[0] - a[0], b[1] - a[1]];
+                        let n = gc_math::fm::hypot(d[0], d[1]);
+                        let s = (at[0] - corner[0]) * d[0] + (at[1] - corner[1]) * d[1];
+                        Some(if s >= 0.0 { [d[0] / n, d[1] / n] } else { [-d[0] / n, -d[1] / n] })
+                    };
+                    let (u1, u2) = (
+                        towards(lines[0]).ok_or(SketchError::InvalidValue)?,
+                        towards(lines[1]).ok_or(SketchError::InvalidValue)?,
+                    );
+                    let theta = gc_math::fm::acos((u1[0] * u2[0] + u1[1] * u2[1]).clamp(-1.0, 1.0));
+                    // Triangle corner, cut 1, cut 2: angle alpha at cut 1, theta at the corner.
+                    let third = std::f64::consts::PI - alpha - theta;
+                    if !(alpha > 0.0 && third > 1e-9) {
+                        return Err(SketchError::InvalidValue.into());
+                    }
+                    [d2 * gc_math::fm::sin(third) / gc_math::fm::sin(alpha), d2]
+                }
+            };
+            let (corner, _) = sketch.chamfer_plan(*lines, distances).ok_or(SketchError::InvalidValue)?;
+            let cut = sketch.chamfer(ids, *lines, distances)?;
+            push_cut(&mut created, &cut);
+            if *dimensions {
+                let bevel = *cut.curves.first().ok_or(SketchError::InvalidValue)?;
+                let (c1, c2) = sketch.line(bevel).ok_or(SketchError::MissingCurve)?;
+                // The corner as a point held on both lines (extended).
+                let x = sketch.add_point(ids, [corner[0], corner[1], 0.0]);
+                created.push(Created::Point(x));
+                for (line, _) in lines {
+                    require(sketch, ids, GeoConstraint::PointOnCurve(x, *line), &mut created)?;
+                }
+                let mut dimension =
+                    |sketch: &mut Sketch, kind: DimKind, source: &str, value: f64| -> Result<(), EditError> {
+                        let result = sketch.try_add_dimension(ids, kind, source, value, corner)?;
+                        created.push(Created::Dimension(added(result)?));
+                        Ok(())
+                    };
+                match kind {
+                    ChamferKind::Equal(d) => {
+                        dimension(sketch, DimKind::Distance { p: x, q: c1 }, d, distances[0])?;
+                        dimension(sketch, DimKind::Distance { p: x, q: c2 }, d, distances[1])?;
+                    }
+                    ChamferKind::Unequal(d1, d2) => {
+                        dimension(sketch, DimKind::Distance { p: x, q: c1 }, d1, distances[0])?;
+                        dimension(sketch, DimKind::Distance { p: x, q: c2 }, d2, distances[1])?;
+                    }
+                    ChamferKind::DistanceAngle { distance, angle } => {
+                        dimension(sketch, DimKind::Distance { p: x, q: c2 }, distance, distances[1])?;
+                        let alpha = evaluate(angle, scope, Unit::Deg)?;
+                        // The reading of the angle between the first line and the bevel that gives alpha.
+                        let (first, _) = lines[0];
+                        let reading = [(false, false), (false, true), (true, false), (true, true)]
+                            .into_iter()
+                            .flat_map(|(rev1, rev2)| {
+                                [
+                                    DimKind::Angle { l1: first, rev1, l2: bevel, rev2 },
+                                    DimKind::Angle { l1: bevel, rev1, l2: first, rev2 },
+                                ]
+                            })
+                            .find(|k| sketch.measure(k).is_some_and(|m| (m - alpha).abs() < 1e-6))
+                            .ok_or(SketchError::InvalidValue)?;
+                        dimension(sketch, reading, angle, alpha)?;
+                    }
+                }
+            }
+            "Chamfer"
         }
         SketchOp::Extend { curve, at } => {
             push_cut(&mut created, &sketch.extend(ids, *curve, *at)?);

@@ -1161,6 +1161,9 @@ impl eframe::App for GraphCtrlApp {
                 crate::sketch_dialogs::polygon_window(&ctx, &mut self.session, lang)
             }
             gc_tools::ToolKind::Offset => crate::sketch_dialogs::offset_window(&ctx, &mut self.session, lang),
+            gc_tools::ToolKind::Chamfer => {
+                crate::sketch_dialogs::chamfer_window(&ctx, &mut self.session, lang)
+            }
             _ => {}
         }
         if self.drive.open {

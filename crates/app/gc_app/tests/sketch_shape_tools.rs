@@ -382,3 +382,22 @@ fn the_ribbon_starts_midpoint_line_tangent_circle_and_the_center_rectangles() {
     }
     harness.get_by_label("직사각형의 중심을 클릭하십시오");
 }
+
+#[test]
+fn split_and_chamfer_on_the_ribbon_and_the_chamfer_dialog() {
+    let mut harness = sketching();
+    harness.get_by_label("분할").click();
+    harness.run();
+    assert_eq!(harness.state().session.tool(), ToolKind::Split);
+    harness.get_by_label("모따기").click();
+    harness.run();
+    assert_eq!(harness.state().session.tool(), ToolKind::Chamfer);
+    harness.get_by_label("2D 모따기");
+    harness.get_by_label("다른 거리").click();
+    harness.run();
+    assert!(matches!(harness.state().session.chamfer_options().0, gc_doc::ChamferKind::Unequal(..)));
+    harness.get_by_label("거리 2");
+    harness.get_by_label("확인").click();
+    harness.run();
+    assert_eq!(harness.state().session.tool(), ToolKind::Select, "OK leaves the tool");
+}
