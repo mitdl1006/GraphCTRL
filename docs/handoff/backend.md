@@ -124,6 +124,12 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — URScript: 사용자 글로 명령이 끼어들지 못하게 (QA)
+
+- 주석·명령 한 줄에 들어가는 모든 글(작업·로봇·신호·동작 이름, 대기 조건)에서 제어 문자(줄바꿈·CR·탭 등)를 공백으로 바꾼다 — 줄 단위로 한 번 더 막는다(`plain`). 문자열 리터럴(`popup`)에는 식별자로 바꾼 이름(ASCII 영숫자·`_`)만 들어가므로 따옴표·역슬래시가 나올 수 없다.
+- 함수 이름: ASCII 밖 글자가 있는 이름은 뒤에 항목 id를 붙인다(`__12`) → 한글만으로 된 두 이름이 같은 `__`로 겹치지 않는다. ASCII 이름은 그대로(`Go_there`).
+- QA 브랜치의 `qa_schedule_toolkit_urscript.rs::text_with_a_line_break…`는 이 브랜치에 없어 `#[ignore]`를 못 뗐다. 같은 경우를 `urscript.rs::text_from_the_user_cannot_add_commands_and_names_stay_apart`에 넣었다.
+
 ## 2026-11-18 — 로봇 후보를 작업 스레드에서 (`request_task_candidates`)
 
 - `session.request_task_candidates(task)`: 지금 문서 기준으로 그 작업의 후보(로봇별 예상 시간 또는 못 하는 이유)를 실행기에서 계산하기 시작한다. 같은 작업·같은 리비전이면 아무것도 하지 않고, 다른 작업이나 더 새 문서를 요청하면 계산 중인 것을 취소한다(한 번에 하나).
