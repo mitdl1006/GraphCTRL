@@ -973,6 +973,8 @@ messages! {
     BendPickSecond => ("굽힘: 두 번째 선을 클릭하십시오", "Bend: click the second line"),
     BendEqual => ("같음", "Equal"),
     BendRadius => ("반지름", "Radius"),
+    CmdAssignWaypoint => ("웨이포인트로 지정", "Make Waypoint"),
+    CmdAssignPath => ("경로로 지정", "Make Path"),
     CmdSplitSpline => ("스플라인 분할", "Split Spline"),
     CmdFlexible => ("유연", "Flexible"),
     /// Assemble tab, Edit group: the group's title.

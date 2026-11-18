@@ -743,6 +743,39 @@ impl Viewport {
                                     <= gc_tools::tolerance::POINT_PX
                             })
                     };
+                    // Sketch roles (plan 9.1): the point or the open curve under the cursor can become a
+                    // waypoint or a path of the robot work.
+                    if let Some((sketch_id, sketch)) = session.active_sketch() {
+                        menu.waypoint = sketch
+                            .points
+                            .keys()
+                            .copied()
+                            .find(|p| near_point(*p) && session.waypoint_role(sketch_id, *p).is_none())
+                            .map(|p| (sketch_id, p));
+                        if menu.waypoint.is_none() {
+                            let mut best: Option<(f64, Id<gc_sketch::Curve>)> = None;
+                            for curve in sketch.curves.keys() {
+                                if session.path_role(sketch_id, *curve).is_some() {
+                                    continue;
+                                }
+                                let Some(run) = sketch.curve_run(*curve) else { continue };
+                                let on_screen: Vec<[f64; 2]> = run
+                                    .iter()
+                                    .filter_map(|p| self.camera.project(plane.world(*p), size))
+                                    .collect();
+                                let distance = on_screen
+                                    .windows(2)
+                                    .map(|w| segment_distance(at, w[0], w[1]))
+                                    .fold(f64::INFINITY, f64::min);
+                                if distance <= 6.0 && best.is_none_or(|(d, _)| distance < d) {
+                                    best = Some((distance, *curve));
+                                }
+                            }
+                            menu.path = best
+                                .filter(|(_, curve)| !session.chain_at(sketch_id, *curve).is_empty())
+                                .map(|(_, curve)| (sketch_id, curve));
+                        }
+                    }
                     if let Some((_, sketch)) = session.active_sketch() {
                         for (curve, c) in &sketch.curves {
                             let gc_sketch::CurveGeom::Spline { points } = &c.geom else { continue };
