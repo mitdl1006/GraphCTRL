@@ -979,6 +979,16 @@ impl GraphCtrlApp {
                 // in a sketch C is the circle.
                 egui::Key::C if !command && !sketching => self.constrain.start(),
                 egui::Key::P if !command && !sketching => self.place_component(self.lang),
+                // Work features: ] plane, / axis, . point (Keyboard Shortcut Reference, GUID-DEEB0723-DFC7-4B28-95F4-099CC1E1EBF8).
+                egui::Key::CloseBracket if !command && !sketching => {
+                    self.work_feature.start(crate::work_feature::Category::Plane);
+                }
+                egui::Key::Slash if !command && !sketching => {
+                    self.work_feature.start(crate::work_feature::Category::Axis);
+                }
+                egui::Key::Period if !command && !sketching => {
+                    self.work_feature.start(crate::work_feature::Category::Point);
+                }
                 // Tab demotes the selected component (asks for the new subassembly's name, as the browser
                 // menu does) and Shift + Tab promotes it one level up (Inventor 2026 help, shortcut table
                 // GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E: "Tab Demote", "Shift + Tab Promote").
@@ -1581,6 +1591,19 @@ impl eframe::App for GraphCtrlApp {
                     self.notice.as_deref(),
                     (self.session.active_sketch().is_some() && !self.session.sketch_is_spatial())
                         .then_some(&mut self.viewport.slice),
+                    if self.assemble.picking() {
+                        Some(gc_i18n::Msg::StatusPickAssemble)
+                    } else if self.constrain.picking() {
+                        Some(gc_i18n::Msg::StatusPickConstrain)
+                    } else if self.joint.open {
+                        Some(gc_i18n::Msg::StatusPickJoint)
+                    } else if self.pattern.open {
+                        Some(gc_i18n::Msg::StatusPickPattern)
+                    } else if self.replicate.picking() {
+                        Some(gc_i18n::Msg::StatusPickReplicate)
+                    } else {
+                        None
+                    },
                 );
             });
         }

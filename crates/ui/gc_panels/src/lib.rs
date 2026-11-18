@@ -123,6 +123,10 @@ pub struct ParamsUi {
     pub work: work::WorkUi,
     /// The rows marked with Ctrl+click (for moving several into a folder or subassembly at once).
     pub marked: Vec<gc_doc::TreeKey>,
+    /// The component rows in the order they were drawn last frame, and the row a Shift+click extends from.
+    pub row_order: Vec<gc_doc::TreeKey>,
+    drawn_rows: Vec<gc_doc::TreeKey>,
+    anchor: Option<gc_doc::TreeKey>,
     /// The sketch role selected in the browser.
     pub role: Option<Id<gc_doc::SketchRole>>,
     /// The relationship selected in the browser, the value typed for it and which one that was loaded for.
@@ -513,7 +517,9 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
                 });
             }
             let rows = session.component_tree();
+            state.drawn_rows.clear();
             component_rows(ui, session, lang, state, selected, &mut action, &rows, None);
+            state.row_order = std::mem::take(&mut state.drawn_rows);
         });
     egui::CollapsingHeader::new(tr!(lang, BrowserSketches)).default_open(true).show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = 1.0;
@@ -1550,11 +1556,26 @@ fn node_row(
     if groundable {
         // Ctrl+click marks rows to move together; a drag takes the marked rows, or this one.
         let key = gc_doc::TreeKey::Component(occurrence);
-        if result.row.clicked() && ui.input(|i| i.modifiers.command || i.modifiers.ctrl) {
-            if let Some(at) = state.marked.iter().position(|k| *k == key) {
-                state.marked.remove(at);
+        state.drawn_rows.push(key);
+        if result.row.clicked() {
+            let (ctrl, shift) = ui.input(|i| (i.modifiers.command || i.modifiers.ctrl, i.modifiers.shift));
+            if shift {
+                // Shift+click marks every row from the last clicked one to this one.
+                let from = state.anchor.and_then(|a| state.row_order.iter().position(|k| *k == a));
+                let to = state.row_order.iter().position(|k| *k == key);
+                if let (Some(from), Some(to)) = (from, to) {
+                    let (low, high) = (from.min(to), from.max(to));
+                    state.marked = state.row_order[low..=high].to_vec();
+                }
+            } else if ctrl {
+                if let Some(at) = state.marked.iter().position(|k| *k == key) {
+                    state.marked.remove(at);
+                } else {
+                    state.marked.push(key);
+                }
+                state.anchor = Some(key);
             } else {
-                state.marked.push(key);
+                state.anchor = Some(key);
             }
         }
         let payload: Vec<gc_doc::TreeKey> =
@@ -1564,7 +1585,12 @@ fn node_row(
     if result.row.hovered() && matches!(node.any.kind, gc_core::Kind::Body | gc_core::Kind::RobotInstance) {
         state.hovered = Some(node.any);
     }
-    if result.row.clicked() && node.selected && !result.row.double_clicked() && !renaming {
+    // F2 renames the selected node (Keyboard Shortcut Reference, GUID-DEEB0723-DFC7-4B28-95F4-099CC1E1EBF8).
+    let f2 = node.selected
+        && !renaming
+        && name_of(session, node.any).is_some()
+        && ui.input(|i| i.key_pressed(egui::Key::F2));
+    if f2 || (result.row.clicked() && node.selected && !result.row.double_clicked() && !renaming) {
         // A second click on the selected node edits its name.
         state.rename = Some((node.any, node.name.to_owned()));
         state.rename_fresh = true;
@@ -1770,10 +1796,14 @@ pub fn status_bar(
     gpu: bool,
     notice: Option<&str>,
     slice: Option<&mut bool>,
+    command_prompt: Option<Msg>,
 ) {
     ui.horizontal(|ui| {
         if session.active_sketch().is_some() {
             ui.label(prompt_text(lang, session.prompt()));
+        } else if let Some(prompt) = command_prompt {
+            // A command of the assembly is waiting for a pick (the status bar tells what to pick next).
+            ui.label(prompt.text(lang));
         } else {
             ui.label(tr!(lang, StatusReady));
         }

@@ -6865,3 +6865,56 @@ fn a_task_is_shown_and_saved_as_a_urscript_program() {
     let text = std::fs::read_to_string(&path).unwrap();
     assert!(text.contains("def ") && text.contains("sleep(1.5"), "{text}");
 }
+
+/// The status bar tells what a waiting assembly command wants picked (Inventor's prompt line).
+#[test]
+fn the_status_bar_prompts_for_the_pick_of_an_assembly_command() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("준비");
+    harness.key_press(egui::Key::J);
+    harness.run_steps(3);
+    harness.get_by_label("조인트: 연결할 두 요소를 차례로 선택하십시오");
+}
+
+/// `]`, `/` and `.` start the work plane, axis and point commands (Keyboard Shortcut Reference,
+/// GUID-DEEB0723-DFC7-4B28-95F4-099CC1E1EBF8).
+#[test]
+fn the_work_feature_shortcuts_open_their_commands() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    for (key, title) in [
+        (egui::Key::CloseBracket, gc_i18n::Msg::WorkPlaneTitle),
+        (egui::Key::Slash, gc_i18n::Msg::WorkAxisTitle),
+        (egui::Key::Period, gc_i18n::Msg::WorkPointTitle),
+    ] {
+        harness.key_press(key);
+        harness.run_steps(3);
+        harness.get_all_by_label(title.text(gc_i18n::Lang::Ko)).next().expect("the command window");
+    }
+}
+
+/// F2 renames the selected browser node (Keyboard Shortcut Reference, GUID-DEEB0723-DFC7-4B28-95F4-099CC1E1EBF8).
+#[test]
+fn f2_renames_the_selected_browser_node() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("파일").click();
+    harness.run();
+    harness.get_by_label("예제 열기 (UR5e 셀)").click();
+    harness.run();
+    harness.query_all_by_label("P1").next().unwrap().click();
+    harness.run();
+    harness.key_press(egui::Key::F2);
+    harness.run_steps(3);
+    harness.get_by_label("name");
+}

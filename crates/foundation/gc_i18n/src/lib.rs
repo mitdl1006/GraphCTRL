@@ -103,6 +103,11 @@ messages! {
     CmdDelete => ("삭제", "Delete"),
     /// Status bar while idle.
     StatusReady => ("준비", "Ready"),
+    StatusPickAssemble => ("조립: 붙일 면·모서리·원점 요소를 선택하십시오", "Assemble: select the faces, edges or origin elements to join"),
+    StatusPickConstrain => ("구속: 구속할 두 요소를 차례로 선택하십시오", "Constrain: select the two elements to constrain"),
+    StatusPickJoint => ("조인트: 연결할 두 요소를 차례로 선택하십시오", "Joint: select the two elements to connect"),
+    StatusPickPattern => ("패턴: 반복할 컴포넌트와 방향 요소를 선택하십시오", "Pattern: select the component and the direction"),
+    StatusPickReplicate => ("복제: 복제할 요소를 선택하십시오", "Replicate: select the elements to copy"),
     /// Status bar: how many dimensions a sketch still needs. `{0}` is the count.
     StatusDimensionsNeeded => ("{0}개 치수 필요", "{0} dimensions needed"),
     /// Status bar: the sketch is fully constrained.
