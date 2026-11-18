@@ -1179,9 +1179,15 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
             if txn.doc().work_shape(*id).is_none() {
                 return Err(EditError::BadValue);
             }
+            // Components constrained to it follow (refused when they cannot).
+            settle(txn)?;
             Ok((Vec::new(), "Edit work feature"))
         }
         CellOp::DeleteWorkFeature(id) => {
+            // A relationship on it keeps it (Inventor asks to delete the constraint first).
+            if txn.doc().relationships().iter().any(|(_, r)| r.references(id.erase())) {
+                return Err(EditError::InUse);
+            }
             txn.remove(*id)?;
             Ok((Vec::new(), "Delete work feature"))
         }
@@ -1228,8 +1234,8 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
         }
         CellOp::AddRelationship(relationship) => {
             if !relationship.is_valid()
-                || !txn.doc().has_occurrence(relationship.first.occurrence)
-                || !txn.doc().has_occurrence(relationship.second.occurrence)
+                || !txn.doc().relatable(relationship.first.occurrence)
+                || !txn.doc().relatable(relationship.second.occurrence)
             {
                 return Err(EditError::BadValue);
             }
@@ -1241,8 +1247,8 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
         }
         CellOp::SetRelationship { id, relationship } => {
             if !relationship.is_valid()
-                || !txn.doc().has_occurrence(relationship.first.occurrence)
-                || !txn.doc().has_occurrence(relationship.second.occurrence)
+                || !txn.doc().relatable(relationship.first.occurrence)
+                || !txn.doc().relatable(relationship.second.occurrence)
             {
                 return Err(EditError::BadValue);
             }
