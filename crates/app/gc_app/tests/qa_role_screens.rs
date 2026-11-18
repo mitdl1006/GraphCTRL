@@ -97,10 +97,10 @@ fn the_sketch_menu_offers_roles_only_where_they_apply() {
     right_click(&mut h, at);
     assert!(!menu_has(&h, waypoint) && !menu_has(&h, path), "roles offered in empty space");
     escape(&mut h);
-    // The circle is closed: a path cannot be made of it (its centre is a point).
-    let at = screen(&h, mm(20.0, -60.0));
+    // A closed curve is a path of its own in the backend since b1c2326; the menu offering it is the ignored BUG
+    // test below. Here: whatever the menu shows, opening and closing it leaves the document alone.
+    let at = screen(&h, mm(0.0, -40.0));
     right_click(&mut h, at);
-    assert!(!menu_has(&h, path), "a closed curve offered as a path");
     escape(&mut h);
     assert_eq!(depth(&h), steps, "opening and closing menus changed the document");
     // The lone point: a waypoint, one undo step; the same point again offers no second one.
@@ -142,6 +142,19 @@ fn the_sketch_menu_offers_roles_only_where_they_apply() {
     assert!(h.state_mut().session.undo());
     assert_eq!(depth(&h), steps - 1);
     assert_eq!(h.state().session.sketch_roles(sketch).len(), before);
+}
+
+/// BUG: the backend makes a circle, a whole ellipse or a closed spline a path role of its own (`chain_at` of it is
+/// that curve, backend b1c2326), but the sketch right-click menu picks the curve under the cursor with
+/// `Sketch::curve_run`, which has no run for a closed curve (it is `curve_loop`'s), so "경로로 지정" is never
+/// offered for one: a closed path can only be made through the session API.
+#[test]
+#[ignore = "BUG: the sketch menu never offers Make Path for a closed curve (owner: frontend, gc_viewport lib.rs uses curve_run)"]
+fn a_closed_curve_is_offered_as_a_path_by_the_sketch_menu() {
+    let mut h = scene();
+    let at = screen(&h, mm(0.0, -40.0));
+    right_click(&mut h, at);
+    assert!(menu_has(&h, "경로로 지정"), "Make Path is not offered on a circle");
 }
 
 #[test]
