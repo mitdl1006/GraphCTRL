@@ -614,7 +614,14 @@ fn task_properties(ui: &mut Ui, session: &mut Session, lang: Lang, id: Id<Task>)
     // With kinds of tool defined, signals and actions are chosen from theirs (the names are text otherwise).
     let mut out_names: Vec<(String, String)> = Vec::new();
     let mut action_names: Vec<(String, String)> = Vec::new();
+    // What a wait can be for: the tools' input signals and the signals tasks of the cell set.
+    let mut in_names: Vec<(String, String)> = Vec::new();
     for (_, kit) in session.doc().tool_kits().iter() {
+        for signal in kit.signals.iter().filter(|s| s.direction == gc_doc::IoDirection::In) {
+            if !in_names.iter().any(|(n, _)| *n == signal.name) {
+                in_names.push((signal.name.clone(), signal.name.clone()));
+            }
+        }
         for signal in kit.signals.iter().filter(|s| s.direction == gc_doc::IoDirection::Out) {
             if !out_names.iter().any(|(n, _)| *n == signal.name) {
                 out_names.push((signal.name.clone(), signal.name.clone()));
@@ -671,11 +678,36 @@ fn task_properties(ui: &mut Ui, session: &mut Session, lang: Lang, id: Id<Task>)
                 }
                 Step::WaitIo { condition, timeout } => {
                     ui.label(tr!(lang, WorkWaitIo));
-                    let key = egui::Id::unique("gc_task_wait_io").with((id, index));
-                    let current = condition.clone();
-                    if let (_, Some(text)) = committed_text(ui, key, &current, 100.0) {
-                        *condition = text;
-                        changed = true;
+                    match (in_names.is_empty(), gc_doc::signal_condition(condition)) {
+                        // Signals are known (tools define them, or tasks set them): a signal and its value.
+                        (false, parsed) => {
+                            let (mut name, mut on) = parsed.unwrap_or_else(|| (in_names[0].0.clone(), true));
+                            let mut options = in_names.clone();
+                            if !options.iter().any(|(n, _)| *n == name) {
+                                options.push((name.clone(), name.clone()));
+                            }
+                            let mut edited =
+                                choice(ui, ("gc_task_wait_signal", id, index), &mut name, &options);
+                            let values = [
+                                (true, tr!(lang, WorkSignalOn).to_owned()),
+                                (false, tr!(lang, WorkSignalOff).to_owned()),
+                            ];
+                            edited |= choice(ui, ("gc_task_wait_value", id, index), &mut on, &values);
+                            if edited {
+                                let plain = name.chars().all(|c| c.is_alphanumeric() || c == '_');
+                                let shown = if plain { name } else { format!("\"{name}\"") };
+                                *condition = format!("{shown} == {on}");
+                                changed = true;
+                            }
+                        }
+                        (true, _) => {
+                            let key = egui::Id::unique("gc_task_wait_io").with((id, index));
+                            let current = condition.clone();
+                            if let (_, Some(text)) = committed_text(ui, key, &current, 100.0) {
+                                *condition = text;
+                                changed = true;
+                            }
+                        }
                     }
                     let r = ui.add(egui::DragValue::new(timeout).speed(0.1).range(0.0..=3600.0).suffix(" s"));
                     changed |= r.drag_stopped() || (r.lost_focus() && r.changed());
@@ -864,28 +896,26 @@ fn task_properties(ui: &mut Ui, session: &mut Session, lang: Lang, id: Id<Task>)
     }
     // Which robot would do it and how long it takes: planned when asked (the planning is not instant, so it
     // is not done every frame).
-    let key = egui::Id::unique("gc_task_candidates").with(id);
     if ui.button(tr!(lang, WorkCandidates)).clicked() {
-        let table: Vec<(String, Result<f64, String>)> = session
-            .task_candidates(id)
-            .into_iter()
-            .map(|c| {
-                (
-                    session.doc().get(c.robot).map_or_else(String::new, |r: &gc_doc::Robot| r.name.clone()),
-                    c.time,
-                )
-            })
-            .collect();
-        ui.data_mut(|d| d.insert_temp(key, table));
+        session.request_task_candidates(id);
     }
-    if let Some(table) = ui.data(|d| d.get_temp::<Vec<(String, Result<f64, String>)>>(key)) {
-        if table.is_empty() {
+    if session.task_candidates_pending() == Some(id) {
+        ui.weak(tr!(lang, WorkCandidatesPending));
+        ui.ctx().request_repaint();
+    }
+    if let Some((candidates, current)) = session.task_candidates_result(id) {
+        if candidates.is_empty() {
             ui.weak(tr!(lang, WorkNoCandidates));
         }
+        if !current {
+            ui.colored_label(gc_ui::colors::ERROR, tr!(lang, WorkCandidatesStale));
+        }
         egui::Grid::new(("gc_task_candidates_grid", id)).num_columns(2).spacing([12.0, 3.0]).show(ui, |ui| {
-            for (robot, time) in &table {
-                ui.label(robot);
-                match time {
+            for c in candidates {
+                ui.label(
+                    session.doc().get(c.robot).map_or_else(String::new, |r: &gc_doc::Robot| r.name.clone()),
+                );
+                match &c.time {
                     Ok(seconds) => ui.label(format!("{seconds:.1} s")),
                     Err(why) => ui.colored_label(gc_ui::colors::ERROR, why),
                 };
