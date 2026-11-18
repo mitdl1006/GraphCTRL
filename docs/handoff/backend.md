@@ -54,6 +54,34 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 조인트 한계(Limits, 리드 ①)
+
+근거: To Define and Manage Joint Relationships(GUID-21DC3336-5C51-42C1-90FB-4299CD66E0C6) Limits 탭.
+- Angular·Linear 가능 여부는 조인트 종류가 정한다. Rotational은 Angular만, Rigid는 없음.
+- Start·Current·End 값을 넣는다. 한계가 있는 관계는 브라우저에 +/- 표시가 붙는다.
+- 구속(Mate·Flush 등)의 최소·최대·휴지 위치(`Relationship.limits`)는 예전부터 있다. 이번 일은 조인트 쪽이다.
+
+**모델**
+- `JointCondition`에 `angular`, `linear: Option<JointRange{start, end, current: Option<f64>}>`를 추가했다.
+  Lock·Protect와 같은 곳(`Components.joint_conditions`)에 저장한다. 옛 파일은 비어 있는 채로 열린다.
+- 값의 뜻(`joint_values`): angular는 둘째 원점 Z축 둘레로 첫째 X축이 돈 각(라디안), linear는 둘째 Z축을 따라 첫째 원점이 미끄러진 거리(m).
+- 솔버: 조인트 잔차 뒤에 범위마다 한 행을 더한다. `current`가 있으면 그 값에서 벗어난 만큼(자유도 1개를 없앰),
+  없으면 범위 밖으로 벗어난 만큼(안에서는 0, 자유도를 없애지 않음). 각도는 감아서 잰다.
+- `takes_limits(kind, angular)`: angular는 Rotational·Cylindrical, linear는 Slider·Cylindrical. Ball·Rigid·구속은 안 받는다.
+- `CellOp::SetJointLimits{id, angular, linear}`: 종류에 안 맞거나, Start > End, Current가 범위 밖이거나 유한하지 않으면 `BadValue`.
+  적용 뒤 관계를 다시 맞추고, 안 맞으면 거부한다. 실행 취소 한 단계다. `SetJointCondition`(Lock·Protect)은 범위를 보존한다.
+- Drive: 한계가 있는 조인트를 구동하면 범위 안으로 깎은 값을 `current`로 둔 미리 보기를 낸다(각도 범위가 우선).
+  그래서 Slider·Cylindrical도 한계가 있으면 구동된다. 한계가 없는 조인트는 예전 동작 그대로다(Rotational은 상대 회전).
+- `Document::joint_position(id) -> Option<(angle, slide)>`: 대화상자의 Current 표시용.
+
+**세션(프론트엔드)**
+- `set_joint_limits(id, angular, linear)`, `joint_limits(id) -> (Option<JointRange>, Option<JointRange>)`(브라우저 +/- 표시), `joint_position(id)`.
+
+**원문과 다른 점·남은 것**
+- 원문의 Current는 지금 위치를 바꾸는 값이다. 우리는 `current: None`이면 그 자리에 두고 범위만 지킨다.
+- 로봇 관절 한계는 로봇 설명(URDF, `gc_robot`)에서 오고 관계 한계와는 따로다.
+- 테스트: `gc_session/tests/joint_limits.rs`.
+
 ## 2026-11-18 — 치수 상자의 `이름 = 값`을 한 단계로(프론트엔드 요청)
 
 - `Command::Sequence(Vec<Command>)`: 명령 여러 개를 한 트랜잭션에서 차례로 실행한다. 실행 취소 한 단계이고,

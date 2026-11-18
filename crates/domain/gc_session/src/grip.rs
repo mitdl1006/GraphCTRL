@@ -9,6 +9,31 @@ use gc_math::DPose3;
 use crate::Session;
 
 impl Session {
+    /// Sets a joint's Limits (angular for Rotational and Cylindrical, linear for Slider and Cylindrical;
+    /// `None` clears one); a range with `current` holds the joint there. One undo step.
+    pub fn set_joint_limits(
+        &mut self,
+        id: gc_core::Id<gc_doc::Relationship>,
+        angular: Option<gc_doc::JointRange>,
+        linear: Option<gc_doc::JointRange>,
+    ) -> Result<(), EditError> {
+        self.execute(&Command::Cell(CellOp::SetJointLimits { id, angular, linear })).map(|_| ())
+    }
+
+    /// A joint's Limits: (angular, linear). The browser marks a joint that has one with +/-.
+    pub fn joint_limits(
+        &self,
+        id: gc_core::Id<gc_doc::Relationship>,
+    ) -> (Option<gc_doc::JointRange>, Option<gc_doc::JointRange>) {
+        self.doc().joint_condition(id).map_or((None, None), |c| (c.angular, c.linear))
+    }
+
+    /// Where a joint stands now: (turn about its Z axis in radians, slide along it in metres), the values
+    /// its Limits use (the dialog's Current).
+    pub fn joint_position(&self, id: gc_core::Id<gc_doc::Relationship>) -> Option<(f64, f64)> {
+        self.doc().joint_position(id)
+    }
+
     /// A work plane, axis or point of the assembly as a relationship's selection (its geometry is read live
     /// from the work feature): pass it to [`Session::add_relationship`], `possible_relations` and the like.
     pub fn work_feature_selection(&self, id: gc_core::Id<gc_doc::WorkFeature>) -> Option<gc_doc::Selection> {

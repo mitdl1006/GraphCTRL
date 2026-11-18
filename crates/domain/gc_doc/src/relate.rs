@@ -292,6 +292,59 @@ pub struct JointCondition {
     /// Protected: relationships that take its freedom away are refused.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub protected: bool,
+    /// Angular limits (Rotational, Cylindrical): the turn about the joint's Z axis, radians.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub angular: Option<JointRange>,
+    /// Linear limits (Slider, Cylindrical): the slide along the joint's Z axis, metres.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linear: Option<JointRange>,
+}
+
+/// A joint's range of motion (Inventor 2026 help, To Define and Manage Joint Relationships,
+/// GUID-21DC3336-5C51-42C1-90FB-4299CD66E0C6, Limits tab: Start, Current, End). The joint stays within
+/// Start..End; with `current` it is held there (as Inventor's Current value positions the joint).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct JointRange {
+    /// The smallest value.
+    pub start: f64,
+    /// The largest value.
+    pub end: f64,
+    /// Where the joint is held; `None` leaves it free within the range.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current: Option<f64>,
+}
+
+impl JointRange {
+    /// True when the values are finite, Start is not past End, and Current lies between them.
+    pub fn is_valid(&self) -> bool {
+        self.start.is_finite()
+            && self.end.is_finite()
+            && self.start <= self.end
+            && self.current.is_none_or(|c| c.is_finite() && (self.start..=self.end).contains(&c))
+    }
+
+    /// What the joint is asked to be, given where it is: Current when set, otherwise the value kept within
+    /// the range.
+    fn target(&self, value: f64) -> f64 {
+        self.current.unwrap_or_else(|| value.clamp(self.start, self.end))
+    }
+}
+
+/// The joint kinds that take angular (`true`) or linear (`false`) limits (Rigid takes none).
+pub fn takes_limits(kind: &RelationKind, angular: bool) -> bool {
+    match kind {
+        RelationKind::Rotational { .. } => angular,
+        RelationKind::Slider { .. } => !angular,
+        RelationKind::Cylindrical { .. } => true,
+        RelationKind::Mate { .. }
+        | RelationKind::Flush { .. }
+        | RelationKind::Insert { .. }
+        | RelationKind::Tangent { .. }
+        | RelationKind::Angle { .. }
+        | RelationKind::Symmetry { .. }
+        | RelationKind::Rigid { .. }
+        | RelationKind::Ball => false,
+    }
 }
 
 /// A joint's first origin in the second's frame, when it was locked.
@@ -657,6 +710,8 @@ struct Term {
     limits: Option<Limits>,
     /// A locked joint: where its first origin stays relative to the second.
     locked: Option<LockedPose>,
+    /// A joint's angular and linear limits.
+    ranges: [Option<JointRange>; 2],
 }
 
 impl Document {
@@ -963,6 +1018,7 @@ impl Document {
                 axis,
                 limits: relationship.limits,
                 locked: self.joint_condition(id).and_then(|c| c.locked),
+                ranges: self.joint_condition(id).map_or([None, None], |c| [c.angular, c.linear]),
             });
         }
         Ok((owners, terms))
@@ -971,6 +1027,19 @@ impl Document {
 
 impl Document {
     /// Lock and Protect of a joint.
+    /// Where a joint stands now: its turn about its Z axis (radians) and slide along it (metres), the values
+    /// its Limits are measured in. `None` for a constraint or a missing component.
+    pub fn joint_position(&self, id: Id<Relationship>) -> Option<(f64, f64)> {
+        let r = self.get(id)?;
+        if !is_joint_kind(&r.kind) {
+            return None;
+        }
+        let (g1, g2) = (self.in_owner(&r.first)?, self.in_owner(&r.second)?);
+        let (p1, p2) =
+            (self.owner_pose(r.first.occurrence.owner())?, self.owner_pose(r.second.occurrence.owner())?);
+        Some(joint_values(&p1, &g1, &p2, &g2))
+    }
+
     pub fn joint_condition(&self, id: Id<Relationship>) -> Option<JointCondition> {
         self.timeline().and_then(|(_, t)| t.components.joint_conditions.get(&id).copied())
     }
@@ -1019,7 +1088,40 @@ fn joint_world(pose: &DPose3, geometry: &Geometry) -> (DVec3, DVec3, DVec3) {
     (pose.translation + pose.rotation * p, pose.rotation * z, pose.rotation * x)
 }
 
+/// A joint's turn about its Z axis (radians) and slide along it (metres), as the first origin stands in the
+/// second's frame.
+pub(crate) fn joint_values(pose1: &DPose3, g1: &Geometry, pose2: &DPose3, g2: &Geometry) -> (f64, f64) {
+    let (p1, _, x1) = joint_world(pose1, g1);
+    let (p2, z2, x2) = joint_world(pose2, g2);
+    let angle = gc_math::fm::atan2(z2.dot(x2.cross(x1)), x2.dot(x1));
+    (angle, (p1 - p2).dot(z2))
+}
+
+/// The residuals of a joint's limits: how far its turn and slide are from what the ranges ask (zero
+/// within a free range). One row per range, whatever the pose, so the rows stay the same.
+fn range_residuals(term: &Term, poses: &[DPose3]) -> Vec<f64> {
+    if term.ranges.iter().all(Option::is_none) {
+        return Vec::new();
+    }
+    let (angle, slide) =
+        joint_values(&poses[term.owners[0]], &term.geometry[0], &poses[term.owners[1]], &term.geometry[1]);
+    let wrap = |a: f64| gc_math::fm::atan2(gc_math::fm::sin(a), gc_math::fm::cos(a));
+    let mut out = Vec::with_capacity(2);
+    if let Some(range) = term.ranges[0] {
+        out.push(wrap(angle - range.target(angle)));
+    }
+    if let Some(range) = term.ranges[1] {
+        out.push(slide - range.target(slide));
+    }
+    out
+}
+
 fn term_residuals(term: &Term, poses: &[DPose3]) -> Vec<f64> {
+    if is_joint(&term.kind) {
+        let mut out = plain_residuals(term, poses);
+        out.extend(range_residuals(term, poses));
+        return out;
+    }
     // Limits without a resting position: the value may be anywhere within them, so the constraint asks
     // only for the nearest value inside.
     if let Some(limits) = term.limits.filter(|l| !l.resting)
@@ -1921,6 +2023,18 @@ impl Document {
             limits.resting = true;
         }
         let mut preview = self.clone();
+        // A joint with Limits is driven to a position within them (its angular range when it has one,
+        // otherwise its linear range), held there like the Limits tab's Current.
+        let ranged = self.joint_condition(id).filter(|c| c.angular.is_some() || c.linear.is_some());
+        if let (true, Some(condition)) = (is_joint_kind(&relationship.kind), ranged) {
+            let (mut angular, mut linear) = (condition.angular, condition.linear);
+            match (&mut angular, &mut linear) {
+                (Some(r), _) | (None, Some(r)) => r.current = Some(value.clamp(r.start, r.end)),
+                (None, None) => {}
+            }
+            crate::apply(&mut preview, &Command::Cell(CellOp::SetJointLimits { id, angular, linear }))?;
+            return Ok(self.moved_in(&preview));
+        }
         match relationship.kind {
             RelationKind::Mate { sense, .. } => {
                 let kind = RelationKind::Mate { offset: value, sense };
@@ -1994,6 +2108,11 @@ impl Document {
             | RelationKind::Ball
             | RelationKind::Symmetry { .. } => return Err(EditError::BadValue),
         }
+        Ok(self.moved_in(&preview))
+    }
+
+    /// The components that stand elsewhere in `preview` than here, with where they stand there.
+    fn moved_in(&self, preview: &Document) -> Vec<(AnyId, DPose3)> {
         let items: Vec<AnyId> = self
             .bodies()
             .iter()
@@ -2001,13 +2120,13 @@ impl Document {
             .chain(self.robots().iter().map(|(id, _)| id.erase()))
             .chain(self.assemblies().iter().map(|(id, _)| id.erase()))
             .collect();
-        Ok(items
+        items
             .into_iter()
             .filter_map(|item| {
                 let now = preview.owner_pose(item)?;
                 (self.owner_pose(item)? != now).then_some((item, now))
             })
-            .collect())
+            .collect()
     }
 }
 
