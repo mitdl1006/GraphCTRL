@@ -24,6 +24,9 @@ pub struct CellUi {
     /// Set when the user asked to load a robot's tool from a mesh file: the application shows the file
     /// dialog and takes this back.
     pub tool_mesh: Option<gc_core::Id<gc_doc::Robot>>,
+    /// Set while a command of the view (Grip Snap) shows a preview between clicks: the panels do not
+    /// end previews when the mouse is up.
+    pub hold_previews: bool,
 }
 
 impl CellUi {
@@ -98,7 +101,7 @@ pub fn cell(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) 
         taught(ui, session, lang, id);
         reach(ui, session, lang, id);
     }
-    if !pointer_down && !ui.memory(|m| m.focused().is_some()) {
+    if !pointer_down && !state.hold_previews && !ui.memory(|m| m.focused().is_some()) {
         // The previews become one undo step each when the mouse is released.
         session.end_jog();
         session.end_base_preview();

@@ -1391,6 +1391,7 @@ impl eframe::App for GraphCtrlApp {
                 ui.set_max_width(ui.available_width());
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     gc_panels::properties(ui, &mut self.session, lang, &mut self.expression);
+                    self.cell.hold_previews = self.viewport.is_grip_snapping();
                     gc_panels::cell(ui, &mut self.session, lang, &mut self.cell);
                 });
             },

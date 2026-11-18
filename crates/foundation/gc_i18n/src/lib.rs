@@ -1102,6 +1102,18 @@ messages! {
     ParamDriven => ("(참조)", "(reference)"),
     /// Assemble tab > Position: ground or free the selected component (Inventor's Grounded).
     CmdGround => ("접지", "Grounded"),
+    GripTitle => ("그립 스냅", "Grip Snap"),
+    GripMove => ("축을 따라 이동", "Move along ray"),
+    GripRotate => ("선 기준 회전", "Rotate about line"),
+    GripPickEdge => ("기준이 될 구성요소의 모서리를 선택하세요", "Select an edge of the component as the reference"),
+    GripPickFrom => ("시작점을 클릭하세요", "Click the start point"),
+    GripPickTo => ("끝점을 클릭하면 위치가 확정됩니다", "Click the end point to fix the result"),
+    GripReady => ("완료 또는 접지 후 완료를 누르세요", "Press Done or Commit and Ground"),
+    GripAllowed => ("남은 자유도가 이 동작을 허용합니다", "The remaining freedom allows this snap"),
+    GripBlocked => ("남은 자유도가 이 동작을 허용하지 않습니다", "The remaining freedom does not allow this snap"),
+    GripDone => ("완료", "Done"),
+    GripGround => ("접지 후 완료", "Commit and Ground"),
+    GripCancel => ("취소", "Cancel"),
     /// Status: the selected component was grounded / freed. `{0}` its name.
     GroundOn => ("{0}을(를) 접지했습니다.", "{0} is grounded."),
     GroundOff => ("{0}의 접지를 풀었습니다.", "{0} is no longer grounded."),
