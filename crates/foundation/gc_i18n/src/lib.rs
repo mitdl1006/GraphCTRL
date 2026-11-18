@@ -690,6 +690,7 @@ messages! {
     /// Joint dialog: a joint that removes all freedom.
     JointRigid => ("강체", "Rigid"),
     /// Joint dialog: a joint with one rotation.
+    JointPlanar => ("평면 (Planar)", "Planar"),
     JointRotational => ("회전", "Rotational"),
     /// Joint dialog: the origin on the component that moves.
     JointFirst => ("첫 번째 원점", "First origin"),

@@ -504,6 +504,8 @@ pub(crate) enum JointType {
     Automatic,
     Rigid,
     Rotational,
+    /// Planar: sliding in a plane and turning about its normal stay free (the help does not describe it).
+    Planar,
 }
 
 /// The Joint dialog (Inventor's Assemble tab, Relationships panel, Joint): pick the origin on the
@@ -603,9 +605,14 @@ impl Joint {
             },
             JointType::Rigid => RelationKind::Rigid { flip: self.flip },
             JointType::Rotational => RelationKind::Rotational { flip: self.flip },
+            JointType::Planar => RelationKind::Planar { flip: self.flip },
         };
         let name = if self.name.trim().is_empty() {
-            let word = if matches!(kind, RelationKind::Rotational { .. }) { "Rotational" } else { "Rigid" };
+            let word = match kind {
+                RelationKind::Rotational { .. } => "Rotational",
+                RelationKind::Planar { .. } => "Planar",
+                _ => "Rigid",
+            };
             format!("{word}:{}", session.relationships().len() + 1)
         } else {
             self.name.trim().to_owned()
@@ -652,6 +659,7 @@ impl Joint {
                                     (JointType::Automatic, tr!(lang, JointAutomatic)),
                                     (JointType::Rigid, tr!(lang, JointRigid)),
                                     (JointType::Rotational, tr!(lang, JointRotational)),
+                                    (JointType::Planar, tr!(lang, JointPlanar)),
                                 ] {
                                     if ui.selectable_label(self.kind == kind, name).clicked() {
                                         self.kind = kind;

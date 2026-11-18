@@ -590,6 +590,14 @@
 - 하지 않은 것: 원문의 폴더 트리·상태 기호 순환·"Isolate connected components"·"충돌하는 관계만 표시", Place/Edit 오류 대화상자의 "Diagnose" 단추(브라우저 메뉴로만 연다).
 - 테스트: `constrain.rs`의 `motion_takes_a_ratio_or_a_distance_and_a_direction`, 셸의 `the_conflict_analysis_checks_with_a_relationship_broken`.
 
+## Planar 조인트·위치 표현 중 비활성·새 뷰 즉시 활성 (백엔드 28233a2)
+
+- Joint 대화상자 유형에 "평면 (Planar)"(`RelationKind::Planar{flip}`; 원문 미확인·일반 정의이므로 백엔드 doc의 설명 그대로). 이름 기본값 "Planar:N".
+- 위치 표현이 [Primary]가 아닐 때(`representations().active_position.is_some()`) 컴포넌트를 더하거나 지우는 명령은 백엔드가 `PrimaryOnly`로 거부한다. 리본의 컴포넌트 배치·Replace·패턴·Mirror·Copy·작업 평면/축/점(3D 모델 탭)을 비활성으로 하고 큰 단추에는 툴팁("Primary 위치 표현이 활성일 때만 할 수 있습니다"), 브라우저 컴포넌트 행의 삭제 단추·우클릭 삭제 항목도 비활성. 근거: Positional representations in assemblies GUID-C728DFAC-1B45-4879-A004-45A8DC991954(백엔드 handoff).
+- 아직 비활성 처리 안 한 것: 서브어셈블리 메뉴(Demote·Dissolve·Move), 패턴·작업 피처 삭제 단추, 끌어 놓기로 트리 이동, 붙여넣기 — 눌러도 상태 줄에 같은 문구가 뜬다.
+- 새 뷰 표현이 만들자마자 활성: 표현 UI 테스트 영향 없음(전체 통과).
+- 테스트: `a_position_representation_disables_removing_components_and_the_joint_dialog_offers_planar`.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

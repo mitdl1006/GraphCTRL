@@ -1574,6 +1574,16 @@ fn node_row(
     let inactive = suppressed_now || out_of_scope || !enabled || (groundable && !visible);
     let show_label = tr!(lang, ShowItem, node.name);
     let delete_label = tr!(lang, CmdDeleteItem, node.name);
+    // Removing a component is refused while a positional representation other than [Primary] is active.
+    let delete_blocked = session.representations().active_position.is_some()
+        && matches!(
+            node.delete,
+            gc_doc::Command::Cell(
+                gc_doc::CellOp::DeleteBody(_)
+                    | gc_doc::CellOp::DeleteRobot(_)
+                    | gc_doc::CellOp::DeleteAssembly(_)
+            )
+        );
     let renaming = state.rename.as_ref().is_some_and(|(id, _)| *id == node.any);
     let fresh = renaming && std::mem::take(&mut state.rename_fresh);
     let row = TreeRow {
@@ -1582,7 +1592,7 @@ fn node_row(
         selected: node.selected
             || (groundable && state.marked.contains(&gc_doc::TreeKey::Component(occurrence))),
         visible: Some((&mut visible, show_label.as_str())),
-        delete: Some(&delete_label),
+        delete: (!delete_blocked).then_some(&delete_label),
         edit: state.rename.as_mut().filter(|_| renaming).map(|(_, text)| text),
         focus: fresh,
         dim: inactive,
@@ -1746,7 +1756,10 @@ fn node_row(
                 ui.close();
             }
         }
-        if ui.button(delete_label.as_str()).clicked() {
+        let delete = ui.add_enabled(!delete_blocked, egui::Button::new(delete_label.as_str()));
+        let delete =
+            if delete_blocked { delete.on_disabled_hover_text(tr!(lang, ErrPrimaryOnly)) } else { delete };
+        if delete.clicked() {
             *action = Some(BrowserAction::Edit(Box::new(node.delete.clone())));
             ui.close();
         }
