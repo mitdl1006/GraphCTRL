@@ -51,6 +51,10 @@ pub enum HudField {
     Height,
     /// Offset distance.
     Distance,
+    /// A point's X coordinate in the sketch (the Point tool).
+    X,
+    /// A point's Y coordinate in the sketch (the Point tool).
+    Y,
 }
 
 /// One input box as the display should show it now.

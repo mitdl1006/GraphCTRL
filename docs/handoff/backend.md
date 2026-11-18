@@ -35,6 +35,13 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 점 도구 HUD X/Y(리드 ④)
+
+- 원문: Dynamic Input `GUID-33A8B11D-A04C-4809-BC82-C0419215915F.htm`, Draw Points Using Dynamic Input. 점에 치수를 붙인다는 말은 없어서 붙이지 않는다.
+- 동작: `HudField::{X, Y}`. 상자에 커서 좌표가 보이고, 입력한 값이 클릭·Enter 때 커서 좌표 대신 쓰인다. 점을 놓으면 입력이 지워진다.
+- 원문과 다른 점: 원문은 Tab을 먼저 눌러야 X 입력이 시작되지만, 여기서는 다른 도구처럼 바로 X 상자에 입력된다.
+- 테스트: 세션 `the_point_tool_shows_x_and_y…`, 앱 kittest `the_point_tool_takes_typed_x_and_y…`.
+
 ## 2026-11-18 — 스케치 패턴 개체: 편집·삭제·요소 억제(리드 ②)
 
 원문: To Create and Edit Sketch Patterns `GUID-AAD3A699-FED8-4614-A31D-0A2316328CEE.htm`, Edit Rectangular and Circular Patterns.
@@ -105,7 +112,6 @@
   - 스케치를 나가면 패턴 창은 닫힘.
 - **원문과 다른 점**:
   - 간격띄우기 토글은 우클릭 메뉴 대신 창.
-  - 점 HUD(X/Y)는 없음.
 - **테스트**: 앱 `tests/sketch_shape_tools.rs` 8개(도구 4, 대화상자 4), 세션 `sketch_shape_tools.rs` 5개.
 - **남음**: 호 슬롯 2종, 스케치 패턴 개체(편집·삭제).
 

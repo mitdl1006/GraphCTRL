@@ -278,3 +278,31 @@ fn a_selected_pattern_opens_its_dialog_to_edit_suppress_and_delete() {
     let (_, sketch) = harness.state().session.active_sketch().unwrap();
     assert!(sketch.patterns.is_empty());
 }
+
+/// Draw Points Using Dynamic Input (Inventor 2026 help, GUID-33A8B11D-A04C-4809-BC82-C0419215915F): the
+/// X and Y boxes follow the cursor; typed values place the point.
+#[test]
+fn the_point_tool_takes_typed_x_and_y_in_the_heads_up_boxes() {
+    let mut harness = sketching();
+    harness.get_by_label("점").click();
+    harness.run();
+    harness.event(egui::Event::PointerMoved(egui::pos2(640.0, 400.0)));
+    harness.run();
+    harness.get_by_label("HUD X");
+    harness.get_by_label("HUD Y");
+    for text in ["1", "0"] {
+        harness.event(egui::Event::Text(text.into()));
+        harness.run();
+    }
+    harness.key_press(egui::Key::Tab);
+    harness.run();
+    for text in ["-", "5"] {
+        harness.event(egui::Event::Text(text.into()));
+        harness.run();
+    }
+    harness.key_press(egui::Key::Enter);
+    harness.run();
+    let (_, sketch) = harness.state().session.active_sketch().unwrap();
+    let placed = sketch.points.values().find(|p| p.pos[1] < 0.0).unwrap();
+    assert!((placed.pos[0] - 0.01).abs() < 1e-9 && (placed.pos[1] + 0.005).abs() < 1e-9, "{:?}", placed.pos);
+}

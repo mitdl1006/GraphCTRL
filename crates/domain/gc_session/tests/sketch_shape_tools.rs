@@ -216,3 +216,22 @@ fn the_arc_slot_tools_take_three_points_then_the_width() {
         assert_eq!(session.prompt(), first, "ready for the next");
     }
 }
+
+/// Inventor 2026 help, Dynamic Input (GUID-33A8B11D-A04C-4809-BC82-C0419215915F), Draw Points Using
+/// Dynamic Input: the X and Y boxes show the cursor; Tab, X, Tab, Y, Enter places the point there.
+#[test]
+fn the_point_tool_shows_x_and_y_and_places_typed_coordinates() {
+    let mut session = new_session();
+    session.set_tool(ToolKind::Point);
+    session.tool_event(ToolEvent::Move { pos: mm(12.0, 34.0), px: PX, suppress_snap: true });
+    let hud = session.tool_hud();
+    assert_eq!(hud.iter().map(|s| s.field).collect::<Vec<_>>(), vec![HudField::X, HudField::Y]);
+    assert!((hud[0].measured - 0.012).abs() < 1e-12 && (hud[1].measured - 0.034).abs() < 1e-12);
+    session.tool_event(ToolEvent::Hud { field: HudField::X, value: Some("10".into()) });
+    session.tool_event(ToolEvent::Hud { field: HudField::Y, value: Some("-5".into()) });
+    session.tool_event(ToolEvent::Key(Key::Enter));
+    let (_, sketch) = session.active_sketch().unwrap();
+    let placed = sketch.points.values().find(|p| p.pos[1] < 0.0).unwrap();
+    assert!((placed.pos[0] - 0.01).abs() < 1e-12 && (placed.pos[1] + 0.005).abs() < 1e-12);
+    assert!(session.tool_hud().iter().all(|s| s.locked.is_none()), "the next point starts afresh");
+}

@@ -197,6 +197,8 @@ fn field_name(lang: Lang, field: HudField) -> &'static str {
         HudField::Width => tr!(lang, HudWidth),
         HudField::Height => tr!(lang, HudHeight),
         HudField::Distance => tr!(lang, HudDistance),
+        HudField::X => tr!(lang, HudX),
+        HudField::Y => tr!(lang, HudY),
     }
 }
 

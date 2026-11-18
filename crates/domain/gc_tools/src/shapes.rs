@@ -3,7 +3,9 @@
 //! (GUID-D489CE6D-7299-4211-A43A-F3580A4BA357), To Stretch, Scale, or Offset 2D Sketch Geometry
 //! (GUID-962CEE71-8BE4-4DA6-B51E-341319C64FA4).
 //!
-//! - Point: each click places a point (a centre point unless the Center Point toggle is off).
+//! - Point: each click places a point (a centre point unless the Center Point toggle is off); the X and Y
+//!   boxes show the cursor's coordinates, and typed values place it there (Tab, X, Tab, Y, Enter; Inventor
+//!   2026 help, Dynamic Input, GUID-33A8B11D-A04C-4809-BC82-C0419215915F).
 //! - Polygon: click the centre, then a corner (inscribed) or an edge midpoint (circumscribed).
 //! - Slot: two clicks as the slot kind reads them, then the width.
 //! - Arc slot: three clicks for the centre arc (start, end, a point on it; or centre, start, end), then the
@@ -275,6 +277,7 @@ impl Tool {
             locked: self.locked(field).map(str::to_owned),
         };
         match self.kind {
+            ToolKind::Point => vec![slot(HudField::X, cursor[0]), slot(HudField::Y, cursor[1])],
             ToolKind::Slot(_) => match (self.anchor, self.second) {
                 (Some(a), Some(b)) => vec![slot(HudField::Width, slot_width(a, b.pos, cursor))],
                 _ => Vec::new(),
@@ -316,7 +319,13 @@ impl Tool {
         Some(match self.kind {
             ToolKind::Point => {
                 let here = self.place(sketch, pos, px, None, modifier).pos;
-                vec![ToolOutput::Edit(SketchOp::PlacePoint { pos: xyz(here), center: self.center_point })]
+                // Typed coordinates win over the cursor's.
+                let at = [
+                    self.locked_value(HudField::X).unwrap_or(here[0]),
+                    self.locked_value(HudField::Y).unwrap_or(here[1]),
+                ];
+                self.hud.clear();
+                vec![ToolOutput::Edit(SketchOp::PlacePoint { pos: xyz(at), center: self.center_point })]
             }
             ToolKind::Polygon => {
                 let here = self.place(sketch, pos, px, None, modifier).pos;

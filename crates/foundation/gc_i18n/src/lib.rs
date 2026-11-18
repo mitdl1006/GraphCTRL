@@ -995,6 +995,8 @@ messages! {
     PromptPickPoint => ("점이나 원을 클릭하십시오(원은 중심)", "Click a point or a circle (its centre)"),
     /// Input box: offset distance.
     HudDistance => ("거리", "Distance"),
+    HudX => ("X", "X"),
+    HudY => ("Y", "Y"),
     /// Ribbon group (Inventor: Pattern panel).
     GroupPattern => ("패턴", "Pattern"),
     /// Ribbon group (Inventor: Modify panel).
