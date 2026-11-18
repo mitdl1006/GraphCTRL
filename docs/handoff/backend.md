@@ -124,6 +124,38 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 원형 모서리·구 면 인식과 `Feature::{Circle, Sphere}` (프런트 요청)
+
+근거: To Place Insert Constraints(`GUID-97DD5557-FAEE-46FA-845D-11123D725BA9`, 원형 모서리), Place Tangent constraints(`GUID-FF270566-CA9E-420A-A00A-F52DD0FDFD8E`, 구).
+
+| 무엇 | 호출 |
+|---|---|
+| 구 면 | `gc_mesh::region::spherical_region_in(mesh, &adjacency, triangle, bend, tolerance) -> Option<SphereRegion { triangles, centre, radius }>`(`spherical_region`은 인접 정보를 직접 만든다). 평면·원통·원뿔·불규칙 면은 `None` |
+| 원형 모서리 | `gc_mesh::region::circular_edge(mesh, &feature_edges, picked_index, tolerance) -> Option<CircleEdge { edges, centre, normal, radius, closed }>` — `feature_edges`는 `gc_mesh::edges::feature_edges` 결과, `picked_index`는 그 목록에서 고른 모서리. 꼭짓점에서 특징 모서리가 정확히 둘 만나는 동안 이어 붙여, 5점 이상이 한 원 위에 있으면 된다(닫힌 원·호 모두). `normal`은 그 모서리에 붙은 평평한 면이 보는 쪽(Insert가 맞대는 쪽) |
+| 세션 Feature | `Feature::Circle { centre, normal, radius }`, `Feature::Sphere { centre, radius }`(열거형 끝에 추가). 측정(`measure_features`)에서는 중심점으로 잰다 |
+
+- 권장 인자: 구 `bend` 0.6 rad 안팎(면 수가 적은 구), `tolerance` 1e-3~1e-2; 원형 모서리 `tolerance` 1e-3.
+- **다른 레이어에 넣은 최소 변경**(워크스페이스가 컴파일되도록; `Feature`를 빠짐없이 match하는 곳): `gc_viewport/src/altdrag.rs::geometry_of`(Circle → `Geometry::Circle`, Sphere → `Geometry::Sphere`), `gc_viewport/src/grip.rs::reference_of`(둘 다 `None`), `gc_app/src/measure.rs` 두 곳(목록 줄은 중심 좌표, 화면 표시는 중심에 점). 프런트 브랜치는 같은 match에 `Feature::Cone`을 이미 넣었으므로 **병합 때 이 네 곳에서 충돌이 날 수 있다** — 양쪽 arm을 모두 남기면 된다.
+- `gc_scene`의 픽 연결(면 픽에서 `spherical_region_in`, 모서리 픽에서 `circular_edge` 호출해 `Feature`를 만드는 것)은 프런트 몫.
+- 테스트: `gc_mesh` `region::tests::{a_ball_is_a_sphere…, the_rim_of_a_cylinder_is_a_circular_edge…}`, `gc_session` `measure::tests::features_measure_like_inventor`(끝부분).
+
+## 2026-11-18 — BOM 추가분: BOM 설정(행 병합·억제 숨기기), Varies, Static Quantity
+
+근거: To Work with Bill of Materials(`GUID-7A1FC6F1-8833-4A76-9E2B-AA6FE5FDF223`) — "different components with the same part number … quantities are summed together and properties that do not match are reported as Varies", "A suppressed component does not participate in the Bill of Materials and appears as a 0 QTY … To remove 0 QTY items from the BOM display, click BOM Settings and enable Hide Suppressed components in BOM". Part Number Row Merge Settings(`GUID-EBBCAEA4-B876-4B39-8D33-F3DC9E18E620`) — Merge Rows on Part Number Match, Excluded Part Numbers. About BOM Quantity(`GUID-37BA8DB6-E39C-4C96-AAF1-E7B342F20D0E`) — "You can override the calculated quantity value and enter a Static Quantity value. An override value is displayed in dark blue."
+
+| 무엇 | 호출 |
+|---|---|
+| BOM 설정 읽기/쓰기 | `session.bom_settings()`, `session.set_bom_settings(BomSettings { merge_part_numbers, merge_excluded, hide_suppressed })` = `CellOp::SetBomSettings` |
+| Static Quantity | `session.set_bom_quantity(key, Some(n) / None)` = `CellOp::SetBomQuantity { key, quantity }` — 행에 든 컴포넌트 아무거나로 지정. 없는 행은 `BadValue` |
+| 행 | `BomRow.static_quantity: bool`(추가) — 손으로 넣은 수량이면 true(인벤터는 짙은 파랑) |
+
+- **동작 변화(직전 커밋 70a1d83의 "억제 컴포넌트는 BOM에서 제외"를 원문대로 고침)**: 억제된 컴포넌트는 기본으로 수량 0으로 센다 — 같은 부품 번호의 다른 인스턴스가 있으면 그 행의 수량에서 빠질 뿐이고, 전부 억제면 수량 0 행이 남는다. `hide_suppressed`를 켜면 행에서도 사라진다. 억제된 행 아래 것은 어느 쪽이든 나오지 않는다.
+- 병합: 기본 켬(지금까지와 같음). 끄거나 그 부품 번호가 `merge_excluded`에 있으면 인스턴스마다 한 행.
+- 병합된 행의 Description이 서로 다르면 `"Varies"`.
+- 저장: 설정과 Static Quantity는 문서(타임라인)에 저장된다(serde default; 기본값이면 파일에 안 쓴다).
+- 하지 않은 것: Item QTY·Unit QTY·Base Quantity/Base Unit(길이 기준 수량), 열 사용자 정의·정렬·번호 다시 매기기(표 화면 동작), Model Data 탭, First-Level/All-Levels 전환, Merge Instance rows(인스턴스 속성 없음), 문서 설정의 기본 BOM 구조.
+- 테스트: `gc_session/tests/bom.rs::{suppressed_components_count_nothing_and_can_be_hidden, rows_merge_on_part_number_unless_told_otherwise}`.
+
 ## 2026-11-18 — 로봇 교체(Replace / Replace All)
 
 근거: Replace assembly components(`GUID-E5FAA224-7332-4AC6-A78E-793FDACFEEDD`) — "If possible, relationships are retained, unless the replacement part has a different shape. In that case, some relationships may not survive and must be reapplied", "The new component … placed in the same location as the original components. The origin of the replacement component is coincident with the origin of the replaced component", Replace All = "all occurrences of the component in the current assembly".

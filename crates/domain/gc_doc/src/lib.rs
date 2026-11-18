@@ -56,7 +56,7 @@ pub use gc_expr::Unit;
 pub use gc_sketch::Sketch;
 pub use grip::{GripLine, GripMotion, GripReference, grip_pose, grip_pose_on};
 pub use history::History;
-pub use iproperties::{BomStructure, DEFAULT_DENSITY, IProperties};
+pub use iproperties::{BomSettings, BomStructure, DEFAULT_DENSITY, IProperties};
 pub use pattern::{ComponentPattern, PatternDirection, PatternElement, PatternLayout};
 pub use placement::{ComponentOrigin, WorkShape};
 pub use project::ProjectSource;

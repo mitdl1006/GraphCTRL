@@ -28,6 +28,34 @@ pub enum BomStructure {
 /// The default density, kg/m³ (the Physical tab's default material).
 pub const DEFAULT_DENSITY: f64 = 1.0;
 
+/// The Bill of Materials settings (Inventor 2026 help, Part Number Row Merge Settings,
+/// GUID-EBBCAEA4-B876-4B39-8D33-F3DC9E18E620; To Work with Bill of Materials,
+/// GUID-7A1FC6F1-8833-4A76-9E2B-AA6FE5FDF223, BOM Settings).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BomSettings {
+    /// Merge Rows on Part Number Match: components with the same part number are one row.
+    pub merge_part_numbers: bool,
+    /// Excluded Part Numbers: values that are not merged into one row.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub merge_excluded: Vec<String>,
+    /// Hide Suppressed components in BOM: otherwise a suppressed component shows with quantity 0.
+    #[serde(default)]
+    pub hide_suppressed: bool,
+}
+
+impl Default for BomSettings {
+    fn default() -> Self {
+        Self { merge_part_numbers: true, merge_excluded: Vec::new(), hide_suppressed: false }
+    }
+}
+
+impl BomSettings {
+    /// True for the settings a new document has.
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 /// The iProperties kept for the document or a component.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]

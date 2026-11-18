@@ -3215,6 +3215,13 @@ fn paint_pick(
             line(v(centre) - v(axis) * l / 2.0, v(centre) + v(axis) * l / 2.0);
         }
         Feature::Cone { apex, axis, .. } => line(v(apex), v(apex) + v(axis) * length * 3.0),
+        // A circular edge or a spherical face: its centre, ringed (the picker that finds them comes later).
+        Feature::Circle { centre, .. } | Feature::Sphere { centre, .. } => {
+            if let Some(at) = screen(v(centre)) {
+                painter.circle_stroke(at, 8.0, stroke);
+                painter.circle(at, 3.0, colour, egui::Stroke::NONE);
+            }
+        }
         Feature::Face { point, normal, .. } => {
             if let (Some(a), Some(b)) = (screen(v(point)), screen(v(point) + v(normal) * length)) {
                 painter.arrow(a, b - a, stroke);

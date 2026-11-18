@@ -35,6 +35,8 @@ fn world_geometry_of(feature: &Feature) -> Option<Geometry> {
             Some(Geometry::Axis { point: a, direction: direction.to_array() })
         }
         Feature::Point(p) => Some(Geometry::Point(p)),
+        Feature::Circle { centre, normal, .. } => Some(Geometry::Circle { centre, normal }),
+        Feature::Sphere { centre, radius } => Some(Geometry::Sphere { centre, radius }),
     }
 }
 

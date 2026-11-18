@@ -409,6 +409,19 @@ pub enum CellOp {
         /// Its structure.
         structure: crate::iproperties::BomStructure,
     },
+    /// The Bill of Materials settings: row merge on part number, its exclude list, hiding suppressed
+    /// components (Part Number Row Merge Settings, GUID-EBBCAEA4-B876-4B39-8D33-F3DC9E18E620; To Work
+    /// with Bill of Materials, GUID-7A1FC6F1-8833-4A76-9E2B-AA6FE5FDF223).
+    SetBomSettings(crate::iproperties::BomSettings),
+    /// A Static Quantity for a BOM row, entered by hand instead of the counted one (About BOM Quantity,
+    /// GUID-37BA8DB6-E39C-4C96-AAF1-E7B342F20D0E); `None` goes back to the counted quantity. The row is
+    /// named by a component it stands for. Refused for a row that is not in the tree.
+    SetBomQuantity {
+        /// A component or subassembly of the row.
+        key: crate::subassembly::TreeKey,
+        /// The quantity, or `None` to count again.
+        quantity: Option<u32>,
+    },
     /// Document Settings (To Change Document Settings, GUID-FB49837F-7832-4713-928E-1CEDBDB0C3BD): replaces
     /// the settings saved with the document. Refused when they are not valid (`DocSettings::is_valid`).
     SetDocSettings(crate::settings::DocSettings),
@@ -1045,9 +1058,22 @@ pub(crate) fn set_timeline(
             t.components.bom.iter().map(|(k, _)| *k).filter(|k| !txn.doc().has_tree_row(*k)).collect()
         })
         .unwrap_or_default();
+    let unlisted_quantities: Vec<crate::subassembly::TreeKey> = txn
+        .doc()
+        .timeline()
+        .map(|(_, t)| {
+            t.components
+                .bom_quantities
+                .iter()
+                .map(|(k, _)| *k)
+                .filter(|k| !txn.doc().has_tree_row(*k))
+                .collect()
+        })
+        .unwrap_or_default();
     let edit = |t: &mut crate::design::Timeline| {
         t.components.sketch_owners.retain(|(s, _)| !orphaned.contains(s));
         t.components.bom.retain(|(k, _)| !unlisted.contains(k));
+        t.components.bom_quantities.retain(|(k, _)| !unlisted_quantities.contains(k));
         if !gone.is_empty() {
             let c = &mut t.components;
             for list in [&mut c.grounded, &mut c.disabled, &mut c.hidden, &mut c.suppressed] {
@@ -1575,6 +1601,23 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
                 }
             })?;
             Ok((Vec::new(), "BOM Structure"))
+        }
+        CellOp::SetBomSettings(settings) => {
+            let settings = settings.clone();
+            set_timeline(txn, |t| t.components.bom_settings = settings)?;
+            Ok((Vec::new(), "BOM Settings"))
+        }
+        CellOp::SetBomQuantity { key, quantity } => {
+            if !txn.doc().has_tree_row(*key) {
+                return Err(EditError::BadValue);
+            }
+            set_timeline(txn, |t| {
+                t.components.bom_quantities.retain(|(k, _)| k != key);
+                if let Some(quantity) = quantity {
+                    t.components.bom_quantities.push((*key, *quantity));
+                }
+            })?;
+            Ok((Vec::new(), "BOM Quantity"))
         }
         CellOp::SetDocSettings(settings) => {
             if !settings.is_valid() {
