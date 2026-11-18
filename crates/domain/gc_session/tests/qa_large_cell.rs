@@ -474,7 +474,6 @@ fn a_loop_inside_a_chain_is_accepted_when_consistent_and_diagnosed_when_not() {
 /// beside the four Flush ones), although they are all satisfied and only the Flush ones disagree in X.
 /// The culprit list (what alone suppressed would fix it) is unchanged.
 #[test]
-#[ignore = "BUG: the unsatisfied list of an impossible loop now includes satisfied chain Mates (owner: backend, relate.rs chain solver residual); the culprit list is unchanged"]
 fn the_unsatisfied_list_of_a_loop_names_only_the_relationships_that_disagree() {
     let mut c = chain::build(12);
     let (b3, b4, b6) = (c.bodies[3], c.bodies[4], c.bodies[6]);

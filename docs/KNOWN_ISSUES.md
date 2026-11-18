@@ -55,4 +55,4 @@
   복사본을 원본에서 직접 계산한 위치로 만들고 "고정 패턴" 구속만 두거나, 성분을 원본별로 분해하면 선형에 가깝게 된다.
 - 담당: 백엔드(`gc_doc/src/command.rs` `RectangularPattern`/`CircularPattern`, `gc_solver`). 수정 후 10×10이 수십 ms 안에 끝나는지 위 보고 테스트로 확인.
 
-- **(해결됨, 2026-11-18)** 사슬로 쌓인 구속의 관계 추가 시간 폭발은 백엔드 dd8b494로 고쳐졌다(100개 사슬 약 10 ms). 회귀 보호는 `crates/domain/gc_session/tests/qa_large_cell.rs`. 남은 것: 모순 루프 거부 시 오류의 "만족하지 못한 관계" 목록에 만족된 사슬 Mate가 섞임(`-- --ignored the_unsatisfied_list`).
+- **(해결됨, 2026-11-18)** 사슬로 쌓인 구속의 관계 추가 시간 폭발은 백엔드 dd8b494로 고쳐졌다(100개 사슬 약 10 ms). 회귀 보호는 `crates/domain/gc_session/tests/qa_large_cell.rs`. 모순 루프 진단 목록 차이도 백엔드 8a81630으로 해결(테스트 `the_unsatisfied_list…` 활성).
