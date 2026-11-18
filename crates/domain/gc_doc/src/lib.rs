@@ -53,8 +53,8 @@ pub use placement::{ComponentOrigin, WorkShape};
 pub use project::ProjectSource;
 pub use relate::{
     AngleSolution, AssembleSolution, AxisSense, ComponentStatus, Dof, DofAxis, DofSymbol, Geometry,
-    JointCondition, Limits, LockedPose, RelationKind, RelationStatus, Relationship, Selection, Unsolved,
-    is_joint_kind, possible_relations,
+    JointCondition, JointRange, Limits, LockedPose, RelationKind, RelationStatus, Relationship, Selection,
+    Unsolved, is_joint_kind, possible_relations, takes_limits,
 };
 pub use replicate::Replacement;
 pub use representation::{PositionalRepresentation, Representations, ViewRepresentation};
