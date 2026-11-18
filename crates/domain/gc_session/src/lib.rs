@@ -908,6 +908,24 @@ impl Session {
         self.execute(&Command::Cell(gc_doc::CellOp::ActivateViewRepresentation(index))).map(|_| ())
     }
 
+    /// Lock or unlock a view representation: a locked one keeps its display characteristics, and
+    /// components added while it is active are hidden. While a view is active and not locked, display
+    /// edits (visibility, enabled, transparency) are saved in it. One undo step.
+    pub fn lock_view_representation(&mut self, index: usize, locked: bool) -> Result<(), EditError> {
+        let op = gc_doc::CellOp::LockViewRepresentation { index, locked };
+        self.execute(&Command::Cell(op)).map(|_| ())
+    }
+
+    /// Copies a view representation under a numbered name; the copy becomes the active one.
+    pub fn copy_view_representation(&mut self, index: usize) -> Result<(), EditError> {
+        self.execute(&Command::Cell(gc_doc::CellOp::CopyViewRepresentation(index))).map(|_| ())
+    }
+
+    /// Copies a positional representation with its overrides under a numbered name.
+    pub fn copy_positional_representation(&mut self, index: usize) -> Result<(), EditError> {
+        self.execute(&Command::Cell(gc_doc::CellOp::CopyPositionalRepresentation(index))).map(|_| ())
+    }
+
     /// Adds a positional representation (a copy of [Primary]). One undo step.
     pub fn add_positional_representation(&mut self, name: &str) -> Result<(), EditError> {
         self.execute(&Command::Cell(gc_doc::CellOp::AddPositionalRepresentation(name.to_owned()))).map(|_| ())

@@ -124,6 +124,24 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 표현: 뷰 Lock·따라가기·Copy, 위치 표현 Copy (대조 목록 9 중 원문에 있는 부분)
+
+근거: To Create, Edit, and Restore View Representations(`GUID-397F9263-12C3-47A1-B6A6-16FC05EDEF47`) — "Copy: Duplicates the current View representation to make it active. The incremental number appends the name", "Lock: Prevents changes to the View representation display characteristics. Components added after a view is locked are not visible while the view is active", "Edit a View representation … Activate. Edit the display of components", "select Lock so the representation does not update changes to the display". To Create, Edit, or Copy Positional Representations(`GUID-34C28C35-45CA-4476-9336-30146F7C9471`) — Copy. Positional representations in assemblies(`GUID-C728DFAC-1B45-4879-A004-45A8DC991954`), Overrides in Positional Representations(`GUID-EB1593D3-E545-489F-9008-EE01F2AFD5C2`)도 읽었다.
+
+- `ViewRepresentation`에 `locked: bool`, `known: Vec<Occurrence>`(잠글 때 있던 컴포넌트) 추가 — serde default, 다른 브랜치에 구조체 리터럴 없음(확인).
+- **동작 변화**: 활성 뷰(`active_view`)가 잠겨 있지 않으면 표시 편집(가시성·Enabled·투명도: `SetVisible`, `SetComponent`, `Set*Look`, `Isolate`, `UndoIsolate`)이 같은 실행 취소 단계에서 그 뷰에 저장된다. 전에는 뷰가 만든 순간의 스냅숏이었다. 활성이 아닌 뷰는 그대로다. `AddViewRepresentation`은 여전히 새 뷰를 활성으로 만들지 않는다(원문은 "It becomes the active View representation" — 바꾸면 리드·QA 테스트 `a_view_representation_restores_visibility`, `view_representations_restore…`가 깨져서 그대로 뒀다. 리드 결정 필요).
+- 잠긴 뷰: 표시 편집이 저장되지 않는다. `SetViewRepresentation`은 이름만 바꾼다. 활성인 동안 추가된 컴포넌트는 숨겨지고 뷰의 hidden에 들어간다(손으로 다시 보이게 할 수는 있다).
+
+| 무엇 | 호출 |
+|---|---|
+| 잠금/해제 | `session.lock_view_representation(index, bool)` = `CellOp::LockViewRepresentation { index, locked }` |
+| 뷰 복사(복사본이 활성, 이름에 번호) | `session.copy_view_representation(index)` = `CellOp::CopyViewRepresentation(index)` |
+| 위치 표현 복사(오버라이드 포함, 활성은 그대로) | `session.copy_positional_representation(index)` = `CellOp::CopyPositionalRepresentation(index)` |
+| 잠김 표시 | `session.representations().views[i].locked` |
+
+- **하지 않은 것(리드 결정 필요)**: ① "Primary가 활성일 때만" 규칙(컴포넌트 추가·삭제·순서, 재구성, 패턴 개수, 작업 피처 생성·삭제는 위치 표현 활성 중 거부, A63) — 기존에 되던 명령을 거부하게 되고 새 오류 종류가 필요하다(`EditError`에 변형을 더하면 gc_panels의 빠짐없는 match가 깨진다). ② 위치 표현의 고정(grounding)·조인트 한계·유연(flexible) 오버라이드 — Override 대화상자 참조 페이지를 찾지 못했다(읽은 페이지에는 "relationship values or component placements", "flexibility state of subassemblies, component enabled status … offsets and suppression of relationships and patterns"만 있다). 값·억제·배치 오버라이드는 이미 있다.
+- 테스트: `gc_doc/tests/relate.rs::the_active_view_follows_the_display_until_it_is_locked`.
+
 ## 2026-11-18 — Free Move / Free Rotate와 Update (대조 목록 5)
 
 근거: Move assembly components(`GUID-9796C22B-23C1-4D69-BC2E-54056E46F255`) — "A component with no relationships remains in the new location …", "A component snaps back to the position defined by its relationships to other components when you update the assembly", "The Free Move command displays component relationships as an elastic band". Rotate assembly components(`GUID-7EAE9DFD-899A-4FD1-B63F-92DD41D0A916`) — "When you click Update, a component snaps back to its constrained or connected position. An grounded component and components with no relationships relocates to the new position. Any components related to a grounded component snap into their connected or constrained positions in the new location."
