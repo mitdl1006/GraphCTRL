@@ -124,6 +124,14 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 로봇 후보를 작업 스레드에서 (`request_task_candidates`)
+
+- `session.request_task_candidates(task)`: 지금 문서 기준으로 그 작업의 후보(로봇별 예상 시간 또는 못 하는 이유)를 실행기에서 계산하기 시작한다. 같은 작업·같은 리비전이면 아무것도 하지 않고, 다른 작업이나 더 새 문서를 요청하면 계산 중인 것을 취소한다(한 번에 하나).
+- 결과는 `poll_jobs()`로 도착 → `session.task_candidates_result(task) -> Option<(&[TaskCandidate], bool)>`(bool = 요청 뒤 문서가 안 바뀜). 작업별로 마지막 결과를 보관한다(작업이 지워지면 다음 결과 도착 때 정리).
+- `session.task_candidates_pending() -> Option<Id<Task>>`: 계산 중인 작업.
+- 동기 `task_candidates(task)`와 결과가 같다. `task_plan`은 여전히 동기다(작업 속성 창에서는 `request_task_candidates`를 쓰면 된다).
+- 테스트: `task_schedule.rs::candidates_asked_for_in_the_background_are_kept_per_task`.
+
 ## 2026-11-18 — IO 신호 모델: 신호 대기와 로봇 간 핸드셰이크
 
 - **대기 조건의 뜻**: `Step::WaitIo.condition`은 여전히 글자로 저장하지만 "신호 이름 + 값"으로 읽는다 — `ready`, `not ready`, `ready == true`, `"part ready" == false`(공백 든 이름은 큰따옴표). `gc_doc::signal_condition(text) -> Option<(String, bool)>`(입력 칸 검증에 쓸 수 있다). 읽을 수 없으면 거부하지 않고 `task_problems`가 알려 준다(툴 종류가 있는 문서에서).
