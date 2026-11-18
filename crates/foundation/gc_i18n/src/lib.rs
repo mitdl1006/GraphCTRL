@@ -859,6 +859,7 @@ messages! {
     /// File menu: the Application Options window.
     MenuOptions => ("응용 프로그램 옵션", "Application Options"),
     /// Application Options, Sketch tab: project the edges of the selected face when a sketch is created.
+    OptSnapToGrid => ("격자에 스냅", "Snap to grid"),
     OptAutoBend => ("3D 선 그릴 때 자동 굽힘", "Auto-bend with 3D line creation"),
     OptAutoproject => ("스케치 작성·편집 시 모서리 자동 투영", "Autoproject edges for sketch creation and edit"),
     /// 3D Model tab: group of the work features.

@@ -370,6 +370,7 @@ impl GraphCtrlApp {
         if let Some(settings) = options.settings_dir.as_deref().map(gc_persist::places::load_settings) {
             session.set_autoproject_face_edges(!settings.autoproject_edges_off);
             session.set_auto_bend(settings.auto_bend);
+            session.set_snap_to_grid(settings.snap_to_grid);
         }
         let saved =
             options.settings_dir.as_deref().map(gc_persist::places::load_settings).unwrap_or_default();
@@ -1070,6 +1071,7 @@ impl GraphCtrlApp {
             light_theme: !self.dark,
             autoproject_edges_off: !self.session.autoproject_face_edges(),
             auto_bend: self.session.auto_bend(),
+            snap_to_grid: self.session.snap_to_grid(),
             hide_view_cube: !self.viewport.show_view_cube,
             hide_nav_bar: !self.viewport.show_nav_bar,
             hide_status_bar: !self.show_status,
@@ -1122,6 +1124,12 @@ impl GraphCtrlApp {
             let mut on = self.session.autoproject_face_edges();
             if ui.checkbox(&mut on, tr!(lang, OptAutoproject)).changed() {
                 self.session.set_autoproject_face_edges(on);
+                changed = true;
+            }
+            // Snap to grid (Sketch tab; the spacing is the document's Snap Spacing): off by default.
+            let mut snap = self.session.snap_to_grid();
+            if ui.checkbox(&mut snap, tr!(lang, OptSnapToGrid)).changed() {
+                self.session.set_snap_to_grid(snap);
                 changed = true;
             }
             // Auto-bend with 3D line creation (Sketch tab, 3D Sketch; GUID-1898C432-CFD2-46F1-8BAE-631392DFBF1D):

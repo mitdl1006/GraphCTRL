@@ -350,6 +350,14 @@
 - 브라우저의 바디·로봇 행 위에 커서를 올리면 `ParamsUi.hovered` → `Viewport.browser_hover`로 전달되어 뷰에 그 컴포넌트의 경계 상자(월드 축 정렬, 12개 모서리)를 강조색으로 그린다. 브라우저를 벗어나거나 접으면 사라진다. 경계 계산은 `find_in_window`와 같은 함수(`item_bounds`)를 쓴다.
 - 테스트: `hovering_a_browser_row_boxes_the_component_in_the_view`.
 
+### 문서 설정 남은 것: 격자에 스냅, 스케치 격자 간격, 입력 식 표시
+
+- 근거: Inventor 2026 도움말 Sketch Tab Reference(Application Options, GUID-1898C432-CFD2-46F1-8BAE-631392DFBF1D: Snap to grid), Sketch Tab Reference(Document Settings, GUID-58DD9A89-84C7-48F3-8E4E-0303E755B10F: Snap Spacing, Grid Display), To Change Document Settings(GUID-FB49837F-7832-4713-928E-1CEDBDB0C3BD: Units 탭 Default Parameter Input Display).
+- 응용 프로그램 옵션 스케치 탭 "격자에 스냅"(`Session::set_snap_to_grid`, 기본 꺼짐, `settings.json`의 `snap_to_grid`에 저장·복원).
+- 스케치를 편집하는 동안 격자는 문서 설정을 따른다: 가는 선 = 스냅 간격 × 보조선당 스냅 수(축별), 굵은 선 = 주선당 보조선 수마다. 너무 멀리 축소해 가는 선이 6 px보다 가까워지면 주선 간격씩 키운다. 스케치가 없을 때의 바닥 격자는 이전의 1-2-5 자동 간격 그대로.
+- 치수 입력 상자: 문서 설정 "입력 식 표시"가 켜져 있으면(기본) 쓴 식, 꺼져 있으면 값(문서 단위·자릿수)으로 시작한다(`Viewport::edit_dimension`, 뷰에서 더블클릭). 새 치수를 만들 때의 값 입력 상자(도구가 요청하는 것)는 이번에 바꾸지 않았다.
+- 테스트: `the_snap_to_grid_option_is_off_by_default_saved_and_read_back`, `editing_a_dimension_starts_from_the_expression_or_the_value_as_the_document_says`, gc_viewport `the_sketch_grid_follows_the_document_settings`.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

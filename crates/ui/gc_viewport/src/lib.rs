@@ -2344,13 +2344,29 @@ impl Viewport {
     /// Opens the in-place editor of a dimension of the sketch being edited: the expression of a driving
     /// dimension, and the Driven check box of any.
     pub fn edit_dimension(&mut self, session: &Session, id: Id<gc_sketch::Dimension>) {
-        let source = session
-            .active_sketch()
-            .and_then(|(_, sketch)| sketch.dimensions.get(&id))
-            .map(|dimension| dimension.source.clone());
+        // Default Parameter Input Display (Document Settings, Units tab): the box shows the expression as
+        // typed, or the value to the document's precision.
+        let settings = session.doc_settings();
+        let source = session.active_sketch().and_then(|(_, sketch)| {
+            let dimension = sketch.dimensions.get(&id)?;
+            if settings.input_as_expression {
+                return Some(dimension.source.clone());
+            }
+            let value = sketch.measure(&dimension.kind)?;
+            Some(if matches!(dimension.kind, gc_sketch::DimKind::Angle { .. }) {
+                settings.format_angle(value)
+            } else {
+                settings.format_length(value)
+            })
+        });
         if let Some(source) = source {
             self.dimension_edit = Some((id, source, true));
         }
+    }
+
+    /// The text of the dimension edit box that is open, if any.
+    pub fn dimension_edit_text(&self) -> Option<&str> {
+        self.dimension_edit.as_ref().map(|(_, text, _)| text.as_str())
     }
 
     /// The box in which the expression of an existing dimension is edited. Enter applies it; a refused

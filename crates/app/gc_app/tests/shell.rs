@@ -6130,3 +6130,72 @@ fn hovering_a_browser_row_boxes_the_component_in_the_view() {
     harness.run_steps(3);
     assert!(harness.state().viewport().browser_hover.is_none());
 }
+
+/// Snap to grid (Application Options, Sketch tab): off by default, saved, read back.
+#[test]
+fn the_snap_to_grid_option_is_off_by_default_saved_and_read_back() {
+    let directory = tempfile::tempdir().unwrap();
+    let options =
+        || RunOptions { settings_dir: Some(directory.path().to_path_buf()), ..RunOptions::default() };
+    let mut harness =
+        egui_kittest::Harness::builder().with_size(SIZE).build_eframe(|cc| GraphCtrlApp::new(cc, options()));
+    harness.run();
+    assert!(!harness.state().session.snap_to_grid());
+    harness.get_by_label("파일").click();
+    harness.run();
+    harness.get_by_label("응용 프로그램 옵션").click();
+    harness.run_steps(3);
+    harness.get_by_label("격자에 스냅").click();
+    harness.run();
+    assert!(harness.state().session.snap_to_grid());
+    assert!(gc_persist::places::load_settings(directory.path()).snap_to_grid);
+    let again =
+        egui_kittest::Harness::builder().with_size(SIZE).build_eframe(|cc| GraphCtrlApp::new(cc, options()));
+    assert!(again.state().session.snap_to_grid());
+}
+
+/// Default Parameter Input Display (Document Settings, Units tab): with it off, editing a dimension in the view
+/// starts from its value, not the expression typed.
+#[test]
+fn editing_a_dimension_starts_from_the_expression_or_the_value_as_the_document_says() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let app = harness.state_mut();
+    let sketch = app.session.create_sketch("XY").unwrap();
+    let line = app
+        .session
+        .execute(&gc_doc::Command::Sketch {
+            sketch,
+            op: gc_doc::SketchOp::AddLine {
+                a: [0.0; 3],
+                b: [0.05, 0.0, 0.0],
+                snap_a: gc_doc::EndSnap::default(),
+                snap_b: gc_doc::EndSnap::default(),
+                horizontal: Some(true),
+            },
+        })
+        .unwrap()
+        .iter()
+        .find_map(|c| if let gc_doc::Created::Curve(id) = c { Some(*id) } else { None })
+        .unwrap();
+    let (p, q) = app.session.active_sketch().unwrap().1.line(line).unwrap();
+    let kind = gc_sketch::DimKind::Distance { p, q };
+    app.session
+        .execute(&gc_doc::Command::Sketch {
+            sketch,
+            op: gc_doc::SketchOp::AddDimension { kind, source: "25 + 25".into(), text_pos: [0.0; 2] },
+        })
+        .unwrap();
+    let id = *app.session.active_sketch().unwrap().1.dimensions.keys().next().unwrap();
+    let mut viewport = gc_viewport::Viewport::new(None);
+    viewport.edit_dimension(&app.session, id);
+    assert_eq!(viewport.dimension_edit_text(), Some("25 + 25"));
+    let mut settings = app.session.doc_settings();
+    settings.input_as_expression = false;
+    app.session.set_doc_settings(settings).unwrap();
+    viewport.edit_dimension(&app.session, id);
+    assert_eq!(viewport.dimension_edit_text(), Some("50 mm"));
+}

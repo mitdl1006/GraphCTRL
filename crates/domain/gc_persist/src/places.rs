@@ -79,6 +79,8 @@ pub struct Settings {
     /// Automatically places tangent corner bends on 3D lines as they are sketched (Sketch tab, "Auto-bend
     /// with 3D line creation"; default: off).
     pub auto_bend: bool,
+    /// Snap to grid (Sketch tab, "Snap to grid"; default: off).
+    pub snap_to_grid: bool,
     /// View tab, Windows panel, User Interface: what the user switched off (all shown by default).
     pub hide_view_cube: bool,
     /// The navigation bar is hidden.
