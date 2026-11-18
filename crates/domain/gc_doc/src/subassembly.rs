@@ -478,6 +478,49 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &SubassemblyOp) -> Outcome {
     }
 }
 
+impl Document {
+    /// The components a Paste of `keys` copies: each copied component, and every component in each
+    /// copied subassembly (nested levels too). Rows that no longer exist are skipped. For the paste
+    /// preview.
+    pub fn pasted_components(&self, keys: &[TreeKey]) -> Vec<gc_core::AnyId> {
+        self.pasted(keys).0
+    }
+
+    fn pasted(&self, keys: &[TreeKey]) -> (Vec<gc_core::AnyId>, Vec<Subassembly>) {
+        let doc = self;
+        let all = doc.subassemblies();
+        // What is pasted: the components, and each copied subassembly with everything below it.
+        let mut items: Vec<gc_core::AnyId> = Vec::new();
+        let mut groups: Vec<Subassembly> = Vec::new();
+        for key in keys {
+            match *key {
+                TreeKey::Component(Occurrence::Item(item)) if doc.level_of(*key).is_some() => {
+                    if !items.contains(&item) {
+                        items.push(item);
+                    }
+                }
+                TreeKey::Subassembly(id) if all.iter().any(|s| s.id == id) => {
+                    for s in all
+                        .iter()
+                        .filter(|s| doc.is_under(TreeKey::Subassembly(s.id), TreeKey::Subassembly(id)))
+                    {
+                        if !groups.iter().any(|g| g.id == s.id) {
+                            groups.push(s.clone());
+                        }
+                    }
+                    for item in doc.subassembly_components(id) {
+                        if !items.contains(&item) {
+                            items.push(item);
+                        }
+                    }
+                }
+                TreeKey::Component(_) | TreeKey::Subassembly(_) => {}
+            }
+        }
+        (items, groups)
+    }
+}
+
 fn paste(
     txn: &mut Txn<'_>,
     keys: &[TreeKey],
@@ -489,33 +532,7 @@ fn paste(
     if into.is_some_and(|i| !all.iter().any(|s| s.id == i)) {
         return Err(EditError::BadValue);
     }
-    // What is pasted: the components, and each copied subassembly with everything below it.
-    let mut items: Vec<gc_core::AnyId> = Vec::new();
-    let mut groups: Vec<Subassembly> = Vec::new();
-    for key in keys {
-        match *key {
-            TreeKey::Component(Occurrence::Item(item)) if doc.level_of(*key).is_some() => {
-                if !items.contains(&item) {
-                    items.push(item);
-                }
-            }
-            TreeKey::Subassembly(id) if all.iter().any(|s| s.id == id) => {
-                for s in
-                    all.iter().filter(|s| doc.is_under(TreeKey::Subassembly(s.id), TreeKey::Subassembly(id)))
-                {
-                    if !groups.iter().any(|g| g.id == s.id) {
-                        groups.push(s.clone());
-                    }
-                }
-                for item in doc.subassembly_components(id) {
-                    if !items.contains(&item) {
-                        items.push(item);
-                    }
-                }
-            }
-            TreeKey::Component(_) | TreeKey::Subassembly(_) => {}
-        }
-    }
+    let (items, groups) = doc.pasted(keys);
     if items.is_empty() && groups.is_empty() {
         return Err(EditError::BadValue);
     }

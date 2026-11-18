@@ -54,6 +54,18 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 붙여넣기 고스트 미리보기(리드 요청)
+
+Ctrl+V 뒤 복사본 모양이 커서를 따라다니게(인벤터 Paste 동작). 문서는 바꾸지 않는다.
+
+- `Session::preview_paste(offset: Placement)`: 클립보드 내용을 `offset`에 보여 준다. 남은 복사 대상이 없거나 값이 유한하지 않으면 거부하고 미리보기도 끈다. 다시 부르면 바뀐다.
+- `Session::end_paste_preview()`: 미리보기를 끈다.
+- `Session::paste_ghosts() -> Vec<(AnyId, DPose3)>`: 고스트로 그릴 원본 컴포넌트와, 지금 모습에 앞에서 곱할 이동(모두 같은 `offset`, 월드 기준 — 실제 `paste`와 같은 식). 서브어셈블리는 안의 컴포넌트 전부.
+- `Document::pasted_components(keys)`: Paste가 복사할 컴포넌트(`paste`와 같은 수집 코드).
+- `gc_scene::Scene::of`가 고스트를 그린다. 바디는 반투명 하늘색 솔리드, 로봇은 링크·툴을 같은 색으로. `owner: None`이라 피킹되지 않는다.
+- FE: Ctrl+V → 커서 위치로 `offset`을 계산해 매 프레임 `preview_paste`, 클릭하면 `paste(offset)` 다음 `end_paste_preview`, Esc면 `end_paste_preview`.
+- 테스트: `gc_scene/tests/scene.rs::a_paste_preview_draws_ghosts_at_the_offset`.
+
 ## 2026-11-18 — 스플라인 교점·Trim·Split(리드 다음 ③ 2차)
 
 근거: To Split, Trim, or Extend Curves, GUID-DD00037F-6BBA-4B95-AA90-4F99DCEB667D(Trim·Split은 가장 가까운 교차 곡선까지/에서).

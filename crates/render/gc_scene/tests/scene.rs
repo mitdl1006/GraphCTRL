@@ -78,3 +78,43 @@ fn a_ray_picks_the_nearest_body_or_robot_and_skips_hidden_ones() {
     session.delete_item(CellItem::Body(wall)).unwrap();
     assert_eq!(session.selected_item(), None);
 }
+
+/// A paste preview draws the copied components as unpickable see-through ghosts moved by the offset,
+/// leaves the document alone, and disappears when it ends.
+#[test]
+fn a_paste_preview_draws_ghosts_at_the_offset() {
+    use gc_doc::{Occurrence, TreeKey};
+    let path = format!("{}/../../../fixtures/urdf/six_axis.urdf", env!("CARGO_MANIFEST_DIR"));
+    let mut session = Session::new();
+    let robot = session.add_robot("Robot1", &std::fs::read_to_string(path).unwrap()).unwrap();
+    let ball = session
+        .add_body(Solid::Sphere { radius: 0.1 }, Placement { xyz: [1.0, 0.0, 0.1], rpy: [0.0; 3] })
+        .unwrap();
+    let plain = Scene::of(&session);
+    let offset = Placement { xyz: [0.0, 2.0, 0.0], rpy: [0.0; 3] };
+    // Nothing copied yet: refused.
+    assert!(session.preview_paste(offset).is_err());
+    session
+        .copy_to_clipboard(&[
+            TreeKey::Component(Occurrence::Item(ball.erase())),
+            TreeKey::Component(Occurrence::Item(robot.erase())),
+        ])
+        .unwrap();
+    let before = session.doc().clone();
+    session.preview_paste(offset).unwrap();
+    assert!(session.doc().same_content(&before));
+    assert_eq!(session.paste_ghosts().len(), 2);
+    let ghosted = Scene::of(&session);
+    let extra = &ghosted.solids[plain.solids.len()..];
+    assert_eq!(extra.len(), plain.solids.len(), "a ghost per drawn solid: the ball and the links");
+    assert!(extra.iter().all(|s| s.owner.is_none() && s.color[3] < 1.0));
+    let ghost_ball = extra.iter().find(|s| s.shape == Shape3::Primitive(Primitive::Sphere(0.1))).unwrap();
+    assert!((ghost_ball.pose.translation - gc_math::DVec3::new(1.0, 2.0, 0.1)).length() < 1e-12);
+    // Not finite: refused and the preview ends.
+    let bad = Placement { xyz: [f64::NAN, 0.0, 0.0], rpy: [0.0; 3] };
+    assert!(session.preview_paste(bad).is_err());
+    assert!(session.paste_ghosts().is_empty());
+    session.preview_paste(offset).unwrap();
+    session.end_paste_preview();
+    assert_eq!(Scene::of(&session).solids.len(), plain.solids.len());
+}
