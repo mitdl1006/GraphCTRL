@@ -88,6 +88,13 @@ impl Replicate {
         }
     }
 
+    /// A pick of a planar face in the view: the mirror plane.
+    pub(crate) fn pick_selection(&mut self, selection: Selection) {
+        if self.mode == Mode::Mirror && matches!(selection.geometry, Geometry::Plane { .. }) {
+            self.plane = Some(selection);
+        }
+    }
+
     /// Whether the view is picking for the dialog.
     pub(crate) fn picking(&self) -> bool {
         self.open && self.mode == Mode::Mirror

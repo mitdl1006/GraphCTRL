@@ -597,6 +597,36 @@ impl Joint {
         }
     }
 
+    /// A pick of a face, edge, point, cylinder or cone in the view: the joint origin it stands for (a point with its
+    /// Z axis out of the face, along the edge or the axis).
+    pub(crate) fn pick_selection(&mut self, selection: Selection) {
+        if self.editing.is_some() {
+            return;
+        }
+        let perpendicular = |z: [f64; 3]| {
+            let z = gc_math::DVec3::from_array(z).try_normalize().unwrap_or(gc_math::DVec3::Z);
+            let helper = if z.x.abs() < 0.9 { gc_math::DVec3::X } else { gc_math::DVec3::Y };
+            helper.cross(z).try_normalize().unwrap_or(gc_math::DVec3::X).to_array()
+        };
+        let frame = |origin: [f64; 3], z: [f64; 3]| Geometry::Frame { origin, z, x: perpendicular(z) };
+        let geometry = match selection.geometry {
+            Geometry::Plane { point, normal } => frame(point, normal),
+            Geometry::Axis { point, direction } => frame(point, direction),
+            Geometry::Cylinder { point, direction, .. } => frame(point, direction),
+            Geometry::Cone { apex, direction, .. } => frame(apex, direction),
+            Geometry::Circle { centre, normal } => frame(centre, normal),
+            Geometry::Point(point) => frame(point, [0.0, 0.0, 1.0]),
+            other => other,
+        };
+        let selection = Selection { occurrence: selection.occurrence, geometry };
+        if self.slot == 0 {
+            self.first = Some(selection);
+            self.slot = 1;
+        } else {
+            self.second = Some(selection);
+        }
+    }
+
     fn relationship(&self, session: &Session) -> Option<Relationship> {
         let (first, second) = (self.first?, self.second?);
         let kind = match self.kind {

@@ -635,6 +635,17 @@
 - 뷰포트 `pick_feature_with(.., cones)`: Alt 끌기 맞춤(altdrag)은 원뿔을 `Geometry::Cone`으로 선택하고(Tangent 대상), Measure·Grip은 기존처럼 원뿔을 고르지 않는다.
 - 하지 않은 것: 호버 하이라이트에 원뿔 윤곽 표시, Constrain 대화상자의 뷰 선택(지금 대화상자는 원점 요소·작업 피처만 받는다 — 메시 면 선택 자체가 아직 없다). 원뿔 메시로 만든 끝단 테스트도 없다(컴파일·기존 테스트만 통과).
 
+## Constrain·Joint 대화상자: 뷰에서 면·모서리·점·원통·원뿔 선택
+
+근거: To Place Mate or Flush Constraints in Assemblies GUID-0F500089-4F69-41C5-AFE8-B58AC9E8E15E, To Place Angle Constraints GUID-AD4679FD-EE9B-47C0-9E32-04B990BDD29E(선택은 "면 또는 모서리"를 그래픽 창에서 고른다), Place Tangent GUID-FF270566-CA9E-420A-A00A-F52DD0FDFD8E.
+
+- 구속 대화상자(Constrain·Assemble·Joint·Mirror 평면)가 열려 있으면 뷰 클릭이 `pick_feature_with(.., cones=true)`로 평면(면)·원통 축·원뿔·직선 모서리(Axis)·점(Point)을 골라 `Selection`으로 채운다. 지오메트리는 세계 좌표에서 컴포넌트 원점 프레임으로 바꾼다(`altdrag::selection_of(session, …)`; Alt 끌기가 세계 좌표를 그대로 넘기던 오류도 같이 고쳤다). 선택 후 다음 선택으로 자동 이동(기존 slot 규칙). Joint는 면→Z가 면 바깥인 조인트 원점 프레임, 모서리·축→방향이 Z, 점→Z 위로. Mirror는 평면 면만.
+- 호버 하이라이트: 면=법선 화살표+원, 원통·원뿔=축 선, 모서리=선, 점=원.
+- 우선순위: 작업 피처 > (사용자가 보이게 한) 원점 요소 > 면·모서리 등 > (이 모드가 제공하기만 한) 원점 평면. 원점 축·점은 좌표계 위에 그려지므로 클릭이 그 가까이면 계속 이긴다.
+- Predict 미리보기·Apply/OK는 이전과 같다(두 선택이 차면 `predict_relationship`).
+- 한계: 원(Circle) 모서리·구 면은 아직 골라지지 않는다(Feature에 없음): Insert의 원형 모서리와 Tangent 구는 원점/작업 피처로만. 면의 윤곽 하이라이트는 없음. 뷰에서 면의 어느 쪽(법선 방향)을 고르는지는 보이는 면의 법선으로 정한다.
+- 테스트: `the_constrain_dialog_picks_faces_in_the_view`(두 상자의 윗면을 클릭해 Flush가 만들어지고 지오메트리가 면의 평면). QA 시나리오는 같은 흐름으로 쓸 수 있다.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹
