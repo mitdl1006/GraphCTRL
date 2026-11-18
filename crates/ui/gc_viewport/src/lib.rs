@@ -515,20 +515,28 @@ impl Viewport {
                         self.insert_spline = None;
                     } else if response.clicked_by(PointerButton::Primary)
                         && let Some(pos) = response.interact_pointer_pos().and_then(on_sketch)
+                        && near_spline(session, curve, pos, gc_tools::tolerance::CURVE_PX * px)
                     {
-                        // A refusal is explained in the status bar.
+                        // Only a click on the spline (within the pick distance) inserts a point; a refusal
+                        // is explained in the status bar.
                         drop(session.edit_active_sketch(gc_doc::SketchOp::InsertSplinePoint {
                             curve,
                             at: [pos[0], pos[1]],
                         }));
                     }
-                    ui.painter_at(self.rect).text(
-                        self.rect.center_top() + egui::vec2(0.0, 14.0),
-                        egui::Align2::CENTER_TOP,
-                        tr!(lang, SplineInsertHint),
-                        egui::FontId::proportional(13.0),
-                        colors::ACCENT,
-                    );
+                    // The hint is a label (it has an accessibility node), not painted text.
+                    egui::Area::new(egui::Id::unique("gc_insert_spline_hint"))
+                        .fixed_pos(self.rect.center_top() + egui::vec2(0.0, 14.0))
+                        .pivot(egui::Align2::CENTER_TOP)
+                        .order(egui::Order::Foreground)
+                        .interactable(false)
+                        .show(ui.ctx(), |ui| {
+                            ui.label(
+                                egui::RichText::new(tr!(lang, SplineInsertHint))
+                                    .size(13.0)
+                                    .color(colors::ACCENT),
+                            );
+                        });
                 } else if response.clicked_by(PointerButton::Primary)
                     && let Some(pos) = response.interact_pointer_pos().and_then(on_sketch)
                 {
@@ -2310,6 +2318,25 @@ impl Viewport {
             session.tool_event(ToolEvent::Key(ToolKey::Delete));
         }
     }
+}
+
+/// Whether `pos` (sketch coordinates) is within `reach` of the spline `curve`.
+fn near_spline(session: &Session, curve: Id<gc_sketch::Curve>, pos: [f64; 2], reach: f64) -> bool {
+    let Some((_, sketch)) = session.active_sketch() else { return false };
+    let Some(line) = sketch.curves.get(&curve).and_then(|c| sketch.spline_outline(&c.geom, 16)) else {
+        return false;
+    };
+    line.windows(2).any(|w| {
+        let (dx, dy) = (w[1][0] - w[0][0], w[1][1] - w[0][1]);
+        let length = dx * dx + dy * dy;
+        let t = if length > 0.0 {
+            (((pos[0] - w[0][0]) * dx + (pos[1] - w[0][1]) * dy) / length).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let (x, y) = (w[0][0] + dx * t - pos[0], w[0][1] + dy * t - pos[1]);
+        x * x + y * y <= reach * reach
+    })
 }
 
 /// The context menu of an item of the cell: its name, show or hide, plan (a path), delete.

@@ -259,6 +259,12 @@
 - 원문과 차이: Variable helical curve(표), Helix Ends 탭(Natural/Flat 전이), 지름 생략(자동 계산)은 없음 — 지름은 필수(기본 20 mm). 끝점은 축 방향만 정한다(높이는 값에서).
 - 테스트: `the_helical_curve_dialog_then_two_clicks_make_a_helix`.
 
+### 스플라인 점 삽입 보정 (QA 관찰 2건)
+
+- 점 삽입 모드는 곡선에서 픽 허용 거리(`CURVE_PX`) 안을 클릭할 때만 점을 넣는다(원문 "곡선을 클릭"). 멀리 누르면 무시.
+- 안내 글자는 그려진 텍스트 대신 레이블(Area)이라 접근성 노드가 있다 → 화면 테스트에서 모드 확인 가능.
+- 테스트: `the_spline_menu_inserts_points_and_closes_the_curve`에 안내 레이블·먼 클릭 무시 단언 추가.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹
