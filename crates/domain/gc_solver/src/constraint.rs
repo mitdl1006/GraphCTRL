@@ -159,6 +159,29 @@ pub enum Constraint {
         /// The distance, positive.
         value: f64,
     },
+    /// Distance from a line to a circle or arc itself (not its centre), the circle on the given side
+    /// (`+1` = left of `a -> b`).
+    LineCircleDistance {
+        /// The line.
+        line: Line2,
+        /// The circle.
+        round: Round,
+        /// `+1.0` or `-1.0`.
+        side: f64,
+        /// The distance, positive.
+        value: f64,
+    },
+    /// Distance between two circles or arcs themselves: apart (`external`) or one inside the other.
+    CircleCircleDistance {
+        /// First circle.
+        a: Round,
+        /// Second circle.
+        b: Round,
+        /// True when they lie apart.
+        external: bool,
+        /// The distance, positive.
+        value: f64,
+    },
     /// Distance of a point from a line, on the given side (`+1` = left of `a -> b`).
     PointLineDistance {
         /// The point.
@@ -295,6 +318,8 @@ impl Constraint {
             | Self::HDistance { value, .. }
             | Self::VDistance { value, .. }
             | Self::PointLineDistance { value, .. }
+            | Self::LineCircleDistance { value, .. }
+            | Self::CircleCircleDistance { value, .. }
             | Self::Angle { value, .. }
             | Self::Radius { value, .. }
             | Self::Diameter { value, .. }
@@ -312,6 +337,8 @@ impl Constraint {
             | Self::HDistance { value, .. }
             | Self::VDistance { value, .. }
             | Self::PointLineDistance { value, .. }
+            | Self::LineCircleDistance { value, .. }
+            | Self::CircleCircleDistance { value, .. }
             | Self::Angle { value, .. }
             | Self::Radius { value, .. }
             | Self::Diameter { value, .. }
@@ -386,13 +413,24 @@ impl Constraint {
                 }
             }
             Self::TangentLineCircle { line, round, side } => out.rows.push((
-                RowKind::LineCircleTangent { side: *side },
+                RowKind::LineCircleTangent { side: *side, gap: 0.0 },
                 [line_vars(line).as_slice(), &[round.c[0], round.c[1], round.r]].concat(),
             )),
             Self::TangentCircleCircle { a, b, external } => {
                 let sign = if get(a.r) >= get(b.r) { 1.0 } else { -1.0 };
                 out.rows.push((
-                    RowKind::CircleCircle { external: *external, sign },
+                    RowKind::CircleCircle { external: *external, sign, gap: 0.0 },
+                    vec![a.c[0], a.c[1], a.r, b.c[0], b.c[1], b.r],
+                ));
+            }
+            Self::LineCircleDistance { line, round, side, value } => out.rows.push((
+                RowKind::LineCircleTangent { side: *side, gap: *value },
+                [line_vars(line).as_slice(), &[round.c[0], round.c[1], round.r]].concat(),
+            )),
+            Self::CircleCircleDistance { a, b, external, value } => {
+                let sign = if get(a.r) >= get(b.r) { 1.0 } else { -1.0 };
+                out.rows.push((
+                    RowKind::CircleCircle { external: *external, sign, gap: *value },
                     vec![a.c[0], a.c[1], a.r, b.c[0], b.c[1], b.r],
                 ));
             }

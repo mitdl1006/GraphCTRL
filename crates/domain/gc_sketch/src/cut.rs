@@ -1511,6 +1511,10 @@ fn map_dimension(d: &DimKind, f: impl Fn(Id<SkPoint>) -> Id<SkPoint>) -> DimKind
         DimKind::VDistance { p, q, sign } => DimKind::VDistance { p: f(p), q: f(q), sign },
         DimKind::PointLine { p, line, side } => DimKind::PointLine { p: f(p), line, side },
         DimKind::PlaneDistance { p, axis, side } => DimKind::PlaneDistance { p: f(p), axis, side },
-        other => other,
+        other @ (DimKind::Angle { .. }
+        | DimKind::Radius(_)
+        | DimKind::Diameter(_)
+        | DimKind::LineArc { .. }
+        | DimKind::ArcArc { .. }) => other,
     }
 }

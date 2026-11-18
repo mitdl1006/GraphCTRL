@@ -1387,6 +1387,9 @@ fn tangent_circle(sketch: &Sketch, lines: &[Id<Curve>; 3], near: &[[f64; 2]; 3])
 pub fn flipped(kind: &DimKind) -> Option<DimKind> {
     Some(match *kind {
         DimKind::PointLine { p, line, side } => DimKind::PointLine { p, line, side: -side },
+        // The circle on the other side of the line; the circles apart or one inside the other.
+        DimKind::LineArc { line, arc, side } => DimKind::LineArc { line, arc, side: -side },
+        DimKind::ArcArc { a, b, external } => DimKind::ArcArc { a, b, external: !external },
         DimKind::HDistance { p, q, sign } => DimKind::HDistance { p, q, sign: -sign },
         DimKind::VDistance { p, q, sign } => DimKind::VDistance { p, q, sign: -sign },
         // The same angle measured the other way round: the second line turns to the other side.

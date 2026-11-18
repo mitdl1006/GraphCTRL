@@ -71,6 +71,23 @@ To Work with Sketch Dimensions GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185.
 | Flip Direction 대상의 "line to an arc (the arc itself)"·"between 2 arcs" 거리 | 없음 | 선-호·호-호 거리 치수 |
 | 구동 치수 토글 | 있음(`SketchOp::SetDriving`) | — |
 
+## 2026-11-18 — 선-호·호-호 거리 치수(① 4번)
+
+근거: To Work with Sketch Dimensions, GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185 — Flip Direction이 받는 치수 종류에 "Distance from a line to an arc (the
+arc itself, not to the arc center point)", "Distance between 2 arcs".
+
+- `DimKind::LineArc { line, arc, side }`: 선에서 원·호 자체까지 거리(`side`는 원이 선의 왼쪽이면 +1).
+- `DimKind::ArcArc { a, b, external }`: 두 원·호 자체 사이 거리(떨어짐, 또는 한쪽이 안).
+- 솔버: `Constraint::{LineCircleDistance, CircleCircleDistance}`. 접선 행(`RowKind::LineCircleTangent`·`CircleCircle`)에 `gap` 필드를 더한 것이라 새 잔차는 없다.
+- 치수 도구 판단:
+  - 선 + 원(호) 클릭: 선이 원과 떨어져 있으면 `LineArc`.
+  - 원 + 원 클릭: 떨어져 있거나 한쪽이 안이면 `ArcArc`. 겹치면 치수 없음.
+  - 이전에는 둘 다 치수가 없었다.
+- Flip Direction: `LineArc`는 원을 선 반대쪽으로, `ArcArc`는 떨어짐 ↔ 안 쪽으로 바꾼다. 뷰포트는 가장 가까운 두 점 사이 치수선을 그린다. 매개변수 표에서는 길이.
+- 3D 스케치는 거부(`WrongSpace`).
+- 테스트: `gc_session/tests/sketch_arc_distance.rs`.
+- QA 브랜치 영향: 없음(`DimKind` 변형 추가뿐, QA 테스트에 `DimKind`·`RowKind` 빠짐없는 match 없음).
+
 ## 2026-11-18 — 선·곡선 쌍 Symmetric(① 3번)
 
 근거: GUID-A85A7A30-7D81-4C75-8769-CAD034EEA930 — "click the first line or curve. Click the second line or curve. Click the line of symmetry." /

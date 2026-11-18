@@ -655,6 +655,41 @@ fn dimension_marks(
                 view.segment(world(centre), world(text_at), stroke);
             }
         }
+        // From the foot on the line to the nearest point of the circle.
+        DimKind::LineArc { line, arc, .. } => {
+            if let (Some((a, b)), Some((c, r))) = (sketch.line(line), sketch.round(arc))
+                && let (Some(a), Some(b), Some(c)) = (xy(a), xy(b), xy(c))
+            {
+                let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+                let length2 = dx * dx + dy * dy;
+                let t = ((c[0] - a[0]) * dx + (c[1] - a[1]) * dy) / length2;
+                let foot = [a[0] + t * dx, a[1] + t * dy];
+                let (ux, uy) = (foot[0] - c[0], foot[1] - c[1]);
+                let gap = (ux * ux + uy * uy).sqrt();
+                if length2 > 0.0 && gap > 0.0 {
+                    let near = [c[0] + ux / gap * r, c[1] + uy / gap * r];
+                    linear(foot, near, [near[0] - foot[0], near[1] - foot[1]]);
+                }
+            }
+        }
+        // Between the circles' nearest points, along the line through the centres.
+        DimKind::ArcArc { a, b, external } => {
+            if let (Some((ca, ra)), Some((cb, rb))) = (sketch.round(a), sketch.round(b))
+                && let (Some(ca), Some(cb)) = (xy(ca), xy(cb))
+            {
+                let (ux, uy) = (cb[0] - ca[0], cb[1] - ca[1]);
+                let apart = (ux * ux + uy * uy).sqrt();
+                if apart > 0.0 {
+                    let u = [ux / apart, uy / apart];
+                    let (pa, pb) = if external {
+                        ([ca[0] + u[0] * ra, ca[1] + u[1] * ra], [cb[0] - u[0] * rb, cb[1] - u[1] * rb])
+                    } else {
+                        ([ca[0] + u[0] * ra, ca[1] + u[1] * ra], [cb[0] + u[0] * rb, cb[1] + u[1] * rb])
+                    };
+                    linear(pa, pb, u);
+                }
+            }
+        }
         DimKind::Angle { .. } | DimKind::PlaneDistance { .. } => {}
     }
     let Some(value) =

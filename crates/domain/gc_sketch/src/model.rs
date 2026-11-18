@@ -271,6 +271,27 @@ pub enum DimKind {
         /// `+1.0` or `-1.0`.
         side: f64,
     },
+    /// Distance from a line to a circle or arc itself (not its centre); `side = +1` when the circle is left
+    /// of the line's direction (To Work with Sketch Dimensions, GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185:
+    /// "Distance from a line to an arc (the arc itself, not to the arc center point)").
+    LineArc {
+        /// The line.
+        line: Id<Curve>,
+        /// The circle or arc.
+        arc: Id<Curve>,
+        /// `+1.0` or `-1.0`.
+        side: f64,
+    },
+    /// Distance between two circles or arcs themselves ("Distance between 2 arcs"): apart (`external`), or
+    /// one inside the other.
+    ArcArc {
+        /// First circle or arc.
+        a: Id<Curve>,
+        /// Second.
+        b: Id<Curve>,
+        /// True when they lie apart.
+        external: bool,
+    },
     /// Angle from the first line to the second, counter-clockwise, each optionally reversed.
     Angle {
         /// First line.
@@ -494,7 +515,9 @@ impl Sketch {
             | DimKind::HDistance { p, q, .. }
             | DimKind::VDistance { p, q, .. } => (vec![p, q], Vec::new()),
             DimKind::PointLine { p, line, .. } => (vec![p], vec![line]),
-            DimKind::Angle { l1, l2, .. } => (Vec::new(), vec![l1, l2]),
+            DimKind::Angle { l1, l2, .. }
+            | DimKind::LineArc { line: l1, arc: l2, .. }
+            | DimKind::ArcArc { a: l1, b: l2, .. } => (Vec::new(), vec![l1, l2]),
             DimKind::Radius(curve) | DimKind::Diameter(curve) => (Vec::new(), vec![curve]),
             DimKind::PlaneDistance { p, .. } => (vec![p], Vec::new()),
         }
