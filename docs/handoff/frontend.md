@@ -143,6 +143,14 @@
 - 테스트 `grip_snap_moves_a_component_along_the_normal_of_a_picked_face`.
 - 원문과 차이: Free Drag·Free Rotate(참조 기하 없는 옵션), 두 번째·세 번째 선택으로 점·선·면을 고르는 방식(두 점으로만), 원형 모서리·곡면·NURB 첫 선택(원통 면은 선택 불가), 오프셋 값 입력은 없다. 꼭짓점은 측정 명령의 점 줍기(8 px)를 쓴다.
 
+### 서브어셈블리를 통째로 이동
+
+- 근거: Create Subassemblies in Place, GUID-FCEE3F0E-AAE2-4619-8645-2588FEECD353 (서브어셈블리는 부모 안에서 하나의 단위). 백엔드 `subassembly_moved` / `move_subassembly`.
+- 자유 이동·자유 회전: 서브어셈블리에 속한 구성요소를 끌면 서브어셈블리 전체가 움직이고(`delta = 새 포즈 × 시작 포즈⁻¹`) 놓을 때 Undo 한 단계. 접지된 구성요소가 있는 서브어셈블리는 끌려가지 않는다(드래그 시작 안 함). 그립 스냅: 서브어셈블리의 구성요소를 잡으면 확정 때 나머지도 함께 이동(접지 후 완료는 모두 접지).
+- 같이 고침: 자유 이동/회전이 켜져 있으면 이동·회전 핸들(기즈모)을 끈다. 선택한 구성요소의 핸들 위로 끌면 핸들이 드래그를 가로채 자유 이동이 끝나지 않던 버그.
+- 원문과 차이: 끄는 동안 화면에는 잡은 구성요소만 미리보기로 움직이고 나머지는 놓을 때 따라온다(세션 미리보기가 한 구성요소만 지원 — 다중 미리보기 API(`preview_components`)가 있으면 바꾼다). 핸들(기즈모) 드래그와 속성 패널 위치 입력은 서브어셈블리 단위가 아니다.
+- 테스트 `free_move_drags_a_whole_subassembly`, `grip_snap_moves_the_whole_subassembly_of_the_picked_component`.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹
