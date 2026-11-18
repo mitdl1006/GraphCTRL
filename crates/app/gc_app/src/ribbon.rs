@@ -254,6 +254,20 @@ pub(crate) fn show(
                                 (ToolKind::Arc, Icon::Arc, Msg::ToolArc),
                             ],
                         );
+                        // Helical Curve: its dialog first (GUID-37BA1DCE-6BC4-41CD-A36D-577F31B304FC).
+                        ui.vertical(|ui| {
+                            let button = gc_ui::ribbon_small_button(
+                                ui,
+                                Icon::Spline,
+                                tr!(lang, ToolHelix),
+                                viewport.is_helixing(),
+                                sketching,
+                            );
+                            if button.clicked() {
+                                session.set_tool(ToolKind::Select);
+                                viewport.start_helix();
+                            }
+                        });
                         // Bend: two lines that meet, then a radius (GUID-4F861674-F74C-474E-869A-4C190ED6EC4B).
                         ui.vertical(|ui| {
                             let button = gc_ui::ribbon_small_button(

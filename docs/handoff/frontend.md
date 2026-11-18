@@ -252,6 +252,13 @@
 - 겹친 두 원: 백엔드 테스트(`sketch_arc_distance`, 5개)가 리드 브랜치에서 통과 — 치수 도구 경로는 UI도 동일.
 - 테스트: `the_auto_bend_option_is_off_by_default_saved_and_read_back`.
 
+### 3D 스케치 Helical Curve 대화상자
+
+- 근거: Inventor 2026 도움말 GUID-37BA1DCE-6BC4-41CD-A36D-577F31B304FC (To Draw 3D Curves, Draw a Helical Curve).
+- 3D 스케치 그리기 패널의 "나선 곡선" 버튼 → 대화상자(정의: 피치 및 회전 / 회전 및 높이 / 피치 및 높이 / 나선형, 지름, 피치·회전·높이, 테이퍼(나선형 제외), 왼손·오른손) → 확인 → 뷰포트에서 시작점, 끝점(축 방향) 클릭 → `SketchOp::AddHelix`. 값은 `evaluate_value`로 해석(단위·매개변수 가능). 시작~끝 점 사이 고무줄 선을 보여 준다. 실패하면 명령 유지, Esc 종료.
+- 원문과 차이: Variable helical curve(표), Helix Ends 탭(Natural/Flat 전이), 지름 생략(자동 계산)은 없음 — 지름은 필수(기본 20 mm). 끝점은 축 방향만 정한다(높이는 값에서).
+- 테스트: `the_helical_curve_dialog_then_two_clicks_make_a_helix`.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹
