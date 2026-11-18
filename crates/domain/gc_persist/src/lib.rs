@@ -127,6 +127,8 @@ struct FileV1 {
     timelines: BTreeMap<Id<gc_doc::Timeline>, gc_doc::Timeline>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     relationships: BTreeMap<Id<gc_doc::Relationship>, gc_doc::Relationship>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    roles: BTreeMap<Id<gc_doc::SketchRole>, gc_doc::SketchRole>,
 }
 
 /// A loaded document.
@@ -194,6 +196,7 @@ pub fn to_text(doc: &Document) -> Result<String, PersistError> {
         assemblies: doc.assemblies().iter().map(|(id, a)| (id, a.clone())).collect(),
         timelines: doc.timeline().map(|(id, t)| (id, t.clone())).into_iter().collect(),
         relationships: doc.relationships().iter().map(|(id, r)| (id, r.clone())).collect(),
+        roles: doc.roles().iter().map(|(id, r)| (id, r.clone())).collect(),
     };
     let mut text = serde_json::to_string_pretty(&file)?;
     text.push('\n');
@@ -271,6 +274,7 @@ pub fn from_text(text: &str) -> Result<Loaded, PersistError> {
         assemblies: file.assemblies,
         timelines,
         relationships: file.relationships,
+        roles: file.roles,
     })?;
     let needs_repair = doc
         .sketches()
@@ -390,8 +394,19 @@ mod tests {
             seed: 7,
             tcp_speed: None,
             contacts: Vec::new(),
+            follow: Vec::new(),
         };
         cell(&mut doc, CellOp::AddPath(path));
+        // The point is a waypoint for any robot, the tool tilted there.
+        cell(
+            &mut doc,
+            CellOp::AddRole(gc_doc::SketchRole {
+                name: "W1".into(),
+                sketch,
+                kind: gc_doc::RoleKind::Waypoint { point: a },
+                aim: gc_doc::ToolAim { reference: gc_doc::AimReference::SketchPlane, rpy: [0.0, 0.25, 0.0] },
+            }),
+        );
         // The design side: a work plane, an extrusion of the sketch, an imported assembly, and a stored
         // tree order with a suppressed item.
         let plane = gc_doc::WorkFeature {

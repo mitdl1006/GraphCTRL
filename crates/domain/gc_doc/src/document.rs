@@ -225,6 +225,7 @@ tables! {
     assemblies: crate::design::Assembly,
     timelines: crate::design::Timeline,
     relationships: crate::relate::Relationship,
+    roles: crate::role::SketchRole,
 }
 
 /// Everything a stored document consists of, as [`Document::restore`] takes it.
@@ -258,6 +259,8 @@ pub struct Contents {
     pub timelines: BTreeMap<Id<crate::design::Timeline>, crate::design::Timeline>,
     /// Assembly constraints and joints.
     pub relationships: BTreeMap<Id<crate::relate::Relationship>, crate::relate::Relationship>,
+    /// Waypoint and path roles of sketch elements.
+    pub roles: BTreeMap<Id<crate::role::SketchRole>, crate::role::SketchRole>,
 }
 
 impl Default for Document {
@@ -286,6 +289,7 @@ impl Document {
             assemblies: Store::default(),
             timelines: Store::default(),
             relationships: Store::default(),
+            roles: Store::default(),
             ids: IdAlloc::new(),
             revision: Revision::default(),
         };
@@ -330,6 +334,7 @@ impl Document {
             assemblies: Store { items: contents.assemblies },
             timelines: Store { items: contents.timelines },
             relationships: Store { items: contents.relationships },
+            roles: Store { items: contents.roles },
             ids: IdAlloc::new(),
             revision: Revision::default(),
         };
@@ -348,6 +353,7 @@ impl Document {
         doc.assemblies.items.keys().for_each(|id| raise(id.raw()));
         doc.timelines.items.keys().for_each(|id| raise(id.raw()));
         doc.relationships.items.keys().for_each(|id| raise(id.raw()));
+        doc.roles.items.keys().for_each(|id| raise(id.raw()));
         for (id, sketch) in &doc.sketches.items {
             raise(id.raw());
             sketch.points.keys().for_each(|p| raise(p.raw()));
@@ -435,6 +441,11 @@ impl Document {
     /// Assembly constraints and joints.
     pub fn relationships(&self) -> &Store<crate::relate::Relationship> {
         &self.relationships
+    }
+
+    /// Waypoint and path roles of sketch elements.
+    pub fn roles(&self) -> &Store<crate::role::SketchRole> {
+        &self.roles
     }
 
     /// The stored model-tree order, if any was set (see [`Document::model_order`]).
