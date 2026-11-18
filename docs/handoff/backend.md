@@ -124,6 +124,15 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 스케줄 재생 (여러 로봇 동시)
+
+- `Schedule.plans: Vec<TaskPlan>`(할당과 같은 순서) 추가. `Schedule`의 `==`는 할당과 막힌 작업만 비교한다(궤적은 비교 안 함).
+- `TaskPlan`에 `start`(시작 관절값), `pauses: Vec<(몇 번째 동작 뒤, 초)>`(대기·툴 동작으로 서 있는 구간), `sample(t)`(작업 시작 후 t초의 관절값) 추가.
+- `Schedule::joints_at(robot, t) -> Option<Vec<f64>>`: 그 시각 하고 있는 작업의 동작 위, 또는 마지막 작업이 끝난 자세. 첫 작업 전·작업 없는 로봇은 `None`. `Schedule::robots_at(t)`: 작업이 있는 모든 로봇의 자세.
+- 뷰포트용: `session.set_schedule_playback(Some(t))` → `session.robot_joints(robot)`(뷰포트가 이미 쓰는 함수)이 모든 로봇을 그 시각 자세로 돌려준다. 문서는 안 바뀐다. `None`으로 해제, `session.schedule_playback()`으로 조회. 대상은 `request_schedule`로 받은 마지막 스케줄(`schedule_result`)이며 스케줄이 없으면 무시된다. 켜면 경로 재생(`set_playback`)은 꺼진다.
+- 프론트 할 일: 시간축 슬라이더·재생 버튼에서 `set_schedule_playback(t)`를 부르고 `0..=schedule.makespan()` 범위로 움직이면 된다.
+- 테스트: `task_schedule.rs::a_schedule_is_played_back_…`.
+
 ## 2026-11-18 — 조건식 길이 상한, 빈 로봇 조건 (QA)
 
 - `gc_expr::Condition`: `and`/`or`를 256개까지만 받는다(넘으면 그 자리의 `CondError` "a condition can combine at most 256 terms"). 긴 연쇄는 깊이가 길이만큼인 트리가 되어 평가·순회·해제가 재귀로 스택을 다 쓰던 것(약 5000항에서 프로세스 종료)을 막는다. 괄호·`not` 중첩 상한 64는 그대로.

@@ -251,3 +251,46 @@ fn a_schedule_asked_for_in_the_background_arrives_for_the_document_it_was_asked_
     let (schedule, current) = s.schedule_result().unwrap();
     assert!(current && schedule.assignments.len() == 2);
 }
+
+#[test]
+fn a_schedule_is_played_back_with_every_robot_where_it_is_at_that_moment() {
+    let Cell { mut s, left, right, roles, .. } = cell();
+    let mut first = task("First", roles[0]);
+    first.steps.insert(0, Step::Wait { seconds: 1.0 });
+    first.robots = RobotChoice::Only(vec![left]);
+    let mut second = task("Second", roles[1]);
+    second.robots = RobotChoice::Only(vec![right]);
+    add(&mut s, first);
+    add(&mut s, second);
+    let home = s.doc().get(left).unwrap().joints.clone();
+
+    // Nothing to play back before a schedule was asked for.
+    s.set_schedule_playback(Some(0.5));
+    assert_eq!(s.schedule_playback(), None);
+    s.request_schedule();
+    let (schedule, _) = s.schedule_result().unwrap();
+    let schedule = schedule.clone();
+    assert_eq!(schedule.plans.len(), schedule.assignments.len());
+    let of = |robot: Id<Robot>| {
+        schedule.assignments.iter().zip(&schedule.plans).find(|(a, _)| a.robot == robot).unwrap()
+    };
+    let (left_task, left_plan) = of(left);
+    let (_, right_plan) = of(right);
+
+    // The left robot waits a second where it stands, then moves; the right one moves at once.
+    assert_eq!(schedule.joints_at(left, 0.5), Some(home.clone()));
+    assert_ne!(schedule.joints_at(right, 0.5), Some(right_plan.start.clone()));
+    assert_eq!(schedule.joints_at(left, left_task.end + 10.0), Some(left_plan.end.clone()), "it stays there");
+    assert_eq!(schedule.robots_at(0.0).len(), 2);
+    // The session shows them so without changing the document, and goes back.
+    let revision = s.doc().revision();
+    let middle = 1.0 + (left_task.end - 1.0) / 2.0;
+    s.set_schedule_playback(Some(middle));
+    let shown = s.robot_joints(left).unwrap();
+    assert!(shown != home && shown != left_plan.end, "on its way");
+    assert_eq!(shown, left_plan.sample(middle));
+    assert_eq!(s.robot_joints(right), schedule.joints_at(right, middle));
+    assert_eq!(s.doc().revision(), revision);
+    s.set_schedule_playback(None);
+    assert_eq!(s.robot_joints(left), Some(home));
+}
