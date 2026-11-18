@@ -7,6 +7,7 @@
 mod dof;
 mod freemove;
 mod gizmo;
+mod grip;
 mod hud;
 mod origin;
 mod paint;
@@ -19,7 +20,7 @@ mod workfeat;
 
 use egui::{Key, PointerButton, Sense, vec2};
 use gc_core::Id;
-use gc_doc::Sketch;
+use gc_doc::{GripLine, GripMotion, Sketch};
 use gc_draw::{Camera, NavAction, NavInput, NavPreset, StandardView, nav_action, viewcube};
 use gc_i18n::{Lang, tr};
 use gc_math::{Aabb, DPose3, DVec3, Plane};
@@ -113,6 +114,8 @@ pub struct Viewport {
     /// A component being dragged with it.
     free_drag: Option<freemove::FreeDrag>,
     placing: Option<place::Placing>,
+    /// A Grip Snap in progress.
+    grip: Option<grip::Grip>,
     /// The marking menu of the graphics window and the commands it offers.
     marking: gc_ui::marking::MarkingMenu,
     marking_set: radial::Set,
@@ -177,6 +180,7 @@ impl Viewport {
             free_tool: None,
             free_drag: None,
             placing: None,
+            grip: None,
             marking: gc_ui::marking::MarkingMenu::default(),
             marking_set: radial::Set::default(),
             request: None,
@@ -368,7 +372,7 @@ impl Viewport {
                 ui.ctx().request_repaint();
             }
         } else if active.is_none() && self.navigating.is_none() {
-            self.cell_input(ui, &response, rect, session);
+            self.cell_input(ui, &response, rect, session, lang);
         }
 
         self.select_other_list(ui, session);
@@ -1131,6 +1135,149 @@ impl Viewport {
         self.free_tool = None;
     }
 
+    /// Starts Grip Snap: pick an edge, then two points.
+    pub fn start_grip_snap(&mut self) {
+        self.grip = Some(grip::Grip::new());
+        self.free_tool = None;
+    }
+
+    /// Whether a Grip Snap is running.
+    pub fn is_grip_snapping(&self) -> bool {
+        self.grip.is_some()
+    }
+
+    /// Grip Snap's clicks and its panel. True while it is running, so that nothing else takes the click.
+    fn grip_step(
+        &mut self,
+        ui: &egui::Ui,
+        response: &egui::Response,
+        session: &mut Session,
+        size: [f64; 2],
+        to_view: &impl Fn(egui::Pos2) -> [f64; 2],
+        lang: Lang,
+    ) -> bool {
+        let Some(mut grip) = self.grip else { return false };
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) || response.secondary_clicked() {
+            grip::cancel(session, &grip);
+            self.grip = None;
+            return true;
+        }
+        let pointer = response.hover_pos().map(to_view);
+        let clicked = response.clicked_by(PointerButton::Primary);
+        if let Some(target) = grip.target {
+            if grip.from.is_none() {
+                if clicked && let Some(at) = pointer {
+                    let scene = Scene::of(session);
+                    let hit = self.picker.pick_surface(&scene, &self.camera.ray(at, size)).map(|h| h.point);
+                    grip.from = hit.or_else(|| {
+                        grip::on_view_plane(&self.camera, size, DVec3::from(target.line.point), at)
+                    });
+                }
+            } else if let (Some(from), false) = (grip.from, grip.fixed) {
+                // Moving along the line: the point of a parallel line through the start nearest the cursor's
+                // ray, so the component follows the cursor; turning: the point of the view plane.
+                let direction = DVec3::from(target.line.direction).normalize_or_zero();
+                let to = pointer.and_then(|at| match grip.motion {
+                    GripMotion::MoveAlong => gizmo::along_axis(&self.camera, at, size, from, direction)
+                        .map(|t| from + direction * t),
+                    GripMotion::RotateAbout => grip::on_view_plane(&self.camera, size, from, at),
+                });
+                if let Some(to) = to {
+                    grip.pose = session.grip_snap_pose(
+                        target.any,
+                        grip.motion,
+                        target.line,
+                        from.to_array(),
+                        to.to_array(),
+                    );
+                    grip::show(session, &target, grip.pose.as_ref().or(Some(&target.start)));
+                    ui.ctx().request_repaint();
+                    if clicked && grip.pose.is_some() {
+                        grip.fixed = true;
+                    }
+                }
+            }
+        } else if clicked
+            && let Some(at) = pointer
+            && let Some((item, gc_session::Feature::Edge(a, b))) = self.pick_feature(session, at, size)
+            && let Some(any) = grip::component_of(item)
+            && let Some(line) = GripLine::through(a, b)
+            && let Some((start, _)) = gizmo::pose_of(session, item)
+        {
+            session.select_item(Some(item));
+            grip.target = Some(grip::Target { item, any, line, start });
+        }
+        // The panel: what to pick next, move or rotate, the freedom report, and the ways to end.
+        let mut end: Option<Option<bool>> = None;
+        let mut motion = grip.motion;
+        let anchor = self.rect.center_top() + egui::vec2(0.0, 12.0);
+        egui::Area::new(egui::Id::unique("gc_grip_snap"))
+            .fixed_pos(anchor)
+            .pivot(egui::Align2::CENTER_TOP)
+            .order(egui::Order::Foreground)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.strong(tr!(lang, GripTitle));
+                    ui.horizontal(|ui| {
+                        ui.selectable_value(&mut motion, GripMotion::MoveAlong, tr!(lang, GripMove));
+                        ui.selectable_value(&mut motion, GripMotion::RotateAbout, tr!(lang, GripRotate));
+                    });
+                    let hint = match (&grip.target, grip.from, grip.fixed) {
+                        (None, _, _) => tr!(lang, GripPickEdge),
+                        (Some(_), None, _) => tr!(lang, GripPickFrom),
+                        (Some(_), Some(_), false) => tr!(lang, GripPickTo),
+                        (Some(_), Some(_), true) => tr!(lang, GripReady),
+                    };
+                    ui.label(hint);
+                    if let Some(target) = &grip.target {
+                        let allowed = session.grip_allows(target.any, motion, target.line);
+                        let text = if allowed { tr!(lang, GripAllowed) } else { tr!(lang, GripBlocked) };
+                        let colour = if allowed {
+                            egui::Color32::from_rgb(0x2e, 0x9e, 0x4f)
+                        } else {
+                            egui::Color32::from_rgb(0xc9, 0x3b, 0x2f)
+                        };
+                        ui.colored_label(colour, text);
+                    }
+                    ui.horizontal(|ui| {
+                        let ready = grip.pose.is_some();
+                        if ui.add_enabled(ready, egui::Button::new(tr!(lang, GripDone))).clicked() {
+                            end = Some(Some(false));
+                        }
+                        if ui.add_enabled(ready, egui::Button::new(tr!(lang, GripGround))).clicked() {
+                            end = Some(Some(true));
+                        }
+                        if ui.button(tr!(lang, GripCancel)).clicked() {
+                            end = Some(None);
+                        }
+                    });
+                });
+            });
+        if motion != grip.motion {
+            // A different snap starts again from its first point.
+            if let Some(target) = &grip.target {
+                grip::show(session, target, None);
+            }
+            grip = grip::Grip { motion, from: None, pose: None, fixed: false, ..grip };
+        }
+        match end {
+            Some(Some(ground)) => {
+                if let (Some(target), Some(pose)) = (&grip.target, &grip.pose) {
+                    // The preview goes first; the commit is one undo step.
+                    grip::show(session, target, None);
+                    session.grip_snap_commit(&[(target.any, *pose)], ground).ok();
+                }
+                self.grip = None;
+            }
+            Some(None) => {
+                grip::cancel(session, &grip);
+                self.grip = None;
+            }
+            None => self.grip = Some(grip),
+        }
+        true
+    }
+
     /// Whether a component hangs on the cursor.
     pub fn is_placing(&self) -> bool {
         self.placing.is_some()
@@ -1154,11 +1301,14 @@ impl Viewport {
         response: &egui::Response,
         rect: egui::Rect,
         session: &mut Session,
+        lang: Lang,
     ) {
         let size = [f64::from(rect.width()), f64::from(rect.height())];
         let to_view = |p: egui::Pos2| [f64::from(p.x - rect.left()), f64::from(p.y - rect.top())];
         // The move and turn handles of the selected item come first: dragging them is not a selection.
-        let on_handles = gizmo::ui(ui, response, rect, &self.camera, session, &mut self.gizmo);
+        // (Not during Grip Snap: its clicks are not drags of the handles.)
+        let on_handles =
+            self.grip.is_none() && gizmo::ui(ui, response, rect, &self.camera, session, &mut self.gizmo);
         let hovered = if on_handles {
             None
         } else {
@@ -1209,6 +1359,9 @@ impl Viewport {
             let found: Vec<gc_session::CellItem> =
                 self.picker.pick_all(&scene, &ray).into_iter().map(|(_, item)| item).collect();
             self.select_other = (found.len() > 1).then_some((at, found));
+        }
+        if self.grip_step(ui, response, session, size, &to_view, lang) {
+            return;
         }
         // Place Component: the component hangs on the cursor; a click sets it down and attaches a copy.
         if let Some(placing) = self.placing {

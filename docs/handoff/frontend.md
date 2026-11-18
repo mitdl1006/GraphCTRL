@@ -98,6 +98,16 @@
 - 증거: `docs/evidence/img/review-54-select-other.png`, 테스트 `select_other_lists_what_lies_under_the_cursor`.
 - 원문과 차이: 오른쪽 클릭 메뉴의 "다른 항목 선택" 없음, 지연 시간 설정 없음, 화살표 키 순환 없음, 구성요소만 대상.
 
+### 그립 스냅 (Grip Snap)
+
+- 근거: 인벤터 도움말 Grip Snap move or rotate, GUID-E1CA109A-D5A1-4131-AC3A-AE217716DD8C (백엔드 `grip_snap_pose` / `grip_allows` / `grip_snap_commit`).
+- 조립 탭 > 위치 > "그립 스냅". 흐름: 구성요소의 모서리 클릭(기준선) → "축을 따라 이동"/"선 기준 회전" 선택 → 시작점 클릭 → 끝점 위로 움직이면 미리보기, 클릭하면 확정 → 완료 / 접지 후 완료 / 취소(Esc·우클릭). 완료는 Undo 한 단계.
+- HUD 줄: `grip_allows`로 남은 자유도가 이 동작을 허용하는지 초록/빨강으로 표시.
+- 이동은 시작점을 지나는 기준선과 평행한 선 위에서 커서에 가장 가까운 점을 끝점으로 써서 커서를 따라가고, 회전은 시점 평면 위의 점을 쓴다.
+- 미리보기는 세션 미리보기를 쓰므로 `CellUi::hold_previews`로 속성 패널이 마우스를 뗀 순간 커밋하지 않게 했다. 그립 스냅 중에는 이동/회전 핸들(기즈모)을 끈다.
+- 증거: `docs/evidence/img/review-55-grip-snap.png`, 테스트 `grip_snap_moves_a_component_along_a_picked_edge`.
+- 원문과 차이: 기준이 모서리뿐(점·면 기준 없음), 인벤터의 화면 내 조작 핸들·HUD 아이콘 대신 상단 패널, 시작점은 표면 클릭(스냅 점 보조 없음), 여러 구성요소 동시 조작 없음.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

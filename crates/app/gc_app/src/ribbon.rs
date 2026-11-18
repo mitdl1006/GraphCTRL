@@ -731,6 +731,10 @@ fn assemble_tab(
             let tool = tools[index].0;
             viewport.free_tool = if viewport.free_tool == Some(tool) { None } else { Some(tool) };
         }
+        // Grip Snap: an edge as the reference, then two points.
+        if ribbon_button(ui, Icon::Pan, tr!(lang, GripTitle), viewport.is_grip_snapping(), has).clicked() {
+            viewport.start_grip_snap();
+        }
         // Ground: the selected body, robot or imported assembly, shown pressed when it is grounded.
         let selected = session.selected_occurrence().filter(|o| session.can_ground(*o));
         let grounded =

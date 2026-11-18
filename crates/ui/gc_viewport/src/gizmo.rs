@@ -112,7 +112,7 @@ pub(crate) fn commit(session: &mut Session, item: CellItem) {
 }
 
 /// Where along the axis through `origin` the cursor's ray passes closest, in metres from the origin.
-fn along_axis(
+pub(crate) fn along_axis(
     camera: &Camera,
     cursor: [f64; 2],
     size: [f64; 2],

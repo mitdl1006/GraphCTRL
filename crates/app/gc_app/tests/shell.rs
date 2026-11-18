@@ -4452,3 +4452,77 @@ fn select_other_lists_what_lies_under_the_cursor() {
         "the list closed after the choice"
     );
 }
+
+/// Grip Snap (Inventor 2026 help, Grip Snap move or rotate, GUID-E1CA109A-D5A1-4131-AC3A-AE217716DD8C):
+/// pick an edge, click a start point, then an end point; the component moves along the edge by the part
+/// of the way that lies along it; Done sets it down as one undo step.
+#[test]
+fn grip_snap_moves_a_component_along_a_picked_edge() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let app = harness.state_mut();
+    // The first component is grounded; the one that moves is the second.
+    app.session
+        .add_body(
+            gc_doc::Solid::Box { size: [0.1; 3] },
+            gc_doc::Placement { xyz: [-0.5, 0.0, 0.0], rpy: [0.0; 3] },
+        )
+        .unwrap();
+    let id =
+        app.session.add_body(gc_doc::Solid::Box { size: [0.2; 3] }, gc_doc::Placement::default()).unwrap();
+    app.fit_view();
+    app.viewport_mut().camera.pan([0.0, 0.0], [-250.0, 0.0], [1280.0, 700.0]);
+    harness.run();
+    harness.get_by_label("조립").click();
+    harness.run_steps(3);
+    harness.get_by_label("그립 스냅").click();
+    harness.run_steps(3);
+    harness.get_by_label("기준이 될 구성요소의 모서리를 선택하세요");
+    let screen = |h: &egui_kittest::Harness<'_, GraphCtrlApp>, p: [f64; 3]| {
+        h.state().viewport().screen_of(gc_math::DVec3::from(p)).unwrap()
+    };
+    let click = |h: &mut egui_kittest::Harness<'_, GraphCtrlApp>, at: egui::Pos2| {
+        h.event(egui::Event::PointerMoved(at));
+        h.run_steps(3);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            h.run_steps(3);
+        }
+    };
+    // The top face's edge along Y at x = 0.1 (a little inside, where the top face is hit).
+    let edge = screen(&harness, [0.098, 0.0, 0.1]);
+    click(&mut harness, edge);
+    harness.get_by_label("시작점을 클릭하세요");
+    let from = screen(&harness, [0.0, 0.0, 0.1]);
+    click(&mut harness, from);
+    harness.get_by_label("끝점을 클릭하면 위치가 확정됩니다");
+    let to = screen(&harness, [0.0, 0.06, 0.1]);
+    harness.event(egui::Event::PointerMoved(to));
+    harness.run_steps(3);
+    if gpu {
+        let image = harness.render().unwrap();
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        image.save(out.join("review-55-grip-snap.png")).unwrap();
+    }
+    click(&mut harness, to);
+    harness.get_by_label("완료 또는 접지 후 완료를 누르세요");
+    assert_eq!(harness.state().session.doc().get(id).unwrap().placement.xyz, [0.0; 3], "still a preview");
+    harness.get_by_label("완료").click();
+    harness.run_steps(3);
+    let xyz = harness.state().session.doc().get(id).unwrap().placement.xyz;
+    assert!((xyz[1] - 0.06).abs() < 0.01, "followed the cursor along the edge: {xyz:?}");
+    assert!(xyz[0].abs() < 1e-9 && xyz[2].abs() < 1e-9, "only along it: {xyz:?}");
+    assert!(!harness.state().viewport().is_grip_snapping(), "Done ends the command");
+    harness.state_mut().session.undo();
+    let back = harness.state().session.doc().get(id).unwrap().placement.xyz;
+    assert!(back[1].abs() < 1e-9, "one undo step puts it back: {back:?}");
+}
