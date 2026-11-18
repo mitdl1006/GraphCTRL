@@ -72,6 +72,8 @@ pub(crate) enum RibbonAction {
     StartJoint,
     /// Open the Pattern dialog.
     StartPattern,
+    /// Open the mirror, copy or replace dialog in a mode.
+    StartReplicate(crate::replicate::Mode),
     /// Open the parameters dialog.
     StartParameters,
     /// Project the edges the sketch plane cuts into the active sketch.
@@ -458,12 +460,31 @@ fn assemble_tab(
         if ribbon_button(ui, Icon::Import, tr!(lang, CmdPlace), false, true).clicked() {
             action = Some(RibbonAction::ImportMesh);
         }
+        if ribbon_button(
+            ui,
+            Icon::Select,
+            tr!(lang, ReplicateReplace),
+            false,
+            !session.components().is_empty(),
+        )
+        .clicked()
+        {
+            action = Some(RibbonAction::StartReplicate(crate::replicate::Mode::Replace));
+        }
     });
     ribbon_group(ui, tr!(lang, PatternTitle), |ui| {
         if ribbon_button(ui, Icon::Select, tr!(lang, PatternTitle), false, !session.components().is_empty())
             .clicked()
         {
             action = Some(RibbonAction::StartPattern);
+        }
+        for (mode, label) in [
+            (crate::replicate::Mode::Mirror, tr!(lang, ReplicateMirror)),
+            (crate::replicate::Mode::Copy, tr!(lang, ReplicateCopy)),
+        ] {
+            if ribbon_button(ui, Icon::Select, label, false, !session.components().is_empty()).clicked() {
+                action = Some(RibbonAction::StartReplicate(mode));
+            }
         }
     });
     // Failures of these commands are shown in the status bar.

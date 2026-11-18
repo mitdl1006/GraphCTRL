@@ -764,6 +764,34 @@ messages! {
     ContactSetOnly => ("접촉 세트만", "Contact Set Only"),
     /// Contact solver mode: every component of the assembly.
     ContactAll => ("모든 컴포넌트", "All Components"),
+    /// Assemble tab: mirrors components across a plane; the dialog's tab.
+    ReplicateMirror => ("미러", "Mirror"),
+    /// Assemble tab: copies components; the dialog's tab.
+    ReplicateCopy => ("복사", "Copy"),
+    /// Assemble tab: replaces a component with another shape; the dialog's tab.
+    ReplicateReplace => ("교체", "Replace"),
+    /// Mirror/copy/replace dialog: the components the command works on.
+    ReplicateComponents => ("컴포넌트", "Components"),
+    /// Mirror dialog: the mirror plane.
+    ReplicatePlane => ("대칭면", "Mirror plane"),
+    /// Copy dialog: the offset of the copy. Followed by the axis and the unit.
+    ReplicateOffset => ("이동", "Offset"),
+    /// Replace dialog: a box.
+    ReplicateBox => ("박스", "Box"),
+    /// Replace dialog: a cylinder.
+    ReplicateCylinder => ("원기둥", "Cylinder"),
+    /// Replace dialog: a sphere.
+    ReplicateSphere => ("구", "Sphere"),
+    /// Replace dialog: every component of the same source.
+    ReplicateAll => ("모두 교체", "Replace All"),
+    /// Mirror and copy dialog: make the relationships between the components for the copies too.
+    ReplicateRelationships => ("관계 복사", "Copy relationships"),
+    /// Mirror and copy dialog: ground the new components.
+    ReplicateGround => ("새 컴포넌트 고정", "Ground new components"),
+    /// Mirror, copy and replace dialog: done.
+    ReplicateDone => ("완료했습니다.", "Done."),
+    /// Mirror, copy and replace dialog: relationships that could not be kept. `{0}` lists them.
+    ReplicateSuppressed => ("억제된 관계(다시 적용하세요): {0}", "Suppressed relationships (apply again): {0}"),
     /// Plan card: what the checks guarantee. `{0}` padding mm, `{1}` step mm, `{2}` step degrees, `{3}` clearance mm.
     PlanGuarantee => ("패딩 {0} mm, 검사 간격 {1} mm·{2}°에서 볼록 충돌 모델이 장애물과 {3} mm 이상 떨어짐", "Padding {0} mm; with check steps of {1} mm and {2} degrees the convex collision model stays at least {3} mm from obstacles"),
     /// Plan card: the guarantee holds only at the checked states.
