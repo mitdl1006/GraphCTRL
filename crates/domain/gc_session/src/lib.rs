@@ -486,8 +486,17 @@ impl Session {
     /// Creates a sketch on an origin plane (`"XY"`, `"XZ"` or `"YZ"`) and starts editing it.
     pub fn create_sketch(&mut self, plane: &str) -> Result<Id<Sketch>, EditError> {
         let frame = self.doc.origin_plane(plane).ok_or(gc_sketch::SketchError::MissingItem)?;
+        // Editing a component in place: its own origin plane, so the sketch belongs to it and moves with it.
+        if let Some(gc_doc::TreeKey::Component(occurrence)) = self.edit_target() {
+            let plane = match plane {
+                "XZ" => gc_doc::OriginPlane::Xz,
+                "YZ" => gc_doc::OriginPlane::Yz,
+                _ => gc_doc::OriginPlane::Xy,
+            };
+            return self.create_sketch_on(gc_doc::PlaneSource::Component { occurrence, plane });
+        }
         let name = format!("Sketch{}", self.doc.sketches().len() + 1);
-        let created = self.execute(&Command::CreateSketch { name, frame, spatial: false })?;
+        let created = self.execute_owned(Command::CreateSketch { name, frame, spatial: false })?;
         match created.first() {
             Some(Created::Sketch(id)) => {
                 self.enter_created_sketch(*id);
@@ -1048,7 +1057,7 @@ impl Session {
 
     fn create_sketch_on(&mut self, source: gc_doc::PlaneSource) -> Result<Id<Sketch>, EditError> {
         let name = format!("Sketch{}", self.doc.sketches().len() + 1);
-        let created = self.execute(&Command::CreateSketchOn { name, source })?;
+        let created = self.execute_owned(Command::CreateSketchOn { name, source })?;
         match created.first() {
             Some(Created::Sketch(id)) => {
                 self.enter_created_sketch(*id);
@@ -1062,7 +1071,7 @@ impl Session {
     pub fn create_sketch_3d(&mut self) -> Result<Id<Sketch>, EditError> {
         let name = format!("Sketch{}", self.doc.sketches().len() + 1);
         let frame = self.doc.world().ok_or(gc_sketch::SketchError::MissingItem)?;
-        let created = self.execute(&Command::CreateSketch { name, frame, spatial: true })?;
+        let created = self.execute_owned(Command::CreateSketch { name, frame, spatial: true })?;
         match created.first() {
             Some(Created::Sketch(id)) => {
                 self.enter_created_sketch(*id);

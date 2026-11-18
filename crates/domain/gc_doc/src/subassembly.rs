@@ -98,6 +98,23 @@ impl Document {
         t.components.placed_in.iter().find(|(o, _)| *o == occurrence).map(|(_, s)| *s)
     }
 
+    /// The owner of a sketch: the component or subassembly it was made in; `None` for the top-level
+    /// assembly (or an owner that no longer exists).
+    pub fn sketch_owner(&self, sketch: gc_core::Id<gc_sketch::Sketch>) -> Option<TreeKey> {
+        let (_, t) = self.timeline()?;
+        t.components
+            .sketch_owners
+            .iter()
+            .find(|(s, _)| *s == sketch)
+            .map(|(_, o)| *o)
+            .filter(|o| self.has_tree_row(*o))
+    }
+
+    /// The sketches an owner holds (`None`: the top-level assembly's), in model order.
+    pub fn sketches_of(&self, owner: Option<TreeKey>) -> Vec<gc_core::Id<gc_sketch::Sketch>> {
+        self.sketches().iter().map(|(id, _)| id).filter(|id| self.sketch_owner(*id) == owner).collect()
+    }
+
     /// The row a tree row hangs under; `None` at the top level or for a row that does not exist.
     pub fn tree_parent(&self, key: TreeKey) -> Option<TreeKey> {
         match key {

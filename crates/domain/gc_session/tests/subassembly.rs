@@ -208,3 +208,46 @@ fn components_outside_the_edit_target_cannot_be_selected() {
     s.return_to_top();
     assert!(s.select_occurrence(Some(occ(c))));
 }
+
+/// Help (Sketches in assemblies, GUID-2C180C3A-2064-4671-B1C2-F74B383B5D39): a sketch made in the assembly
+/// belongs to the top-level assembly; one made while a component is edited in place belongs to that
+/// component and sits on its origin plane (it moves with it).
+#[test]
+fn sketches_belong_to_the_assembly_or_to_the_component_being_edited() {
+    let mut s = Session::new();
+    let (a, b) = (body(&mut s, 0.2), body(&mut s, 0.5));
+    let top = s.create_sketch("XY").unwrap();
+    s.finish_sketch();
+    assert_eq!(s.sketch_owner(top), None);
+
+    s.edit_component(key(a)).unwrap();
+    let steps = s.history().undo_depth();
+    let own = s.create_sketch("XZ").unwrap();
+    assert_eq!(s.history().undo_depth(), steps + 1, "a sketch with its owner is one undo step");
+    s.finish_sketch();
+    assert_eq!(s.sketch_owner(own), Some(key(a)));
+    assert_eq!(s.sketches_of(Some(key(a))), vec![own]);
+    assert_eq!(s.sketches_of(None), vec![top]);
+    // On A's own XZ plane: it stands where A stands (x = 0.2), not at the world's origin.
+    let frame_x = |s: &Session, k: Id<gc_doc::Sketch>| {
+        let (gc_sketch::Space::Planar(f) | gc_sketch::Space::Spatial(f)) = s.doc().get(k).unwrap().space;
+        s.doc().frame_world_pose(Id::from_raw(f.raw)).unwrap().translation.x
+    };
+    assert!((frame_x(&s, own) - 0.2).abs() < 1e-9);
+    assert!(frame_x(&s, top).abs() < 1e-9);
+    s.return_to_top();
+
+    // Editing a subassembly: the sketch belongs to it.
+    let sub = demote(&mut s, vec![key(b)], "Jig");
+    s.edit_component(TreeKey::Subassembly(sub)).unwrap();
+    let in_sub = s.create_sketch("XY").unwrap();
+    s.finish_sketch();
+    assert_eq!(s.sketch_owner(in_sub), Some(TreeKey::Subassembly(sub)));
+    s.return_to_top();
+    // An owner that goes away hands its sketches to the top level.
+    s.edit_subassemblies(SubassemblyOp::Dissolve(sub)).unwrap();
+    assert_eq!(s.sketch_owner(in_sub), None);
+    // Undoing the sketch takes its ownership with it; redo brings both back.
+    s.undo();
+    assert_eq!(s.sketch_owner(in_sub), Some(TreeKey::Subassembly(sub)));
+}
