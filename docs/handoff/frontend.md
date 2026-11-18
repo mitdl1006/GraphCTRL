@@ -525,6 +525,15 @@
 - 2026 도움말에는 탭·패널을 한 장에 나열한 "Ribbon reference"가 없다. About the Ribbon(GUID-78BFC5E2-5323-48E3-A704-58DDD1836EFE)은 "탭 > 패널(드롭다운 화살표 = 추가 명령)" 구조만 설명하고, 패널 이름·순서는 명령 페이지마다 "Assemble tab > Component panel > Place" 식으로 흩어져 나온다.
 - 우리 스케치 탭 패널 이름(Create·Modify·Pattern·Constrain·Exit)은 명령 페이지의 표기와 같다. 조립 탭은 Component·Pattern·Productivity·Relationships·Edit·Position 순이라 원문 표기(Component > Position > Relationships > Pattern > … > Productivity)와 순서가 다를 수 있으나, 순서를 확정할 원문 페이지를 못 찾아 바꾸지 않았다. 순서 근거(리본 스크린샷 또는 패널 목록)를 받으면 조정한다.
 
+## ViewCube 우클릭 메뉴 (Home)
+
+근거(원문, curl): To Reorient the View GUID-94F44C80-7313-4529-85D1-E64ABF732700, About Reorienting the View GUID-4A18A2AC-69F2-44DD-AD07-B8733321E8C9, To Work with the Navigation Bar GUID-FAAB453E-31EB-46B8-9A74-3BF7A4D88EC9.
+
+- ViewCube 우클릭: "현재 뷰를 홈으로 설정"(Set Current View as Home), "홈으로 이동"(Go Home), "뷰를 바꿀 때 모델 맞추기"(Fit-to-View on view change). 홈 단추·마킹 메뉴의 Home도 저장한 홈 뷰로 간다(없으면 등각). 홈 뷰는 세션 안에서만 기억한다(문서에 저장 안 함).
+- 큐브 위의 우클릭은 마킹 메뉴를 열지 않는다.
+- 구현 메모: egui의 `context_menu`는 큐브 위젯이 우클릭을 못 받아 쓰지 못했고(뷰포트 응답과 겹침) 직접 그린 Area로 열었다. 메뉴가 열린 첫 프레임엔 크기가 없어 "밖을 눌렀다"로 닫히지 않게 나이를 센다.
+- 하지 않은 것: Set Current View as Front / Reset Front(큐브 면 방향이 고정이라), 애니메이션 전환 옵션, 큐브 우클릭의 Orthographic/Perspective(2026 원문 페이지에 없음), 탐색 막대 Customize·도킹·불투명도.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

@@ -7195,3 +7195,43 @@ fn the_marking_menu_takes_the_keys_and_can_be_the_classic_list() {
     harness.run_steps(3);
     harness.get_by_label("첫 번째 선택: 뷰에서 선택");
 }
+
+/// The ViewCube's menu (Inventor 2026 help, To Reorient the View, GUID-94F44C80-7313-4529-85D1-E64ABF732700):
+/// Set Current View as Home saves the camera, and Go Home (and the Home button) bring it back.
+#[test]
+fn the_view_cube_menu_sets_and_goes_to_the_home_view() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let (middle, half) = harness.state().viewport().view_cube_placement().expect("the ViewCube is shown");
+    let centre = middle + egui::vec2(0.9 * half, 0.0);
+    let right_click = |h: &mut egui_kittest::Harness<'_, GraphCtrlApp>| {
+        h.event(egui::Event::PointerMoved(centre));
+        h.run_steps(2);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: centre,
+                button: egui::PointerButton::Secondary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            h.run_steps(2);
+        }
+        h.run_steps(2);
+    };
+    harness.state_mut().viewport_mut().look(gc_draw::StandardView::Front);
+    harness.run_steps(2);
+    let saved = harness.state().viewport().camera.rotation;
+    right_click(&mut harness);
+    harness.get_by_label("현재 뷰를 홈으로 설정").click();
+    harness.run_steps(3);
+    harness.state_mut().viewport_mut().look(gc_draw::StandardView::Top);
+    harness.run_steps(2);
+    assert_ne!(harness.state().viewport().camera.rotation, saved);
+    right_click(&mut harness);
+    harness.get_by_label("홈으로 이동").click();
+    harness.run_steps(3);
+    assert_eq!(harness.state().viewport().camera.rotation, saved);
+}

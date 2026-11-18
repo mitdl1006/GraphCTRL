@@ -786,6 +786,9 @@ messages! {
     /// Navigation bar tool.
     NavLookAt => ("면 보기", "Look At"),
     /// The ViewCube's home button.
+    CubeSetHome => ("현재 뷰를 홈으로 설정", "Set Current View as Home"),
+    CubeGoHome => ("홈으로 이동", "Go Home"),
+    CubeFitOnChange => ("뷰를 바꿀 때 모델 맞추기", "Fit-to-View on view change"),
     NavHome => ("홈 뷰", "Home view"),
     /// Browser: the root node's name when the document has no file yet.
     BrowserDocument => ("Cell1", "Cell1"),
