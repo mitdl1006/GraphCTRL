@@ -23,7 +23,7 @@ fn ellipses(s: &Session) -> Vec<(f64, f64, f64)> {
     sk.curves
         .values()
         .filter_map(|c| match c.geom {
-            CurveGeom::Ellipse { c, major, minor } => {
+            CurveGeom::Ellipse { c, major, minor, .. } => {
                 let (c, m) = (sk.pos(c).unwrap(), sk.pos(major).unwrap());
                 Some((c[0], ((m[0] - c[0]).powi(2) + (m[1] - c[1]).powi(2)).sqrt(), minor))
             }

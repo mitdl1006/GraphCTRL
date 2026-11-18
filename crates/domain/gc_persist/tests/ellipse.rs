@@ -146,3 +146,139 @@ fn bad_ellipses_are_refused_and_ellipses_round_trip() {
     );
     assert!(loaded.doc.same_content(&doc));
 }
+
+fn line(doc: &mut Document, k: Id<Sketch>, a: [f64; 2], b: [f64; 2]) -> Id<gc_sketch::Curve> {
+    let created = op(
+        doc,
+        k,
+        SketchOp::AddLine {
+            a: [a[0], a[1], 0.0],
+            b: [b[0], b[1], 0.0],
+            snap_a: Default::default(),
+            snap_b: Default::default(),
+            horizontal: None,
+        },
+    )
+    .unwrap();
+    created.iter().find_map(|c| if let Created::Curve(c) = c { Some(*c) } else { None }).unwrap()
+}
+
+fn ellipse(doc: &mut Document, k: Id<Sketch>) -> Id<gc_sketch::Curve> {
+    let created = op(
+        doc,
+        k,
+        SketchOp::AddEllipse {
+            centre: [0.0; 3],
+            major: [0.03, 0.0, 0.0],
+            minor: 0.01,
+            centre_snap: Default::default(),
+        },
+    )
+    .unwrap();
+    created.iter().find_map(|c| if let Created::Curve(c) = c { Some(*c) } else { None }).unwrap()
+}
+
+/// Help (To Create 2D Shape Geometry, Ellipse): "You can trim and extend ellipses like any other curve."
+#[test]
+fn ellipses_trim_split_and_extend_like_other_curves() {
+    let (mut doc, k) = new_sketch();
+    let e = ellipse(&mut doc, k);
+    let cutter = line(&mut doc, k, [0.0, -0.02], [0.0, 0.02]);
+    // Where they cross: the ends of the minor axis; the quadrants are the four axis ends.
+    let sk = doc.get(k).unwrap();
+    let mut crossings = sk.curve_crossings(e, cutter);
+    crossings.sort_by(|p, q| p[1].total_cmp(&q[1]));
+    assert_eq!(crossings.len(), 2);
+    assert!((crossings[0][1] + 0.01).abs() < 1e-9 && (crossings[1][1] - 0.01).abs() < 1e-9, "{crossings:?}");
+    assert_eq!(sk.ellipse_quadrants(e).len(), 4);
+    // Trimming the right half leaves the left half as an elliptical arc ending on the line.
+    let preview = sk.trim_preview(e, [0.03, 0.0]).unwrap();
+    assert!(
+        matches!(preview, gc_sketch::Piece::EllipseArc { sweep, .. } if (sweep - std::f64::consts::PI).abs() < 1e-6)
+    );
+    op(&mut doc, k, SketchOp::Trim { curve: e, at: [0.03, 0.0] }).unwrap();
+    let sk = doc.get(k).unwrap();
+    let (s, en) = sk.ellipse_arc(e).expect("an elliptical arc now");
+    let (ps, pe) = (sk.pos(s).unwrap(), sk.pos(en).unwrap());
+    assert!(ps[0].abs() < 1e-9 && (ps[1] - 0.01).abs() < 1e-9, "starts at the top: {ps:?}");
+    assert!(pe[0].abs() < 1e-9 && (pe[1] + 0.01).abs() < 1e-9, "ends at the bottom: {pe:?}");
+    assert!(sk.clone().solve().is_ok());
+    assert_eq!(sk.ellipse_quadrants(e).len(), 3, "the top, left and bottom axis ends remain on it");
+
+    // A cut through the middle of the arc splits it into two arcs of one ellipse.
+    let middle = line(&mut doc, k, [-0.015, -0.02], [-0.015, 0.02]);
+    op(&mut doc, k, SketchOp::Trim { curve: e, at: [-0.03, 0.0] }).unwrap();
+    let sk = doc.get(k).unwrap();
+    let arcs: Vec<_> = sk
+        .curves
+        .iter()
+        .filter(|(_, c)| matches!(c.geom, CurveGeom::Ellipse { arc: Some(_), .. }))
+        .map(|(id, _)| *id)
+        .collect();
+    assert_eq!(arcs.len(), 2, "split in two");
+    assert!(
+        sk.constraints
+            .values()
+            .any(|c| matches!(c, GeoConstraint::Equal(a, b) if arcs.contains(a) && arcs.contains(b)))
+    );
+    // Both stay on one ellipse when its minor radius is driven.
+    let minor = dimension(&mut doc, k, DimKind::Radius(arcs[0]), "10 mm");
+    op(&mut doc, k, SketchOp::SetDimension { id: minor, source: "12 mm".into() }).unwrap();
+    let sk = doc.get(k).unwrap();
+    for arc in &arcs {
+        assert!((sk.ellipse(*arc).unwrap().2 - 0.012).abs() < 1e-9);
+    }
+    let _ = middle;
+
+    // Extend: an elliptical arc lengthens to the next curve beyond its end.
+    let (mut doc, k) = new_sketch();
+    let e = ellipse(&mut doc, k);
+    let cutter = line(&mut doc, k, [0.0, -0.02], [0.0, 0.02]);
+    op(&mut doc, k, SketchOp::Trim { curve: e, at: [0.03, 0.0] }).unwrap();
+    op(&mut doc, k, SketchOp::Delete(vec![gc_sketch::Item::Curve(cutter)])).unwrap();
+    let wall = line(&mut doc, k, [0.02, -0.02], [0.02, 0.02]);
+    let sk = doc.get(k).unwrap();
+    assert!(sk.extend_preview(e, [0.001, 0.0099]).is_some());
+    op(&mut doc, k, SketchOp::Extend { curve: e, at: [0.001, 0.0099] }).unwrap();
+    let sk = doc.get(k).unwrap();
+    let (s, _) = sk.ellipse_arc(e).unwrap();
+    let ps = sk.pos(s).unwrap();
+    let y = 0.01 * (1.0f64 - (0.02f64 / 0.03).powi(2)).sqrt();
+    assert!((ps[0] - 0.02).abs() < 1e-9 && (ps[1] - y).abs() < 1e-9, "extended to the wall: {ps:?}");
+    assert!(sk.clone().solve().is_ok());
+    let _ = wall;
+    // An elliptical arc saves and loads.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("arc.gcp");
+    gc_persist::save(&doc, &path).unwrap();
+    assert!(gc_persist::load(&path).unwrap().doc.same_content(&doc));
+}
+
+/// A circle crossing an ellipse: found numerically, on both curves.
+#[test]
+fn circles_and_ellipses_cross_where_both_hold() {
+    let (mut doc, k) = new_sketch();
+    let e = ellipse(&mut doc, k);
+    let circle = match op(
+        &mut doc,
+        k,
+        SketchOp::AddCircle {
+            centre: [0.03, 0.0, 0.0],
+            radius: 0.01,
+            centre_snap: Default::default(),
+            rim_snap: Default::default(),
+        },
+    )
+    .unwrap()[..]
+    {
+        [Created::Curve(c), ..] => c,
+        ref other => panic!("{other:?}"),
+    };
+    let sk = doc.get(k).unwrap();
+    let crossings = sk.curve_crossings(e, circle);
+    assert_eq!(crossings.len(), 2, "{crossings:?}");
+    for p in crossings {
+        assert!(on_ellipse(sk, e, [p[0], p[1], 0.0]).abs() < 1e-9);
+        assert!((((p[0] - 0.03).powi(2) + p[1].powi(2)).sqrt() - 0.01).abs() < 1e-9);
+    }
+}

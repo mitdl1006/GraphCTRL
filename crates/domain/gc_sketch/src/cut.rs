@@ -40,6 +40,47 @@ pub enum Piece {
         /// Radius.
         radius: f64,
     },
+    /// A piece of an ellipse: its centre, the vector to its major axis end, its minor radius, and the
+    /// eccentric angles of the start and the counter-clockwise sweep (2π for the whole ellipse).
+    EllipseArc {
+        /// Centre.
+        centre: [f64; 2],
+        /// From the centre to the major axis end.
+        major: [f64; 2],
+        /// Minor radius.
+        minor: f64,
+        /// Eccentric angle of the start.
+        start: f64,
+        /// Counter-clockwise sweep (positive).
+        sweep: f64,
+    },
+}
+
+impl Piece {
+    /// The piece as points along it (`segments` steps for a curved piece; a whole circle or ellipse
+    /// ends where it began), for drawing.
+    pub fn polyline(&self, segments: u32) -> Vec<[f64; 2]> {
+        let steps = segments.max(1);
+        let along = |f: &dyn Fn(f64) -> [f64; 2]| -> Vec<[f64; 2]> {
+            (0..=steps).map(|k| f(f64::from(k) / f64::from(steps))).collect()
+        };
+        match *self {
+            Piece::Segment(a, b) => vec![a, b],
+            Piece::Arc { centre, radius, start, sweep } => {
+                along(&|k| on_circle(centre, radius, start + sweep * k))
+            }
+            Piece::Circle { centre, radius } => along(&|k| on_circle(centre, radius, TAU * k)),
+            Piece::EllipseArc { centre, major, minor, start, sweep } => {
+                let a = fm::hypot(major[0], major[1]).max(f64::MIN_POSITIVE);
+                let (u, v) = ([major[0] / a, major[1] / a], [-major[1] / a, major[0] / a]);
+                along(&|k| {
+                    let t = start + sweep * k;
+                    let (x, y) = (a * fm::cos(t), minor * fm::sin(t));
+                    [centre[0] + x * u[0] + y * v[0], centre[1] + x * u[1] + y * v[1]]
+                })
+            }
+        }
+    }
 }
 
 /// What a trim, extend or fillet created.
@@ -58,6 +99,9 @@ enum Shape {
     Segment([f64; 2], [f64; 2]),
     /// Centre, radius, and for an arc its start angle and counter-clockwise sweep.
     Round([f64; 2], f64, Option<(f64, f64)>),
+    /// An ellipse: centre, unit major direction, major and minor radii, and for an arc its start and
+    /// counter-clockwise sweep in eccentric angle.
+    Oval { c: [f64; 2], u: [f64; 2], a: f64, b: f64, arc: Option<(f64, f64)> },
 }
 
 fn dist(a: [f64; 2], b: [f64; 2]) -> f64 {
@@ -84,24 +128,77 @@ impl Shape {
             }
             Shape::Round(c, _, None) => angle(c, p).rem_euclid(TAU),
             Shape::Round(c, _, Some((start, _))) => (angle(c, p) - start).rem_euclid(TAU),
+            Shape::Oval { arc, .. } => {
+                let [x, y] = self.local(p);
+                (fm::atan2(y, x) - arc.map_or(0.0, |(start, _)| start)).rem_euclid(TAU)
+            }
         }
+    }
+
+    /// A point in an ellipse's own axes, scaled so the ellipse is the unit circle (the identity for other
+    /// shapes).
+    fn local(&self, p: [f64; 2]) -> [f64; 2] {
+        match *self {
+            Shape::Oval { c, u, a, b, .. } => {
+                let (x, y) = (p[0] - c[0], p[1] - c[1]);
+                [(x * u[0] + y * u[1]) / a, (y * u[0] - x * u[1]) / b]
+            }
+            Shape::Segment(..) | Shape::Round(..) => p,
+        }
+    }
+
+    /// Back from [`Shape::local`].
+    fn global(&self, q: [f64; 2]) -> [f64; 2] {
+        match *self {
+            Shape::Oval { c, u, a, b, .. } => {
+                let (x, y) = (q[0] * a, q[1] * b);
+                [c[0] + x * u[0] - y * u[1], c[1] + x * u[1] + y * u[0]]
+            }
+            Shape::Segment(..) | Shape::Round(..) => q,
+        }
+    }
+
+    /// Zero on the full circle or ellipse, negative inside, positive outside (in length units).
+    fn implicit(&self, p: [f64; 2]) -> f64 {
+        match *self {
+            Shape::Round(c, r, _) => dist(c, p) - r,
+            Shape::Oval { b, .. } => {
+                let [x, y] = self.local(p);
+                (fm::hypot(x, y) - 1.0) * b
+            }
+            Shape::Segment(..) => 0.0,
+        }
+    }
+
+    /// The point at an angle round the full circle or ellipse, ignoring an arc's start.
+    fn full_at(&self, t: f64) -> [f64; 2] {
+        match *self {
+            Shape::Round(c, r, _) => on_circle(c, r, t),
+            Shape::Oval { .. } => self.global([fm::cos(t), fm::sin(t)]),
+            Shape::Segment(..) => self.at(t),
+        }
+    }
+
+    /// True for a whole circle or ellipse.
+    fn closed(&self) -> bool {
+        matches!(self, Shape::Round(_, _, None) | Shape::Oval { arc: None, .. })
     }
 
     /// The parameter range of the curve itself.
     fn span(&self) -> f64 {
         match *self {
             Shape::Segment(..) => 1.0,
-            Shape::Round(_, _, None) => TAU,
-            Shape::Round(_, _, Some((_, sweep))) => sweep,
+            Shape::Round(_, _, None) | Shape::Oval { arc: None, .. } => TAU,
+            Shape::Round(_, _, Some((_, sweep))) | Shape::Oval { arc: Some((_, sweep)), .. } => sweep,
         }
     }
 
     /// True when a point known to lie on the full line or circle lies on this curve.
     fn holds(&self, p: [f64; 2]) -> bool {
         match self {
-            Shape::Round(_, _, None) => true,
+            Shape::Round(_, _, None) | Shape::Oval { arc: None, .. } => true,
             Shape::Segment(..) => (-EPS..=1.0 + EPS).contains(&self.param(p)),
-            Shape::Round(_, _, Some(_)) => {
+            Shape::Round(_, _, Some(_)) | Shape::Oval { arc: Some(_), .. } => {
                 let t = self.param(p);
                 t <= self.span() + EPS || t >= TAU - EPS
             }
@@ -114,6 +211,7 @@ impl Shape {
             Shape::Segment(a, b) => [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])],
             Shape::Round(c, r, None) => on_circle(c, r, t),
             Shape::Round(c, r, Some((start, _))) => on_circle(c, r, start + t),
+            Shape::Oval { arc, .. } => self.full_at(arc.map_or(0.0, |(start, _)| start) + t),
         }
     }
 
@@ -125,6 +223,16 @@ impl Shape {
                 let base = arc.map_or(0.0, |(start, _)| start);
                 Piece::Arc { centre, radius, start: base + from, sweep: to - from }
             }
+            Shape::Oval { c, u, a, b, arc } => {
+                let base = arc.map_or(0.0, |(start, _)| start);
+                Piece::EllipseArc {
+                    centre: c,
+                    major: [u[0] * a, u[1] * a],
+                    minor: b,
+                    start: base + from,
+                    sweep: to - from,
+                }
+            }
         }
     }
 
@@ -134,13 +242,53 @@ impl Shape {
             Shape::Segment(a, b) => Piece::Segment(a, b),
             Shape::Round(centre, radius, None) => Piece::Circle { centre, radius },
             Shape::Round(centre, radius, Some((start, sweep))) => Piece::Arc { centre, radius, start, sweep },
+            Shape::Oval { c, u, a, b, arc } => {
+                let (start, sweep) = arc.unwrap_or((0.0, TAU));
+                Piece::EllipseArc { centre: c, major: [u[0] * a, u[1] * a], minor: b, start, sweep }
+            }
         }
     }
 }
 
-/// Where the full lines or circles of two shapes meet.
+/// Where the full lines, circles or ellipses of two shapes meet.
 fn meet(first: &Shape, second: &Shape) -> Vec<[f64; 2]> {
     match (*first, *second) {
+        // A line and an ellipse: in the ellipse's own scaled axes, a line and the unit circle.
+        (line @ Shape::Segment(..), oval @ Shape::Oval { .. })
+        | (oval @ Shape::Oval { .. }, line @ Shape::Segment(..)) => {
+            let Shape::Segment(p, q) = line else { return Vec::new() };
+            let unit = Shape::Round([0.0, 0.0], 1.0, None);
+            meet(&Shape::Segment(oval.local(p), oval.local(q)), &unit)
+                .into_iter()
+                .map(|r| oval.global(r))
+                .collect()
+        }
+        // An ellipse and a circle or another ellipse: round the second's full curve, where the first's
+        // equation changes sign, refined by bisection.
+        (Shape::Oval { .. }, Shape::Round(..) | Shape::Oval { .. })
+        | (Shape::Round(..), Shape::Oval { .. }) => {
+            const STEPS: u32 = 720;
+            let f = |t: f64| first.implicit(second.full_at(t));
+            let mut out = Vec::new();
+            for k in 0..STEPS {
+                let (mut lo, mut hi) =
+                    (TAU * f64::from(k) / f64::from(STEPS), TAU * f64::from(k + 1) / f64::from(STEPS));
+                let (flo, fhi) = (f(lo), f(hi));
+                if flo == 0.0 {
+                    out.push(second.full_at(lo));
+                    continue;
+                }
+                if flo.signum() == fhi.signum() || fhi == 0.0 {
+                    continue;
+                }
+                for _ in 0..60 {
+                    let mid = 0.5 * (lo + hi);
+                    if f(mid).signum() == flo.signum() { lo = mid } else { hi = mid }
+                }
+                out.push(second.full_at(0.5 * (lo + hi)));
+            }
+            out
+        }
         (Shape::Segment(a, b), Shape::Segment(c, d)) => {
             let (r, s) = ([b[0] - a[0], b[1] - a[1]], [d[0] - c[0], d[1] - c[1]]);
             let denom = r[0] * s[1] - r[1] * s[0];
@@ -211,8 +359,23 @@ impl Sketch {
                 let start = angle(c, s);
                 Shape::Round(c, dist(c, s), Some((start, (angle(c, e) - start).rem_euclid(TAU))))
             }
-            // Trim, extend and split do not cut ellipses yet.
-            CurveGeom::Ellipse { .. } => return None,
+            CurveGeom::Ellipse { c, major, minor, arc } => {
+                let (c, m) = (self.xy(c)?, self.xy(major)?);
+                let a = dist(c, m);
+                if !(a > 1e-12 && minor > 1e-12) {
+                    return None;
+                }
+                let u = [(m[0] - c[0]) / a, (m[1] - c[1]) / a];
+                let full = Shape::Oval { c, u, a, b: minor, arc: None };
+                let arc = match arc {
+                    Some((s, e)) => {
+                        let start = full.param(self.xy(s)?);
+                        Some((start, (full.param(self.xy(e)?) - start).rem_euclid(TAU)))
+                    }
+                    None => None,
+                };
+                Shape::Oval { c, u, a, b: minor, arc }
+            }
         })
     }
 
@@ -234,6 +397,22 @@ impl Sketch {
         cuts
     }
 
+    /// Where two curves cross, within both (lines, circles, arcs, ellipses and elliptical arcs).
+    pub fn curve_crossings(&self, a: Id<Curve>, b: Id<Curve>) -> Vec<[f64; 2]> {
+        let (Some(first), Some(second)) = (self.shape(a), self.shape(b)) else { return Vec::new() };
+        meet(&first, &second).into_iter().filter(|p| first.holds(*p) && second.holds(*p)).collect()
+    }
+
+    /// An ellipse's quadrant points (the ends of its two axes) that lie on it (all four for a whole
+    /// ellipse); empty for other curves.
+    pub fn ellipse_quadrants(&self, curve: Id<Curve>) -> Vec<[f64; 2]> {
+        let Some(shape @ Shape::Oval { arc, .. }) = self.shape(curve) else { return Vec::new() };
+        (0..4)
+            .map(|k| shape.full_at(f64::from(k) * TAU / 4.0))
+            .filter(|p| arc.is_none() || shape.holds(*p))
+            .collect()
+    }
+
     /// The piece of `curve` that a trim at `at` would remove, between the cuts on either side of `at`.
     pub fn trim_preview(&self, curve: Id<Curve>, at: [f64; 2]) -> Option<Piece> {
         let shape = self.shape(curve)?;
@@ -252,7 +431,7 @@ impl Sketch {
         let t = shape.param(at);
         let end = shape.span();
         let inner: Vec<Cut> = self.cuts(curve, false);
-        if let Shape::Round(_, _, None) = shape {
+        if shape.closed() {
             if inner.len() < 2 {
                 return Some(Span::Whole);
             }
@@ -290,6 +469,17 @@ impl Sketch {
         let mut result = CutResult::default();
         match (span, geom) {
             (Span::Whole, _) => self.delete(&[Item::Curve(curve)]),
+            // A whole ellipse becomes the elliptical arc that is left, like a circle.
+            (Span::Circle { from, to }, CurveGeom::Ellipse { arc: None, .. }) => {
+                let s = self.add_point(alloc, [to.pos[0], to.pos[1], 0.0]);
+                let e = self.add_point(alloc, [from.pos[0], from.pos[1], 0.0]);
+                if let Some(Curve { geom: CurveGeom::Ellipse { arc, .. }, .. }) = self.curves.get_mut(&curve)
+                {
+                    *arc = Some((s, e));
+                }
+                self.attach(alloc, s, to.pos, to.by, &mut result);
+                self.attach(alloc, e, from.pos, from.by, &mut result);
+            }
             (Span::Circle { from, to }, CurveGeom::Circle { c, .. }) => {
                 // What is left runs counter-clockwise from where the removed piece ends to where it
                 // starts: the circle becomes that arc and keeps its constraints and dimensions.
@@ -337,7 +527,20 @@ impl Sketch {
                 let centre = self.pos(c).ok_or(SketchError::MissingPoint)?;
                 self.add_arc(alloc, centre, [to.pos[0], to.pos[1], 0.0], last_pos)?
             }
-            CurveGeom::Circle { .. } | CurveGeom::Ellipse { .. } => return Err(SketchError::InvalidValue),
+            // The rest of an elliptical arc: on the same ellipse (its centre and axis end are shared).
+            CurveGeom::Ellipse { c, major, minor, arc: Some(_) } => {
+                let s = self.add_point(alloc, [to.pos[0], to.pos[1], 0.0]);
+                let e = self.add_point(alloc, last_pos);
+                let id = alloc.alloc();
+                self.curves.insert(
+                    id,
+                    Curve { geom: CurveGeom::Ellipse { c, major, minor, arc: Some((s, e)) }, construction },
+                );
+                id
+            }
+            CurveGeom::Circle { .. } | CurveGeom::Ellipse { arc: None, .. } => {
+                return Err(SketchError::InvalidValue);
+            }
         };
         if let Some(k) = self.curves.get_mut(&piece) {
             k.construction = construction;
@@ -369,6 +572,7 @@ impl Sketch {
                 };
                 vec![GeoConstraint::Coincident(c, piece_c), GeoConstraint::Equal(curve, piece)]
             }
+            CurveGeom::Ellipse { .. } => vec![GeoConstraint::Equal(curve, piece)],
             _ => vec![GeoConstraint::Collinear(curve, piece)],
         };
         for constraint in together {
@@ -383,8 +587,8 @@ impl Sketch {
     fn ends(geom: &CurveGeom) -> Option<(Id<SkPoint>, Id<SkPoint>)> {
         match *geom {
             CurveGeom::Line { a, b } => Some((a, b)),
-            CurveGeom::Arc { s, e, .. } => Some((s, e)),
-            CurveGeom::Circle { .. } | CurveGeom::Ellipse { .. } => None,
+            CurveGeom::Arc { s, e, .. } | CurveGeom::Ellipse { arc: Some((s, e)), .. } => Some((s, e)),
+            CurveGeom::Circle { .. } | CurveGeom::Ellipse { arc: None, .. } => None,
         }
     }
 
@@ -428,6 +632,7 @@ impl Sketch {
         let scale = self.shape(by).map_or(1.0, |s| match s {
             Shape::Segment(a, b) => dist(a, b),
             Shape::Round(_, r, _) => r,
+            Shape::Oval { a, .. } => a,
         });
         let at_point = curve
             .points()
