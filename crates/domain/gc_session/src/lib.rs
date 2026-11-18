@@ -666,6 +666,26 @@ impl Session {
         gc_doc::Document::automatic_joint(first, second)
     }
 
+    /// Lock and Protect of a joint (none for a constraint).
+    pub fn joint_condition(&self, id: Id<gc_doc::Relationship>) -> gc_doc::JointCondition {
+        self.doc.joint_condition(id).unwrap_or_default()
+    }
+
+    /// Lock a joint where it stands, or free it (Inventor 2026 help, To Define and Manage Joint
+    /// Relationships, GUID-21DC3336-5C51-42C1-90FB-4299CD66E0C6). One undo step; refused for constraints.
+    pub fn set_joint_lock(&mut self, id: Id<gc_doc::Relationship>, on: bool) -> Result<(), EditError> {
+        let protect = self.joint_condition(id).protected;
+        let op = gc_doc::CellOp::SetJointCondition { id, lock: on, protect };
+        self.execute(&Command::Cell(op)).map(|_| ())
+    }
+
+    /// Protect a joint's freedom, or not. One undo step; refused for constraints.
+    pub fn set_joint_protect(&mut self, id: Id<gc_doc::Relationship>, on: bool) -> Result<(), EditError> {
+        let lock = self.joint_condition(id).locked.is_some();
+        let op = gc_doc::CellOp::SetJointCondition { id, lock, protect: on };
+        self.execute(&Command::Cell(op)).map(|_| ())
+    }
+
     /// The freedom a component has left under the assembly relationships (the DOF symbol): total and pure
     /// translations. Grounded: none; unconstrained: six.
     pub fn component_dof(&self, item: gc_core::AnyId) -> Option<gc_doc::Dof> {

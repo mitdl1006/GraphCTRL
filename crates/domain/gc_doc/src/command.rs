@@ -813,6 +813,9 @@ pub enum EditError {
     /// The points that set a work frame's axes coincide with its origin or lie on one line with it.
     #[error("the axis points do not give a frame")]
     DegenerateFrame,
+    /// A relationship would take freedom away from this protected joint (Protect).
+    #[error("the protected joint {0} would lose its motion")]
+    Protected(String),
     /// Another item of the same kind already has this name.
     #[error("the name is already taken")]
     NameTaken,

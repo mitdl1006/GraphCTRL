@@ -20,7 +20,7 @@
 | 8 | ~~Automatic Dimensions and Constraints~~ **완료** | 126 (P2) | — | 아래 작업 기록 |
 | 9 | ~~치수 방향 뒤집기(Flip)~~ **완료** | 124 (P3) | 선-호·호-호 거리 치수 종류는 없음 | 아래 작업 기록 |
 | 10 | 타원·스플라인(+ Smooth G2) | 60, 61, 108 (P3) | `CurveGeom`에 없음 | 새 곡선 종류 — 영향 큼 |
-| 11 | 어셈블리: 서브어셈블리 계층·활성화, 조인트 Lock/Protect, 3D 그립 스냅, 어셈블리 스케치 소유자, 원기둥 축 작업 축 | 어셈블리 43, 90, 61, 98, 157 | 없음 또는 일부(확인 필요) | 행마다 원문 확인 후 범위 결정 |
+| 11 | 어셈블리: 서브어셈블리 계층·활성화, ~~조인트 Lock/Protect~~(**완료**), 3D 그립 스냅, 어셈블리 스케치 소유자, 작업 축(선·모서리 위, 원 중심, 회전 면, 두 평면 교선) | 어셈블리 43, 90, 61, 98, 157 | 작업 축은 두 점·평면 법선만 | 행마다 원문 확인 후 범위 결정 |
 
 ## 현황 — 완료
 
@@ -53,6 +53,24 @@
 | 모션(오래된 남은 일) | 맨 아래 "남은 일(백엔드)" 절 그대로 |
 
 # 작업 기록(최신 순)
+
+## 2026-11-18 — 조인트 Lock·Protect(우선순위 표 11 일부)
+
+- **원문**: To Define and Manage Joint Relationships `GUID-21DC3336-5C51-42C1-90FB-4299CD66E0C6.htm`.
+  - Lock: 현재 위치를 유지해 모든 운동을 없애지만, 관련 컴포넌트가 움직이면 따라간다. 고정(Ground)과 다르다.
+  - Protect: 추가 관계가 필요한 자유도를 침해하면 경고한다.
+  - 구속(Constraint)에는 둘 다 없다.
+- **gc_doc**:
+  - `Components::joint_conditions: BTreeMap<Id<Relationship>, JointCondition{locked: Option<LockedPose>, protected}>`. 직렬화 기본값이 있어 예전 파일도 열린다.
+  - `CellOp::SetJointCondition{id, lock, protect}`: 조인트가 아니면 `BadValue`.
+  - Lock은 잠그는 순간 첫 조인트 원점을 둘째 원점 좌표로 저장(`LockedPose`)하고, 잠긴 동안 잔차가 그 상대 자세(원점·Z·X)를 요구한다. 그래서 따라 움직이고 자유도는 0이다.
+  - Protect: 관계 추가·편집 전후로 보호된 조인트의 움직이는 컴포넌트 자유도를 비교해, 줄면 `EditError::Protected(이름)`으로 거부한다.
+  - 조인트를 지우면 조건도 정리된다(`set_timeline`, `prune_states`).
+- **세션**: `joint_condition(id)`, `set_joint_lock(id, on)`, `set_joint_protect(id, on)`.
+- **상태 표시줄**: Protected 거부 문구(ErrProtected).
+- **UI**: 브라우저 관계 우클릭 Lock/Protect 체크는 프론트엔드 몫(모델 트리 메뉴).
+- **원문과 다른 점**: 원문은 경고(warn)라고 했지만 여기서는 거부한다(되돌릴 단계가 남지 않게).
+- **테스트**: `gc_session/tests/qa_joints.rs` lock_and_protect_a_joint.
 
 ## 2026-11-18 — 스케치 축척·신축(우선순위 표 6 나머지)
 

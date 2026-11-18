@@ -958,6 +958,7 @@ pub fn status_bar(
                 gc_doc::EditError::BadValue => Msg::ErrBadValue,
                 gc_doc::EditError::Underconstrained => Msg::ErrUnderconstrained,
                 gc_doc::EditError::DegenerateFrame => Msg::ErrDegenerateFrame,
+                gc_doc::EditError::Protected(_) => Msg::ErrProtected,
                 _ => Msg::ErrOther,
             };
             ui.separator();

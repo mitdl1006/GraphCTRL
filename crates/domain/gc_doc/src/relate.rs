@@ -280,6 +280,31 @@ pub struct Relationship {
     pub limits: Option<Limits>,
 }
 
+/// Lock and Protect on a joint (Inventor 2026 help, To Define and Manage Joint Relationships,
+/// GUID-21DC3336-5C51-42C1-90FB-4299CD66E0C6): "Lock eliminates all motion, but allows the component to
+/// change position when related components move"; "Protect a relationship to warn if added relationships
+/// violate the necessary degrees of freedom". Not for constraints.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct JointCondition {
+    /// Locked where it stood: the first joint origin as seen from the second.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locked: Option<LockedPose>,
+    /// Protected: relationships that take its freedom away are refused.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub protected: bool,
+}
+
+/// A joint's first origin in the second's frame, when it was locked.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LockedPose {
+    /// Origin.
+    pub origin: [f64; 3],
+    /// Z axis.
+    pub z: [f64; 3],
+    /// X axis.
+    pub x: [f64; 3],
+}
+
 /// Limits of a constraint's offset (metres) or angle (radians): within them the components may move;
 /// the constraint's own value is where they rest when `resting` is set (Inventor 2026 help, To Place Mate
 /// or Flush Constraints: "Check Maximum … Minimum … Use Offset As Resting Position").
@@ -623,6 +648,8 @@ struct Term {
     axis: DVec3,
     /// Limits of the value; without `resting` the value may be anywhere within them.
     limits: Option<Limits>,
+    /// A locked joint: where its first origin stays relative to the second.
+    locked: Option<LockedPose>,
 }
 
 impl Document {
@@ -876,10 +903,55 @@ impl Document {
                 third,
                 axis,
                 limits: relationship.limits,
+                locked: self.joint_condition(id).and_then(|c| c.locked),
             });
         }
         Ok((owners, terms))
     }
+}
+
+impl Document {
+    /// Lock and Protect of a joint.
+    pub fn joint_condition(&self, id: Id<Relationship>) -> Option<JointCondition> {
+        self.timeline().and_then(|(_, t)| t.components.joint_conditions.get(&id).copied())
+    }
+
+    /// Where a joint's first origin stands in its second's frame now (for Lock). `None` for a constraint or
+    /// a missing component.
+    pub(crate) fn lock_pose(&self, relationship: &Relationship) -> Option<LockedPose> {
+        if !is_joint(&relationship.kind) {
+            return None;
+        }
+        let g1 = self.in_owner(&relationship.first)?;
+        let g2 = self.in_owner(&relationship.second)?;
+        let pose1 = self.owner_pose(relationship.first.occurrence.owner())?;
+        let pose2 = self.owner_pose(relationship.second.occurrence.owner())?;
+        let (p1, z1, x1) = joint_world(&pose1, &g1);
+        let (p2, z2, x2) = joint_world(&pose2, &g2);
+        let y2 = z2.cross(x2);
+        let to = |v: DVec3| [v.dot(x2), v.dot(y2), v.dot(z2)];
+        Some(LockedPose { origin: to(p1 - p2), z: to(z1), x: to(x1) })
+    }
+
+    /// The freedom of each protected joint's moving component (Protect's check).
+    pub(crate) fn protected_freedom(&self) -> Vec<(Id<Relationship>, u8)> {
+        let Some((_, timeline)) = self.timeline() else { return Vec::new() };
+        timeline
+            .components
+            .joint_conditions
+            .iter()
+            .filter(|(_, c)| c.protected)
+            .filter_map(|(id, _)| {
+                let r = self.get(*id)?;
+                Some((*id, self.component_dof(r.first.occurrence.owner())?.total))
+            })
+            .collect()
+    }
+}
+
+/// True for the joint kinds (Lock and Protect apply to them only).
+pub fn is_joint_kind(kind: &RelationKind) -> bool {
+    is_joint(kind)
 }
 
 /// A joint origin in the world: point, Z, X.
@@ -958,6 +1030,15 @@ fn plain_residuals(term: &Term, poses: &[DPose3]) -> Vec<f64> {
     if is_joint(&term.kind) {
         let (p1, z1, x1) = joint_world(pose1, &term.geometry[0]);
         let (p2, z2, x2) = joint_world(pose2, &term.geometry[1]);
+        if let Some(lock) = term.locked {
+            // Locked: the first origin stays where it was in the second's frame.
+            let y2 = z2.cross(x2);
+            let from = |v: [f64; 3]| x2 * v[0] + y2 * v[1] + z2 * v[2];
+            push3(&mut out, p1 - (p2 + from(lock.origin)));
+            push3(&mut out, z1 - from(lock.z));
+            push3(&mut out, x1 - from(lock.x));
+            return out;
+        }
         match term.kind {
             RelationKind::Slider { .. } | RelationKind::Cylindrical { .. } => {
                 push3(&mut out, across(p1 - p2, z2))
