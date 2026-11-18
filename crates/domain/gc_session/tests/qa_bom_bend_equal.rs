@@ -314,7 +314,6 @@ fn a_big_bom_stays_quick_and_consistent() {
 /// formula, but not cells that start with a tab or a carriage return (also on the OWASP list of CSV injection
 /// starts: a spreadsheet drops the tab and then runs the formula).
 #[test]
-#[ignore = "BUG: a BOM cell starting with a tab or carriage return is exported as it is (owner: backend, gc_session/src/bom.rs csv)"]
 fn csv_also_guards_cells_that_start_with_a_tab_or_a_carriage_return() {
     let mut s = Session::new();
     body(&mut s, 0.0, "\t=1+2", "\r=1+2");
