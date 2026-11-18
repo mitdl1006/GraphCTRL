@@ -25,8 +25,8 @@ pub(crate) struct SpatialState {
     spline: Vec<([f64; 3], Option<Id<SkPoint>>)>,
     /// The line the line in progress continues from (for Auto-Bend).
     previous: Option<Id<gc_sketch::Curve>>,
-    /// Auto-Bend's radius as typed, when it is on.
-    auto_bend: Option<String>,
+    /// Auto-Bend is on (an application option; the radius is the document's).
+    auto_bend: bool,
 }
 
 impl Default for SpatialState {
@@ -38,7 +38,7 @@ impl Default for SpatialState {
             arc: Vec::new(),
             spline: Vec::new(),
             previous: None,
-            auto_bend: None,
+            auto_bend: false,
         }
     }
 }
@@ -69,17 +69,26 @@ impl Session {
         self.active_sketch().is_some_and(|(_, sketch)| sketch.is_spatial())
     }
 
-    /// Auto-Bend for 3D lines (Sketch tab of Application Options, GUID-1898C432-CFD2-46F1-8BAE-631392DFBF1D:
-    /// "Automatically places tangent corner bends on 3D lines as you sketch them. Default setting is off"):
-    /// `Some(radius)` turns it on with that radius as typed (the document's 3D Sketch Auto-Bend Radius),
-    /// `None` off.
-    pub fn set_auto_bend(&mut self, radius: Option<String>) {
-        self.spatial.auto_bend = radius;
+    /// Auto-Bend for 3D lines on or off (Sketch tab of Application Options, GUID-1898C432-CFD2-46F1-8BAE-631392DFBF1D:
+    /// "Automatically places tangent corner bends on 3D lines as you sketch them. Default setting is off").
+    /// The radius is the document's 3D Sketch Auto-Bend Radius ([`gc_doc::DocSettings::auto_bend_radius`]).
+    pub fn set_auto_bend(&mut self, on: bool) {
+        self.spatial.auto_bend = on;
     }
 
-    /// Auto-Bend's radius when it is on.
-    pub fn auto_bend(&self) -> Option<&str> {
-        self.spatial.auto_bend.as_deref()
+    /// True when Auto-Bend is on.
+    pub fn auto_bend(&self) -> bool {
+        self.spatial.auto_bend
+    }
+
+    /// The Document Settings of the open document.
+    pub fn doc_settings(&self) -> gc_doc::DocSettings {
+        self.doc().settings()
+    }
+
+    /// Replaces the Document Settings (one undo step; saved with the document). Refused when not valid.
+    pub fn set_doc_settings(&mut self, settings: gc_doc::DocSettings) -> Result<(), gc_doc::EditError> {
+        self.execute(&gc_doc::Command::Cell(gc_doc::CellOp::SetDocSettings(settings))).map(|_| ())
     }
 
     /// The normal of the working plane of 3D sketching: 2 = XY, 0 = YZ, 1 = ZX.
@@ -177,11 +186,13 @@ impl Session {
             horizontal: None,
         };
         // With Auto-Bend, the corner with the line before gets a bend.
-        let op = match (&self.spatial.auto_bend, self.spatial.previous) {
-            (Some(radius), Some(previous)) => {
-                SketchOp::AddLineBent { line: Box::new(line), previous, radius: radius.clone() }
-            }
-            _ => line,
+        let op = match (self.spatial.auto_bend, self.spatial.previous) {
+            (true, Some(previous)) => SketchOp::AddLineBent {
+                line: Box::new(line),
+                previous,
+                radius: self.doc().settings().auto_bend_text(),
+            },
+            (true, None) | (false, _) => line,
         };
         let Ok(created) = self.sketch_op(op) else { return };
         let new = created.iter().find_map(|c| match c {

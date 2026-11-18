@@ -719,12 +719,15 @@ fn dimension_marks(
     else {
         return;
     };
-    let mut label = match dimension.kind {
-        DimKind::Angle { .. } => format_angle(value),
-        DimKind::Radius(_) => format!("R {}", format_length(value)),
-        DimKind::Diameter(_) => format!("D {}", format_length(value)),
-        _ => format_length(value),
+    // As the Document Settings show dimensions: units, precision, value, name or expression.
+    let (angle, prefix) = match dimension.kind {
+        DimKind::Angle { .. } => (true, ""),
+        DimKind::Radius(_) => (false, "R "),
+        DimKind::Diameter(_) => (false, "D "),
+        _ => (false, ""),
     };
+    let mut label =
+        session.doc_settings().dimension_text(angle, prefix, value, &dimension.name, &dimension.source);
     if !dimension.driving {
         label = format!("({label})");
     }
