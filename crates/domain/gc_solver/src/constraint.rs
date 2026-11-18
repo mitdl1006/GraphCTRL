@@ -159,6 +159,33 @@ pub enum Constraint {
         /// The distance, positive.
         value: f64,
     },
+    /// The line touches the ellipse (centre `c`, major axis end `major`, minor radius `minor`), the ellipse
+    /// on the given side (`+1` = left of `a -> b`).
+    TangentLineEllipse {
+        /// The line.
+        line: Line2,
+        /// Centre.
+        c: P2,
+        /// End of the major axis.
+        major: P2,
+        /// Minor radius.
+        minor: ParamId,
+        /// `+1.0` or `-1.0`.
+        side: f64,
+    },
+    /// A line ending at the ellipse's point `at` runs along the ellipse there.
+    EndTangentEllipse {
+        /// The line.
+        line: Line2,
+        /// The shared point.
+        at: P2,
+        /// Centre.
+        c: P2,
+        /// End of the major axis.
+        major: P2,
+        /// Minor radius.
+        minor: ParamId,
+    },
     /// Distance from a line to a circle or arc itself (not its centre), the circle on the given side
     /// (`+1` = left of `a -> b`).
     LineCircleDistance {
@@ -423,6 +450,15 @@ impl Constraint {
                     vec![a.c[0], a.c[1], a.r, b.c[0], b.c[1], b.r],
                 ));
             }
+            Self::TangentLineEllipse { line, c, major, minor, side } => out.rows.push((
+                RowKind::LineEllipseTangent { side: *side },
+                [line_vars(line).as_slice(), &[c[0], c[1], major[0], major[1], *minor]].concat(),
+            )),
+            Self::EndTangentEllipse { line, at, c, major, minor } => out.rows.push((
+                RowKind::EndTangentEllipse,
+                [line_vars(line).as_slice(), &[at[0], at[1], c[0], c[1], major[0], major[1], *minor]]
+                    .concat(),
+            )),
             Self::LineCircleDistance { line, round, side, value } => out.rows.push((
                 RowKind::LineCircleTangent { side: *side, gap: *value },
                 [line_vars(line).as_slice(), &[round.c[0], round.c[1], round.r]].concat(),
