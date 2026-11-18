@@ -12,6 +12,13 @@ use gc_ui::panel::{TreeRow, tree_row};
 
 use crate::BrowserAction;
 
+/// Something the work editors ask the application to do: it needs the file dialogs or the clipboard.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WorkRequest {
+    /// Show a task as a URScript program for a robot (and offer to save it).
+    UrScript(Id<Task>, Id<gc_doc::Robot>),
+}
+
 /// What is selected in the work node.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WorkItem {
@@ -318,15 +325,22 @@ fn location_options(session: &Session, lang: Lang) -> Vec<(gc_doc::Location, Str
 
 /// The properties of what is selected in the work node: a task (location, condition, steps, effects, robots,
 /// priority), an object type (its states), an object (type, place, state) or a variable (its kind and value).
-pub fn work_properties(ui: &mut Ui, session: &mut Session, lang: Lang, state: &WorkUi) {
+pub fn work_properties(
+    ui: &mut Ui,
+    session: &mut Session,
+    lang: Lang,
+    state: &WorkUi,
+) -> Option<WorkRequest> {
+    let mut request = None;
     match state.selected {
-        Some(WorkItem::Task(id)) => task_properties(ui, session, lang, id),
+        Some(WorkItem::Task(id)) => request = task_properties(ui, session, lang, id),
         Some(WorkItem::Type(id)) => type_properties(ui, session, lang, id),
         Some(WorkItem::Object(id)) => object_properties(ui, session, lang, id),
         Some(WorkItem::Var(id)) => var_properties(ui, session, lang, id),
         Some(WorkItem::Kit(id)) => kit_properties(ui, session, lang, id),
         None => {}
     }
+    request
 }
 
 fn type_properties(ui: &mut Ui, session: &mut Session, lang: Lang, id: Id<ObjectType>) {
@@ -549,9 +563,10 @@ fn condition_box(
     done
 }
 
-fn task_properties(ui: &mut Ui, session: &mut Session, lang: Lang, id: Id<Task>) {
+fn task_properties(ui: &mut Ui, session: &mut Session, lang: Lang, id: Id<Task>) -> Option<WorkRequest> {
     use gc_doc::{Effect, EffectTarget, MoveTarget, RobotChoice, Step};
-    let Some(task) = session.doc().get(id).cloned() else { return };
+    let mut request = None;
+    let task = session.doc().get(id).cloned()?;
     gc_ui::panel::header(ui, &task.name);
     let mut next = task.clone();
     let mut changed = false;
@@ -917,6 +932,19 @@ fn task_properties(ui: &mut Ui, session: &mut Session, lang: Lang, id: Id<Task>)
         // A refusal (a condition that does not read, a name taken) shows in the status bar.
         drop(session.edit_work(WorkOp::SetTask { id, task: next }));
     }
+    // The task as a URScript program for one of the robots that may do it.
+    gc_ui::panel::section(ui, tr!(lang, UrScriptTitle));
+    let robots = session.task_robots(id);
+    if robots.is_empty() {
+        ui.weak(tr!(lang, WorkNoCandidates));
+    }
+    for robot in robots {
+        let name = session.doc().get(robot).map_or_else(String::new, |r: &gc_doc::Robot| r.name.clone());
+        if ui.button(tr!(lang, UrScriptExportFor, name)).clicked() {
+            request = Some(WorkRequest::UrScript(id, robot));
+        }
+    }
+    request
 }
 
 /// The editor of a kind of tool: its signals (name, direction, pin), its states and its actions.

@@ -58,6 +58,14 @@ pub trait FileDialogs {
     fn save_csv(&mut self, _suggested_name: &str) -> Option<PathBuf> {
         None
     }
+    /// Where to save a URScript program, or `None` when the user cancelled.
+    fn save_script(&mut self, _suggested_name: &str) -> Option<PathBuf> {
+        None
+    }
+    /// A folder to put several programs in, or `None` when the user cancelled.
+    fn pick_folder(&mut self) -> Option<PathBuf> {
+        None
+    }
 }
 
 struct NativeDialogs;
@@ -90,6 +98,21 @@ impl FileDialogs for NativeDialogs {
     fn save_csv(&mut self, suggested_name: &str) -> Option<PathBuf> {
         rfd::FileDialog::new().add_filter("CSV", &["csv"]).set_file_name(suggested_name).save_file()
     }
+
+    fn save_script(&mut self, suggested_name: &str) -> Option<PathBuf> {
+        rfd::FileDialog::new().add_filter("URScript", &["script"]).set_file_name(suggested_name).save_file()
+    }
+
+    fn pick_folder(&mut self) -> Option<PathBuf> {
+        rfd::FileDialog::new().pick_folder()
+    }
+}
+
+/// The URScript programs being looked at (plan 9.6): offline text, never sent anywhere.
+struct ScriptWindow {
+    /// A file name and the program.
+    programs: Vec<(String, String)>,
+    shown: usize,
 }
 
 /// Something that would discard unsaved changes and therefore waits for the user's answer.
@@ -281,6 +304,8 @@ pub struct GraphCtrlApp {
     bom: crate::bom::BomDialog,
     /// The iProperties dialog.
     iproperties: crate::iproperties::IPropertiesDialog,
+    /// The URScript preview window: the programs (a file name and the text) and the one shown.
+    script: Option<ScriptWindow>,
     /// The schedule panel at the bottom (Tools > Schedule) and what it shows.
     schedule_open: bool,
     schedule: gc_panels::ScheduleUi,
@@ -408,6 +433,7 @@ impl GraphCtrlApp {
             parameters: crate::parameters::Parameters::default(),
             bom: crate::bom::BomDialog::default(),
             iproperties: crate::iproperties::IPropertiesDialog::default(),
+            script: None,
             schedule_open: false,
             schedule: gc_panels::ScheduleUi::default(),
             doc_settings: crate::doc_settings::DocSettingsDialog::default(),
@@ -556,6 +582,121 @@ impl GraphCtrlApp {
                 self.notice = Some(tr!(lang, FileError, error));
                 false
             }
+        }
+    }
+
+    /// A file name made of a task or robot name (no characters a file system dislikes).
+    fn script_file_name(name: &str) -> String {
+        let clean: String =
+            name.chars().map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
+        format!("{clean}.script")
+    }
+
+    /// Shows a task as a URScript program for a robot.
+    fn open_task_script(
+        &mut self,
+        task: gc_core::Id<gc_doc::Task>,
+        robot: gc_core::Id<gc_doc::Robot>,
+        lang: Lang,
+    ) {
+        match self.session.task_urscript(task, robot) {
+            Ok(text) => {
+                let name =
+                    self.session.doc().get(task).map_or_else(String::new, |t: &gc_doc::Task| t.name.clone());
+                self.script =
+                    Some(ScriptWindow { programs: vec![(Self::script_file_name(&name), text)], shown: 0 });
+            }
+            Err(why) => self.notice = Some(tr!(lang, UrScriptNothing, why)),
+        }
+    }
+
+    /// Shows the schedule worked out last as one URScript program per robot.
+    fn open_schedule_scripts(&mut self, lang: Lang) {
+        let Some((schedule, _)) = self.session.schedule_result().map(|(s, c)| (s.clone(), c)) else { return };
+        let programs: Vec<(String, String)> = self
+            .session
+            .schedule_urscript(&schedule)
+            .into_iter()
+            .map(|(robot, text)| {
+                let name = self
+                    .session
+                    .doc()
+                    .get(robot)
+                    .map_or_else(String::new, |r: &gc_doc::Robot| r.name.clone());
+                (Self::script_file_name(&name), text)
+            })
+            .collect();
+        if programs.is_empty() {
+            self.notice = Some(tr!(lang, UrScriptNothing, tr!(lang, ScheduleNotYet)));
+        } else {
+            self.script = Some(ScriptWindow { programs, shown: 0 });
+        }
+    }
+
+    /// The URScript preview: read-only monospace text, a note that it was not tried on a robot, copy and save.
+    fn script_window(&mut self, ctx: &egui::Context, lang: Lang) {
+        let Some(window) = self.script.as_mut() else { return };
+        let mut open = true;
+        let (mut save_one, mut save_all, mut copy) = (false, false, false);
+        egui::Window::new(tr!(lang, UrScriptWindow)).open(&mut open).default_size([560.0, 420.0]).show(
+            ctx,
+            |ui| {
+                ui.colored_label(gc_ui::colors::ERROR, tr!(lang, UrScriptNotice));
+                if window.programs.len() > 1 {
+                    ui.horizontal_wrapped(|ui| {
+                        for (index, (name, _)) in window.programs.iter().enumerate() {
+                            ui.selectable_value(&mut window.shown, index, name);
+                        }
+                    });
+                }
+                ui.horizontal(|ui| {
+                    copy = ui.button(tr!(lang, UrScriptCopy)).clicked();
+                    save_one = ui.button(tr!(lang, UrScriptSave)).clicked();
+                    if window.programs.len() > 1 {
+                        save_all = ui.button(tr!(lang, UrScriptSaveAll)).clicked();
+                    }
+                });
+                ui.separator();
+                if let Some((_, text)) = window.programs.get(window.shown) {
+                    egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
+                        // Read-only: a text box over a copy of the text.
+                        let mut shown: &str = text;
+                        ui.add(
+                            egui::TextEdit::multiline(&mut shown)
+                                .font(egui::TextStyle::Monospace)
+                                .desired_width(f32::INFINITY),
+                        );
+                    });
+                }
+            },
+        );
+        let current = window.programs.get(window.shown).cloned();
+        let all = window.programs.clone();
+        if !open {
+            self.script = None;
+            return;
+        }
+        if copy && let Some((_, text)) = &current {
+            ctx.copy_text(text.clone());
+        }
+        if save_one
+            && let Some((name, text)) = current
+            && let Some(path) = self.dialogs.save_script(&name)
+        {
+            self.notice = Some(match std::fs::write(&path, text) {
+                Ok(()) => tr!(lang, UrScriptSaved, path.display()),
+                Err(error) => tr!(lang, FileError, error),
+            });
+        }
+        if save_all && let Some(folder) = self.dialogs.pick_folder() {
+            let mut result = Ok(());
+            for (name, text) in &all {
+                result = result.and(std::fs::write(folder.join(name), text));
+            }
+            self.notice = Some(match result {
+                Ok(()) => tr!(lang, UrScriptSaved, folder.display()),
+                Err(error) => tr!(lang, FileError, error),
+            });
         }
     }
 
@@ -1443,6 +1584,8 @@ impl eframe::App for GraphCtrlApp {
                 );
             });
         }
+        let mut schedule_request = None;
+        let mut work_request: Option<gc_panels::WorkRequest> = None;
         // The schedule: a bottom panel with the Gantt chart, above the status bar (declared after it).
         if self.schedule_open {
             egui::Panel::bottom("schedule").resizable(true).default_size(150.0).show(ui, |ui| {
@@ -1454,7 +1597,8 @@ impl eframe::App for GraphCtrlApp {
                             self.schedule.stop(&mut self.session);
                         }
                     });
-                    gc_panels::schedule_panel(ui, &mut self.session, lang, &mut self.schedule);
+                    schedule_request =
+                        gc_panels::schedule_panel(ui, &mut self.session, lang, &mut self.schedule);
                 });
             });
         }
@@ -1480,6 +1624,7 @@ impl eframe::App for GraphCtrlApp {
         if self.interference.open {
             self.interference.window(&ctx, &self.session, lang);
         }
+
         if self.bom.open {
             self.bom.window(&ctx, &mut self.session, lang);
             if std::mem::take(&mut self.bom.export)
@@ -1701,7 +1846,8 @@ impl eframe::App for GraphCtrlApp {
                     }
                     // What is selected in the work node has its editor.
                     if self.params.work.selected.is_some() {
-                        gc_panels::work_properties(ui, &mut self.session, lang, &self.params.work);
+                        work_request =
+                            gc_panels::work_properties(ui, &mut self.session, lang, &self.params.work);
                         ui.separator();
                     }
                     gc_panels::properties(ui, &mut self.session, lang, &mut self.expression);
@@ -1714,6 +1860,13 @@ impl eframe::App for GraphCtrlApp {
                 });
             },
         );
+        if let Some(gc_panels::WorkRequest::UrScript(task, robot)) = work_request {
+            self.open_task_script(task, robot, lang);
+        }
+        if let Some(gc_panels::ScheduleRequest::UrScript) = schedule_request {
+            self.open_schedule_scripts(lang);
+        }
+        self.script_window(&ctx, lang);
         // What the marking menu of the view asked for.
         match self.viewport.take_request() {
             Some(gc_viewport::ViewportRequest::Constrain) => self.constrain.start(),

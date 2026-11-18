@@ -1500,6 +1500,9 @@ impl gc_app::FileDialogs for Scripted {
     fn save_csv(&mut self, _: &str) -> Option<std::path::PathBuf> {
         Some(self.0.clone())
     }
+    fn save_script(&mut self, _: &str) -> Option<std::path::PathBuf> {
+        Some(self.0.clone())
+    }
 }
 
 /// "Import Mesh" asks for a file and adds it as a body; a file that cannot be read is reported.
@@ -6739,6 +6742,10 @@ fn the_schedule_panel_plays_the_schedule_and_resets() {
     harness.get_by_label("스케줄 원위치").click();
     harness.run_steps(3);
     assert!(harness.state().session.schedule_playback().is_none(), "the robots are back where they were");
+    // The schedule as one URScript program per robot, with the note that it was not tried.
+    harness.get_by_label("로봇별 URScript 내보내기…").click();
+    harness.run_steps(3);
+    harness.get_by_label("URSim·실제 로봇으로 검증하지 않은 프로그램입니다 — 실행 전에 반드시 확인하십시오.");
 }
 
 /// The task editor's Repeat choice and a robot's park pose (plan 9.4/9.5).
@@ -6798,4 +6805,63 @@ fn a_task_repeats_and_a_robot_gets_a_park_pose() {
     harness.get_by_label("현재 자세로 설정").click();
     harness.run_steps(3);
     assert_eq!(harness.state().session.history().undo_depth(), before + 1);
+}
+
+/// URScript export (plan 9.6): a task's editor offers the program for a robot, shown read-only with a note that
+/// it was not tried on a robot, and saved through the file dialog.
+#[test]
+fn a_task_is_shown_and_saved_as_a_urscript_program() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("task.script");
+    let mut harness =
+        egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0).build_eframe(|cc| {
+            GraphCtrlApp::new(cc, RunOptions::default()).with_dialogs(Box::new(Scripted(path.clone())))
+        });
+    harness.run();
+    harness.get_by_label("로봇").click();
+    harness.run();
+    harness.get_by_label("로봇 추가").click();
+    harness.run();
+    harness.get_by_label("UR5e 로봇").click();
+    harness.run();
+    let robot_name = {
+        let doc = harness.state().session.doc();
+        doc.robots().iter().next().unwrap().1.name.clone()
+    };
+    let task = gc_doc::Task {
+        name: "Nap".into(),
+        location: gc_doc::Location::None,
+        precondition: String::new(),
+        steps: vec![gc_doc::Step::Wait { seconds: 1.5 }],
+        effects: Vec::new(),
+        robots: gc_doc::RobotChoice::Any,
+        priority: 0,
+    };
+    harness.state_mut().session.edit_work(gc_doc::WorkOp::AddTask(task)).unwrap();
+    harness.run_steps(2);
+    let click = |h: &mut egui_kittest::Harness<'_, GraphCtrlApp>, at: egui::Pos2| {
+        h.event(egui::Event::PointerMoved(at));
+        h.run_steps(2);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+        h.run_steps(3);
+    };
+    let at = harness.get_all_by_label("작업").find(|n| n.rect().min.x < 300.0).unwrap().rect().center();
+    click(&mut harness, at);
+    let row =
+        harness.get_all_by_label_contains("Nap").find(|n| n.rect().min.x < 300.0).unwrap().rect().center();
+    click(&mut harness, row);
+    harness.get_by_label(&format!("URScript 내보내기… ({robot_name})")).click();
+    harness.run_steps(3);
+    harness.get_by_label("URSim·실제 로봇으로 검증하지 않은 프로그램입니다 — 실행 전에 반드시 확인하십시오.");
+    harness.get_by_label("이 프로그램 저장…").click();
+    harness.run_steps(3);
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("def ") && text.contains("sleep(1.5"), "{text}");
 }
