@@ -27,6 +27,7 @@ mod role;
 mod schedule;
 mod sketch_pick;
 mod spatial;
+mod urscript;
 mod work;
 
 use std::collections::BTreeSet;
@@ -36,7 +37,7 @@ pub use assembly::{AssemblyReader, Imported, Importer, ShownAssemblyPart};
 pub use bom::{BomRow, BomView, structure_name};
 pub use cell::{
     CellItem, CompareRow, ContactStop, Ghost, LoadedRobot, MeshRef, PADDING, PLANNERS, PlanStatus,
-    PlannedPath, Reference, Resources, Shown, ShownPart, TaskCandidate, TaskPlan,
+    PlannedPath, ProgramStep, Reference, Resources, Shown, ShownPart, TaskCandidate, TaskPlan,
 };
 pub use design::WorkShape;
 pub use gc_collide::{Closest, Interference};
