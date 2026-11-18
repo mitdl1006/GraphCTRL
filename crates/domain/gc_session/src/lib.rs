@@ -20,6 +20,7 @@ mod grip;
 pub mod library;
 mod look;
 mod measure;
+mod physical;
 mod project;
 mod sketch_pick;
 mod spatial;
@@ -44,6 +45,7 @@ pub use look::{LookItem, LookTarget};
 pub use measure::{
     Feature, FeaturePair, InterferenceRow, ItemMeasure, PairMeasure, angle_at, measure_features,
 };
+pub use physical::PhysicalProperties;
 pub use sketch_pick::SketchPick;
 
 /// A dimension that is about to be placed and needs its value from the user.

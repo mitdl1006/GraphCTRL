@@ -12,11 +12,6 @@ use gc_viewport::Viewport;
 
 use crate::ribbon::{self, Tab};
 
-/// The radius Auto-bend uses for the text in the options window: 10 mm when nothing is typed.
-fn bend_radius_text(typed: &str) -> String {
-    if typed.trim().is_empty() { "10 mm".to_owned() } else { typed.trim().to_owned() }
-}
-
 /// Command-line driven options.
 #[derive(Debug, Default, Clone)]
 pub struct RunOptions {
@@ -364,7 +359,7 @@ impl GraphCtrlApp {
         if let Some(settings) = options.settings_dir.as_deref().map(gc_persist::places::load_settings) {
             session.set_autoproject_face_edges(!settings.autoproject_edges_off);
             auto_bend_radius_initial = settings.auto_bend_radius.clone();
-            session.set_auto_bend(settings.auto_bend.then(|| bend_radius_text(&settings.auto_bend_radius)));
+            session.set_auto_bend(settings.auto_bend);
         }
         let saved =
             options.settings_dir.as_deref().map(gc_persist::places::load_settings).unwrap_or_default();
@@ -1015,7 +1010,7 @@ impl GraphCtrlApp {
             opaque_panels: !self.translucent,
             light_theme: !self.dark,
             autoproject_edges_off: !self.session.autoproject_face_edges(),
-            auto_bend: self.session.auto_bend().is_some(),
+            auto_bend: self.session.auto_bend(),
             auto_bend_radius: self.auto_bend_radius.clone(),
             hide_view_cube: !self.viewport.show_view_cube,
             hide_nav_bar: !self.viewport.show_nav_bar,
@@ -1073,10 +1068,10 @@ impl GraphCtrlApp {
             }
             // Auto-bend (Sketch tab, 3D Sketch): off by default; the radius is ours (the help has only the
             // check box).
-            let mut bend = self.session.auto_bend().is_some();
+            let mut bend = self.session.auto_bend();
             ui.horizontal(|ui| {
                 if ui.checkbox(&mut bend, tr!(lang, OptAutoBend)).changed() {
-                    self.session.set_auto_bend(bend.then(|| bend_radius_text(&self.auto_bend_radius)));
+                    self.session.set_auto_bend(bend);
                     changed = true;
                 }
                 ui.add_enabled_ui(bend, |ui| {
@@ -1088,7 +1083,8 @@ impl GraphCtrlApp {
                     });
                     drop(label);
                     if field.changed() || field.lost_focus() {
-                        self.session.set_auto_bend(Some(bend_radius_text(&self.auto_bend_radius)));
+                        // The radius now lives in the document settings (GUID-58DD9A89); this field only keeps the
+                        // typed text until the Document Settings dialog replaces it.
                         changed = true;
                     }
                 });

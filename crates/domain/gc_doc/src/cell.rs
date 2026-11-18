@@ -385,6 +385,18 @@ impl Entity for MotionPath {
 /// An edit of the robot cell.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum CellOp {
+    /// iProperties (iProperties Reference, GUID-8ABF17C5-B9EB-47B5-92CF-9FBD335334E3): replaces those of a
+    /// component, or of the document (`None`). Refused for a component that does not exist or numbers that
+    /// are not valid.
+    SetProperties {
+        /// The component, or `None` for the document.
+        target: Option<crate::design::Occurrence>,
+        /// The new iProperties.
+        properties: crate::iproperties::IProperties,
+    },
+    /// Document Settings (To Change Document Settings, GUID-FB49837F-7832-4713-928E-1CEDBDB0C3BD): replaces
+    /// the settings saved with the document. Refused when they are not valid (`DocSettings::is_valid`).
+    SetDocSettings(crate::settings::DocSettings),
     /// Adds a work plane, axis or point at the rollback marker of the model tree.
     AddWorkFeature(crate::design::WorkFeature),
     /// Replaces a work feature.
@@ -814,6 +826,7 @@ pub(crate) fn set_timeline(
                 .copied()
                 .chain(c.origins_shown.iter().map(|(o, _)| *o))
                 .chain(c.placed_in.iter().map(|(o, _)| *o))
+                .chain(c.properties.iter().map(|(o, _)| *o))
                 .filter(|o| !txn.doc().has_occurrence(*o))
                 .collect()
         })
@@ -850,6 +863,7 @@ pub(crate) fn set_timeline(
             c.contact_set.retain(|o| !gone.contains(o));
             c.dof_shown.retain(|o| !gone.contains(o));
             c.placed_in.retain(|(o, _)| !gone.contains(o));
+            c.properties.retain(|(o, _)| !gone.contains(o));
         }
         t.components.joint_conditions.retain(|id, _| !dropped.contains(id));
         edit(t);
@@ -1196,6 +1210,29 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
                 p.contacts.retain(|c| c.index < waypoints.len());
             })?;
             Ok((Vec::new(), "Edit path"))
+        }
+        CellOp::SetProperties { target, properties } => {
+            if !properties.is_valid() || target.is_some_and(|o| !txn.doc().has_occurrence(o)) {
+                return Err(EditError::BadValue);
+            }
+            let properties = properties.clone();
+            set_timeline(txn, |t| match target {
+                None => t.properties = properties,
+                Some(o) => {
+                    t.components.properties.retain(|(p, _)| p != o);
+                    if !properties.is_empty() {
+                        t.components.properties.push((*o, properties));
+                    }
+                }
+            })?;
+            Ok((Vec::new(), "iProperties"))
+        }
+        CellOp::SetDocSettings(settings) => {
+            if !settings.is_valid() {
+                return Err(EditError::BadValue);
+            }
+            set_timeline(txn, |t| t.settings = *settings)?;
+            Ok((Vec::new(), "Document Settings"))
         }
         CellOp::AddWorkFeature(feature) => {
             work_feature_ok(txn, feature, None)?;
