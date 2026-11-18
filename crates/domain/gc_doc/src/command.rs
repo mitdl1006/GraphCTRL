@@ -123,6 +123,40 @@ impl Motion {
     }
 }
 
+/// The Helical Curve dialog's Definition (To Draw 3D Curves, GUID-37BA1DCE-6BC4-41CD-A36D-577F31B304FC):
+/// which two of pitch, revolutions and height are given; lengths in metres.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum HelixShape {
+    /// "Pitch and Revolution".
+    PitchRevolution {
+        /// The elevation gain for each revolution.
+        pitch: f64,
+        /// Revolutions (more than zero, partial ones allowed).
+        revolutions: f64,
+    },
+    /// "Revolution and Height".
+    RevolutionHeight {
+        /// Revolutions.
+        revolutions: f64,
+        /// Height.
+        height: f64,
+    },
+    /// "Pitch and Height".
+    PitchHeight {
+        /// The elevation gain for each revolution.
+        pitch: f64,
+        /// Height.
+        height: f64,
+    },
+    /// "Spiral": a flat helix whose radius grows by `pitch` each revolution.
+    Spiral {
+        /// The radius gained each revolution.
+        pitch: f64,
+        /// Revolutions.
+        revolutions: f64,
+    },
+}
+
 /// The 2D Chamfer dialog's types; sizes are expressions (millimetres, degrees by default).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ChamferKind {
@@ -461,6 +495,23 @@ pub enum SketchOp {
         lines: [(Id<Curve>, [f64; 2]); 2],
         /// The radius as typed, e.g. `"5 mm"`.
         radius: String,
+    },
+    /// Helical Curve (To Draw 3D Curves, GUID-37BA1DCE-6BC4-41CD-A36D-577F31B304FC): a constant helix in a 3D
+    /// sketch, its axis from `start` towards `end` ("click to define the start point of the curve and then
+    /// click to define the end point"), as an interpolation spline through eight fit points a turn.
+    AddHelix {
+        /// Where the axis starts (the helix starts level with it).
+        start: [f64; 3],
+        /// A point the axis runs towards.
+        end: [f64; 3],
+        /// Diameter, metres.
+        diameter: f64,
+        /// Pitch, revolutions, height.
+        shape: HelixShape,
+        /// Taper angle, radians (not for a spiral): the radius grows by `tan(taper)` per unit of height.
+        taper: f64,
+        /// Right hand (counter-clockwise rising along the axis); left hand otherwise.
+        right_hand: bool,
     },
     /// A 3D line drawn with Auto-Bend on (Sketch tab of Application Options, GUID-1898C432-CFD2-46F1-8BAE-
     /// 631392DFBF1D: "Automatically places tangent corner bends on 3D lines as you sketch them"): the line
@@ -1145,6 +1196,59 @@ fn added<T: Entity>(result: AddResult<T>) -> Result<Id<T>, EditError> {
         AddResult::Redundant(with) => Err(EditError::Redundant(with)),
         AddResult::Conflicting(with) => Err(EditError::Conflicting(with)),
     }
+}
+
+/// The fit points of a helix, eight a turn (at most 4096): `None` for values that make no helix (a
+/// diameter, pitch, height or number of revolutions that is not positive and finite, a zero axis, a taper
+/// that shrinks the radius to nothing).
+fn helix_points(
+    start: [f64; 3],
+    end: [f64; 3],
+    diameter: f64,
+    shape: HelixShape,
+    taper: f64,
+    right_hand: bool,
+) -> Option<Vec<[f64; 3]>> {
+    use gc_math::DVec3;
+    let positive = |v: f64| v.is_finite() && v > 0.0;
+    let (pitch, revolutions, flat) = match shape {
+        HelixShape::PitchRevolution { pitch, revolutions } => (pitch, revolutions, false),
+        HelixShape::RevolutionHeight { revolutions, height } => (height / revolutions, revolutions, false),
+        HelixShape::PitchHeight { pitch, height } => (pitch, height / pitch, false),
+        HelixShape::Spiral { pitch, revolutions } => (pitch, revolutions, true),
+    };
+    if !(positive(diameter) && positive(pitch) && positive(revolutions) && taper.is_finite()) {
+        return None;
+    }
+    let axis = (DVec3::from_array(end) - DVec3::from_array(start)).try_normalize()?;
+    let x = axis.any_orthonormal_vector();
+    let y = if right_hand { axis.cross(x) } else { x.cross(axis) };
+    const PER_TURN: f64 = 8.0;
+    let steps = (revolutions * PER_TURN).ceil();
+    if steps > 4096.0 {
+        return None;
+    }
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "at most 4096 steps")]
+    let steps = (steps as u32).max(2);
+    let r0 = diameter / 2.0;
+    let mut out = Vec::with_capacity(steps as usize + 1);
+    for k in 0..=steps {
+        let turns = revolutions * f64::from(k) / f64::from(steps);
+        let angle = turns * std::f64::consts::TAU;
+        let (rise, radius) = if flat {
+            (0.0, r0 + pitch * turns)
+        } else {
+            let rise = pitch * turns;
+            (rise, r0 + rise * gc_math::fm::tan(taper))
+        };
+        if !positive(radius) {
+            return None;
+        }
+        let (sin, cos) = gc_math::fm::sin_cos(angle);
+        let p = DVec3::from_array(start) + axis * rise + (x * cos + y * sin) * radius;
+        out.push(p.to_array());
+    }
+    Some(out)
 }
 
 /// Adds a constraint that was inferred from how something was drawn; dropped unless it is accepted.
@@ -2929,6 +3033,15 @@ fn sketch_op(
         SketchOp::Extend { curve, at } => {
             push_cut(&mut created, &sketch.extend(ids, *curve, *at)?);
             "Extend"
+        }
+        SketchOp::AddHelix { start, end, diameter, shape, taper, right_hand } => {
+            if !sketch.is_spatial() {
+                return Err(SketchError::WrongSpace.into());
+            }
+            let points = helix_points(*start, *end, *diameter, *shape, *taper, *right_hand)
+                .ok_or(SketchError::InvalidValue)?;
+            created.push(Created::Curve(sketch.add_spline(ids, &points)?));
+            "Helical Curve"
         }
         SketchOp::AddLineBent { line, previous, radius } => {
             let SketchOp::AddLine { .. } = **line else { return Err(SketchError::InvalidValue.into()) };

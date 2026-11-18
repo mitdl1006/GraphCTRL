@@ -38,7 +38,7 @@ fn windows_target_installed() -> bool {
 }
 
 /// Everything a commit must pass, in the order the project rules prescribe.
-pub fn gate(root: &Path) -> Result<()> {
+pub fn gate(root: &Path, skip_gpu: bool) -> Result<()> {
     cargo_step(root, "fmt", ["fmt", "--all", "--check"])?;
     cargo_step(root, "check", ["check", "--workspace", "--all-targets", "--locked"])?;
     let clippy = ["clippy", "--workspace", "--all-targets", "--locked"];
@@ -52,7 +52,11 @@ pub fn gate(root: &Path) -> Result<()> {
         bail!("the {WINDOWS_TARGET} target is not installed; run `rustup target add {WINDOWS_TARGET}`");
     }
     cargo_step(root, "test", ["test", "--workspace", "--locked"])?;
-    test_gpu(root)?;
+    if skip_gpu {
+        println!("\n== test-gpu: skipped (--skip-gpu); run `cargo xtask test-gpu` before updating main");
+    } else {
+        test_gpu(root)?;
+    }
     println!("\n== check-layers");
     layers::check(root)?;
     println!("\n== check-licences");
