@@ -157,6 +157,10 @@ pub struct Viewport {
     /// The ground plane (the floor grid) is shown; a sketch's own grid stays (View tab, Appearance panel;
     /// on and off are session-based).
     pub show_ground: bool,
+    /// The ViewCube is shown (View tab, Windows panel, User Interface); the navigation bar keeps its own.
+    pub show_view_cube: bool,
+    /// The navigation bar is shown.
+    pub show_nav_bar: bool,
     /// Object Visibility (View tab, Visibility panel).
     pub visibility: ObjectVisibility,
     /// A selection box being dragged in a sketch: where the mouse went down.
@@ -420,6 +424,8 @@ impl Viewport {
             show_constraints: true,
             style: VisualStyle::default(),
             show_ground: true,
+            show_view_cube: true,
+            show_nav_bar: true,
             visibility: ObjectVisibility::default(),
             box_select: None,
             frame_time: 0.0,
@@ -852,8 +858,14 @@ impl Viewport {
         } else {
             self.hud.cancel();
         }
-        self.view_cube(ui, rect, lang);
-        self.nav_bar(ui, rect, session, lang);
+        if self.show_view_cube {
+            self.view_cube(ui, rect, lang);
+        } else {
+            self.cube_centre = None;
+        }
+        if self.show_nav_bar {
+            self.nav_bar(ui, rect, session, lang);
+        }
         if self.perf_overlay {
             self.perf(ui, rect, lang);
         }

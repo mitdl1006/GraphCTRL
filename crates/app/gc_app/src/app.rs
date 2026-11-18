@@ -304,6 +304,10 @@ pub struct GraphCtrlApp {
     right_width: f32,
     left_open: bool,
     right_open: bool,
+    /// The status bar is shown (View tab, Windows panel, User Interface).
+    show_status: bool,
+    /// Clean Screen is on: the ribbon and the browser are away; the browser's state before it.
+    clean_screen: Option<bool>,
     /// Whether the about window is open.
     about: bool,
     /// The pose calculator, when its window is open.
@@ -362,11 +366,16 @@ impl GraphCtrlApp {
             auto_bend_radius_initial = settings.auto_bend_radius.clone();
             session.set_auto_bend(settings.auto_bend.then(|| bend_radius_text(&settings.auto_bend_radius)));
         }
+        let saved =
+            options.settings_dir.as_deref().map(gc_persist::places::load_settings).unwrap_or_default();
+        let mut viewport = Viewport::new(cc.wgpu_render_state.clone());
+        viewport.show_view_cube = !saved.hide_view_cube;
+        viewport.show_nav_bar = !saved.hide_nav_bar;
         Self {
             options,
             frames: 0,
             session,
-            viewport: Viewport::new(cc.wgpu_render_state.clone()),
+            viewport,
             lang,
             tab: Tab::Model,
             cell: gc_panels::CellUi::default(),
@@ -402,8 +411,10 @@ impl GraphCtrlApp {
             was_sketching: false,
             left_width: 210.0,
             right_width: 330.0,
-            left_open: true,
-            right_open: true,
+            left_open: !saved.browser_closed,
+            right_open: !saved.properties_closed,
+            show_status: !saved.hide_status_bar,
+            clean_screen: None,
             about: false,
             pose_calc: None,
             dialogs: Box::new(NativeDialogs),
@@ -533,6 +544,19 @@ impl GraphCtrlApp {
                 false
             }
         }
+    }
+
+    /// Clean Screen (Inventor 2026 help, To Work with Graphics Windows, GUID-84B053B0-E83B-4D9C-8436-
+    /// 1BE9AD5E9EBE: hides the browser and the ribbon; again brings them back as they were).
+    fn toggle_clean_screen(&mut self) {
+        match self.clean_screen.take() {
+            Some(browser_was_open) => self.left_open = browser_was_open,
+            None => {
+                self.clean_screen = Some(self.left_open);
+                self.left_open = false;
+            }
+        }
+        self.save_settings();
     }
 
     /// Puts a project first in the recent list.
@@ -756,6 +780,9 @@ impl GraphCtrlApp {
                 egui::Key::S if command => {
                     self.save(modifiers.shift);
                 }
+                // Ctrl+0 leaves Clean Screen (GUID-5ED57F9B-6FA8-440B-94F3-0B92CACBE295: "press Ctrl 0 (zero) to
+                // switch from Clean Screen display"); it also switches it on.
+                egui::Key::Num0 if command => self.toggle_clean_screen(),
                 egui::Key::N if command => self.request(Pending::New, ctx),
                 egui::Key::O if command => self.request(Pending::Open, ctx),
                 egui::Key::Y if command => {
@@ -990,6 +1017,11 @@ impl GraphCtrlApp {
             autoproject_edges_off: !self.session.autoproject_face_edges(),
             auto_bend: self.session.auto_bend().is_some(),
             auto_bend_radius: self.auto_bend_radius.clone(),
+            hide_view_cube: !self.viewport.show_view_cube,
+            hide_nav_bar: !self.viewport.show_nav_bar,
+            hide_status_bar: !self.show_status,
+            browser_closed: !self.clean_screen.unwrap_or(self.left_open),
+            properties_closed: !self.right_open,
             ..Default::default()
         };
         if let Err(error) = gc_persist::places::save_settings(dir, &settings) {
@@ -1187,19 +1219,31 @@ impl eframe::App for GraphCtrlApp {
         egui::Panel::top("menu").show(ui, |ui| self.menu(ui));
         let looks = (self.translucent, self.dark);
         let mut ribbon_action = None;
-        egui::Panel::top("ribbon").show(ui, |ui| {
-            ribbon_action = ribbon::show(
-                ui,
-                &mut self.tab,
-                &mut self.session,
-                &mut self.viewport,
-                &mut self.cell,
-                &self.library,
-                &mut self.translucent,
-                &mut self.dark,
-                lang,
-            );
-        });
+        let interface = ribbon::Interface {
+            view_cube: self.viewport.show_view_cube,
+            nav_bar: self.viewport.show_nav_bar,
+            browser: self.left_open,
+            properties: self.right_open,
+            status_bar: self.show_status,
+            clean_screen: self.clean_screen.is_some(),
+        };
+        // Clean Screen hides the ribbon.
+        if self.clean_screen.is_none() {
+            egui::Panel::top("ribbon").show(ui, |ui| {
+                ribbon_action = ribbon::show(
+                    ui,
+                    &mut self.tab,
+                    &mut self.session,
+                    &mut self.viewport,
+                    &mut self.cell,
+                    &self.library,
+                    &mut self.translucent,
+                    &mut self.dark,
+                    interface,
+                    lang,
+                );
+            });
+        }
         if looks != (self.translucent, self.dark) {
             if looks.1 != self.dark {
                 gc_ui::install_theme(&ctx, self.dark);
@@ -1222,6 +1266,17 @@ impl eframe::App for GraphCtrlApp {
                     _ => self.drive.start(&mut self.session),
                 }
             }
+            Some(ribbon::RibbonAction::SetInterface(element, on)) => {
+                match element {
+                    ribbon::InterfaceElement::ViewCube => self.viewport.show_view_cube = on,
+                    ribbon::InterfaceElement::NavBar => self.viewport.show_nav_bar = on,
+                    ribbon::InterfaceElement::Browser => self.left_open = on,
+                    ribbon::InterfaceElement::Properties => self.right_open = on,
+                    ribbon::InterfaceElement::StatusBar => self.show_status = on,
+                }
+                self.save_settings();
+            }
+            Some(ribbon::RibbonAction::CleanScreen) => self.toggle_clean_screen(),
             Some(ribbon::RibbonAction::StartConstrain) => self.constrain.start(),
             Some(ribbon::RibbonAction::StartAssemble) => self.assemble.start(),
             Some(ribbon::RibbonAction::StartWorkFeature(category)) => self.work_feature.start(category),
@@ -1316,17 +1371,19 @@ impl eframe::App for GraphCtrlApp {
                 }
             }
         }
-        egui::Panel::bottom("status").show(ui, |ui| {
-            gc_panels::status_bar(
-                ui,
-                &self.session,
-                lang,
-                self.viewport.background().has_gpu(),
-                self.notice.as_deref(),
-                (self.session.active_sketch().is_some() && !self.session.sketch_is_spatial())
-                    .then_some(&mut self.viewport.slice),
-            );
-        });
+        if self.show_status {
+            egui::Panel::bottom("status").show(ui, |ui| {
+                gc_panels::status_bar(
+                    ui,
+                    &self.session,
+                    lang,
+                    self.viewport.background().has_gpu(),
+                    self.notice.as_deref(),
+                    (self.session.active_sketch().is_some() && !self.session.sketch_is_spatial())
+                        .then_some(&mut self.viewport.slice),
+                );
+            });
+        }
         // The 3D view fills the window; the browser and the properties float over it, see-through, and
         // the view's own overlays keep to what they leave free.
         let stage = ui.available_rect_before_wrap();

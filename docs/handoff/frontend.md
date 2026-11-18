@@ -296,6 +296,14 @@
 - 점선은 화면 대각선 4 px 켜짐/4 px 꺼짐(fs_edge_hidden의 discard), 투명도 0.55. 원문에는 점선 규격이 없다.
 - 테스트: `gc_render` GPU `hidden_edges_and_depth_only_solids`(큐브 뒤 모서리: 기본 안 보임, 숨은 모서리 점선, 깊이 전용에서 큐브 색 없음·모서리는 여전히 가려짐), 셸 `the_visual_style_drop_down_…`에 새 스타일 선택 추가.
 
+### 뷰 탭 창(Windows) 패널: 사용자 인터페이스 드롭다운, Clean Screen
+
+- 근거: Inventor 2026 도움말 GUID-285B9036-0E97-4F18-A6D2-EF78B8B8FAA9 (ViewCube Menu Reference: "View tab > Windows pane > User Interface > ViewCube", 끄면 탐색 막대에서 계속 사용), GUID-84B053B0-E83B-4D9C-8436-1BE9AD5E9EBE (To Work with Graphics Windows: Clean Screen은 View 탭 Windows 패널, 브라우저와 리본을 숨김). Ctrl+0은 구판 GUID-5ED57F9B-6FA8-440B-94F3-0B92CACBE295(Increase Screen Space)에서 확인한 것이라 2026 쪽 문서로는 못 찾음.
+- 사용자 인터페이스 드롭리스트: 뷰큐브·탐색 막대·브라우저·속성·상태 표시줄 체크(`ribbon_drop_button`). 켜고 끄는 즉시 설정 파일(`hide_view_cube`, `hide_nav_bar`, `hide_status_bar`, `browser_closed`, `properties_closed`)에 저장되고 다음 실행에서 복원.
+- Clean Screen: 외형 아래 스택의 한 줄(1280 px 안에 들어가게). 리본을 없애고 브라우저를 접으며, 다시 누르거나 Ctrl+0이면 이전 상태로 복원. 저장되지 않는다(세션 단위). 원문의 "Inventor 창 최대화"·"패널 최소화 상태 복원"은 해당 없음.
+- 원문에서 확인 못 한 것: 2026 드롭다운의 전체 항목 목록(확인한 것은 ViewCube, 탐색 막대). 브라우저·속성·상태 표시줄은 앱에 있는 요소를 기준으로 붙였다.
+- 테스트: `the_user_interface_list_hides_elements_and_clean_screen_toggles_with_ctrl_0`; shell 108개 통과(1280 px 폭 검사 포함).
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹
