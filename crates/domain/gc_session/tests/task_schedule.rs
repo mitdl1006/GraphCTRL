@@ -181,11 +181,12 @@ fn ready_tasks_go_to_the_idle_robot_that_finishes_soonest_and_effects_ready_the_
     let touch = add(&mut s, task("Touch right", roles[1]));
     let never = add(&mut s, Task { precondition: "B.state == done".into(), ..task("Never", roles[0]) });
 
-    // The bids for the first task, from where the robots stand.
-    let bids = s.task_candidates(fasten);
-    let (first, other) = (bids[0].robot, if bids[0].robot == left { right } else { left });
     let revision = s.doc().revision();
     let schedule = s.schedule();
+    // Whichever robot bid lower got the first task (each bid is planned with the other robot standing
+    // where it is).
+    let first = schedule.assignments[0].robot;
+    let other = if first == left { right } else { left };
     assert_eq!(s.doc().revision(), revision, "nothing is run or edited");
     assert_eq!(schedule, s.schedule(), "the same every time");
     let of = |task: Id<Task>| schedule.assignments.iter().find(|x| x.task == task).unwrap();
@@ -195,7 +196,6 @@ fn ready_tasks_go_to_the_idle_robot_that_finishes_soonest_and_effects_ready_the_
     assert_eq!(schedule.assignments[0].task, fasten);
     assert_eq!((of(fasten).robot, of(fasten).start), (first, 0.0));
     assert_eq!((of(touch).robot, of(touch).start), (other, 0.0));
-    assert_eq!(of(fasten).end, *bids[0].time.as_ref().unwrap());
     assert!(of(fasten).end - of(fasten).start > 2.0, "the wait is part of it");
     // Inspect starts when Fasten ends (its effect), with a robot that is idle then.
     assert_eq!(of(inspect).start, of(fasten).end);
@@ -293,4 +293,45 @@ fn a_schedule_is_played_back_with_every_robot_where_it_is_at_that_moment() {
     assert_eq!(s.doc().revision(), revision);
     s.set_schedule_playback(None);
     assert_eq!(s.robot_joints(left), Some(home));
+}
+
+#[test]
+fn robots_keep_clear_of_each_other_and_the_one_in_the_way_is_waited_for() {
+    let Cell { mut s, left, right, sketch, points, roles } = cell();
+    // Both robots are to touch the same point, between them.
+    let between = SketchOp::SetCoords { points: vec![(points[0], [0.35, 0.5, 0.0])], radii: Vec::new() };
+    s.execute(&Command::Sketch { sketch, op: between }).unwrap();
+    let only = |name: &str, robot: Id<Robot>, priority: i32| Task {
+        robots: RobotChoice::Only(vec![robot]),
+        priority,
+        ..task(name, roles[0])
+    };
+    let first = add(&mut s, only("Left touches", left, 2));
+    let second = add(&mut s, only("Right touches", right, 1));
+    // On their own, each can.
+    assert!(s.task_plan(first, left).is_ok() && s.task_plan(second, right).is_ok());
+
+    // Left goes first and then stands on the point: right can never get there.
+    let schedule = s.schedule();
+    assert_eq!(schedule.assignments.len(), 1);
+    assert_eq!((schedule.assignments[0].task, schedule.assignments[0].robot), (first, left));
+    assert_eq!(schedule.blocked.len(), 1);
+    assert_eq!(schedule.blocked[0].0, second);
+
+    // With a task that takes left back to where it started, right waits for it and then goes.
+    let home = s.add_waypoint_here(left).unwrap();
+    let away = add(
+        &mut s,
+        Task {
+            location: Location::Robot(left),
+            steps: vec![Step::MoveJ(MoveTarget::Waypoint(home))],
+            ..task("Left away", roles[0])
+        },
+    );
+    let schedule = s.schedule();
+    assert!(schedule.blocked.is_empty(), "{:?}", schedule.blocked);
+    let of = |task: Id<Task>| schedule.assignments.iter().find(|x| x.task == task).unwrap();
+    assert_eq!((of(first).start, of(away).start), (0.0, of(first).end));
+    assert_eq!(of(second).start, of(away).end, "right starts when left is out of the way");
+    assert_eq!(of(second).robot, right);
 }
