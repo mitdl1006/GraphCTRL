@@ -92,3 +92,44 @@ fn a_bend_is_refused_where_it_cannot_fit() {
     let b = line(&mut s, flat, [0.1, 0.0, 0.0], [0.1, 0.1, 0.0]);
     assert!(run(&mut s, flat, SketchOp::Bend { lines: [a, b], radius: "5 mm".into() }).is_err());
 }
+
+/// Auto-Bend (Sketch tab of Application Options, GUID-1898C432-CFD2-46F1-8BAE-631392DFBF1D: "Automatically
+/// places tangent corner bends on 3D lines as you sketch them. Default setting is off"): each corner of a
+/// chain of 3D lines gets a bend of the document's radius, the line and its bend one undo step.
+#[test]
+fn auto_bend_places_a_bend_at_each_corner_as_lines_are_drawn() {
+    use gc_tools::ToolKind;
+    let mut s = Session::new();
+    let _k = s.create_sketch_3d().unwrap();
+    assert_eq!(s.auto_bend(), None, "off by default");
+    s.set_auto_bend(Some("10 mm".into()));
+    s.set_tool(ToolKind::Line);
+    s.spatial_click([0.0, 0.0, 0.0], None, None);
+    s.spatial_click([0.1, 0.0, 0.0], None, None);
+    let steps = s.history().undo_depth();
+    s.spatial_click([0.1, 0.1, 0.05], None, None);
+    assert_eq!(s.history().undo_depth(), steps + 1, "line and bend: one step");
+    s.spatial_click([0.2, 0.1, 0.05], None, None);
+    let arcs = |s: &Session| {
+        s.active_sketch()
+            .unwrap()
+            .1
+            .curves
+            .values()
+            .filter(|c| matches!(c.geom, CurveGeom::Arc { .. }))
+            .count()
+    };
+    assert_eq!(arcs(&s), 2);
+    let sk = s.active_sketch().unwrap().1;
+    for (_, c) in sk.curves.iter().filter(|(_, c)| matches!(c.geom, CurveGeom::Arc { .. })) {
+        let CurveGeom::Arc { c, s: start, .. } = c.geom.clone() else { panic!() };
+        assert!((len(sub(sk.pos(start).unwrap(), sk.pos(c).unwrap())) - 0.01).abs() < 1e-9);
+    }
+    // A corner too tight for the radius keeps the line without a bend.
+    s.spatial_click([0.2, 0.105, 0.05], None, None);
+    assert_eq!(arcs(&s), 2);
+    // Off again: plain corners.
+    s.set_auto_bend(None);
+    s.spatial_click([0.3, 0.2, 0.1], None, None);
+    assert_eq!(arcs(&s), 2);
+}
