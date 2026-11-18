@@ -185,6 +185,8 @@ impl Session {
 
     fn replace_document(&mut self, doc: Document, path: Option<PathBuf>) {
         self.recovered = false;
+        // What an earlier open dropped belongs to that document.
+        self.load_warnings.clear();
         self.saved_revision = doc.revision();
         self.doc = doc;
         self.path = path;
@@ -272,6 +274,7 @@ impl Session {
     pub fn open_recovered(&mut self, autosave: &Path, project: Option<&Path>) -> Result<(), PersistError> {
         let loaded = gc_persist::load(autosave)?;
         self.replace_document(loaded.doc, project.map(Path::to_path_buf));
+        self.load_warnings = loaded.warnings;
         self.recovered = true;
         Ok(())
     }

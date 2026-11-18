@@ -590,7 +590,6 @@ fn load_warnings_describe_what_was_dropped_and_do_not_outlive_the_file() {
 /// Starting a new document, and taking up an autosave, are other documents: the warnings of the project
 /// opened before must not carry over, and the warnings of the autosave itself must be reported.
 #[test]
-#[ignore = "BUG: new_document and open_recovered leave load_warnings as the previous open left them (open_recovered also never reports what its own file dropped) (owner: backend, gc_session lib.rs)"]
 fn load_warnings_belong_to_the_document_that_was_opened() {
     let dir = tempfile::tempdir().unwrap();
     let bad = damaged_project(dir.path(), "bad.gcp", -0.123);

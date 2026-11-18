@@ -423,6 +423,8 @@ pub struct Tool {
     offset_loop: bool,
     offset_constrain: bool,
     offset_pick: Option<Id<Curve>>,
+    /// Where the offset's curve was picked (an ellipse picked between quadrants offsets to a spline).
+    offset_at: Option<[f64; 2]>,
     offset_measured: f64,
     /// Arc slot: the third click.
     slot_third: Option<[f64; 2]>,
@@ -679,6 +681,7 @@ impl Tool {
             offset_loop: true,
             offset_constrain: true,
             offset_pick: None,
+            offset_at: None,
             offset_measured: 0.0,
             slot_third: None,
             tangent_lines: Vec::new(),

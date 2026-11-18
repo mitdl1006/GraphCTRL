@@ -526,7 +526,13 @@ fn offset_takes_whole_loops_and_keeps_one_distance() {
     let sides = rectangle(&mut bench);
     let dof = bench.dof();
     let created = bench
-        .op(SketchOp::Offset { curves: vec![sides[0]], distance: 0.01, loop_select: true, constrain: true })
+        .op(SketchOp::Offset {
+            curves: vec![sides[0]],
+            distance: 0.01,
+            loop_select: true,
+            constrain: true,
+            picked: None,
+        })
         .unwrap();
     let made: Vec<Id<Curve>> =
         Bench::curves(&created).into_iter().filter(|c| !bench.sketch().curves[c].construction).collect();
@@ -552,7 +558,13 @@ fn offset_takes_whole_loops_and_keeps_one_distance() {
     );
     // A negative distance goes inside.
     let created = bench
-        .op(SketchOp::Offset { curves: vec![sides[1]], distance: -0.02, loop_select: true, constrain: true })
+        .op(SketchOp::Offset {
+            curves: vec![sides[1]],
+            distance: -0.02,
+            loop_select: true,
+            constrain: true,
+            picked: None,
+        })
         .unwrap();
     let inner: Vec<[f64; 3]> = Bench::curves(&created)
         .into_iter()
@@ -569,12 +581,24 @@ fn offset_takes_whole_loops_and_keeps_one_distance() {
     let sides = rectangle(&mut bench);
     let dof = bench.dof();
     bench
-        .op(SketchOp::Offset { curves: vec![sides[0]], distance: 0.01, loop_select: true, constrain: false })
+        .op(SketchOp::Offset {
+            curves: vec![sides[0]],
+            distance: 0.01,
+            loop_select: true,
+            constrain: false,
+            picked: None,
+        })
         .unwrap();
     assert_eq!(bench.dof(), dof + 4);
     // Loop Select off: only the picked side.
     let created = bench
-        .op(SketchOp::Offset { curves: vec![sides[0]], distance: 0.01, loop_select: false, constrain: true })
+        .op(SketchOp::Offset {
+            curves: vec![sides[0]],
+            distance: 0.01,
+            loop_select: false,
+            constrain: true,
+            picked: None,
+        })
         .unwrap();
     assert_eq!(
         Bench::curves(&created).into_iter().filter(|c| !bench.sketch().curves[c].construction).count(),
@@ -595,7 +619,13 @@ fn offset_takes_whole_loops_and_keeps_one_distance() {
     );
     let dof = bench.dof();
     let created = bench
-        .op(SketchOp::Offset { curves: vec![slot[0]], distance: 0.01, loop_select: true, constrain: true })
+        .op(SketchOp::Offset {
+            curves: vec![slot[0]],
+            distance: 0.01,
+            loop_select: true,
+            constrain: true,
+            picked: None,
+        })
         .unwrap();
     assert_eq!(bench.dof(), dof + 1, "slot offset: its distance");
     let arcs: Vec<f64> =
@@ -613,7 +643,13 @@ fn offset_takes_whole_loops_and_keeps_one_distance() {
             .unwrap(),
     )[0];
     let created = bench
-        .op(SketchOp::Offset { curves: vec![circle], distance: 0.02, loop_select: true, constrain: true })
+        .op(SketchOp::Offset {
+            curves: vec![circle],
+            distance: 0.02,
+            loop_select: true,
+            constrain: true,
+            picked: None,
+        })
         .unwrap();
     let r =
         Bench::curves(&created).into_iter().find_map(|c| bench.sketch().round(c).map(|(_, r)| r)).unwrap();
@@ -621,12 +657,24 @@ fn offset_takes_whole_loops_and_keeps_one_distance() {
     // Refused: nothing, no distance, a circle offset to nothing.
     assert!(
         bench
-            .op(SketchOp::Offset { curves: vec![], distance: 0.01, loop_select: true, constrain: true })
+            .op(SketchOp::Offset {
+                curves: vec![],
+                distance: 0.01,
+                loop_select: true,
+                constrain: true,
+                picked: None
+            })
             .is_err()
     );
     assert!(
         bench
-            .op(SketchOp::Offset { curves: vec![circle], distance: 0.0, loop_select: true, constrain: true })
+            .op(SketchOp::Offset {
+                curves: vec![circle],
+                distance: 0.0,
+                loop_select: true,
+                constrain: true,
+                picked: None
+            })
             .is_err()
     );
     assert!(
@@ -635,7 +683,8 @@ fn offset_takes_whole_loops_and_keeps_one_distance() {
                 curves: vec![circle],
                 distance: -0.06,
                 loop_select: true,
-                constrain: true
+                constrain: true,
+                picked: None
             })
             .is_err()
     );
