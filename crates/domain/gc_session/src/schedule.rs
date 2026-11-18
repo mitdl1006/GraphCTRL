@@ -44,6 +44,9 @@ pub struct Schedule {
     pub plans: Vec<crate::TaskPlan>,
     /// Tasks that had to wait for a moving robot to be out of the way before they could start.
     pub waits: Vec<Wait>,
+    /// The signals the cell drives as they are set: when, which and to what, in the order the tasks that
+    /// set them were started.
+    pub signals: Vec<(f64, String, bool)>,
     /// Moves that take an idle robot to its park pose because it stood in the way of a task that was
     /// ready (`gc_doc::WorkOp::SetRobotPark`; without a park pose, where the document has the robot).
     pub parks: Vec<ParkMove>,
@@ -162,7 +165,40 @@ fn crosses(
 }
 
 /// A tool's state after a task's tool actions, and the states they leave their objects in.
-type ToolOutcome = (Option<String>, Vec<(String, String)>);
+type ToolOutcome = (Option<String>, Vec<(usize, String, String)>);
+
+/// A task laid out in time for a robot: the plan, the state its tool ends in, and what it changes when.
+type Fitted = (crate::TaskPlan, Option<String>, Vec<(f64, Change)>);
+
+/// Something that changes at a moment of the schedule.
+#[derive(Clone, Debug, PartialEq)]
+enum Change {
+    /// A signal the cell drives is set.
+    Signal(String, bool),
+    /// An object gets a state.
+    Object(String, String),
+}
+
+/// When, from `begin` on, a driven signal has `value`: now, or when a change already on its way sets
+/// it. `None` when nothing on its way does.
+fn signal_at(world: &World, coming: &[(f64, Change)], name: &str, value: bool, begin: f64) -> Option<f64> {
+    let mut changes: Vec<(f64, bool)> = coming
+        .iter()
+        .filter_map(|(at, change)| match change {
+            Change::Signal(n, v) if n == name => Some((*at, *v)),
+            _ => None,
+        })
+        .collect();
+    changes.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut current = world.signals.get(name).copied().unwrap_or(false);
+    for (_, v) in changes.iter().filter(|(at, _)| *at <= begin) {
+        current = *v;
+    }
+    if current == value {
+        return Some(begin);
+    }
+    changes.iter().find(|(at, v)| *at > begin && *v == value).map(|(at, _)| *at)
+}
 
 /// The states as the schedule goes along.
 struct World {
@@ -266,13 +302,16 @@ impl Planning<'_> {
             .iter()
             .map(|(id, _)| (id, doc.robot_tool_kit(id).and_then(|(_, state)| state)))
             .collect();
-        let mut changes: BTreeMap<Id<Task>, Vec<(String, String)>> = BTreeMap::new();
+        // What is on its way: changes at the ends of steps of tasks that have started.
+        let mut timed: Vec<(f64, Change)> = Vec::new();
         // How often each task has been done, and since when (and for whom) a ready task has been waiting.
         let mut done: BTreeMap<Id<Task>, u32> = BTreeMap::new();
         let mut waiting: BTreeMap<Id<Task>, (f64, Id<Robot>)> = BTreeMap::new();
         // Where robots have already been sent away from: each place once.
         let mut moved_away: std::collections::BTreeSet<(Id<Robot>, Vec<u64>)> =
             std::collections::BTreeSet::new();
+        // The idle robots found standing in the way of a ready task since the last look.
+        let mut blockers: std::collections::BTreeSet<Id<Robot>> = std::collections::BTreeSet::new();
         let mut running: Vec<Assignment> = Vec::new();
         let mut out = Schedule::default();
         let mut reasons: BTreeMap<Id<Task>, String> = BTreeMap::new();
@@ -281,6 +320,7 @@ impl Planning<'_> {
             if self.control.cancelled() || out.cut_short {
                 break;
             }
+            blockers.clear();
             let mut index = 0;
             while index < pending.len() {
                 let id = pending[index];
@@ -293,26 +333,12 @@ impl Planning<'_> {
                     index += 1;
                     continue;
                 }
-                // A wait for a signal the cell drives: a task that sets it must have ended (a wait for any
-                // other signal is taken to be answered).
-                let unmet = task.steps.iter().find_map(|step| match step {
-                    gc_doc::Step::WaitIo { condition, .. } => {
-                        let (name, value) = gc_doc::signal_condition(condition)?;
-                        world.signals.get(&name).is_some_and(|now| *now != value).then_some(name)
-                    }
-                    _ => None,
-                });
-                if let Some(name) = unmet {
-                    reasons.insert(id, format!("it waits for the signal `{name}`"));
-                    index += 1;
-                    continue;
-                }
                 let allowed = self.task_robots_in(id, &world);
                 if allowed.is_empty() {
                     reasons.insert(id, "no robot may do it".to_owned());
                 }
                 // The idle robot that would finish soonest; the first of equals.
-                let mut best: Option<(crate::TaskPlan, ToolOutcome)> = None;
+                let mut best: Option<Fitted> = None;
                 for robot in allowed {
                     let Some((joints, free_at)) = robots.get(&robot) else { continue };
                     if *free_at > now {
@@ -327,62 +353,106 @@ impl Planning<'_> {
                         .collect();
                     let key =
                         (id, robot, bits(joints), parked.iter().map(|(o, at)| (*o, bits(at))).collect());
-                    let bid = bids.entry(key).or_insert_with(|| {
-                        let others: Vec<gc_motion::Obstacle> = parked
-                            .iter()
-                            .filter_map(|(other, at)| {
-                                let name = doc.get(*other).map(|r| r.name.clone())?;
-                                Some(scenes.get(other)?.as_obstacles(at, &name))
-                            })
-                            .flatten()
-                            .collect();
-                        self.task_plan_among(id, robot, joints, &others)
-                    });
-                    // The robots that are moving must be clear of this motion all the way.
-                    if let Ok(plan) = bid.as_ref() {
-                        let moving: Vec<Id<Robot>> = robots
-                            .iter()
-                            .filter(|(other, (_, free))| **other != robot && *free > now)
-                            .map(|(other, _)| *other)
-                            .collect();
-                        if let Some(other) = moving.into_iter().find(|other| {
-                            let at = |time: f64| out.joints_at(*other, time);
-                            crosses(scenes.get(&robot), plan, now, scenes.get(other), &at)
-                        }) {
-                            let name = doc.get(other).map(|r| r.name.clone()).unwrap_or_default();
-                            reasons.insert(id, format!("it waits for {name} to be out of the way"));
-                            waiting.entry(id).or_insert((now, other));
+                    let standing: Vec<gc_motion::Obstacle> = parked
+                        .iter()
+                        .filter_map(|(other, at)| {
+                            let name = doc.get(*other).map(|r| r.name.clone())?;
+                            Some(scenes.get(other)?.as_obstacles(at, &name))
+                        })
+                        .flatten()
+                        .collect();
+                    let bid: Bid = bids
+                        .entry(key)
+                        .or_insert_with(|| self.task_plan_among(id, robot, joints, &standing))
+                        .clone();
+                    let plan = match bid {
+                        Ok(plan) => plan,
+                        Err(why) => {
+                            // A robot standing in the way of this task is one to send away if nothing
+                            // else helps.
+                            blockers.extend(parked.iter().map(|(other, _)| *other).filter(|other| {
+                                doc.get(*other)
+                                    .is_some_and(|r| why.contains(&format!("collides with `{}`", r.name)))
+                            }));
+                            reasons.insert(id, why);
                             continue;
                         }
-                    }
+                    };
                     // Its tool must be in a state to do the task's tool actions.
                     let tool = tools.get(&robot).cloned().flatten();
-                    let outcome = match self.tool_outcome(task, robot, &world, tool) {
+                    let (tool, objects) = match self.tool_outcome(task, robot, &world, tool) {
                         Ok(outcome) => outcome,
                         Err(why) => {
                             reasons.insert(id, why);
                             continue;
                         }
                     };
-                    match bid {
-                        Ok(plan) if best.as_ref().is_none_or(|(b, _)| plan.duration() < b.duration()) => {
-                            best = Some((plan.clone(), outcome));
+                    // Laid out in time: the signals it waits for must be set or on their way.
+                    let (mut plan, mut events) =
+                        match self.timeline(task, plan, now, &world, &timed, &objects) {
+                            Ok(fitted) => fitted,
+                            Err(why) => {
+                                reasons.insert(id, why);
+                                continue;
+                            }
+                        };
+                    // The robots that are moving must be clear of this motion all the way.
+                    let moving: Vec<(Id<Robot>, f64)> = robots
+                        .iter()
+                        .filter(|(other, (_, free))| **other != robot && *free > now)
+                        .map(|(other, (_, free))| (*other, *free))
+                        .collect();
+                    let crossing = |plan: &crate::TaskPlan| {
+                        moving.iter().copied().find(|(other, _)| {
+                            let at = |time: f64| out.joints_at(*other, time);
+                            crosses(scenes.get(&robot), plan, now, scenes.get(other), &at)
+                        })
+                    };
+                    if let Some((other, free)) = crossing(&plan) {
+                        // Waiting for it would end about when it is done plus this motion. A way round it,
+                        // planned with it standing at moments of the rest of its motion, is taken when
+                        // that is clear of every moving robot and ends sooner.
+                        let mut swept = standing.clone();
+                        let name = doc.get(other).map(|r| r.name.clone()).unwrap_or_default();
+                        for k in 0..=4 {
+                            let at = now + (free - now) * f64::from(k) / 4.0;
+                            if let (Some(q), Some(scene)) = (out.joints_at(other, at), scenes.get(&other)) {
+                                swept.extend(scene.as_obstacles(&q, &name));
+                            }
                         }
-                        Ok(_) => {}
-                        Err(why) => {
-                            reasons.insert(id, why.clone());
+                        let round = self
+                            .task_plan_among(id, robot, joints, &swept)
+                            .ok()
+                            .and_then(|round| self.timeline(task, round, now, &world, &timed, &objects).ok())
+                            .filter(|(round, _)| {
+                                crossing(round).is_none() && now + round.duration() < free + plan.duration()
+                            });
+                        match round {
+                            Some((round, round_events)) => (plan, events) = (round, round_events),
+                            None => {
+                                reasons.insert(id, format!("it waits for {name} to be out of the way"));
+                                waiting.entry(id).or_insert((now, other));
+                                continue;
+                            }
                         }
+                    }
+                    if best.as_ref().is_none_or(|(b, ..)| plan.duration() < b.duration()) {
+                        best = Some((plan, tool, events));
                     }
                 }
                 match best {
-                    Some((plan, (tool, objects))) => {
+                    Some((plan, tool, events)) => {
                         let robot = plan.robot;
                         let assignment =
                             Assignment { task: id, robot, start: now, end: now + plan.duration() };
                         robots.insert(robot, (plan.end.clone(), assignment.end));
                         out.plans.push(plan);
                         tools.insert(robot, tool);
-                        changes.insert(id, objects);
+                        out.signals.extend(events.iter().filter_map(|(at, change)| match change {
+                            Change::Signal(name, value) => Some((*at, name.clone(), *value)),
+                            Change::Object(..) => None,
+                        }));
+                        timed.extend(events);
                         if let Some((since, cause)) = waiting.remove(&id) {
                             out.waits.push(Wait { task: id, robot, seconds: now - since, cause });
                         }
@@ -398,8 +468,11 @@ impl Planning<'_> {
                 }
             }
             // On to the moment the next task ends (its effects may make others ready) or a robot is parked.
-            let ends =
-                running.iter().map(|a| a.end).chain(out.parks.iter().map(|p| p.end).filter(|e| *e > now));
+            let ends = running
+                .iter()
+                .map(|a| a.end)
+                .chain(out.parks.iter().map(|p| p.end).filter(|e| *e > now))
+                .chain(timed.iter().map(|(at, _)| *at).filter(|at| *at >= now));
             let Some(next) = ends.min_by(f64::total_cmp) else {
                 // Nothing moves and nothing more can start. A ready task may be held up by a robot that
                 // stands in the way with nothing to do: one such robot goes to its park pose, and the
@@ -409,22 +482,24 @@ impl Planning<'_> {
                 });
                 let parked = ready
                     .then(|| {
-                        robots.iter().find_map(|(robot, (at, _))| {
-                            let park = doc.robot_park(*robot)?;
-                            if bits(at) == bits(&park) || !moved_away.insert((*robot, bits(at))) {
-                                return None;
-                            }
-                            let others: Vec<gc_motion::Obstacle> = robots
-                                .iter()
-                                .filter(|(other, _)| *other != robot)
-                                .filter_map(|(other, (stands, _))| {
-                                    let name = doc.get(*other).map(|r| r.name.clone())?;
-                                    Some(scenes.get(other)?.as_obstacles(stands, &name))
-                                })
-                                .flatten()
-                                .collect();
-                            self.park_plan(*robot, at, &park, &others).ok()
-                        })
+                        robots.iter().filter(|(robot, _)| blockers.contains(robot)).find_map(
+                            |(robot, (at, _))| {
+                                let park = doc.robot_park(*robot)?;
+                                if bits(at) == bits(&park) || !moved_away.insert((*robot, bits(at))) {
+                                    return None;
+                                }
+                                let others: Vec<gc_motion::Obstacle> = robots
+                                    .iter()
+                                    .filter(|(other, _)| *other != robot)
+                                    .filter_map(|(other, (stands, _))| {
+                                        let name = doc.get(*other).map(|r| r.name.clone())?;
+                                        Some(scenes.get(other)?.as_obstacles(stands, &name))
+                                    })
+                                    .flatten()
+                                    .collect();
+                                self.park_plan(*robot, at, &park, &others).ok()
+                            },
+                        )
                     })
                     .flatten();
                 let Some(plan) = parked else { break };
@@ -434,26 +509,22 @@ impl Planning<'_> {
                 continue;
             };
             now = next;
+            // What changes by now: signals set and objects left in a new state at the end of a step.
+            timed.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let due = timed.partition_point(|(at, _)| *at <= now);
+            for (_, change) in timed.drain(..due) {
+                match change {
+                    Change::Signal(name, value) => drop(world.signals.insert(name, value)),
+                    Change::Object(name, state) => drop(world.objects.insert(name, state)),
+                }
+            }
             let (ended, still): (Vec<Assignment>, Vec<Assignment>) =
                 running.into_iter().partition(|a| a.end <= now);
             running = still;
             for assignment in ended {
-                // What its tool actions did to their objects, then the task's own effects.
-                world.objects.extend(changes.remove(&assignment.task).unwrap_or_default());
+                // The task's own effects (what its steps set and its tool actions did came at their times).
                 if let Some(task) = doc.get(assignment.task) {
                     self.apply_effects(&mut world, task);
-                    // The signals it set, in the order of its steps.
-                    let kit = doc.robot_tool_kit(assignment.robot).and_then(|(kit, _)| doc.get(kit));
-                    for step in &task.steps {
-                        let set = match step {
-                            gc_doc::Step::SetIo { name, value } => Some((name.clone(), *value)),
-                            gc_doc::Step::ToolAction { action, .. } => {
-                                kit.and_then(|k| k.action(action)).and_then(|a| a.set.clone())
-                            }
-                            _ => None,
-                        };
-                        world.signals.extend(set);
-                    }
                 }
                 // A task that repeats goes back among those to do, in its place by priority.
                 let times = done.entry(assignment.task).or_insert(0);
@@ -492,12 +563,12 @@ impl Planning<'_> {
         mut tool: Option<String>,
     ) -> Result<ToolOutcome, String> {
         let doc = self.doc;
-        let mut objects: Vec<(String, String)> = Vec::new();
+        let mut objects: Vec<(usize, String, String)> = Vec::new();
         if doc.tool_kits().is_empty() {
             return Ok((tool, objects));
         }
         let kit = doc.robot_tool_kit(robot).and_then(|(kit, _)| doc.get(kit));
-        for step in &task.steps {
+        for (number, step) in task.steps.iter().enumerate() {
             let gc_doc::Step::ToolAction { action, target } = step else { continue };
             let found =
                 kit.and_then(|k| k.action(action)).ok_or_else(|| format!("its tool cannot `{action}`"))?;
@@ -507,8 +578,8 @@ impl Planning<'_> {
                 objects
                     .iter()
                     .rev()
-                    .find(|(n, _)| n == name)
-                    .map(|(_, s)| s.clone())
+                    .find(|(_, n, _)| n == name)
+                    .map(|(_, _, s)| s.clone())
                     .or_else(|| world.objects.get(name).cloned())
             });
             let scope = gc_doc::ActionScope { outer: world, tool: tool.as_deref(), target: state.as_deref() };
@@ -521,10 +592,64 @@ impl Planning<'_> {
                 tool = Some(next.clone());
             }
             if let (Some(name), Some(next)) = (target, &found.target_state) {
-                objects.push((name, next.clone()));
+                objects.push((number, name, next.clone()));
             }
         }
         Ok((tool, objects))
+    }
+
+    /// Lays a planned task out in time from `start`: where a step waits for a signal the cell drives, the
+    /// robot stands still until the signal has the value (it has it already, or a change on its way sets
+    /// it; a wait for any other signal is taken to be answered). Gives the plan with those waits in it and
+    /// what the task changes when: the signals its steps and tool actions set and the states its tool
+    /// actions leave their objects in, each at the end of its step. Fails when a signal it waits for is
+    /// not on its way.
+    fn timeline(
+        &self,
+        task: &Task,
+        mut plan: crate::TaskPlan,
+        start: f64,
+        world: &World,
+        coming: &[(f64, Change)],
+        objects: &[(usize, String, String)],
+    ) -> Result<(crate::TaskPlan, Vec<(f64, Change)>), String> {
+        let doc = self.doc;
+        let kit = doc.robot_tool_kit(plan.robot).and_then(|(kit, _)| doc.get(kit));
+        let mut own: Vec<(f64, Change)> = Vec::new();
+        for (number, step) in task.steps.iter().enumerate() {
+            if let gc_doc::Step::WaitIo { condition, .. } = step
+                && let Some((name, value)) = gc_doc::signal_condition(condition)
+                && world.signals.contains_key(&name)
+            {
+                let begin =
+                    start + number.checked_sub(1).and_then(|b| plan.step_ends.get(b)).copied().unwrap_or(0.0);
+                let all: Vec<(f64, Change)> = coming.iter().chain(&own).cloned().collect();
+                let at = signal_at(world, &all, &name, value, begin)
+                    .ok_or_else(|| format!("it waits for the signal `{name}`"))?;
+                if at > begin {
+                    plan.hold_before(number, at - begin);
+                }
+            }
+            let end = start + plan.step_ends.get(number).copied().unwrap_or(0.0);
+            match step {
+                gc_doc::Step::SetIo { name, value } => own.push((end, Change::Signal(name.clone(), *value))),
+                gc_doc::Step::ToolAction { action, .. } => {
+                    own.extend(
+                        kit.and_then(|k| k.action(action))
+                            .and_then(|a| a.set.clone())
+                            .map(|(name, value)| (end, Change::Signal(name, value))),
+                    );
+                    own.extend(
+                        objects
+                            .iter()
+                            .filter(|(at, ..)| *at == number)
+                            .map(|(_, name, state)| (end, Change::Object(name.clone(), state.clone()))),
+                    );
+                }
+                _ => {}
+            }
+        }
+        Ok((plan, own))
     }
 
     /// [`Session::task_robots`] for the states of a schedule in progress.

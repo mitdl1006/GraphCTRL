@@ -330,3 +330,72 @@ fn a_wait_for_a_signal_another_robot_sets_is_a_handshake() {
     );
     assert!(s.task_problems(odd)[0].contains("door closed"));
 }
+
+/// Steps have their own times: a signal is set when its step ends, and a robot that reaches a wait for
+/// it before then stands still there until it is set.
+#[test]
+fn a_robot_waits_in_the_middle_of_its_task_for_a_signal_set_in_the_middle_of_another() {
+    let (mut s, [left, right], at_hole) = cell();
+    let signal = |name: &str, direction, pin| IoSignal { name: name.into(), direction, pin };
+    let kit = |name: &str, signals: Vec<IoSignal>| ToolKit {
+        name: name.into(),
+        signals,
+        states: Vec::new(),
+        actions: Vec::new(),
+    };
+    let feeder: Id<ToolKit> =
+        made(&mut s, WorkOp::AddToolKit(kit("Feeder", vec![signal("go", IoDirection::Out, 1)])));
+    let taker: Id<ToolKit> =
+        made(&mut s, WorkOp::AddToolKit(kit("Taker", vec![signal("go", IoDirection::In, 4)])));
+    s.edit_work(WorkOp::SetRobotTool { robot: left, kit: Some(feeder), state: None }).unwrap();
+    s.edit_work(WorkOp::SetRobotTool { robot: right, kit: Some(taker), state: None }).unwrap();
+
+    // Feed: wait 1 s, set the signal, wait 2 s more. Take: wait 0.5 s, wait for the signal, wait 0.25 s.
+    let feed: Id<Task> = made(
+        &mut s,
+        WorkOp::AddTask(Task {
+            priority: 5,
+            ..task(
+                "Feed",
+                vec![
+                    Step::Wait { seconds: 1.0 },
+                    Step::SetIo { name: "go".into(), value: true },
+                    Step::Wait { seconds: 2.0 },
+                    Step::MoveJ(MoveTarget::Role(at_hole)),
+                ],
+            )
+        }),
+    );
+    let take: Id<Task> = made(
+        &mut s,
+        WorkOp::AddTask(Task {
+            robots: RobotChoice::Only(vec![right]),
+            ..task(
+                "Take",
+                vec![
+                    Step::Wait { seconds: 0.5 },
+                    Step::WaitIo { condition: "go".into(), timeout: 5.0 },
+                    Step::Wait { seconds: 0.25 },
+                ],
+            )
+        }),
+    );
+    // The plan knows when each step ends.
+    let plan = s.task_plan(feed, left).unwrap();
+    assert_eq!(plan.step_ends.len(), 4);
+    assert_eq!(&plan.step_ends[..3], &[1.0, 1.0, 3.0]);
+    assert!((plan.step_ends[3] - plan.duration()).abs() < 1e-12);
+
+    let schedule = s.schedule();
+    assert!(schedule.blocked.is_empty(), "{:?}", schedule.blocked);
+    let of = |task: Id<Task>| schedule.assignments.iter().find(|x| x.task == task).unwrap();
+    // Both start at once; the signal is set one second in, in the middle of Feed.
+    assert_eq!((of(feed).start, of(take).start), (0.0, 0.0));
+    assert_eq!(schedule.signals, vec![(1.0, "go".to_owned(), true)]);
+    // Take reaches its wait at 0.5 s, stands still until 1 s, and ends a quarter of a second later.
+    assert_eq!(of(take).end, 1.25);
+    assert!(of(feed).end > 3.0);
+    let taken = schedule.plans.iter().find(|p| p.robot == right).unwrap();
+    assert_eq!(taken.step_ends, vec![0.5, 1.0, 1.25]);
+    assert_eq!(taken.waiting, 1.25);
+}
