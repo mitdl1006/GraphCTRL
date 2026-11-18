@@ -30,8 +30,21 @@ fn tick_step(end: f64) -> f64 {
     [1.0, 2.0, 5.0, 10.0].into_iter().map(|m| m * decade).find(|s| *s >= wanted).unwrap_or(10.0 * decade)
 }
 
+/// What the panel asks the application to do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScheduleRequest {
+    /// Show the schedule as one URScript program per robot (and offer to save them).
+    UrScript,
+}
+
 /// The panel: a button to ask for the schedule, then the chart and the blocked tasks.
-pub fn schedule_panel(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut ScheduleUi) {
+pub fn schedule_panel(
+    ui: &mut Ui,
+    session: &mut Session,
+    lang: Lang,
+    state: &mut ScheduleUi,
+) -> Option<ScheduleRequest> {
+    let mut request = None;
     let pending = session.schedule_pending();
     ui.horizontal(|ui| {
         if ui.add_enabled(!pending, egui::Button::new(tr!(lang, ScheduleCompute))).clicked() {
@@ -53,7 +66,7 @@ pub fn schedule_panel(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mu
         if !pending {
             ui.weak(tr!(lang, ScheduleNotYet));
         }
-        return;
+        return request;
     };
     let fade = if current { 1.0 } else { 0.4 };
     // Playback: the robots are shown where the schedule has them at a moment (the document is not changed).
@@ -72,8 +85,15 @@ pub fn schedule_panel(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mu
             state.stop(session);
             now = 0.0;
         }
-        let slider =
-            ui.add(egui::Slider::new(&mut now, 0.0..=end_time.max(1e-6)).suffix(" s").fixed_decimals(1));
+        if ui.button(tr!(lang, ScheduleUrScript)).clicked() {
+            request = Some(ScheduleRequest::UrScript);
+        }
+        let slider = ui.add(
+            egui::Slider::new(&mut now, 0.0..=end_time.max(1e-6))
+                .text(tr!(lang, ScheduleTime))
+                .suffix(" s")
+                .fixed_decimals(1),
+        );
         if slider.changed() {
             session.set_schedule_playback(Some(now));
         }
@@ -242,4 +262,5 @@ pub fn schedule_panel(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mu
             });
         }
     }
+    request
 }

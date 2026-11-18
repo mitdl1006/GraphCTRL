@@ -208,7 +208,6 @@ fn blocked_tasks_and_endless_repeats_are_explained_on_the_panel() {
 /// BUG: the schedule panel's time slider and its value box have no accessible name (kittest's accessibility check
 /// fails once a schedule is shown and played), so a screen reader reads two unnamed controls.
 #[test]
-#[ignore = "BUG: the schedule panel's time slider and its value box have no accessible name (owner: frontend, gc_panels schedule.rs)"]
 fn the_schedule_panels_slider_has_an_accessible_name() {
     // A harness with the accessibility check on (the default) and the clock stepping.
     let mut h = egui_kittest::Harness::builder()
@@ -316,6 +315,21 @@ fn a_numeric_effect_is_an_expression_and_a_wrong_one_is_explained_and_not_stored
         assert!(explained, "{bad:?}: no explanation under the box");
         assert_eq!(stored(&h), "1", "{bad:?} was stored");
         assert_eq!(h.state().session.history().undo_depth(), steps, "{bad:?}");
+        // A good expression typed after a wrong one is stored (the first try after a refusal too).
+        let at = value_box(&h);
+        press(&mut h, at);
+        h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        h.query_all_by_role(input)
+            .filter(|n| n.rect().min.x > 700.0)
+            .max_by(|a, b| a.rect().min.y.total_cmp(&b.rect().min.y))
+            .unwrap()
+            .type_text("count + 5");
+        h.key_press(egui::Key::Tab);
+        h.run_steps(3);
+        assert_eq!(stored(&h), "count + 5", "after {bad:?}");
+        assert!(h.state_mut().session.undo());
+        h.run_steps(2);
+        assert_eq!(stored(&h), "1");
     }
 }
 
