@@ -2,6 +2,7 @@
 
 mod agent;
 mod app;
+mod assemble;
 mod assembly_import;
 mod conflict;
 mod constrain;

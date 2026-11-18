@@ -227,7 +227,7 @@ impl Constrain {
 }
 
 /// "Body1:1 · XY plane" for a selection.
-fn describe(session: &Session, selection: &Selection, lang: Lang) -> String {
+pub(crate) fn describe(session: &Session, selection: &Selection, lang: Lang) -> String {
     let name = session
         .components()
         .iter()

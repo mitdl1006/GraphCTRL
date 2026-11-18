@@ -260,6 +260,7 @@ pub struct GraphCtrlApp {
     drive: crate::drive::Drive,
     /// The Constrain dialog.
     constrain: crate::constrain::Constrain,
+    assemble: crate::assemble::Assemble,
     conflict: crate::conflict::ConstraintError,
     /// The Joint dialog.
     joint: crate::constrain::Joint,
@@ -361,6 +362,7 @@ impl GraphCtrlApp {
             interference: crate::interference::Interference::default(),
             drive: crate::drive::Drive::default(),
             constrain: crate::constrain::Constrain::default(),
+            assemble: crate::assemble::Assemble::default(),
             conflict: crate::conflict::ConstraintError::default(),
             joint: crate::constrain::Joint::default(),
             pattern: crate::pattern::Pattern::default(),
@@ -1059,6 +1061,7 @@ impl eframe::App for GraphCtrlApp {
                 }
             }
             Some(ribbon::RibbonAction::StartConstrain) => self.constrain.start(),
+            Some(ribbon::RibbonAction::StartAssemble) => self.assemble.start(),
             Some(ribbon::RibbonAction::StartJoint) => self.joint.start(),
             Some(ribbon::RibbonAction::StartPattern) => self.pattern.start(Vec::new()),
             Some(ribbon::RibbonAction::StartReplicate(mode)) => self.replicate.start(mode),
@@ -1339,10 +1342,15 @@ impl eframe::App for GraphCtrlApp {
             None => {}
         }
         // The Constrain dialog picks origin planes, axes and points in the view.
-        self.viewport.constrain_mode =
-            self.constrain.picking() || self.joint.open || self.pattern.open || self.replicate.picking();
+        self.viewport.constrain_mode = self.constrain.picking()
+            || self.joint.open
+            || self.pattern.open
+            || self.replicate.picking()
+            || self.assemble.picking();
         if let Some((occurrence, element)) = self.viewport.take_constrain_pick() {
-            if self.replicate.picking() {
+            if self.assemble.picking() {
+                self.assemble.pick(&self.session, occurrence, element);
+            } else if self.replicate.picking() {
                 self.replicate.pick(occurrence, element);
             } else if self.pattern.open {
                 self.pattern.pick(occurrence, element);
@@ -1361,7 +1369,16 @@ impl eframe::App for GraphCtrlApp {
         if self.replicate.open {
             self.replicate.window(&ctx, &mut self.session, lang);
         }
-        if let Some(conflict) = self.joint.conflict.take().or_else(|| self.constrain.conflict.take()) {
+        if self.assemble.open {
+            self.assemble.window(&ctx, &mut self.session, lang);
+        }
+        if let Some(conflict) = self
+            .joint
+            .conflict
+            .take()
+            .or_else(|| self.constrain.conflict.take())
+            .or_else(|| self.assemble.conflict.take())
+        {
             self.conflict.show_for(&self.session, conflict);
         }
         self.conflict.window(&ctx, &mut self.session, lang);

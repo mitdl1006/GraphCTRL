@@ -3798,3 +3798,31 @@ fn place_hangs_a_body_on_the_cursor_and_sets_it_down_by_clicks() {
     assert!(!harness.state().viewport().is_placing());
     assert_eq!(bodies(&harness), 2);
 }
+
+/// Assemble tab > Assemble opens the command that offers constraint types by the geometry picked
+/// (Inventor 2026 help, GUID-C1E8D955-784D-47DE-9DD4-C9C695051320).
+#[test]
+fn the_assemble_command_opens_from_the_assemble_tab() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.05, 0.05, 0.05] };
+    harness.state_mut().session.add_body(solid, gc_doc::Placement::default()).unwrap();
+    harness.run();
+    harness.get_by_label("조립").click();
+    harness.run();
+    assert_eq!(harness.query_all_by_label("어셈블").count(), 1, "only the ribbon button before");
+    harness.get_by_label("어셈블").click();
+    harness.run_steps(3);
+    assert!(harness.query_all_by_label("어셈블").count() >= 2, "the command window is up");
+    harness.get_by_label_contains("첫 번째 선택");
+    harness.get_by_label_contains("두 번째 선택");
+    if gpu {
+        let image = harness.render().unwrap();
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        image.save(out.join("review-49-assemble.png")).unwrap();
+    }
+}

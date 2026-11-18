@@ -76,6 +76,8 @@ pub(crate) enum RibbonAction {
     StartInterference,
     /// Open the drive dialog.
     StartDrive,
+    /// Open the Assemble command.
+    StartAssemble,
     /// Open the Constrain dialog.
     StartConstrain,
     /// Open the Joint dialog.
@@ -639,6 +641,11 @@ fn assemble_tab(
     });
     // Failures of these commands are shown in the status bar.
     ribbon_group(ui, tr!(lang, GroupRelationships), |ui| {
+        if ribbon_button(ui, Icon::Frame, tr!(lang, AssembleTitle), false, !session.components().is_empty())
+            .clicked()
+        {
+            action = Some(RibbonAction::StartAssemble);
+        }
         if ribbon_button(ui, Icon::Frame, tr!(lang, ConstrainTitle), false, true).clicked() {
             action = Some(RibbonAction::StartConstrain);
         }
