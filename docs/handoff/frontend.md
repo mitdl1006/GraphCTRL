@@ -244,6 +244,14 @@
 - 3D 스케치 그리기 패널의 선 분할 버튼에 "스플라인(보간)" 추가. 뷰포트 클릭마다 `spatial_click`로 맞춤점, Enter로 `spatial_finish`, 진행 중 곡선은 `spatial_spline_preview`로 미리보기. Esc는 기존 도구 취소.
 - 테스트: `a_3d_spline_is_placed_with_fit_points_and_finished_with_enter`.
 
+### Auto-Bend 옵션, 두 원 치수 재확인
+
+- 근거: Inventor 2026 도움말 GUID-1898C432-CFD2-46F1-8BAE-631392DFBF1D (Sketch 탭, 3D Sketch "Auto-bend with 3D line creation": 기본 꺼짐, 3D 선을 그릴 때 접하는 모서리 굽힘을 자동 배치), GUID-58DD9A89.
+- 응용 프로그램 옵션 스케치 탭에 "3D 선 그릴 때 자동 굽힘" 체크 + 굽힘 반지름 칸(기본 10 mm). 설정 파일(`auto_bend`, `auto_bend_radius`)에 저장되고 다음 실행에서 `Session::set_auto_bend`로 복원.
+- 원문과 차이: 원문 옵션은 체크 상자뿐이다. 반지름 칸은 리드 요청으로 추가.
+- 겹친 두 원: 백엔드 테스트(`sketch_arc_distance`, 5개)가 리드 브랜치에서 통과 — 치수 도구 경로는 UI도 동일.
+- 테스트: `the_auto_bend_option_is_off_by_default_saved_and_read_back`.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

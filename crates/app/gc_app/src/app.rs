@@ -12,6 +12,11 @@ use gc_viewport::Viewport;
 
 use crate::ribbon::{self, Tab};
 
+/// The radius Auto-bend uses for the text in the options window: 10 mm when nothing is typed.
+fn bend_radius_text(typed: &str) -> String {
+    if typed.trim().is_empty() { "10 mm".to_owned() } else { typed.trim().to_owned() }
+}
+
 /// Command-line driven options.
 #[derive(Debug, Default, Clone)]
 pub struct RunOptions {
@@ -285,6 +290,8 @@ pub struct GraphCtrlApp {
     log_open: bool,
     /// The Application Options window.
     options_open: bool,
+    /// The radius typed for Auto-bend (empty: 10 mm).
+    auto_bend_radius: String,
     /// Whether the side panels let the 3D scene show through.
     translucent: bool,
     /// Whether the dark colour scheme is in use.
@@ -348,9 +355,12 @@ impl GraphCtrlApp {
             let notifier = std::sync::Arc::new(Repaint(cc.egui_ctx.clone()));
             session.set_executor(gc_jobs::Executor::thread().with_notifier(notifier));
         }
+        let mut auto_bend_radius_initial = String::new();
         // The Application Options that outlive a run.
         if let Some(settings) = options.settings_dir.as_deref().map(gc_persist::places::load_settings) {
             session.set_autoproject_face_edges(!settings.autoproject_edges_off);
+            auto_bend_radius_initial = settings.auto_bend_radius.clone();
+            session.set_auto_bend(settings.auto_bend.then(|| bend_radius_text(&settings.auto_bend_radius)));
         }
         Self {
             options,
@@ -385,6 +395,7 @@ impl GraphCtrlApp {
             notices: false,
             log_open: false,
             options_open: false,
+            auto_bend_radius: auto_bend_radius_initial,
             translucent,
             dark,
             tab_before_sketch: Tab::Model,
@@ -977,6 +988,8 @@ impl GraphCtrlApp {
             opaque_panels: !self.translucent,
             light_theme: !self.dark,
             autoproject_edges_off: !self.session.autoproject_face_edges(),
+            auto_bend: self.session.auto_bend().is_some(),
+            auto_bend_radius: self.auto_bend_radius.clone(),
             ..Default::default()
         };
         if let Err(error) = gc_persist::places::save_settings(dir, &settings) {
@@ -1026,6 +1039,28 @@ impl GraphCtrlApp {
                 self.session.set_autoproject_face_edges(on);
                 changed = true;
             }
+            // Auto-bend (Sketch tab, 3D Sketch): off by default; the radius is ours (the help has only the
+            // check box).
+            let mut bend = self.session.auto_bend().is_some();
+            ui.horizontal(|ui| {
+                if ui.checkbox(&mut bend, tr!(lang, OptAutoBend)).changed() {
+                    self.session.set_auto_bend(bend.then(|| bend_radius_text(&self.auto_bend_radius)));
+                    changed = true;
+                }
+                ui.add_enabled_ui(bend, |ui| {
+                    let label = ui.label(tr!(lang, OptAutoBendRadius));
+                    let field =
+                        ui.add(egui::TextEdit::singleline(&mut self.auto_bend_radius).desired_width(70.0));
+                    field.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::Role::TextInput, true, tr!(lang, OptAutoBendRadius))
+                    });
+                    drop(label);
+                    if field.changed() || field.lost_focus() {
+                        self.session.set_auto_bend(Some(bend_radius_text(&self.auto_bend_radius)));
+                        changed = true;
+                    }
+                });
+            });
         });
         if changed {
             self.save_settings();
