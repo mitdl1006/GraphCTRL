@@ -57,6 +57,14 @@ pub enum BrowserAction {
     JointLimits(gc_core::Id<gc_doc::Relationship>),
     /// Edit a work feature (double-click, or its menu).
     EditWorkFeature(Id<gc_doc::WorkFeature>),
+    /// Ground and Root: move these components to the assembly origin, aligned, and ground them.
+    GroundAtOrigin(Vec<gc_core::AnyId>),
+    /// Place at Component Origin: a new component (the app asks for its file) on this component's origin.
+    PlaceAtOrigin(gc_doc::Occurrence),
+    /// Copy these rows to the clipboard (the row menu's Copy; the marked rows go together).
+    Copy(Vec<gc_doc::TreeKey>),
+    /// Paste what was copied (the app waits for the click that gives its place).
+    Paste,
     /// Edit a component or subassembly in place (double-click in the browser).
     EditComponent(gc_doc::TreeKey),
     /// Demote, move, dissolve or rename subassemblies.
@@ -942,6 +950,24 @@ fn folder_menu(
 }
 
 #[allow(clippy::too_many_arguments, reason = "the browser's shared state")]
+/// Copy and Paste in a row's menu (Paste is offered once something was copied).
+fn copy_paste_items(
+    ui: &mut Ui,
+    session: &Session,
+    lang: Lang,
+    action: &mut Option<BrowserAction>,
+    keys: Vec<gc_doc::TreeKey>,
+) {
+    if ui.button(tr!(lang, CmdCopy)).clicked() {
+        *action = Some(BrowserAction::Copy(keys));
+        ui.close();
+    }
+    if ui.add_enabled(!session.clipboard().is_empty(), egui::Button::new(tr!(lang, CmdPaste))).clicked() {
+        *action = Some(BrowserAction::Paste);
+        ui.close();
+    }
+}
+
 fn component_rows_in(
     ui: &mut Ui,
     session: &Session,
@@ -1038,6 +1064,7 @@ fn component_rows_in(
                         *action = Some(BrowserAction::EditComponent(row.key));
                         ui.close();
                     }
+                    copy_paste_items(ui, session, lang, action, vec![row.key]);
                     // Flexible (Inventor 2026 help, Create and edit flexible components,
                     // GUID-30817F08-A5C2-44B7-B237-4791ACA3F854): the freedom inside is available in the
                     // parent; the check mark is cleared to make it rigid again.
@@ -1641,6 +1668,32 @@ fn node_row(
         if groundable && ui.button(tr!(lang, CmdIsolate)).clicked() {
             *action = Some(BrowserAction::Isolate(vec![occurrence]));
             ui.close();
+        }
+        if groundable {
+            let key = gc_doc::TreeKey::Component(occurrence);
+            let keys = if state.marked.contains(&key) { state.marked.clone() } else { vec![key] };
+            copy_paste_items(ui, session, lang, action, keys);
+        }
+        // Ground and Root, and Place at Component Origin (Inventor 2026 help, GUID-98FA88B2-AA32-4A27-946A-DCECB36A6696
+        // and GUID-E7A45820-E297-449D-AFBF-3C8D8EAE8A0E).
+        if groundable {
+            let key = gc_doc::TreeKey::Component(occurrence);
+            let keys = if state.marked.contains(&key) { state.marked.clone() } else { vec![key] };
+            let items: Vec<gc_core::AnyId> = keys
+                .iter()
+                .filter_map(|k| match k {
+                    gc_doc::TreeKey::Component(gc_doc::Occurrence::Item(any)) => Some(*any),
+                    _ => None,
+                })
+                .collect();
+            if !items.is_empty() && ui.button(tr!(lang, CmdGroundAndRoot)).clicked() {
+                *action = Some(BrowserAction::GroundAtOrigin(items));
+                ui.close();
+            }
+            if ui.button(tr!(lang, CmdPlaceAtOrigin)).clicked() {
+                *action = Some(BrowserAction::PlaceAtOrigin(occurrence));
+                ui.close();
+            }
         }
         if groundable {
             folder_menu(ui, session, lang, state, action, gc_doc::TreeKey::Component(occurrence));

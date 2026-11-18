@@ -477,6 +477,31 @@
 - 스케줄 시간 슬라이더에 "시간" 라벨(접근성 이름)을 붙였다. QA의 ignore 해제.
 - 효과 값 칸: 잘못된 식의 오류 문구가 칸과 같은 줄에 놓여 줄이 길어지면 칸이 옆으로 밀려, 다음 클릭이 빗나가 "한 번 저장 안 됨"처럼 보였다(`count count`에서 재현). 칸과 문구를 세로로 묶어 문구가 칸 아래에 나오게 했다. QA 테스트에 각 잘못된 식 뒤 올바른 식 저장 확인을 추가.
 
+## 브라우저 우클릭: 복사·붙여넣기
+
+- 컴포넌트·서브어셈블리 행 메뉴에 "복사"(표시한 행은 함께)와 "붙여넣기"(복사한 것이 있을 때만 활성; 위치를 클릭으로 지정)를 넣었다. 근거: Keyboard Shortcut Reference GUID-DEEB0723-DFC7-4B28-95F4-099CC1E1EBF8의 Copy/Paste 동작을 메뉴로 노출(우클릭 항목 표는 2026 원문에 없음 — 감사표 3.2의 "Copy / Paste" 행).
+- 브라우저 끌어서 순서 바꾸기: 위치 표현 재정렬만 원문에 있고 우리 앱에 해당 개념(위치 표현)이 없어 보류.
+
+## 간트: 신호 변화·단계 경계 (백엔드 4bd80ef)
+
+- 로봇 행 아래에 `Schedule.signals`의 신호별 행: 켜진 구간을 채워 그린다(켜짐 → 꺼짐, 끝까지 켜져 있으면 스케줄 끝까지).
+- 막대에 `TaskPlan.step_ends`(작업 시작 기준)로 단계 경계 눈금을 그리고, 호버 문구에 "단계 N: t s"를 나열한다.
+- 시각 확인은 못 했다(화면 캡처 없음); 신호 행의 존재만 테스트.
+
+## Ground and Root · Place at Component Origin 연결
+
+근거(원문, curl): Ground and Root GUID-98FA88B2-AA32-4A27-946A-DCECB36A6696, Place at Component Origin GUID-E7A45820-E297-449D-AFBF-3C8D8EAE8A0E.
+
+- 컴포넌트 행 우클릭: "원점에 고정 (Ground and Root)" → `session.ground_at_origin`(표시한 행은 함께; 실패 사유는 상태 줄 알림), "이 컴포넌트의 원점에 배치…" → 파일 열기 대화상자 → `add_mesh_body` + `place_at_component_origin(새 컴포넌트, 이 컴포넌트)`.
+- 원문과 차이: 원문은 리본(Assemble > Productivity)에서 대화상자(Ground at origin / Create origin flush constraints / Reposition to the top of the browser)를 연다. 우리는 백엔드에 "Ground at origin"만 있어 대화상자 없이 우클릭 항목 하나로 했고 리본 단추는 아직 없다. 한국어 표기는 한국어 도움말을 못 읽어 임의("원점에 고정")이니 확인 필요. 여러 파일 동시 선택(Place at Component Origin)은 대화상자가 한 파일만 돌려줘 한 번에 하나.
+- 테스트: `a_row_menu_grounds_the_component_at_the_origin`(원점 이동·고정·undo). 원점 배치는 파일 대화상자 의존이라 UI 테스트 없음.
+
+## 감사표 잔여 점검 (Expand/Collapse All · 리본 탭 전환)
+
+- Expand/Collapse All: Assembly Browser(GUID-5F975252…)·Inventor Browser(GUID-EDF6B951…) 2026 원문에 해당 항목이 없다("File nodes, both collapsed and expanded"만). 근거 없이 만들지 않고 보류.
+- 리본 탭 전환: 스케치 진입 시 스케치 탭 활성화·종료 시 이전 탭 복귀는 이미 있다(`tab_before_sketch`). 그 밖의 문맥 전환은 원문 근거를 찾지 못했다.
+- 백엔드의 구속 값 매개변수·식, Planar 조인트, Gap/정렬, Free Move/Rotate, 표현 재정의·Lock은 API가 오면 연결한다.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

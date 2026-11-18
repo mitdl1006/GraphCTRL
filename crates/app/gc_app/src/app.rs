@@ -341,6 +341,8 @@ pub struct GraphCtrlApp {
     right_open: bool,
     /// The status bar is shown (View tab, Windows panel, User Interface).
     show_status: bool,
+    /// Place at Component Origin asked for in the browser: handled after the panels (it opens a file dialog).
+    place_origin_request: Option<gc_doc::Occurrence>,
     /// Clean Screen is on: the ribbon and the browser are away; the browser's state before it.
     clean_screen: Option<bool>,
     /// Whether the about window is open.
@@ -453,6 +455,7 @@ impl GraphCtrlApp {
             left_open: !saved.browser_closed,
             right_open: !saved.properties_closed,
             show_status: !saved.hide_status_bar,
+            place_origin_request: None,
             clean_screen: None,
             about: false,
             pose_calc: None,
@@ -541,6 +544,21 @@ impl GraphCtrlApp {
                     self.viewport.start_placing(gc_session::CellItem::Body(body), false);
                 } else {
                     self.fit_view();
+                }
+            }
+            Err(error) => self.notice = Some(tr!(lang, FileError, error)),
+        }
+    }
+
+    /// Place at Component Origin (Inventor 2026 help, GUID-E7A45820-E297-449D-AFBF-3C8D8EAE8A0E): the file of the
+    /// new component is asked for, and it is put on the origin of `target` and constrained there.
+    fn place_at_origin(&mut self, target: gc_doc::Occurrence, lang: Lang) {
+        let Some(path) = self.dialogs.open_mesh() else { return };
+        match self.session.add_mesh_body(&path) {
+            Ok(body) => {
+                self.notice = None;
+                if let Err(error) = self.session.place_at_component_origin(body.erase(), target) {
+                    self.notice = Some(tr!(lang, FileError, error));
                 }
             }
             Err(error) => self.notice = Some(tr!(lang, FileError, error)),
@@ -1738,6 +1756,16 @@ impl eframe::App for GraphCtrlApp {
                             drop(self.session.edit_folders(op));
                             self.params.marked.clear();
                         }
+                        Some(BrowserAction::GroundAtOrigin(items)) => {
+                            if let Err(error) = self.session.ground_at_origin(&items) {
+                                self.notice = Some(tr!(lang, FileError, error));
+                            }
+                        }
+                        Some(BrowserAction::PlaceAtOrigin(target)) => {
+                            self.place_origin_request = Some(target)
+                        }
+                        Some(BrowserAction::Copy(keys)) => drop(self.session.copy_to_clipboard(&keys)),
+                        Some(BrowserAction::Paste) => drop(self.viewport.start_paste(&self.session)),
                         Some(BrowserAction::Isolate(keep)) => drop(self.session.isolate(&keep)),
                         Some(BrowserAction::UndoIsolate) => drop(self.session.undo_isolate()),
                         Some(BrowserAction::SelectRole(role)) => self.viewport.role_selected = role,
@@ -1888,6 +1916,9 @@ impl eframe::App for GraphCtrlApp {
         }
         if let Some(gc_panels::ScheduleRequest::UrScript) = schedule_request {
             self.open_schedule_scripts(lang);
+        }
+        if let Some(target) = self.place_origin_request.take() {
+            self.place_at_origin(target, lang);
         }
         self.script_window(&ctx, lang);
         // What the marking menu of the view asked for.

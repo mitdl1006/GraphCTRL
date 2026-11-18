@@ -245,7 +245,79 @@ pub fn schedule_panel(
             // The times, on the bar when the pointer is over it.
             let response =
                 ui.interact(bar, egui::Id::unique("gc_schedule_bar").with(assignment.task), Sense::hover());
-            response.on_hover_text(format!("{task_name}: {:.1} – {:.1} s", assignment.start, assignment.end));
+            // The ends of the task's steps: ticks in the bar and lines in the hover text.
+            let steps: Vec<f64> = schedule
+                .assignments
+                .iter()
+                .position(|a| std::ptr::eq(a, assignment))
+                .and_then(|at| schedule.plans.get(at))
+                .map(|plan| plan.step_ends.iter().map(|e| assignment.start + e).collect())
+                .unwrap_or_default();
+            let mut text = format!("{task_name}: {:.1} – {:.1} s", assignment.start, assignment.end);
+            for (number, at) in steps.iter().enumerate() {
+                text.push('\n');
+                text.push_str(&tr!(lang, ScheduleStepEnd, number + 1, format!("{at:.1}")));
+                if number + 1 < steps.len() {
+                    #[allow(clippy::cast_possible_truncation, reason = "screen coordinates fit f32")]
+                    let x = track.left() + (*at / end) as f32 * track.width();
+                    painter.line_segment(
+                        [pos2(x, bar.bottom() - 5.0), pos2(x, bar.bottom())],
+                        Stroke::new(1.0, egui::Color32::WHITE.gamma_multiply(0.8 * fade)),
+                    );
+                }
+            }
+            response.on_hover_text(text);
+        }
+    }
+    // The signals the cell drives: one row each, filled while the signal is on.
+    {
+        let mut names: Vec<&str> = schedule.signals.iter().map(|(_, n, _)| n.as_str()).collect();
+        names.sort_unstable();
+        names.dedup();
+        for name in names {
+            let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 16.0), Sense::hover());
+            let painter = ui.painter_at(rect);
+            painter.text(
+                pos2(rect.left() + 2.0, rect.center().y),
+                Align2::LEFT_CENTER,
+                name,
+                FontId::proportional(11.0),
+                colors::muted(),
+            );
+            ui.interact(rect, egui::Id::unique("gc_schedule_signal").with(name), Sense::hover())
+                .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, name));
+            let track = Rect::from_min_size(
+                pos2(rect.left() + label_width, rect.top() + 3.0),
+                vec2(width, rect.height() - 6.0),
+            );
+            painter.rect_filled(track, 2.0, colors::muted().gamma_multiply(0.10));
+            let mut on_since: Option<f64> = None;
+            let mut spans: Vec<(f64, f64)> = Vec::new();
+            let mut changes: Vec<&(f64, String, bool)> =
+                schedule.signals.iter().filter(|(_, n, _)| n == name).collect();
+            changes.sort_by(|a, b| a.0.total_cmp(&b.0));
+            for (at, _, value) in changes {
+                match (on_since, *value) {
+                    (None, true) => on_since = Some(*at),
+                    (Some(from), false) => {
+                        spans.push((from, *at));
+                        on_since = None;
+                    }
+                    _ => {}
+                }
+            }
+            if let Some(from) = on_since {
+                spans.push((from, end));
+            }
+            for (from, to) in spans {
+                #[allow(clippy::cast_possible_truncation, reason = "screen coordinates fit f32")]
+                let (x0, x1) = (
+                    track.left() + (from / end) as f32 * track.width(),
+                    track.left() + (to / end) as f32 * track.width(),
+                );
+                let bar = Rect::from_min_max(pos2(x0, track.top()), pos2(x1.max(x0 + 2.0), track.bottom()));
+                painter.rect_filled(bar, 2.0, colors::SELECTED.gamma_multiply(0.8 * fade));
+            }
         }
     }
     if schedule.cut_short {
