@@ -23,6 +23,10 @@ pub(crate) struct Binding {
 /// Where an ellipse and a circle (or arc) or another ellipse start out touching: the point of the ellipse
 /// (the first one, for two) nearest to the other curve; `None` for another pair.
 fn contact_start(sketch: &Sketch, a: Id<Curve>, b: Id<Curve>) -> Option<[f64; 2]> {
+    // A curve is never tangent to itself (an ellipse "touching" itself would be accepted with any point).
+    if a == b {
+        return None;
+    }
     let xy = |p: Id<SkPoint>| sketch.pos(p).map(|q| [q[0], q[1]]);
     let (e, other) = if sketch.ellipse(a).is_some() {
         (a, b)
