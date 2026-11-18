@@ -1269,6 +1269,13 @@ impl eframe::App for GraphCtrlApp {
                         Some(BrowserAction::DriveRelationship(id)) => {
                             self.drive.start_relationship(&mut self.session, id)
                         }
+                        Some(BrowserAction::JointLock(id, on)) => {
+                            // A refusal is explained in the status bar.
+                            drop(self.session.set_joint_lock(id, on));
+                        }
+                        Some(BrowserAction::JointProtect(id, on)) => {
+                            drop(self.session.set_joint_protect(id, on));
+                        }
                         Some(BrowserAction::NewView(name)) => {
                             let camera = Some(gc_viewport::camera_to_json(&self.viewport.camera));
                             let section = self.viewport.section.as_ref().map(gc_viewport::section_to_json);

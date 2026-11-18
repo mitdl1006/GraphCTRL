@@ -73,6 +73,8 @@ pub enum Icon {
     CutEdges,
     /// A ground symbol: a stem over three shrinking lines.
     Ground,
+    /// A padlock: a locked joint.
+    Lock,
     /// A short text, for constraint symbols.
     Text(&'static str),
 }
@@ -193,6 +195,24 @@ impl Icon {
                 line(at(0.25, 0.6), at(0.75, 0.6));
                 dot(at(0.25, 0.6));
                 dot(at(0.75, 0.6));
+            }
+            Self::Lock => {
+                painter.rect_stroke(
+                    Rect::from_min_max(at(0.2, 0.46), at(0.8, 0.88)),
+                    2.0,
+                    stroke,
+                    egui::StrokeKind::Inside,
+                );
+                // The shackle: a half circle over the body.
+                let radius = rect.width() * 0.18;
+                let points: Vec<egui::Pos2> = (0..=10)
+                    .map(|i| {
+                        let angle = std::f32::consts::PI * i as f32 / 10.0;
+                        at(0.5, 0.46) + egui::vec2(radius * angle.cos(), -radius * angle.sin())
+                    })
+                    .collect();
+                painter.add(egui::Shape::line(points, stroke));
+                dot(at(0.5, 0.67));
             }
             Self::Ground => {
                 line(at(0.5, 0.15), at(0.5, 0.5));
