@@ -183,11 +183,10 @@ fn conditions_report_errors_with_their_place_and_never_blow_up() {
     );
 }
 
-/// BUG: a condition made of thousands of terms joined by `and` / `or` overflows the stack (the parser or the
+/// Was a bug (fixed by the 256-term limit): a condition made of thousands of terms joined by `and` / `or` overflows the stack (the parser or the
 /// checker recurses once per term): a 1 MB stack (the Windows main thread) is gone at about 5000 terms, and the
 /// process aborts instead of the text being refused. Deep parentheses and `not` chains are guarded and refused.
 #[test]
-#[ignore = "BUG: a long `and` chain overflows the stack and aborts the process (owner: backend, gc_expr Condition parser/eval)"]
 fn a_long_chain_of_and_terms_is_refused_not_a_crash() {
     let text = "true and ".repeat(5_000) + "true";
     let s = Session::new();
