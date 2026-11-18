@@ -61,6 +61,8 @@ pub enum BrowserAction {
     GroundAtOrigin(Vec<gc_core::AnyId>),
     /// Place at Component Origin: a new component (the app asks for its file) on this component's origin.
     PlaceAtOrigin(gc_doc::Occurrence),
+    /// Recover: isolate the components of the relationships that fail together with this one.
+    IsolateRelatedFailed(gc_core::Id<gc_doc::Relationship>),
     /// Copy these rows to the clipboard (the row menu's Copy; the marked rows go together).
     Copy(Vec<gc_doc::TreeKey>),
     /// Paste what was copied (the app waits for the click that gives its place).
@@ -392,6 +394,12 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
                     result.row.context_menu(|ui| {
                         if ui.add_enabled(drivable, egui::Button::new(tr!(lang, MenuDrive))).clicked() {
                             action = Some(BrowserAction::DriveRelationship(id));
+                            ui.close();
+                        }
+                        // Recover: for a relationship that failed (Inventor 2026 help, Use Design Doctor to repair
+                        // relationship errors, GUID-8C95B0AB-4505-4092-8C37-E60C68DCF4A0).
+                        if session.doc().is_sick(id) && ui.button(tr!(lang, RecoverIsolateFailed)).clicked() {
+                            action = Some(BrowserAction::IsolateRelatedFailed(id));
                             ui.close();
                         }
                         // Lock and Protect are for joints only (Inventor 2026 help, To Define and Manage Joint

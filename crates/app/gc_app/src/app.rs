@@ -1795,6 +1795,10 @@ impl eframe::App for GraphCtrlApp {
                         Some(BrowserAction::PlaceAtOrigin(target)) => {
                             self.place_origin_request = Some(target)
                         }
+                        Some(BrowserAction::IsolateRelatedFailed(id)) => {
+                            let (_, keep) = self.session.related_failed(id);
+                            drop(self.session.isolate(&keep));
+                        }
                         Some(BrowserAction::Copy(keys)) => drop(self.session.copy_to_clipboard(&keys)),
                         Some(BrowserAction::Paste) => drop(self.viewport.start_paste(&self.session)),
                         Some(BrowserAction::Isolate(keep)) => drop(self.session.isolate(&keep)),
@@ -1820,10 +1824,31 @@ impl eframe::App for GraphCtrlApp {
                         // A refused edit (still in use, bad expression) is explained in the status bar.
                         Some(BrowserAction::Edit(command)) => {
                             self.cell.playing = false;
-                            if self.session.execute(&command).is_ok()
-                                && matches!(*command, gc_doc::Command::AddParam { .. })
-                            {
-                                self.params = gc_panels::ParamsUi::default();
+                            match self.session.execute(&command) {
+                                Ok(_) => {
+                                    if matches!(*command, gc_doc::Command::AddParam { .. }) {
+                                        self.params = gc_panels::ParamsUi::default();
+                                    }
+                                }
+                                // An edit of a relationship that cannot be solved opens the constraint error dialog,
+                                // which can accept it as failed.
+                                Err(gc_doc::EditError::Unsolvable { names, .. }) => {
+                                    if let gc_doc::Command::Cell(gc_doc::CellOp::SetRelationship {
+                                        id,
+                                        relationship,
+                                    }) = *command
+                                    {
+                                        self.conflict.show_for(
+                                            &self.session,
+                                            crate::conflict::Conflict {
+                                                candidate: relationship,
+                                                names,
+                                                edit: Some(id),
+                                            },
+                                        );
+                                    }
+                                }
+                                Err(_) => {}
                             }
                         }
                         Some(BrowserAction::Select(item)) => {

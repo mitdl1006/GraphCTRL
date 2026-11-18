@@ -14,6 +14,8 @@ use gc_session::Session;
 pub(crate) struct Conflict {
     pub(crate) candidate: Relationship,
     pub(crate) names: Vec<String>,
+    /// Set when the refused change was an edit of this existing relationship, not a new one.
+    pub(crate) edit: Option<Id<Relationship>>,
 }
 
 /// Adds the relationship. When it cannot be satisfied, `conflict` receives it for the dialog.
@@ -26,7 +28,7 @@ pub(crate) fn try_add(
     match session.add_relationship(relationship.clone()) {
         Ok(_) => true,
         Err(EditError::Unsolvable { names, .. }) => {
-            *conflict = Some(Conflict { candidate: relationship, names });
+            *conflict = Some(Conflict { candidate: relationship, names, edit: None });
             false
         }
         Err(_) => false,
@@ -54,6 +56,7 @@ impl ConstraintError {
         let message = tr!(lang, ConflictMessage, conflict.names.join(", "));
         let mut suppress = None;
         let mut delete = None;
+        let mut accept = false;
         let mut close = false;
         egui::Window::new(tr!(lang, ConflictTitle))
             .collapsible(false)
@@ -85,11 +88,24 @@ impl ConstraintError {
                     }
                 }
                 ui.add_space(6.0);
+                // Accept the relationship: it is kept, marked as failed in the browser (Inventor 2026 help, Place/Edit
+                // Connection Error Reference, GUID-23D0D333-AD6A-4CB6-9786-6966DFE8FDFF).
+                if ui.button(tr!(lang, ConflictAccept)).clicked() {
+                    accept = true;
+                }
                 if ui.button(tr!(lang, ConstrainCancel)).clicked() {
                     close = true;
                 }
             });
-        if let Some(id) = suppress {
+        if accept {
+            if let Some(conflict) = self.pending.take() {
+                match conflict.edit {
+                    Some(id) => drop(session.accept_relationship_edit(id, conflict.candidate)),
+                    None => drop(session.accept_relationship(conflict.candidate)),
+                }
+                self.culprits.clear();
+            }
+        } else if let Some(id) = suppress {
             drop(session.set_relationship_suppressed(id, true));
             self.retry(session);
         } else if let Some(id) = delete {
@@ -105,7 +121,18 @@ impl ConstraintError {
     fn retry(&mut self, session: &mut Session) {
         let Some(conflict) = self.pending.take() else { return };
         let mut next = None;
-        if !try_add(session, conflict.candidate, &mut next) {
+        let placed = match conflict.edit {
+            Some(id) => match session.set_relationship(id, conflict.candidate.clone()) {
+                Ok(()) => true,
+                Err(EditError::Unsolvable { names, .. }) => {
+                    next = Some(Conflict { candidate: conflict.candidate, names, edit: Some(id) });
+                    false
+                }
+                Err(_) => false,
+            },
+            None => try_add(session, conflict.candidate, &mut next),
+        };
+        if !placed {
             if let Some(next) = next {
                 self.show_for(session, next);
             }

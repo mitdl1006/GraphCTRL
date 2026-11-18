@@ -7371,3 +7371,60 @@ fn the_representation_menus_lock_and_copy() {
     harness.run_steps(3);
     assert_eq!(harness.state().session.representation_folder().positions.len(), 3, "[Primary] and two");
 }
+
+/// A relationship accepted although it cannot be solved is marked failed in the browser; its menu offers Recover:
+/// Isolate Related Failed (Inventor 2026 help, GUID-8C95B0AB-4505-4092-8C37-E60C68DCF4A0).
+#[test]
+fn a_failed_relationship_offers_recover_in_its_menu() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.05, 0.05, 0.05] };
+    let app = harness.state_mut();
+    let fixed = app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    let moving =
+        app.session.add_body(solid, gc_doc::Placement { xyz: [0.0, 0.0, 0.2], rpy: [0.0; 3] }).unwrap();
+    let plane = gc_doc::Geometry::origin(gc_doc::OriginElement::Plane(gc_doc::OriginPlane::Xy));
+    let select = |body: gc_core::Id<gc_doc::Body>| gc_doc::Selection {
+        occurrence: gc_doc::Occurrence::Item(body.erase()),
+        geometry: plane,
+    };
+    let mate = |name: &str, offset: f64| {
+        gc_doc::Relationship::new(
+            name,
+            gc_doc::RelationKind::Mate { offset, sense: gc_doc::AxisSense::Opposed },
+            select(moving),
+            select(fixed),
+        )
+    };
+    // A third component that has nothing to do with the failure is hidden by Isolate Related Failed.
+    app.session
+        .add_body(
+            gc_doc::Solid::Box { size: [0.05; 3] },
+            gc_doc::Placement { xyz: [1.0, 0.0, 0.0], rpy: [0.0; 3] },
+        )
+        .unwrap();
+    app.session.add_relationship(mate("Mate:1", 0.0)).unwrap();
+    assert!(app.session.add_relationship(mate("Mate:2", 0.1)).is_err());
+    let failed = app.session.accept_relationship(mate("Mate:2", 0.1)).unwrap();
+    assert!(app.session.doc().is_sick(failed));
+    harness.run_steps(2);
+    let at = harness.get_by_label("Mate:2").rect().center();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run_steps(2);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+    harness.run_steps(3);
+    assert!(!harness.state().session.is_isolated());
+    harness.get_by_label("복구: 관련된 실패 분리 (Isolate Related Failed)").click();
+    harness.run_steps(3);
+    assert!(harness.state().session.is_isolated());
+}

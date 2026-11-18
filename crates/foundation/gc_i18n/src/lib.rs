@@ -899,6 +899,8 @@ messages! {
     /// Constraint error dialog: no single relationship is the cause.
     ConflictNoSingle => ("한 관계만으로는 풀리지 않습니다. 새 관계를 바꾸세요.", "No single relationship is the cause. Change the new relationship."),
     /// Constraint error dialog: delete the relationship in the way.
+    ConflictAccept => ("그대로 받기 (Accept)", "Accept the relationship"),
+    RecoverIsolateFailed => ("복구: 관련된 실패 분리 (Isolate Related Failed)", "Recover: Isolate Related Failed"),
     ConflictDelete => ("삭제", "Delete"),
     /// Pattern dialog: the Assemble tab command and the dialog's title.
     PatternTitle => ("패턴", "Pattern"),

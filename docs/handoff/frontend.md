@@ -571,6 +571,16 @@
 - 백엔드가 곧 넣는 "새 뷰가 만들자마자 활성"·"위치 표현 활성 중 편집 거부"에 맞춰 표현 테스트를 고쳐야 하면 그때 맞춘다(지금 테스트는 통과).
 - 테스트: `the_representation_menus_lock_and_copy`.
 
+## 구속 오류: Accept·Recover (백엔드 9c7e8b8)
+
+근거: Place/Edit Connection Error Reference GUID-23D0D333-AD6A-4CB6-9786-6966DFE8FDFF(Accept the relationship), Use Design Doctor to repair relationship errors GUID-8C95B0AB-4505-4092-8C37-E60C68DCF4A0(Recover 처치), Relationship Conflict Analysis Reference GUID-528B2CD0-93FD-45BC-AB69-6C5A559BB8E8.
+
+- 구속 오류 대화상자에 "그대로 받기 (Accept)": 새 구속은 `accept_relationship`, 편집은 `accept_relationship_edit`(`Conflict.edit`). 받은 구속은 브라우저에서 빨간 대시(sick)로 표시된다(기존 상태 점).
+- 브라우저 구속 노드 우클릭: 실패한 구속에 "복구: 관련된 실패 분리 (Isolate Related Failed)" = `related_failed(id)`의 컴포넌트만 남기고 `isolate`. 삭제·억제는 기존 메뉴 항목.
+- 편집 쪽 Accept 경로는 브라우저의 `SetRelationship` 실패(Unsolvable)만 대화상자로 보낸다. 값 칸(SetRelationValue)과 편집 대화상자(아직 없음)는 상태 줄 오류로 남는다.
+- 하지 않은 것: Conflict Analysis 대화상자(Keep/Break·Check = `conflict_check`), Isolate and Edit·Diagnose.
+- 테스트: `a_failed_relationship_offers_recover_in_its_menu`.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹
