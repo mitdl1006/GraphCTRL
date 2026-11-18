@@ -124,6 +124,12 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 조건식 길이 상한, 빈 로봇 조건 (QA)
+
+- `gc_expr::Condition`: `and`/`or`를 256개까지만 받는다(넘으면 그 자리의 `CondError` "a condition can combine at most 256 terms"). 긴 연쇄는 깊이가 길이만큼인 트리가 되어 평가·순회·해제가 재귀로 스택을 다 쓰던 것(약 5000항에서 프로세스 종료)을 막는다. 괄호·`not` 중첩 상한 64는 그대로.
+- `RobotChoice::When("")`(빈 조건)는 `BadValue`. 빈 전제조건(`Task.precondition`)은 여전히 "항상".
+- QA 브랜치의 `qa_work_model.rs::a_long_chain_of_and_terms…`는 이 브랜치에 없어 `#[ignore]`를 못 뗐다(QA/리드가 병합 때).
+
 ## 2026-11-18 — 스케줄을 작업 스레드에서 (`request_schedule` / `schedule_result`)
 
 - `session.request_schedule()`: 지금 문서의 스케줄을 실행기(앱은 스레드, 기본은 그 자리에서)에서 계산하기 시작한다. 같은 리비전에 대해 이미 계산 중이거나 결과가 있으면 아무것도 하지 않는다. 더 옛 리비전의 계산은 취소한다.
