@@ -185,6 +185,10 @@ impl IPropertiesDialog {
         let square = unit.si_factor().powi(2);
         match self.physical {
             Some(p) => {
+                if p.open {
+                    // A mesh with holes: volume, mass and centre are not to be trusted (the area is right).
+                    ui.colored_label(egui::Color32::from_rgb(0xB0, 0x70, 0x10), tr!(lang, IpOpenMesh));
+                }
                 let number =
                     |v: f64| format!("{v:.6}").trim_end_matches('0').trim_end_matches('.').to_owned();
                 egui::Grid::new("gc_ip_physical_out").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {

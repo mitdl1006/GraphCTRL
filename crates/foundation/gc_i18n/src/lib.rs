@@ -1229,6 +1229,7 @@ messages! {
     IpCentre => ("무게중심", "Center of Gravity"),
     IpUpdate => ("업데이트", "Update"),
     IpNotKnown => ("이 항목의 모양을 아직 알 수 없어 계산할 수 없습니다.", "The shape of this item is not known yet, so nothing can be calculated."),
+    IpOpenMesh => ("닫히지 않은 메시가 있어 부피·질량이 정확하지 않을 수 있습니다.", "There is an open mesh, so volume and mass may not be accurate."),
     IpOverridden => ("(재정의됨)", "(overridden)"),
     MenuDocSettings => ("문서 설정", "Document Settings"),
     DsTabUnits => ("단위", "Units"),

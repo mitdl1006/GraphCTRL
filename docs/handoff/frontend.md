@@ -376,6 +376,10 @@
 - 알려진 차이: 사슬 미리 강조 없음, 뷰에서 역할을 직접 클릭해 선택하는 기능 없음(브라우저만), 속도·자세는 입력할 때마다 되돌리기 한 단계, 닫힌 곡선 경로·구간별 속도는 백엔드에 없음.
 - 테스트: `the_sketch_menu_makes_waypoints_and_paths`, `the_browser_lists_sketch_roles_and_selects_them`, `the_properties_panel_edits_a_path_role`(sketch_shape_tools), `create_path_makes_a_planned_path_between_two_clicked_sketch_points`와 기존 `the_ur5e_follows_a_sketched_polyline`에 follow 목록 단언(shell).
 
+### iProperties Physical 탭: 열린 메시 경고
+
+- `PhysicalProperties.open`이 true이면(면이 정확히 둘이 아닌 모서리가 있는 메시) 계산값 위에 호박색 경고 "닫히지 않은 메시가 있어 부피·질량이 정확하지 않을 수 있습니다."를 보인다(면적은 맞다). 열린 메시를 불러오는 UI 테스트는 못 만들었다(메시 읽기가 작업 스레드) — 코드로만 확인.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹
