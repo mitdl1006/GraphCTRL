@@ -508,6 +508,10 @@ pub struct Components {
     /// Which subassembly each component placed in the cell belongs to (absent: the top level).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub placed_in: Vec<(Occurrence, crate::subassembly::SubassemblyId)>,
+    /// Sketches made while editing a component or subassembly in place, with that owner (the others belong
+    /// to the top-level assembly).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sketch_owners: Vec<(Id<Sketch>, crate::subassembly::TreeKey)>,
     /// The next subassembly id: ids only grow, so one of a dissolved subassembly is never reused.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub next_subassembly: u32,
