@@ -118,3 +118,67 @@ fn a_mesh_that_is_not_closed_is_flagged() {
     let primitive = body(&mut s, Solid::Sphere { radius: 0.1 }, [1.0, 0.0, 0.0]);
     assert!(!s.physical_properties(Some(Occurrence::Item(primitive.erase()))).unwrap().open);
 }
+
+/// Status and Custom iProperties (Inventor 2026 help, iProperties Reference,
+/// GUID-8ABF17C5-B9EB-47B5-92CF-9FBD335334E3): a status classification of any text, and properties the
+/// user adds by name.
+#[test]
+fn status_and_custom_iproperties_are_kept_and_saved() {
+    use gc_doc::CustomProperty;
+    let mut s = Session::new();
+    let body = s
+        .add_body(gc_doc::Solid::Box { size: [0.1; 3] }, gc_doc::Placement { xyz: [0.0; 3], rpy: [0.0; 3] })
+        .unwrap();
+    let occ = Occurrence::Item(body.erase());
+    let custom = |name: &str, value: &str| CustomProperty { name: name.into(), value: value.into() };
+    let props = IProperties {
+        status: "Released".into(),
+        custom: vec![custom("Supplier code", "A-17"), custom("Lead time", "3 weeks")],
+        ..IProperties::default()
+    };
+    s.set_properties(Some(occ), props.clone()).unwrap();
+    let kept = s.properties(Some(occ));
+    assert_eq!(kept, props);
+    assert_eq!(kept.custom_value("Lead time"), Some("3 weeks"));
+    assert_eq!(kept.custom_value("Nothing"), None);
+    // A name is needed, and only once.
+    let before = s.doc().clone();
+    for bad in [vec![custom("", "x")], vec![custom("  ", "x")], vec![custom("A", "1"), custom("A", "2")]] {
+        let refused = IProperties { custom: bad, ..IProperties::default() };
+        assert!(s.set_properties(Some(occ), refused).is_err());
+    }
+    assert!(s.doc().same_content(&before));
+    // Saved and opened again.
+    let text = gc_persist::to_text(s.doc()).unwrap();
+    let opened = gc_persist::from_text(&text).unwrap().doc;
+    assert!(opened.same_content(s.doc()));
+}
+
+/// Include QTY Overrides (Inventor 2026 help, iProperties - Physical Tab - Reference,
+/// GUID-877564AC-78CE-4216-9913-003A2DE8D698): a Static Quantity entered in the bill of materials counts
+/// in the assembly's mass, volume and area when the option is on.
+#[test]
+fn static_quantities_count_in_the_mass_when_asked() {
+    let mut s = Session::new();
+    let bolt = body(&mut s, Solid::Box { size: [0.1, 0.1, 0.1] }, [0.0, 0.0, 0.0]);
+    let plate = body(&mut s, Solid::Box { size: [1.0, 1.0, 0.1] }, [2.0, 0.0, 0.0]);
+    let steel = |part: &str| IProperties {
+        part_number: part.into(),
+        density: Some(1000.0),
+        ..IProperties::default()
+    };
+    s.set_properties(Some(Occurrence::Item(bolt.erase())), steel("BOLT")).unwrap();
+    s.set_properties(Some(Occurrence::Item(plate.erase())), steel("PLATE")).unwrap();
+    let plain = s.physical_properties(None).unwrap();
+    assert!((plain.mass - 101.0).abs() < 1e-9);
+    // Twelve bolts are meant, one is modelled.
+    s.set_bom_quantity(gc_doc::TreeKey::Component(Occurrence::Item(bolt.erase())), Some(12)).unwrap();
+    assert!((s.physical_properties(None).unwrap().mass - 101.0).abs() < 1e-9, "off unless asked");
+    let counted = s.physical_properties_with(None, true).unwrap();
+    assert!((counted.mass - 112.0).abs() < 1e-9, "{}", counted.mass);
+    assert!((counted.volume - (0.012 + 0.1)).abs() < 1e-12);
+    assert!((counted.area - (12.0 * 0.06 + 2.4)).abs() < 1e-9);
+    // One component alone is itself.
+    let one = s.physical_properties_with(Some(Occurrence::Item(bolt.erase())), true).unwrap();
+    assert!((one.mass - 1.0).abs() < 1e-12);
+}
