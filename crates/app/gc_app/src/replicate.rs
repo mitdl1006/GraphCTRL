@@ -27,6 +27,20 @@ enum Shape {
     Sphere,
 }
 
+/// What a robot is replaced with: a description file the user picks, or a robot of the library.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RobotSource {
+    File,
+    Library(usize),
+}
+
+/// A robot replacement the dialog asks the application to make (it needs the file dialog and the library).
+pub(crate) struct RobotRequest {
+    pub(crate) robot: gc_core::Id<gc_doc::Robot>,
+    pub(crate) source: RobotSource,
+    pub(crate) all: bool,
+}
+
 /// The dialog's state.
 pub(crate) struct Replicate {
     pub(crate) open: bool,
@@ -76,6 +90,11 @@ impl Default for Replicate {
 }
 
 impl Replicate {
+    /// Opens the Replace dialog with a component already chosen.
+    pub(crate) fn start_replace(&mut self, item: AnyId) {
+        *self = Self { open: true, mode: Mode::Replace, items: vec![item], ..Self::default() };
+    }
+
     /// Opens the dialog in a mode.
     pub(crate) fn start(&mut self, mode: Mode) {
         *self = Self { open: true, mode, ..Self::default() };
@@ -129,8 +148,14 @@ impl Replicate {
         match self.mode {
             Mode::Mirror => self.plane.is_some(),
             Mode::Copy => Self::numbers(&self.offset).is_some(),
-            Mode::Replace => self.replacement().is_some(),
+            // A robot is replaced by choosing a file or a library robot, not by OK.
+            Mode::Replace => self.replacement().is_some() && !self.replacing_robot(),
         }
+    }
+
+    /// Whether the one component chosen for Replace is a robot.
+    fn replacing_robot(&self) -> bool {
+        matches!(self.items.as_slice(), [item] if item.kind == gc_core::Kind::RobotInstance)
     }
 
     fn run(&mut self, session: &mut Session) -> bool {
@@ -143,31 +168,26 @@ impl Replicate {
                         .map(|()| Vec::new())
                 }
                 Some(plane) => {
-                    // Per component: Mirror = a mirror image in a new file, Reuse = the same shape turned.
-                    let (reuse, mirror): (Vec<AnyId>, Vec<AnyId>) =
-                        self.items.iter().copied().partition(|item| self.reuse.contains(item));
-                    let mut suppressed = Vec::new();
-                    let mut failed = Vec::new();
-                    if !mirror.is_empty() {
-                        match session.mirror_components_reflected(
-                            &mirror,
-                            plane,
-                            self.relationships,
-                            self.ground,
-                        ) {
-                            Ok(outcome) => {
-                                suppressed.extend(outcome.suppressed);
-                                failed = outcome.not_reflected;
-                            }
+                    // Per component: Mirror = a mirror image in a new file, Reuse = the same shape turned; one call,
+                    // one undo step.
+                    let items: Vec<(AnyId, gc_session::MirrorState)> = self
+                        .items
+                        .iter()
+                        .map(|item| {
+                            let state = if self.reuse.contains(item) {
+                                gc_session::MirrorState::Reuse
+                            } else {
+                                gc_session::MirrorState::Mirror
+                            };
+                            (*item, state)
+                        })
+                        .collect();
+                    let (suppressed, failed) =
+                        match session.mirror_components_mixed(&items, plane, self.relationships, self.ground)
+                        {
+                            Ok(outcome) => (outcome.suppressed, outcome.not_reflected),
                             Err(_) => return false,
-                        }
-                    }
-                    if !reuse.is_empty() {
-                        match session.mirror_components(&reuse, plane, self.relationships, self.ground) {
-                            Ok(names) => suppressed.extend(names),
-                            Err(_) => return false,
-                        }
-                    }
+                        };
                     self.not_reflected = failed
                         .iter()
                         .map(|id| {
@@ -207,7 +227,14 @@ impl Replicate {
     }
 
     /// The dialog window.
-    pub(crate) fn window(&mut self, ctx: &egui::Context, session: &mut Session, lang: Lang) {
+    pub(crate) fn window(
+        &mut self,
+        ctx: &egui::Context,
+        session: &mut Session,
+        lang: Lang,
+        robots: &[String],
+    ) -> Option<RobotRequest> {
+        let mut request = None;
         let mut open = self.open;
         let mut ok = false;
         let screen = ctx.content_rect();
@@ -288,22 +315,46 @@ impl Replicate {
                     }
                 }
                 Mode::Replace => {
-                    ui.horizontal(|ui| {
-                        for (shape, name) in [
-                            (Shape::Box, tr!(lang, ReplicateBox)),
-                            (Shape::Cylinder, tr!(lang, ReplicateCylinder)),
-                            (Shape::Sphere, tr!(lang, ReplicateSphere)),
-                        ] {
-                            ui.selectable_value(&mut self.shape, shape, name);
+                    // A robot is replaced with a description file or a robot of the library (Inventor 2026 help,
+                    // Replace assembly components, GUID-E5FAA224-7332-4AC6-A78E-793FDACFEEDD); the rest with a shape.
+                    let robot = match self.items.as_slice() {
+                        [item] if item.kind == gc_core::Kind::RobotInstance => {
+                            Some(gc_core::Id::<gc_doc::Robot>::from_raw(item.raw))
                         }
-                    });
-                    let labels: &[&str] = match self.shape {
-                        Shape::Box => &["X", "Y", "Z"],
-                        Shape::Cylinder => &["R", "L"],
-                        Shape::Sphere => &["R"],
+                        _ => None,
                     };
-                    for (field, label) in self.size.iter_mut().zip(labels) {
-                        labelled(ui, &format!("{label} (mm)"), field);
+                    if let Some(robot) = robot {
+                        ui.label(egui::RichText::new(tr!(lang, ReplaceRobotWith)).strong());
+                        if ui.button(tr!(lang, ReplaceRobotFile)).clicked() {
+                            request = Some(RobotRequest { robot, source: RobotSource::File, all: self.all });
+                        }
+                        for (index, name) in robots.iter().enumerate() {
+                            if ui.button(name).clicked() {
+                                request = Some(RobotRequest {
+                                    robot,
+                                    source: RobotSource::Library(index),
+                                    all: self.all,
+                                });
+                            }
+                        }
+                    } else {
+                        ui.horizontal(|ui| {
+                            for (shape, name) in [
+                                (Shape::Box, tr!(lang, ReplicateBox)),
+                                (Shape::Cylinder, tr!(lang, ReplicateCylinder)),
+                                (Shape::Sphere, tr!(lang, ReplicateSphere)),
+                            ] {
+                                ui.selectable_value(&mut self.shape, shape, name);
+                            }
+                        });
+                        let labels: &[&str] = match self.shape {
+                            Shape::Box => &["X", "Y", "Z"],
+                            Shape::Cylinder => &["R", "L"],
+                            Shape::Sphere => &["R"],
+                        };
+                        for (field, label) in self.size.iter_mut().zip(labels) {
+                            labelled(ui, &format!("{label} (mm)"), field);
+                        }
                     }
                     ui.checkbox(&mut self.all, tr!(lang, ReplicateAll));
                 }
@@ -345,6 +396,7 @@ impl Replicate {
             }
         }
         self.open = open;
+        request
     }
 }
 

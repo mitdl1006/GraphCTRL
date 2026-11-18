@@ -61,6 +61,8 @@ pub enum BrowserAction {
     GroundAtOrigin(Vec<gc_core::AnyId>),
     /// Place at Component Origin: a new component (the app asks for its file) on this component's origin.
     PlaceAtOrigin(gc_doc::Occurrence),
+    /// Replace: open the Replace dialog with this component chosen.
+    Replace(gc_core::AnyId),
     /// Diagnose: the Relationship Conflict Analysis dialog for this relationship.
     Diagnose(gc_core::Id<gc_doc::Relationship>),
     /// Recover: isolate the components of the relationships that fail together with this one.
@@ -1762,6 +1764,13 @@ fn node_row(
                 .collect();
             if !items.is_empty() && ui.button(tr!(lang, CmdGroundAndRoot)).clicked() {
                 *action = Some(BrowserAction::GroundAtOrigin(items));
+                ui.close();
+            }
+            if matches!(occurrence, gc_doc::Occurrence::Item(any) if any.kind != gc_core::Kind::Assembly)
+                && guarded_button(ui, lang, primary_blocked(session), tr!(lang, ReplicateReplace)).clicked()
+                && let gc_doc::Occurrence::Item(any) = occurrence
+            {
+                *action = Some(BrowserAction::Replace(any));
                 ui.close();
             }
             if ui.button(tr!(lang, CmdPlaceAtOrigin)).clicked() {
