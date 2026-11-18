@@ -675,7 +675,8 @@ fn tool_state_in_conditions_and_renames_follow_into_steps() {
 fn program_lines_are_commands(text: &str) {
     for (i, line) in text.lines().enumerate() {
         let trimmed = line.trim_start();
-        let ok = i == 0 && line.starts_with("def ")
+        let ok = line.starts_with("def ")
+            || i == 0 && line.starts_with('#')
             || line == "end"
             || line.starts_with("  ")
                 && [
@@ -700,7 +701,7 @@ fn program_lines_are_commands(text: &str) {
 fn urscript_identifiers_numbers_and_empty_tasks() {
     let Cell { mut s, left, right, roles, .. } = cell();
     let ident = |text: &str| -> String {
-        let line = text.lines().next().unwrap();
+        let line = text.lines().find(|l| l.starts_with("def ")).unwrap();
         line.strip_prefix("def ").unwrap().strip_suffix("():").unwrap().to_owned()
     };
     for name in [
@@ -739,13 +740,14 @@ fn urscript_identifiers_numbers_and_empty_tasks() {
     // A name that is only non-ASCII becomes a row of underscores: two different names can give the same one.
     let (a, b) = (add(&mut s, task("작업", roles[0])), add(&mut s, task("경로", roles[0])));
     let (ta, tb) = (s.task_urscript(a, left).unwrap(), s.task_urscript(b, left).unwrap());
-    eprintln!("observation: Korean-only task names give identifiers {:?} and {:?}", ident(&ta), ident(&tb));
+    // Backend 0b5bb9f: a name with letters outside ASCII gets the item's id appended, so two of them differ.
+    assert_ne!(ident(&ta), ident(&tb), "two non-ASCII names gave one function name");
     // An empty task (no steps), one that only waits: a program or a reason; no NaN anywhere.
     let empty = add(&mut s, Task { steps: Vec::new(), ..task("Empty", roles[0]) });
     for (what, t) in [("empty", empty)] {
         match s.task_urscript(t, left) {
             Ok(text) => {
-                assert!(text.starts_with("def Empty():\n") && text.ends_with("end\n"), "{what}: {text}");
+                assert!(text.contains("def Empty():\n") && text.ends_with("end\n"), "{what}: {text}");
                 program_lines_are_commands(&text);
             }
             Err(why) => assert!(!why.is_empty(), "{what}"),
@@ -788,19 +790,18 @@ fn urscript_identifiers_numbers_and_empty_tasks() {
     assert!(Session::new().schedule_urscript(&Session::new().schedule()).is_empty());
     let programs = s.schedule_urscript(&s.schedule());
     for (robot, text) in &programs {
-        assert!(text.starts_with("def ") && text.ends_with("end\n"));
+        assert!(text.contains("def ") && text.ends_with("end\n"));
         program_lines_are_commands(text);
         let _ = robot;
     }
     let _ = right;
 }
 
-/// BUG: URScript text is made by writing names and conditions into comments; a task name, a robot name, a signal
+/// (Was a BUG, fixed by backend 0b5bb9f.) URScript text is made by writing names and conditions into comments; a task name, a robot name, a signal
 /// condition or a step's text with a line break ends the comment and the rest of the text becomes a command of
 /// the program. Task names, robot names and `WaitIo` conditions take any text (no line break check), so a name
 /// pasted from elsewhere can put a `movej` / `popup` / `set_digital_out` line into a program meant for a robot.
 #[test]
-#[ignore = "BUG: a line break in a task name, robot name or WaitIo condition turns the rest into URScript commands (owner: backend, gc_session/src/urscript.rs)"]
 fn text_with_a_line_break_cannot_become_a_command() {
     let Cell { mut s, left, roles, .. } = cell();
     let payload = "x\n  movej([9.0, 9.0, 9.0, 9.0, 9.0, 9.0], a=9, v=9, r=0)";
