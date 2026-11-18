@@ -5716,20 +5716,20 @@ fn the_auto_bend_option_is_off_by_default_saved_and_read_back() {
     let mut harness =
         egui_kittest::Harness::builder().with_size(SIZE).build_eframe(|cc| GraphCtrlApp::new(cc, options()));
     harness.run();
-    assert!(harness.state().session.auto_bend().is_none());
+    assert!(!harness.state().session.auto_bend());
     harness.get_by_label("파일").click();
     harness.run();
     harness.get_by_label("응용 프로그램 옵션").click();
     harness.run_steps(3);
     harness.get_by_label("3D 선 그릴 때 자동 굽힘").click();
     harness.run();
-    assert_eq!(harness.state().session.auto_bend(), Some("10 mm"));
+    assert!(harness.state().session.auto_bend());
     let saved = gc_persist::places::load_settings(directory.path());
     assert!(saved.auto_bend);
 
     let again =
         egui_kittest::Harness::builder().with_size(SIZE).build_eframe(|cc| GraphCtrlApp::new(cc, options()));
-    assert_eq!(again.state().session.auto_bend(), Some("10 mm"));
+    assert!(again.state().session.auto_bend());
 }
 
 /// Helical Curve in a 3D sketch (GUID-37BA1DCE-6BC4-41CD-A36D-577F31B304FC): the dialog's values, then the start
