@@ -260,7 +260,6 @@ pub struct GraphCtrlApp {
     drive: crate::drive::Drive,
     /// The body Ctrl+C copied.
     clipboard: Option<gc_core::Id<gc_doc::Body>>,
-    joint_limits: crate::joint_limits::JointLimits,
     /// The Constrain dialog.
     constrain: crate::constrain::Constrain,
     assemble: crate::assemble::Assemble,
@@ -372,7 +371,6 @@ impl GraphCtrlApp {
             interference: crate::interference::Interference::default(),
             drive: crate::drive::Drive::default(),
             clipboard: None,
-            joint_limits: crate::joint_limits::JointLimits::default(),
             constrain: crate::constrain::Constrain::default(),
             assemble: crate::assemble::Assemble::default(),
             work_feature: crate::work_feature::WorkFeatureDialog::default(),
@@ -1410,7 +1408,7 @@ impl eframe::App for GraphCtrlApp {
                             // A refusal is explained in the status bar.
                             drop(self.session.set_joint_lock(id, on));
                         }
-                        Some(BrowserAction::JointLimits(id)) => self.joint_limits.start(&self.session, id),
+                        Some(BrowserAction::JointLimits(id)) => self.joint.edit_limits(&self.session, id),
                         Some(BrowserAction::JointProtect(id, on)) => {
                             drop(self.session.set_joint_protect(id, on));
                         }
@@ -1537,9 +1535,6 @@ impl eframe::App for GraphCtrlApp {
         }
         if self.joint.open {
             self.joint.window(&ctx, &mut self.session, lang);
-        }
-        if self.joint_limits.open {
-            self.joint_limits.window(&ctx, &mut self.session, lang);
         }
         if self.pattern.open {
             self.pattern.window(&ctx, &mut self.session, lang);

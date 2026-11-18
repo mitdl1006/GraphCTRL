@@ -177,6 +177,13 @@
 - 3D 모델 탭의 작업 평면·작업 축·작업 점과 조립 탭의 그립 스냅이 모두 같은 "이동(Pan)" 아이콘이어서 구분이 안 됐다. 각각 직접 그린 아이콘(`Icon::WorkPlane` / `WorkAxis` / `WorkPoint` / `GripSnap`, 인벤터 그림 사용 안 함)으로 바꿨다. 증거 `docs/evidence/img/review-58-*.png`.
 - 큰/작은 버튼 혼합: 7개 탭을 모두 렌더해 보니 큰 버튼 탭(3D 모델·조립·로봇·검사·관리·뷰)과 큰+작은 혼합 탭(스케치: 작성·수정·구속)이 인벤터처럼 역할별로 나뉘어 있고 폭도 1280 px 안에 들어간다(`every_ribbon_tab_fits_1280_px`). 분할 버튼은 아래쪽 화살표 때문에 이름이 한 줄 위에 앉는 점이 인벤터와 같다. 따로 더 합칠 항목은 찾지 못했다.
 
+### 구속 한계 / 조인트 한계 탭 / 리본 큰·작은 버튼
+
+- **구속 대화상자 "더 보기"**: 이름, 최대·최소(체크+값, mm), "오프셋을 휴지 위치로" → `Relationship.limits`. 원문 GUID-0F500089-4F69-41C5-AFE8-B58AC9E8E15E("To change the name of the constraint or set limits, click the More button… Check Maximum… Check Minimum… Use Offset As Resting Position"). 최소>최대나 숫자가 아닌 값이면 확인이 막힌다. 테스트 `the_constrain_dialogs_more_section_sets_the_name_and_limits`. 원문과 차이: 값은 오프셋(mm)만, 각도 구속의 한계는 아직 UI 없음, 체크를 풀어도 값이 유지되는("inactive state") 동작은 대화상자를 닫으면 사라진다.
+- **조인트 대화상자에 "조인트 / 한계" 탭**(GUID-21DC3336-5C51-42C1-90FB-4299CD66E0C6 Limits 탭): 만들 때 한계 탭의 값은 조인트가 만들어진 뒤 `set_joint_limits`로 함께 저장. 브라우저 우클릭 "한계…"는 같은 대화상자를 한계 탭으로 연다(이미 있는 조인트는 원점·종류 읽기 전용, 한계만 수정). 별도 "조인트 한계" 창은 없앴다. 테스트 `a_rotational_joint_gets_angular_limits_from_its_dialog`, `the_joint_dialogs_limits_tab_goes_with_a_new_rotational_joint`.
+- **리본 큰/작은 버튼**: 인벤터처럼 패널마다 가장 쓰는 명령은 큰 버튼, 나머지는 아이콘+이름 작은 버튼 세로 묶음(`gc_ui::ribbon_stack`, 최대 3줄). 조립 탭: 배치 / 패턴 / 구속·조인트는 큰 버튼, 교체 / 미러·복사 / 어셈블·구동 / 그립 스냅·접지는 작은 버튼. 3D 모델 탭: 작업 평면 큰 버튼, 작업 축·점 작은 버튼. 1280 px 단언은 그대로 통과. 증거 `docs/evidence/img/review-59-*.png`. 접근성 이름은 이전과 같다(버튼 이름 = 라벨).
+- 원문과 차이: 다른 탭(스케치·로봇·검사·뷰)은 이 규칙으로 아직 정리하지 않았다.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

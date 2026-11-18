@@ -4723,7 +4723,6 @@ fn a_rotational_joint_gets_angular_limits_from_its_dialog() {
     }
     harness.get_by_label("한계…").click();
     harness.run_steps(3);
-    harness.get_by_label("조인트 한계");
     harness.get_by_label("각도 한계").click();
     harness.run_steps(3);
     let input = egui::accesskit::Role::TextInput;
@@ -5151,4 +5150,135 @@ fn f10_toggles_the_visibility_of_the_latest_sketch() {
     harness.key_press(egui::Key::F10);
     harness.run_steps(2);
     assert!(harness.state().session.is_visible(sketch.erase()), "shown again");
+}
+
+/// The Constrain dialog's More section: a name, Maximum / Minimum, Use Offset As Resting Position (Inventor
+/// 2026 help, GUID-0F500089-4F69-41C5-AFE8-B58AC9E8E15E).
+#[test]
+fn the_constrain_dialogs_more_section_sets_the_name_and_limits() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.05, 0.05, 0.05] };
+    let app = harness.state_mut();
+    let fixed = app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    let placement = gc_doc::Placement { xyz: [0.12, 0.0, 0.0], rpy: [0.0; 3] };
+    let moving = app.session.add_body(solid, placement).unwrap();
+    app.fit_view();
+    app.viewport_mut().camera.pan([0.0, 0.0], [-250.0, 0.0], [1280.0, 700.0]);
+    harness.run();
+
+    harness.get_by_label("조립").click();
+    harness.run();
+    harness.get_by_label("구속").click();
+    harness.run_steps(5);
+    let click = |harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, world: gc_math::DVec3| {
+        let at = harness.state().viewport().screen_of(world).unwrap();
+        harness.event(egui::Event::PointerMoved(at));
+        harness.run_steps(3);
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.run_steps(3);
+        }
+    };
+    // First the Z axis that moves, then the one that stays.
+    click(&mut harness, gc_math::DVec3::new(0.12, 0.0, 0.06));
+    harness.get_by_label_contains("첫 번째 선택: Body2:1 · 축");
+    click(&mut harness, gc_math::DVec3::new(0.0, 0.0, 0.06));
+    harness.get_by_label_contains("두 번째 선택: Body1:1 · 축");
+    harness.get_by_label("더 보기").click();
+    harness.run_steps(3);
+    let input = egui::accesskit::Role::TextInput;
+    harness.get_by_role_and_label(input, "이름").click();
+    harness.run_steps(2);
+    harness.get_by_role_and_label(input, "이름").type_text("Stop");
+    harness.get_by_role_and_label(egui::accesskit::Role::CheckBox, "최대").click();
+    harness.run_steps(2);
+    harness.get_by_role_and_label(input, "최대").click();
+    harness.run_steps(2);
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.get_by_role_and_label(input, "최대").type_text("10");
+    harness.run_steps(2);
+    harness.get_by_label("오프셋을 휴지 위치로").click();
+    harness.run_steps(2);
+    harness.get_by_label("확인").click();
+    harness.run();
+    let session = &harness.state().session;
+    let (_, relationship) = session.relationships().into_iter().next().expect("a constraint");
+    assert_eq!(relationship.name, "Stop");
+    let limits = relationship.limits.expect("limits");
+    assert!(limits.min.is_none() && limits.resting, "{limits:?}");
+    assert!((limits.max.unwrap() - 0.01).abs() < 1e-9, "{limits:?}");
+    let _ = (fixed, moving);
+}
+
+/// The Limits tab of the Joint dialog sets the limits of a joint as it is created (Inventor 2026 help,
+/// GUID-21DC3336-5C51-42C1-90FB-4299CD66E0C6).
+#[test]
+fn the_joint_dialogs_limits_tab_goes_with_a_new_rotational_joint() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.05, 0.05, 0.05] };
+    let app = harness.state_mut();
+    app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    let placement = gc_doc::Placement { xyz: [0.12, 0.0, 0.0], rpy: [0.0; 3] };
+    let moving = app.session.add_body(solid, placement).unwrap();
+    app.fit_view();
+    app.viewport_mut().camera.pan([0.0, 0.0], [-250.0, 0.0], [1280.0, 700.0]);
+    harness.run();
+
+    harness.get_by_label("조립").click();
+    harness.run();
+    harness.get_by_label("조인트").click();
+    harness.run_steps(5);
+    let click = |harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, world: gc_math::DVec3| {
+        let at = harness.state().viewport().screen_of(world).unwrap();
+        harness.event(egui::Event::PointerMoved(at));
+        harness.run_steps(3);
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.run_steps(3);
+        }
+    };
+    click(&mut harness, gc_math::DVec3::new(0.12, 0.0, 0.0));
+    harness.get_by_label_contains("첫 번째 원점: Body2:1");
+    click(&mut harness, gc_math::DVec3::new(0.0, 0.0, 0.0));
+    harness.get_by_label_contains("두 번째 원점: Body1:1");
+    harness.get_by_label("회전").click();
+    harness.run_steps(2);
+    harness.get_by_label("한계").click();
+    harness.run_steps(3);
+    harness.get_by_label("각도 한계").click();
+    harness.run_steps(2);
+    let input = egui::accesskit::Role::TextInput;
+    harness.get_by_role_and_label(input, "끝").click();
+    harness.run_steps(2);
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.get_by_role_and_label(input, "끝").type_text("90");
+    harness.run_steps(2);
+    harness.get_by_label("확인").click();
+    harness.run();
+    let session = &harness.state().session;
+    assert_eq!(session.relationships().len(), 1, "{:?}", session.last_error());
+    let (id, _) = session.relationships().into_iter().next().unwrap();
+    let (angular, linear) = session.joint_limits(id);
+    let range = angular.expect("angular limits came with the joint");
+    assert!(linear.is_none());
+    assert!((range.end - 90f64.to_radians()).abs() < 1e-9, "{range:?}");
+    let _ = moving;
 }

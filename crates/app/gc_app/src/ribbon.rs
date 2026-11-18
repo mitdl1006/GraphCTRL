@@ -171,14 +171,31 @@ pub(crate) fn show(
                 // Work features: the axis types of an assembly (Inventor 2026 help, To Create Work Features,
                 // GUID-38A9748E-FA2D-44D3-928C-DFE1326A9385).
                 ribbon_group(ui, tr!(lang, GroupWorkFeatures), |ui| {
-                    for (category, label, icon) in [
-                        (crate::work_feature::Category::Plane, tr!(lang, CmdWorkPlane), Icon::WorkPlane),
-                        (crate::work_feature::Category::Axis, tr!(lang, CmdWorkAxis), Icon::WorkAxis),
-                        (crate::work_feature::Category::Point, tr!(lang, CmdWorkPoint), Icon::WorkPoint),
-                    ] {
-                        if ribbon_button(ui, icon, label, false, !sketching).clicked() {
-                            action = Some(RibbonAction::StartWorkFeature(category));
-                        }
+                    use crate::work_feature::Category;
+                    // The plane is the large button; the axis and the point are stacked beside it.
+                    if ribbon_button(ui, Icon::WorkPlane, tr!(lang, CmdWorkPlane), false, !sketching)
+                        .clicked()
+                    {
+                        action = Some(RibbonAction::StartWorkFeature(Category::Plane));
+                    }
+                    let rows = [
+                        gc_ui::StackRow {
+                            icon: Icon::WorkAxis,
+                            label: tr!(lang, CmdWorkAxis),
+                            selected: false,
+                            enabled: !sketching,
+                        },
+                        gc_ui::StackRow {
+                            icon: Icon::WorkPoint,
+                            label: tr!(lang, CmdWorkPoint),
+                            selected: false,
+                            enabled: !sketching,
+                        },
+                    ];
+                    match gc_ui::ribbon_stack(ui, &rows) {
+                        Some(0) => action = Some(RibbonAction::StartWorkFeature(Category::Axis)),
+                        Some(1) => action = Some(RibbonAction::StartWorkFeature(Category::Point)),
+                        _ => {}
                     }
                 });
             }
@@ -632,66 +649,72 @@ fn assemble_tab(
 ) -> Option<RibbonAction> {
     let mut action = None;
     let robot = session.doc().robots().iter().next().map(|(id, _)| id);
+    let has_components = !session.components().is_empty();
     ribbon_group(ui, tr!(lang, GroupComponent), |ui| {
         if ribbon_button(ui, Icon::Import, tr!(lang, CmdPlace), false, true).clicked() {
             action = Some(RibbonAction::Place);
         }
-        if ribbon_button(
-            ui,
-            Icon::Select,
-            tr!(lang, ReplicateReplace),
-            false,
-            !session.components().is_empty(),
-        )
-        .clicked()
-        {
+        let rows = [gc_ui::StackRow {
+            icon: Icon::Select,
+            label: tr!(lang, ReplicateReplace),
+            selected: false,
+            enabled: has_components,
+        }];
+        if gc_ui::ribbon_stack(ui, &rows).is_some() {
             action = Some(RibbonAction::StartReplicate(crate::replicate::Mode::Replace));
         }
     });
     ribbon_group(ui, tr!(lang, PatternTitle), |ui| {
-        if ribbon_button(
-            ui,
-            Icon::RectPattern,
-            tr!(lang, PatternTitle),
-            false,
-            !session.components().is_empty(),
-        )
-        .clicked()
-        {
+        if ribbon_button(ui, Icon::RectPattern, tr!(lang, PatternTitle), false, has_components).clicked() {
             action = Some(RibbonAction::StartPattern);
         }
-        for (mode, icon, label) in [
-            (crate::replicate::Mode::Mirror, Icon::Mirror, tr!(lang, ReplicateMirror)),
-            (crate::replicate::Mode::Copy, Icon::Cuboid, tr!(lang, ReplicateCopy)),
-        ] {
-            if ribbon_button(ui, icon, label, false, !session.components().is_empty()).clicked() {
-                action = Some(RibbonAction::StartReplicate(mode));
-            }
+        let rows = [
+            gc_ui::StackRow {
+                icon: Icon::Mirror,
+                label: tr!(lang, ReplicateMirror),
+                selected: false,
+                enabled: has_components,
+            },
+            gc_ui::StackRow {
+                icon: Icon::Cuboid,
+                label: tr!(lang, ReplicateCopy),
+                selected: false,
+                enabled: has_components,
+            },
+        ];
+        match gc_ui::ribbon_stack(ui, &rows) {
+            Some(0) => action = Some(RibbonAction::StartReplicate(crate::replicate::Mode::Mirror)),
+            Some(1) => action = Some(RibbonAction::StartReplicate(crate::replicate::Mode::Copy)),
+            _ => {}
         }
     });
-    // Failures of these commands are shown in the status bar.
+    // Failures of these commands are shown in the status bar. Constrain and Joint are the large buttons;
+    // Assemble and Drive are stacked beside them.
     ribbon_group(ui, tr!(lang, GroupRelationships), |ui| {
-        if ribbon_button(ui, Icon::Frame, tr!(lang, AssembleTitle), false, !session.components().is_empty())
-            .clicked()
-        {
-            action = Some(RibbonAction::StartAssemble);
-        }
         if ribbon_button(ui, Icon::Frame, tr!(lang, ConstrainTitle), false, true).clicked() {
             action = Some(RibbonAction::StartConstrain);
         }
         if ribbon_button(ui, Icon::Orbit, tr!(lang, JointTitle), false, true).clicked() {
             action = Some(RibbonAction::StartJoint);
         }
-        if ribbon_button(
-            ui,
-            Icon::Play,
-            tr!(lang, MenuDrive),
-            false,
-            robot.is_some() || !session.relationships().is_empty(),
-        )
-        .clicked()
-        {
-            action = Some(RibbonAction::StartDrive);
+        let rows = [
+            gc_ui::StackRow {
+                icon: Icon::Frame,
+                label: tr!(lang, AssembleTitle),
+                selected: false,
+                enabled: has_components,
+            },
+            gc_ui::StackRow {
+                icon: Icon::Play,
+                label: tr!(lang, MenuDrive),
+                selected: false,
+                enabled: robot.is_some() || !session.relationships().is_empty(),
+            },
+        ];
+        match gc_ui::ribbon_stack(ui, &rows) {
+            Some(0) => action = Some(RibbonAction::StartAssemble),
+            Some(1) => action = Some(RibbonAction::StartDrive),
+            _ => {}
         }
     });
     // Edit in place: back out of the component or subassembly being edited (Inventor 2026 help, Edit
@@ -732,17 +755,29 @@ fn assemble_tab(
             let tool = tools[index].0;
             viewport.free_tool = if viewport.free_tool == Some(tool) { None } else { Some(tool) };
         }
-        // Grip Snap: an edge as the reference, then two points.
-        if ribbon_button(ui, Icon::GripSnap, tr!(lang, GripTitle), viewport.is_grip_snapping(), has).clicked()
-        {
-            viewport.start_grip_snap();
-        }
-        // Ground: the selected body, robot or imported assembly, shown pressed when it is grounded.
+        // Grip Snap and Ground are stacked beside the large Free Move split button. Ground applies to the
+        // selected body, robot or imported assembly and is shown pressed when it is grounded.
         let selected = session.selected_occurrence().filter(|o| session.can_ground(*o));
         let grounded =
             selected.is_some_and(|o| session.doc().component_flag(o, gc_doc::ComponentFlag::Grounded));
-        if ribbon_button(ui, Icon::Ground, tr!(lang, CmdGround), grounded, selected.is_some()).clicked() {
-            action = Some(RibbonAction::ToggleGround);
+        let rows = [
+            gc_ui::StackRow {
+                icon: Icon::GripSnap,
+                label: tr!(lang, GripTitle),
+                selected: viewport.is_grip_snapping(),
+                enabled: has,
+            },
+            gc_ui::StackRow {
+                icon: Icon::Ground,
+                label: tr!(lang, CmdGround),
+                selected: grounded,
+                enabled: selected.is_some(),
+            },
+        ];
+        match gc_ui::ribbon_stack(ui, &rows) {
+            Some(0) => viewport.start_grip_snap(),
+            Some(1) => action = Some(RibbonAction::ToggleGround),
+            _ => {}
         }
     });
     action
