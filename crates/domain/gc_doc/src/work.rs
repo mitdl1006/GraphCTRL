@@ -350,6 +350,14 @@ pub enum WorkOp {
         /// How many times at most.
         times: Option<u32>,
     },
+    /// Where a robot goes to be out of the way of the others (its park pose), as joint values; `None`
+    /// for where the document has it standing.
+    SetRobotPark {
+        /// The robot.
+        robot: Id<Robot>,
+        /// One value per joint of its planning chain.
+        joints: Option<Vec<f64>>,
+    },
     /// Adds a tool kit.
     AddToolKit(crate::toolkit::ToolKit),
     /// Replaces a tool kit. With the same number of actions (signals), one whose name changed is renamed
@@ -559,6 +567,16 @@ impl Document {
             CondValue::Number(value) => Some(value),
             CondValue::Bool(_) | CondValue::Name(_) => None,
         }
+    }
+
+    /// Where a robot goes to be out of the way: its park pose, or without one where the document has it
+    /// standing. `None` for a robot that does not exist.
+    pub fn robot_park(&self, robot: Id<Robot>) -> Option<Vec<f64>> {
+        let data = self.get(robot)?;
+        let stored = self.timeline().and_then(|(_, t)| {
+            t.components.parks.iter().find(|(id, q)| *id == robot && q.len() == data.joints.len())
+        });
+        Some(stored.map_or_else(|| data.joints.clone(), |(_, q)| q.clone()))
     }
 
     /// How many times a task is done at most: `None` for once, `Some(0)` for as often as its precondition
@@ -918,6 +936,18 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &WorkOp) -> Result<(Vec<Created>, &'sta
                 t.components.task_repeats.extend(times.map(|times| (*task, times)));
             })?;
             (Vec::new(), "Repeat task")
+        }
+        WorkOp::SetRobotPark { robot, joints } => {
+            let dof = txn.doc().get(*robot).ok_or(EditError::BadValue)?.joints.len();
+            if joints.as_ref().is_some_and(|q| q.len() != dof || q.iter().any(|v| !v.is_finite())) {
+                return Err(EditError::BadValue);
+            }
+            let robots: Vec<Id<Robot>> = txn.doc().robots().iter().map(|(id, _)| id).collect();
+            crate::cell::set_timeline(txn, |t| {
+                t.components.parks.retain(|(id, _)| *id != *robot && robots.contains(id));
+                t.components.parks.extend(joints.clone().map(|q| (*robot, q)));
+            })?;
+            (Vec::new(), "Park pose")
         }
         WorkOp::AddToolKit(_)
         | WorkOp::SetToolKit { .. }

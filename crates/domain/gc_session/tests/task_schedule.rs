@@ -308,12 +308,32 @@ fn robots_keep_clear_of_each_other_and_the_one_in_the_way_is_waited_for() {
     // On their own, each can.
     assert!(s.task_plan(first, left).is_ok() && s.task_plan(second, right).is_ok());
 
-    // Left goes first and then stands on the point: right can never get there.
+    // Left goes first and then stands on the point with nothing to do: it is sent back to where it
+    // stood (its park pose by default), and right goes once it is out of the way.
     let schedule = s.schedule();
-    assert_eq!(schedule.assignments.len(), 1);
+    assert!(schedule.blocked.is_empty(), "{:?}", schedule.blocked);
     assert_eq!((schedule.assignments[0].task, schedule.assignments[0].robot), (first, left));
-    assert_eq!(schedule.blocked.len(), 1);
-    assert_eq!(schedule.blocked[0].0, second);
+    assert_eq!(schedule.parks.len(), 1);
+    let park = &schedule.parks[0];
+    assert_eq!((park.robot, park.start), (left, schedule.assignments[0].end));
+    assert_eq!(park.plan.end, s.doc().get(left).unwrap().joints);
+    let right_goes = schedule.assignments.iter().find(|x| x.task == second).unwrap();
+    assert!(right_goes.start >= park.start && right_goes.robot == right);
+    assert_eq!(schedule.joints_at(left, park.end + 1.0), Some(park.plan.end.clone()));
+    assert!(schedule.makespan() >= park.end);
+    // A park pose of its own: saved, one undo step, the right number of joints.
+    use gc_doc::EditError;
+    assert_eq!(
+        s.edit_work(WorkOp::SetRobotPark { robot: left, joints: Some(vec![0.0; 2]) }),
+        Err(EditError::BadValue)
+    );
+    let elsewhere = vec![1.2, -0.3, 0.6, 0.0, 0.6, 0.0];
+    let depth = s.history().undo_depth();
+    s.edit_work(WorkOp::SetRobotPark { robot: left, joints: Some(elsewhere.clone()) }).unwrap();
+    assert_eq!(s.history().undo_depth(), depth + 1);
+    assert_eq!(s.doc().robot_park(left), Some(elsewhere.clone()));
+    assert_eq!(s.schedule().parks[0].plan.end, elsewhere);
+    s.edit_work(WorkOp::SetRobotPark { robot: left, joints: None }).unwrap();
 
     // With a task that takes left back to where it started, right waits for it and then goes.
     let home = s.add_waypoint_here(left).unwrap();
