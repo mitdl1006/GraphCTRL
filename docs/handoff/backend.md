@@ -124,6 +124,12 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — BOM CSV·부품 번호 (QA)
+
+- `bom_csv`: 탭(`\t`)·CR(`\r`)로 시작하는 칸도 수식 시작으로 보고 앞에 `'`를 붙인다(OWASP CSV 인젝션 문자 집합: `=` `+` `-` `@` 탭 CR).
+- 부품 번호: 끝 공백을 떼고 묶는다(`"BOLT "` = `"BOLT"`). 대소문자는 구분한다. About the BOM Structure(GUID-A0A95805-CBF6-4524-8314-4AC8B53C19CF)에는 대소문자·공백 규칙이 없다(원문 근거 없음, 리드 지시대로).
+- QA 브랜치의 `qa_bom_bend_equal.rs::csv_also_guards_cells_that_start_with_a_tab_or_a_carriage_return`는 이 브랜치에 없어 `#[ignore]`를 여기서 못 뗐다. 같은 단언을 `gc_session/tests/bom.rs`에 넣었다.
+
 ## 2026-11-18 — 경로 역할: 닫힌 곡선, 접선 방향 툴 자세 (GraphCTRL 고유, 원문 없음)
 
 - `SketchRole.travel: PathTravel { tangent: bool, start: Option<Id<SkPoint>> }` 추가(`#[serde(default)]`, 옛 파일은 기본값). `RoleKind`·`ToolAim`은 그대로(다른 브랜치의 패턴·리터럴을 깨지 않으려고 새 필드를 `SketchRole`에 뒀다).
