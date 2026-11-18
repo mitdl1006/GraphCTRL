@@ -78,6 +78,8 @@ pub(crate) enum RibbonAction {
     StartDrive,
     /// Open the Assemble command.
     StartAssemble,
+    /// Open the Work Axis command.
+    StartWorkAxis,
     /// Open the Constrain dialog.
     StartConstrain,
     /// Open the Joint dialog.
@@ -152,6 +154,13 @@ pub(crate) fn show(
                             session.set_tool(ToolKind::Line);
                         }
                         *tab = Tab::Sketch;
+                    }
+                });
+                // Work features: the axis types of an assembly (Inventor 2026 help, To Create Work Features,
+                // GUID-38A9748E-FA2D-44D3-928C-DFE1326A9385).
+                ribbon_group(ui, tr!(lang, GroupWorkFeatures), |ui| {
+                    if ribbon_button(ui, Icon::Pan, tr!(lang, CmdWorkAxis), false, !sketching).clicked() {
+                        action = Some(RibbonAction::StartWorkAxis);
                     }
                 });
             }
@@ -662,6 +671,20 @@ fn assemble_tab(
         .clicked()
         {
             action = Some(RibbonAction::StartDrive);
+        }
+    });
+    // Edit in place: back out of the component or subassembly being edited (Inventor 2026 help, Edit
+    // components in place, GUID-C79C36C9-A6DB-46C5-8864-41F66C750231).
+    ribbon_group(ui, tr!(lang, GroupEdit), |ui| {
+        let editing = session.edit_target().is_some();
+        if ribbon_button(ui, Icon::Home, tr!(lang, CmdReturn), false, editing).clicked() {
+            session.return_edit();
+        }
+        if ribbon_button(ui, Icon::Home, tr!(lang, CmdReturnParent), false, editing).clicked() {
+            session.return_to_parent();
+        }
+        if ribbon_button(ui, Icon::Home, tr!(lang, CmdReturnTop), false, editing).clicked() {
+            session.return_to_top();
         }
     });
     ribbon_group(ui, tr!(lang, GroupPosition), |ui| {

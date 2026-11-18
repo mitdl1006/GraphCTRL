@@ -261,6 +261,7 @@ pub struct GraphCtrlApp {
     /// The Constrain dialog.
     constrain: crate::constrain::Constrain,
     assemble: crate::assemble::Assemble,
+    work_axis: crate::work_axis::WorkAxis,
     conflict: crate::conflict::ConstraintError,
     /// The Joint dialog.
     joint: crate::constrain::Joint,
@@ -369,6 +370,7 @@ impl GraphCtrlApp {
             drive: crate::drive::Drive::default(),
             constrain: crate::constrain::Constrain::default(),
             assemble: crate::assemble::Assemble::default(),
+            work_axis: crate::work_axis::WorkAxis::default(),
             conflict: crate::conflict::ConstraintError::default(),
             joint: crate::constrain::Joint::default(),
             pattern: crate::pattern::Pattern::default(),
@@ -1099,6 +1101,7 @@ impl eframe::App for GraphCtrlApp {
             }
             Some(ribbon::RibbonAction::StartConstrain) => self.constrain.start(),
             Some(ribbon::RibbonAction::StartAssemble) => self.assemble.start(),
+            Some(ribbon::RibbonAction::StartWorkAxis) => self.work_axis.start(),
             Some(ribbon::RibbonAction::StartJoint) => self.joint.start(),
             Some(ribbon::RibbonAction::StartPattern) => self.pattern.start(Vec::new()),
             Some(ribbon::RibbonAction::StartReplicate(mode)) => self.replicate.start(mode),
@@ -1313,6 +1316,13 @@ impl eframe::App for GraphCtrlApp {
                         Some(BrowserAction::JointProtect(id, on)) => {
                             drop(self.session.set_joint_protect(id, on));
                         }
+                        Some(BrowserAction::EditComponent(key)) => {
+                            drop(self.session.edit_component(key));
+                        }
+                        Some(BrowserAction::Subassembly(op)) => {
+                            // A refusal (a name in use) is explained in the status bar.
+                            drop(self.session.edit_subassemblies(op));
+                        }
                         Some(BrowserAction::NewView(name)) => {
                             let camera = Some(gc_viewport::camera_to_json(&self.viewport.camera));
                             let section = self.viewport.section.as_ref().map(gc_viewport::section_to_json);
@@ -1383,6 +1393,11 @@ impl eframe::App for GraphCtrlApp {
         match self.viewport.take_request() {
             Some(gc_viewport::ViewportRequest::Constrain) => self.constrain.start(),
             Some(gc_viewport::ViewportRequest::PlaceComponent) => self.place_component(lang),
+            Some(gc_viewport::ViewportRequest::EditUnit(occurrence)) => {
+                if let Some(key) = self.session.pick_unit(occurrence) {
+                    drop(self.session.edit_component(key));
+                }
+            }
             None => {}
         }
         // The Constrain dialog picks origin planes, axes and points in the view.
@@ -1415,6 +1430,9 @@ impl eframe::App for GraphCtrlApp {
         }
         if self.assemble.open {
             self.assemble.window(&ctx, &mut self.session, lang);
+        }
+        if self.work_axis.open {
+            self.work_axis.window(&ctx, &mut self.session, lang);
         }
         if let Some(conflict) = self
             .joint

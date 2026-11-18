@@ -15,6 +15,7 @@ mod radial;
 mod repr;
 mod section;
 mod target;
+mod workfeat;
 
 use egui::{Key, PointerButton, Sense, vec2};
 use gc_core::Id;
@@ -445,6 +446,7 @@ impl Viewport {
             };
             origin::paint(&ui.painter_at(rect), &screen, session, self.origin_selected, self.constrain_mode);
             dof::paint(&ui.painter_at(rect), &screen, session, camera.distance * 0.12);
+            workfeat::paint(&ui.painter_at(rect), &screen, session, camera.distance * 0.6);
         }
         if let Some(section) = &self.section {
             let camera = self.camera;
@@ -1165,6 +1167,20 @@ impl Viewport {
                 self.placing = self.attach_copy(session, placing.item);
             }
             return;
+        }
+        // A double click on a component edits it in place; a subassembly is edited as one unit.
+        if response.double_clicked_by(PointerButton::Primary)
+            && !self.constrain_mode
+            && let Some(at) = response.interact_pointer_pos().map(to_view)
+            && let Some(item) = self.pick_item(session, at, size)
+            && let gc_session::CellItem::Body(_) | gc_session::CellItem::Robot(_) = item
+        {
+            let any = match item {
+                gc_session::CellItem::Body(id) => id.erase(),
+                gc_session::CellItem::Robot(id) => id.erase(),
+                _ => return,
+            };
+            self.request = Some(ViewportRequest::EditUnit(gc_doc::Occurrence::Item(any)));
         }
         if self.constrain_mode && response.clicked_by(PointerButton::Primary) {
             let at = response.interact_pointer_pos().map(to_view);

@@ -816,6 +816,56 @@ messages! {
     MenuOptions => ("응용 프로그램 옵션", "Application Options"),
     /// Application Options, Sketch tab: project the edges of the selected face when a sketch is created.
     OptAutoproject => ("스케치 작성·편집 시 모서리 자동 투영", "Autoproject edges for sketch creation and edit"),
+    /// 3D Model tab: group of the work features.
+    GroupWorkFeatures => ("작업 피처", "Work Features"),
+    /// 3D Model tab: creates a work axis; the dialog's title.
+    CmdWorkAxis => ("작업 축", "Work Axis"),
+    /// Work axis dialog: along a sketch line.
+    WorkAxisTitle => ("작업 축", "Work Axis"),
+    /// Work axis type: On Line or Edge.
+    WaOnLine => ("선 위", "On Line"),
+    /// Work axis type: Parallel to Line Through Point.
+    WaParallel => ("선에 평행, 점 통과", "Parallel to Line Through Point"),
+    /// Work axis type: Through Two Points.
+    WaTwoPoints => ("두 점 통과", "Through Two Points"),
+    /// Work axis type: Intersection of Two Planes.
+    WaTwoPlanes => ("두 평면의 교선", "Intersection of Two Planes"),
+    /// Work axis type: Through Center of Circular Shape.
+    WaCircle => ("원의 중심 통과", "Through Center of Circular Shape"),
+    /// Work axis dialog: pick a sketch line.
+    WaLine => ("선", "Line"),
+    /// Work axis dialog: pick a point.
+    WaPoint => ("점", "Point"),
+    /// Work axis dialog: the first point.
+    WaFirstPoint => ("첫 번째 점", "First point"),
+    /// Work axis dialog: the second point.
+    WaSecondPoint => ("두 번째 점", "Second point"),
+    /// Work axis dialog: the first plane.
+    WaFirstPlane => ("첫 번째 평면", "First plane"),
+    /// Work axis dialog: the second plane.
+    WaSecondPlane => ("두 번째 평면", "Second plane"),
+    /// Work axis dialog: pick a circle or arc.
+    WaCircleOf => ("원·호", "Circle or arc"),
+    /// Browser: the folder of work features.
+    BrowserWorkFeatures => ("작업 피처", "Work Features"),
+    /// Browser, right-click a component or subassembly: edit it in place.
+    CmdEditInPlace => ("제자리 편집", "Edit"),
+    /// Browser, right-click a component: group it into a new subassembly.
+    CmdDemote => ("서브어셈블리로 묶기 (강등)", "Component Demote"),
+    /// Browser: move a component or subassembly to the top level.
+    CmdMoveToTop => ("최상위로 이동", "Move to top level"),
+    /// Browser: move a component into another subassembly.
+    CmdMoveInto => ("서브어셈블리로 이동", "Move into subassembly"),
+    /// Browser, right-click a subassembly: dissolve it; its contents go up one level.
+    CmdDissolve => ("해체", "Dissolve"),
+    /// Assemble tab, Edit group: the group's title.
+    GroupEdit => ("편집", "Edit"),
+    /// Assemble tab: back to the previous edit target.
+    CmdReturn => ("복귀", "Return"),
+    /// Assemble tab: edit the parent of the edit target.
+    CmdReturnParent => ("상위로", "Return to Parent"),
+    /// Assemble tab: back to the top-level assembly.
+    CmdReturnTop => ("최상위로", "Return to Top"),
     /// Browser, right-click a joint: refuse relationships that take its freedom away.
     JointProtectItem => ("보호", "Protect"),
     /// Assemble tab: the Assemble command (pick geometry, the geometry decides the constraint types).

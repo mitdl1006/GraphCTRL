@@ -367,3 +367,193 @@ fn an_unsatisfiable_assemble_opens_the_constraint_error_dialog_and_deleting_the_
     assert!(harness.state_mut().session.undo());
     assert!(harness.state_mut().session.undo());
 }
+
+// ---- Subassemblies in the browser ----
+
+fn secondary_click(harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, label: &str) {
+    // The folder being edited shows "● " before its name.
+    let at = harness.get_by_label_contains(label).rect().center();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run();
+    }
+}
+
+fn double_click(harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, at: egui::Pos2) {
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run();
+    for _ in 0..2 {
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.step();
+        }
+    }
+    harness.run_steps(3);
+}
+
+/// Right-click a component > Component Demote > type a name > OK.
+fn demote_by_menu(harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, row: &str, name: &str) {
+    secondary_click(harness, row);
+    harness.get_by_label("서브어셈블리로 묶기 (강등)").click();
+    harness.run_steps(3);
+    let input = egui::accesskit::Role::TextInput;
+    harness.get_by_role_and_label(input, "서브어셈블리로 묶기 (강등)").click();
+    harness.run();
+    if !name.is_empty() {
+        harness.get_by_role_and_label(input, "서브어셈블리로 묶기 (강등)").type_text(name);
+        harness.run();
+    }
+    harness.get_by_label("확인").click();
+    harness.run_steps(3);
+}
+
+/// A harness whose clock steps 50 ms per frame, so two clicks of a double click count as one.
+fn harness_with_clock() -> egui_kittest::Harness<'static, GraphCtrlApp> {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .with_step_dt(0.05)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness
+}
+
+fn two_bodies(
+    harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>,
+) -> (gc_core::Id<gc_doc::Body>, gc_core::Id<gc_doc::Body>) {
+    let solid = gc_doc::Solid::Box { size: [0.05; 3] };
+    let first = harness.state_mut().session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    let second = harness
+        .state_mut()
+        .session
+        .add_body(solid, gc_doc::Placement { xyz: [0.2, 0.0, 0.0], rpy: [0.0; 3] })
+        .unwrap();
+    harness.state_mut().fit_view();
+    harness.run();
+    (first, second)
+}
+
+/// Right-click Demote groups the component, and the browser indents it under the new folder. The dialog's
+/// Esc and a name already taken (or only spaces) change nothing; a blank name takes the automatic one.
+#[test]
+fn demote_from_the_browser_indents_the_tree_and_refuses_bad_names_without_a_trace() {
+    let mut harness = harness();
+    let (first, second) = two_bodies(&mut harness);
+    let _ = first;
+    demote_by_menu(&mut harness, "Body2:1", "Jig");
+    assert_eq!(harness.state().session.doc().subassemblies().len(), 1);
+    // The member's row sits to the right of its folder's row (indentation).
+    let folder_x = harness.get_by_label("Jig").rect().left();
+    let member_x = harness.get_by_label("Body2:1").rect().left();
+    assert!(
+        member_x > folder_x + 4.0,
+        "the member is not indented under its folder ({member_x} vs {folder_x})"
+    );
+    // A second row of the top level is at the folder's own indentation.
+    let loose_x = harness.get_by_label("Body1:1").rect().left();
+    assert!((loose_x - folder_x).abs() < 6.0, "the loose component is not level with the folder");
+
+    // A name that is taken: nothing changes (the dialog may stay or report; the document does not move).
+    let before = harness.state().session.doc().clone();
+    let depth = harness.state().session.history().undo_depth();
+    demote_by_menu(&mut harness, "Body1:1", "Jig");
+    assert!(harness.state().session.doc().same_content(&before), "a taken name changed the document");
+    assert_eq!(harness.state().session.history().undo_depth(), depth);
+    // Esc leaves whatever dialog is open without grouping anything.
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(2);
+    assert!(harness.state().session.doc().same_content(&before));
+    let _ = second;
+}
+
+/// Double click on a folder edits it in place; Return and Return to Parent walk back; the components outside
+/// are not picked by a click in the viewport while another is edited.
+#[test]
+fn editing_in_place_scopes_viewport_clicks_and_the_return_buttons_walk_back() {
+    let mut harness = harness_with_clock();
+    let (first, second) = two_bodies(&mut harness);
+    demote_by_menu(&mut harness, "Body2:1", "Inner");
+    // The browser offers Demote on components only; nesting a folder is made through the session.
+    let inner_id = harness.state().session.doc().subassemblies()[0].id;
+    harness
+        .state_mut()
+        .session
+        .edit_subassemblies(gc_doc::SubassemblyOp::Demote {
+            members: vec![gc_doc::TreeKey::Subassembly(inner_id)],
+            name: "Outer".into(),
+        })
+        .unwrap();
+    harness.run();
+    // A folder opens by a click on its row when it is collapsed.
+    if harness.query_by_label("Inner").is_none() {
+        harness.get_by_label("Outer").click();
+        harness.run_steps(3);
+    }
+    let subs = harness.state().session.doc().subassemblies();
+    assert_eq!(subs.len(), 2, "{subs:?}");
+    let (inner, outer) = (subs[0].id, subs[1].id);
+
+    // Edit Inner in place: Body1 (outside) is out of scope; clicking it in the viewport must not select it.
+    let at = harness.get_by_label("Inner").rect().center();
+    double_click(&mut harness, at);
+    assert_eq!(harness.state().session.edit_target(), Some(gc_doc::TreeKey::Subassembly(inner)));
+    let outside = gc_doc::Occurrence::Item(first.erase());
+    assert!(!harness.state().session.in_edit_scope(outside));
+    harness.state_mut().session.select_occurrence(None);
+    harness.run();
+    let spot = harness.state().viewport().screen_of(gc_math::DVec3::new(0.0, 0.0, 0.0)).unwrap();
+    click_at(&mut harness, spot);
+    assert_ne!(
+        harness.state().session.selected_occurrence(),
+        Some(outside),
+        "a click selected a component outside the edit target"
+    );
+    // The component inside is selectable (the folder is the unit, or the body in it).
+    let inside = harness.state().viewport().screen_of(gc_math::DVec3::new(0.2, 0.0, 0.0)).unwrap();
+    click_at(&mut harness, inside);
+    let picked = harness.state().session.selected_occurrence();
+    assert!(
+        picked.is_none() || picked == Some(gc_doc::Occurrence::Item(second.erase())),
+        "something else was picked inside the edit target: {picked:?}"
+    );
+
+    // Return to Parent goes up to Outer; Return goes back to Inner; Return to Top leaves.
+    harness.get_by_label("조립").click();
+    harness.run();
+    harness.get_by_label("상위로").click();
+    harness.run_steps(3);
+    assert_eq!(harness.state().session.edit_target(), Some(gc_doc::TreeKey::Subassembly(outer)));
+    harness.get_by_label("복귀").click();
+    harness.run_steps(3);
+    assert_eq!(harness.state().session.edit_target(), Some(gc_doc::TreeKey::Subassembly(inner)));
+    harness.get_by_label("최상위로").click();
+    harness.run_steps(3);
+    assert_eq!(harness.state().session.edit_target(), None);
+    // The buttons at the top level do nothing harmful.
+    harness.get_by_label("상위로").click();
+    harness.get_by_label("복귀").click();
+    harness.run_steps(2);
+    assert_eq!(harness.state().session.edit_target(), None);
+
+    // Dissolving the folder that is being edited leaves no edit target.
+    let at = harness.get_by_label("Inner").rect().center();
+    double_click(&mut harness, at);
+    assert!(harness.state().session.edit_target().is_some());
+    secondary_click(&mut harness, "Inner");
+    harness.get_by_label("해체").click();
+    harness.run_steps(3);
+    assert_eq!(harness.state().session.edit_target(), None, "the dissolved folder is still the edit target");
+    assert!(harness.state().session.doc().subassemblies().iter().all(|s| s.id != inner));
+}

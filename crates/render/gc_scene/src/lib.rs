@@ -171,6 +171,9 @@ pub const HOVER: [f32; 3] = [1.0, 0.55, 0.1];
 /// The colour of the selection.
 pub const SELECTED: [f32; 3] = [0.15, 0.55, 1.0];
 
+/// How opaque what lies outside the component being edited in place stays.
+const OUT_OF_SCOPE: f32 = 0.25;
+
 /// A colour mixed towards the highlight colour.
 pub fn emphasised(color: [f32; 4], highlight: Highlight) -> [f32; 4] {
     let mix = |towards: [f32; 3]| {
@@ -242,6 +245,11 @@ impl Scene {
             }
             let mut color = BODY;
             color[3] = 1.0 - look.transparency as f32;
+            // Editing a component or subassembly in place shows the rest faded (Inventor 2026 help, Edit
+            // components in place, GUID-C79C36C9-A6DB-46C5-8864-41F66C750231).
+            if !session.in_edit_scope(gc_doc::Occurrence::Item(id.erase())) {
+                color[3] *= OUT_OF_SCOPE;
+            }
             let owner = CellItem::Body(id);
             let color = emphasised(color, highlight(owner));
             scene.solids.push(Solid3 { shape, pose, color, owner: Some(owner) });
@@ -254,7 +262,10 @@ impl Scene {
             if look.hidden {
                 continue;
             }
-            let alpha = 1.0 - look.transparency as f32;
+            let mut alpha = 1.0 - look.transparency as f32;
+            if !session.in_edit_scope(gc_doc::Occurrence::Item(id.erase())) {
+                alpha *= OUT_OF_SCOPE;
+            }
             // A robot that collides as shown is drawn reddish.
             let colliding = session.robot_problem(id).is_some();
             let owner = CellItem::Robot(id);
