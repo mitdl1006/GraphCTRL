@@ -63,6 +63,8 @@ pub(crate) enum Cmd {
     HideOrigin(Occurrence, OriginElement),
     /// List what lies under the cursor (Select Other).
     SelectOther,
+    /// Look At the selection.
+    LookAt,
     /// Split a spline at one of its inner fit points (Inventor 2026 help, GUID-DB15C479-66F2-456A-9E54-40A60F83DC92:
     /// "right-click a point and choose Split Spline").
     SplitSpline(gc_core::Id<gc_sketch::Curve>, gc_core::Id<gc_sketch::SkPoint>),
@@ -105,6 +107,7 @@ impl Set {
         if let Some(curve) = spline.insert {
             overflow.push(Cmd::InsertSplinePoint(curve));
         }
+        overflow.push(Cmd::LookAt);
         overflow.push(Cmd::Done);
         Self { radial, overflow }
     }
@@ -139,6 +142,7 @@ impl Set {
             overflow.push(Cmd::Flexible(id, !flexible));
         }
         overflow.push(Cmd::SelectOther);
+        overflow.push(Cmd::LookAt);
         overflow.push(Cmd::Home);
         overflow.push(Cmd::FitAll);
         Self { radial, overflow }
@@ -174,6 +178,7 @@ impl Cmd {
             Self::InsertSplinePoint(_) => tr!(lang, CmdInsertSplinePoint).to_owned(),
             Self::CloseSpline(_) => tr!(lang, CmdCloseSpline).to_owned(),
             Self::SelectOther => tr!(lang, SelOther).to_owned(),
+            Self::LookAt => tr!(lang, NavLookAt).to_owned(),
             // The check mark shows the state it has now (the command switches it).
             Self::Flexible(_, becomes) => {
                 format!("{}{}", if becomes { "" } else { "✓ " }, tr!(lang, CmdFlexible))
@@ -193,6 +198,8 @@ pub(crate) enum Effect {
     Request(ViewportRequest),
     /// Show the Select Other list at the cursor.
     SelectOther,
+    /// Turn the view to the selection.
+    LookAt,
     /// Start inserting fit points into a spline.
     InsertSplinePoint(gc_core::Id<gc_sketch::Curve>),
     /// Turn the view to the isometric one.
@@ -236,6 +243,7 @@ pub(crate) fn run(cmd: Cmd, session: &mut Session) -> Effect {
         // A refusal is explained in the status bar.
         Cmd::CloseSpline(curve) => drop(session.edit_active_sketch(gc_doc::SketchOp::CloseSpline { curve })),
         Cmd::SelectOther => return Effect::SelectOther,
+        Cmd::LookAt => return Effect::LookAt,
         // A refusal is explained in the status bar.
         Cmd::Flexible(id, flexible) => drop(session.set_flexible(id, flexible)),
         Cmd::Home => return Effect::Home,
