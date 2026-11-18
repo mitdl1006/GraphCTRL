@@ -32,6 +32,8 @@ VK_ICD_FILENAMES=$(ls /opt/pw-browsers/chromium-*/chrome-linux*/vk_swiftshader_i
 - 선택 기준의 우선순위: 큰 장면 3D 성능 → 유지보수 지속성 → 주류 크레이트.
 - 커밋 전 전체 검사는 `cargo xtask gate` 한 번으로 돌릴 수 있다(위 네 단계 + Windows 교차 clippy + GPU 테스트 + 레이어·라이선스 검사).
   GPU 단계는 GPU를 쓰는 테스트 파일만 다시 돌린다(`xtask/src/gate.rs`의 `GPU_TESTS`, 새 GPU 테스트 파일은 여기에 추가 — 빠지면 xtask 테스트가 실패).
+  GPU 단계는 빈도를 줄인다(사용자 지시 2026-11-18): 리드의 평소 병합은 `cargo xtask gate --skip-gpu`, GPU 단계(`cargo xtask test-gpu`
+  또는 `--skip-gpu` 없는 전체 gate)는 `main`에 반영하기 전과 GPU·렌더링·뷰포트 코드를 바꾼 병합에서만 돌린다.
 - 인벤터와 같은 경험이 목표다. 인벤터 동작을 구현·변경·테스트할 때는 먼저 해당 기능의 Autodesk 공식 도움말 원문
   (`https://help.autodesk.com/view/INVNTOR/2026/ENU/`, `cloudhelp/2026/ENU/Inventor-Help/files/GUID-*.htm`)을 읽고 근거로 삼는다.
   이 환경에서는 `curl`로 열린다(WebFetch는 안 열림). 커밋 메시지나 `docs/handoff/<역할>.md`에 참고한 링크를 남긴다.
