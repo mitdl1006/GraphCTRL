@@ -29,6 +29,7 @@ mod role;
 mod settings;
 mod sketch_offset;
 mod subassembly;
+mod toolkit;
 mod tree;
 mod txn;
 mod work;
@@ -68,6 +69,7 @@ pub use representation::{PositionalRepresentation, Representations, ViewRepresen
 pub use role::{AimReference, PathMotion, PathTravel, RoleKind, SketchRole, ToolAim};
 pub use settings::{AngleUnit, DimensionDisplay, DocSettings, LengthUnit};
 pub use subassembly::{Subassembly, SubassemblyId, SubassemblyOp, TreeKey, TreeRow};
+pub use toolkit::{ActionScope, FittedTool, IoDirection, IoSignal, ToolAction, ToolKit};
 pub use tree::ComponentNode;
 pub use txn::{DocError, Txn};
 pub use work::{

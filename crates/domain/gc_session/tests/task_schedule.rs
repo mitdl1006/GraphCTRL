@@ -210,3 +210,44 @@ fn ready_tasks_go_to_the_idle_robot_that_finishes_soonest_and_effects_ready_the_
     s.set_suppressed(touch.erase(), true).unwrap();
     assert!(s.schedule().assignments.iter().all(|x| x.task != touch));
 }
+
+#[test]
+fn a_schedule_asked_for_in_the_background_arrives_for_the_document_it_was_asked_for() {
+    let Cell { mut s, roles, .. } = cell();
+    let (executor, queue) = gc_jobs::Executor::manual();
+    s.set_executor(executor);
+    let first = add(&mut s, task("First", roles[0]));
+    assert!(s.schedule_result().is_none() && !s.schedule_pending());
+
+    // Nothing is worked out until the job runs; asking again for the same document starts nothing new.
+    s.request_schedule();
+    s.request_schedule();
+    assert!(s.schedule_pending() && s.schedule_result().is_none() && !s.poll_jobs());
+    queue.run_all();
+    assert!(s.poll_jobs());
+    assert!(!s.schedule_pending());
+    let (schedule, current) = s.schedule_result().unwrap();
+    assert!(current);
+    assert_eq!(schedule, &s.schedule(), "the same as working it out here");
+    assert_eq!(schedule.assignments.len(), 1);
+
+    // An edit makes it out of date, not wrong; asked again, the new one replaces it.
+    let second = add(&mut s, task("Second", roles[1]));
+    let (old, current) = s.schedule_result().unwrap();
+    assert!(!current && old.assignments.iter().all(|a| a.task == first));
+    s.request_schedule();
+    // An edit while it is being worked out: the result is for the document that was asked about.
+    s.set_suppressed(second.erase(), true).unwrap();
+    queue.run_all();
+    assert!(s.poll_jobs());
+    let (late, current) = s.schedule_result().unwrap();
+    assert!(!current && late.assignments.iter().any(|a| a.task == second));
+    // Asked again before the old job ran: the old one is cancelled and only the new result arrives.
+    s.request_schedule();
+    s.set_suppressed(second.erase(), false).unwrap();
+    s.request_schedule();
+    queue.run_all();
+    assert!(s.poll_jobs());
+    let (schedule, current) = s.schedule_result().unwrap();
+    assert!(current && schedule.assignments.len() == 2);
+}

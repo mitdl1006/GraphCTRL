@@ -342,6 +342,27 @@ pub enum WorkOp {
     },
     /// Deletes a task.
     DeleteTask(Id<Task>),
+    /// Adds a tool kit.
+    AddToolKit(crate::toolkit::ToolKit),
+    /// Replaces a tool kit. With the same number of actions (signals), one whose name changed is renamed
+    /// in the steps that use it, unless another tool kit still has the old name.
+    SetToolKit {
+        /// The tool kit.
+        id: Id<crate::toolkit::ToolKit>,
+        /// Its new data.
+        kit: crate::toolkit::ToolKit,
+    },
+    /// Deletes a tool kit no robot is fitted with and whose actions and signals no step needs.
+    DeleteToolKit(Id<crate::toolkit::ToolKit>),
+    /// Fits a robot with a tool kit, or takes it off (`None`).
+    SetRobotTool {
+        /// The robot.
+        robot: Id<Robot>,
+        /// The tool kit.
+        kit: Option<Id<crate::toolkit::ToolKit>>,
+        /// The state the tool starts in; `None` for the kit's first.
+        state: Option<String>,
+    },
 }
 
 impl CondScope for Document {
@@ -422,6 +443,10 @@ impl Document {
         if let Err(error) = task_ok(self, task) {
             problems.push(error.to_string());
         }
+        // Without any tool kit the steps' names are just names (documents from before tool kits).
+        if !self.tool_kits().is_empty() {
+            problems.extend(self.tool_step_problems(task));
+        }
         for step in &task.steps {
             let role = match step {
                 Step::MoveJ(MoveTarget::Role(r)) | Step::MoveL(MoveTarget::Role(r)) | Step::FollowPath(r) => {
@@ -471,6 +496,10 @@ fn type_ok(doc: &Document, ty: &ObjectType, except: Option<Id<ObjectType>>) -> R
 
 fn object_ok(doc: &Document, object: &WorkObject, except: Option<Id<WorkObject>>) -> Result<(), EditError> {
     name_ok(&object.name)?;
+    // In a tool action's condition these two stand for the tool and the object it is done to.
+    if matches!(object.name.as_str(), "tool" | "target") {
+        return Err(EditError::BadName(object.name.clone()));
+    }
     if doc.objects().iter().any(|(id, o)| Some(id) != except && o.name == object.name) {
         return Err(EditError::NameTaken);
     }
@@ -800,6 +829,10 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &WorkOp) -> Result<(Vec<Created>, &'sta
             txn.remove(*id)?;
             (Vec::new(), "Delete task")
         }
+        WorkOp::AddToolKit(_)
+        | WorkOp::SetToolKit { .. }
+        | WorkOp::DeleteToolKit(_)
+        | WorkOp::SetRobotTool { .. } => crate::toolkit::run(txn, op)?,
     };
     still_sound(txn.doc())?;
     Ok((created, label))

@@ -412,6 +412,9 @@ type PoseMap = BTreeMap<gc_core::AnyId, DPose3>;
 pub(crate) struct CellState {
     executor: Executor,
     job: Option<PlanJob>,
+    /// A schedule being worked out for a revision of the document, and the last one worked out.
+    schedule_job: Option<(gc_core::Revision, JobHandle<Option<crate::Schedule>>)>,
+    schedule: Option<(gc_core::Revision, crate::Schedule)>,
     compare_job: Option<CompareJob>,
     /// An assembly file being read in the background, and what came of the last one.
     import_job: Option<JobHandle<ImportLoad>>,
@@ -476,6 +479,8 @@ impl Default for CellState {
             // Jobs run to completion where they are started unless the application supplies threads.
             executor: Executor::inline(),
             job: None,
+            schedule_job: None,
+            schedule: None,
             compare_job: None,
             import_job: None,
             import_result: None,
@@ -2563,7 +2568,7 @@ impl Session {
                 }
             }
         }
-        arrived | self.poll_plan()
+        arrived | self.poll_schedule() | self.poll_plan()
     }
 
     fn poll_plan(&mut self) -> bool {
@@ -2981,8 +2986,8 @@ pub struct TaskPlan {
     /// Its motions, in the order of the task's steps (a path step is a move to its start and the motion
     /// along it; steps without motion have none).
     pub segments: Vec<MotionPlan>,
-    /// Seconds spent in `Wait` steps. Signals, signal waits and tool actions count as no time (they have
-    /// no model yet).
+    /// Seconds spent in `Wait` steps and in tool actions (their durations). Signals and signal waits
+    /// count as no time.
     pub waiting: f64,
     /// The joint values the robot ends in.
     pub end: Vec<f64>,
@@ -3004,9 +3009,9 @@ pub struct TaskCandidate {
     pub time: Result<f64, String>,
 }
 
-impl Session {
+impl Planning<'_> {
     /// Plans a task for a robot from its current joint values; see [`Session::task_plan_from`].
-    pub fn task_plan(&self, task: Id<gc_doc::Task>, robot: Id<Robot>) -> Result<TaskPlan, String> {
+    pub(crate) fn task_plan(&self, task: Id<gc_doc::Task>, robot: Id<Robot>) -> Result<TaskPlan, String> {
         let start = self.doc.get(robot).ok_or("the robot no longer exists")?.joints.clone();
         self.task_plan_from(task, robot, &start)
     }
@@ -3018,14 +3023,14 @@ impl Session {
     /// stands, with the robot's tool and every obstacle. Planned with the default planner, here and now
     /// (it can take a moment). Fails with the step and the reason: out of reach, in collision, a role
     /// whose sketch elements are gone, a robot the task is not for.
-    pub fn task_plan_from(
+    pub(crate) fn task_plan_from(
         &self,
         task_id: Id<gc_doc::Task>,
         robot_id: Id<Robot>,
         start: &[f64],
     ) -> Result<TaskPlan, String> {
         use gc_doc::{Location, MoveTarget, RobotChoice};
-        let doc = &self.doc;
+        let doc = self.doc;
         let task = doc.get(task_id).ok_or("the task no longer exists")?;
         let robot = doc.get(robot_id).ok_or("the robot no longer exists")?;
         if doc.is_inactive(task_id.erase()) {
@@ -3042,7 +3047,8 @@ impl Session {
         if !allowed {
             return Err(format!("{} is not for {}", task.name, robot.name));
         }
-        let loaded = self.robot_model(robot_id).ok_or("the robot description could not be read")?;
+        let loaded = self.robots.get(&robot_id).ok_or("the robot description could not be read")?;
+        let kit = doc.robot_tool_kit(robot_id).and_then(|(kit, _)| doc.get(kit));
         let mut steps = Vec::new();
         let mut waiting = 0.0;
         let free = |name: &str, goal: Goal, travel: Travel| Step {
@@ -3064,9 +3070,27 @@ impl Session {
                     waiting += seconds;
                     continue;
                 }
-                gc_doc::Step::SetIo { .. }
-                | gc_doc::Step::WaitIo { .. }
-                | gc_doc::Step::ToolAction { .. } => continue,
+                gc_doc::Step::ToolAction { action, target } => {
+                    // Once the document has tool kits, the robot's own must be able to do it.
+                    if !doc.tool_kits().is_empty() {
+                        let found = kit
+                            .and_then(|k| k.action(action))
+                            .ok_or_else(|| format!("{}: its tool cannot `{action}`", robot.name))?;
+                        let object_type = target.and_then(|t| doc.get(t)).map(|o| o.ty);
+                        if found.target != object_type {
+                            return Err(format!("`{action}` is not done to this kind of object"));
+                        }
+                        waiting += found.duration;
+                    }
+                    continue;
+                }
+                gc_doc::Step::SetIo { name, .. } => {
+                    if !doc.tool_kits().is_empty() && !kit.is_some_and(|k| k.has_output(name)) {
+                        return Err(format!("{}: its tool has no output signal `{name}`", robot.name));
+                    }
+                    continue;
+                }
+                gc_doc::Step::WaitIo { .. } => continue,
             };
             steps.push(match target {
                 MoveTarget::Role(role) => {
@@ -3082,11 +3106,9 @@ impl Session {
                 }
             });
         }
-        let equipment = crate::assembly::obstacles(doc, &self.cell.assemblies, &pose_of);
-        let scene = robot_scene(doc, loaded, &self.cell.meshes, robot, &equipment)?;
+        let scene = robot_scene(doc, loaded, self.meshes, robot, &self.equipment)?;
         let how = (PLANNERS[0].1, 1, 4, None);
-        let segments =
-            run_steps(loaded, robot, &scene, steps, start.to_vec(), how, None, &gc_plan::NeverCancel)?;
+        let segments = run_steps(loaded, robot, &scene, steps, start.to_vec(), how, None, self.control)?;
         let end = segments.last().and_then(|s| s.path.last()).map_or_else(|| start.to_vec(), Vec::clone);
         Ok(TaskPlan { robot: robot_id, segments, waiting, end })
     }
@@ -3094,9 +3116,9 @@ impl Session {
     /// The robots a task may be given to as the states stand: the robot it is located at, the ones it
     /// names, or every robot (none while its robots' condition does not hold). Suppressed robots are
     /// left out. In the order the robots were added.
-    pub fn task_robots(&self, task: Id<gc_doc::Task>) -> Vec<Id<Robot>> {
+    pub(crate) fn task_robots(&self, task: Id<gc_doc::Task>) -> Vec<Id<Robot>> {
         use gc_doc::{Location, RobotChoice};
-        let doc = &self.doc;
+        let doc = self.doc;
         let Some(task) = doc.get(task) else { return Vec::new() };
         let all = || doc.robots().iter().map(|(id, _)| id);
         let robots: Vec<Id<Robot>> = match (&task.location, &task.robots) {
@@ -3117,7 +3139,7 @@ impl Session {
     /// The robots that may do a task ([`Session::task_robots`]), each with the time the task would take
     /// it from its current state or why it cannot (out of reach, in collision): the fastest first, those
     /// that cannot last.
-    pub fn task_candidates(&self, task: Id<gc_doc::Task>) -> Vec<TaskCandidate> {
+    pub(crate) fn task_candidates(&self, task: Id<gc_doc::Task>) -> Vec<TaskCandidate> {
         let mut candidates: Vec<TaskCandidate> = self
             .task_robots(task)
             .into_iter()
@@ -3130,5 +3152,142 @@ impl Session {
             (Err(_), Err(_)) => std::cmp::Ordering::Equal,
         });
         candidates
+    }
+}
+
+/// What planning for tasks reads: the document, the robots' descriptions, the meshes and the equipment
+/// as obstacles. A session lends its own; a background job owns a copy ([`PlanningCopy`]).
+pub(crate) struct Planning<'a> {
+    pub(crate) doc: &'a Document,
+    pub(crate) robots: &'a BTreeMap<Id<Robot>, Arc<LoadedRobot>>,
+    pub(crate) meshes: &'a BTreeMap<String, MeshRef>,
+    pub(crate) equipment: Result<Vec<Obstacle>, String>,
+    pub(crate) control: &'a dyn Control,
+}
+
+/// A copy of what [`Planning`] reads, for a job that outlives the call.
+struct PlanningCopy {
+    doc: Document,
+    robots: BTreeMap<Id<Robot>, Arc<LoadedRobot>>,
+    meshes: BTreeMap<String, MeshRef>,
+    equipment: Result<Vec<Obstacle>, String>,
+}
+
+impl Session {
+    fn planning(&self) -> Planning<'_> {
+        Planning {
+            doc: &self.doc,
+            robots: &self.cell.robots,
+            meshes: &self.cell.meshes,
+            equipment: crate::assembly::obstacles(&self.doc, &self.cell.assemblies, &pose_of),
+            control: &gc_plan::NeverCancel,
+        }
+    }
+
+    /// Plans a task for a robot from its current joint values; see [`Session::task_plan_from`].
+    pub fn task_plan(&self, task: Id<gc_doc::Task>, robot: Id<Robot>) -> Result<TaskPlan, String> {
+        self.planning().task_plan(task, robot)
+    }
+
+    /// Plans a task's steps for a robot that starts at `start`: joint moves and straight moves to the
+    /// waypoint roles (the tool centre point on the sketch point, held as the role says), the path roles
+    /// as they say, the robot's own waypoints in a task located at it. The poses are where the sketches
+    /// are now (a sketch on a component or a work plane follows it), so the plan is for the cell as it
+    /// stands, with the robot's tool and every obstacle. Planned with the default planner, here and now
+    /// (it can take a moment). Fails with the step and the reason: out of reach, in collision, a role
+    /// whose sketch elements are gone, a robot the task is not for or whose tool cannot do a step.
+    pub fn task_plan_from(
+        &self,
+        task: Id<gc_doc::Task>,
+        robot: Id<Robot>,
+        start: &[f64],
+    ) -> Result<TaskPlan, String> {
+        self.planning().task_plan_from(task, robot, start)
+    }
+
+    /// The robots a task may be given to as the states stand: the robot it is located at, the ones it
+    /// names, or every robot (none while its robots' condition does not hold). Suppressed robots are
+    /// left out. In the order the robots were added.
+    pub fn task_robots(&self, task: Id<gc_doc::Task>) -> Vec<Id<Robot>> {
+        self.planning().task_robots(task)
+    }
+
+    /// The robots that may do a task ([`Session::task_robots`]), each with the time the task would take
+    /// it from its current state or why it cannot (out of reach, in collision, no such tool action): the
+    /// fastest first, those that cannot last.
+    pub fn task_candidates(&self, task: Id<gc_doc::Task>) -> Vec<TaskCandidate> {
+        self.planning().task_candidates(task)
+    }
+
+    /// Works out who does what when, here and now; see [`crate::Schedule`]. Suppressed tasks are left
+    /// out. Planning every bid takes a moment in a cell with many tasks and robots: a window should use
+    /// [`Session::request_schedule`] instead.
+    pub fn schedule(&self) -> crate::Schedule {
+        self.planning().schedule()
+    }
+
+    /// Starts working out the schedule in the background (on the executor's threads; with the default
+    /// executor, here and now). The result is for the document as it is at this moment and arrives
+    /// through [`Session::poll_jobs`]; see [`Session::schedule_result`]. A schedule still being worked
+    /// out for an older document is cancelled; one for this document is left to finish.
+    pub fn request_schedule(&mut self) {
+        let revision = self.doc.revision();
+        if self.cell.schedule_job.as_ref().is_some_and(|(wanted, _)| *wanted == revision)
+            || self.cell.schedule.as_ref().is_some_and(|(made, _)| *made == revision)
+        {
+            return;
+        }
+        if let Some((_, job)) = self.cell.schedule_job.take() {
+            job.cancel();
+        }
+        let planning = self.planning();
+        let copy = PlanningCopy {
+            doc: self.doc.clone(),
+            robots: self.cell.robots.clone(),
+            meshes: self.cell.meshes.clone(),
+            equipment: planning.equipment,
+        };
+        let job = self.cell.executor.spawn("schedule", move |ctx| {
+            let control = JobControl(ctx.cancel.clone());
+            let planning = Planning {
+                doc: &copy.doc,
+                robots: &copy.robots,
+                meshes: &copy.meshes,
+                equipment: copy.equipment.clone(),
+                control: &control,
+            };
+            let schedule = planning.schedule();
+            (!ctx.cancel.is_cancelled()).then_some(schedule)
+        });
+        self.cell.schedule_job = Some((revision, job));
+        self.poll_jobs();
+    }
+
+    /// The last schedule worked out by [`Session::request_schedule`], and whether it is still current:
+    /// `true` when the document has not changed since it was asked for (an undo back to that state makes
+    /// it current again only after it is asked for again).
+    pub fn schedule_result(&self) -> Option<(&crate::Schedule, bool)> {
+        let (made, schedule) = self.cell.schedule.as_ref()?;
+        Some((schedule, *made == self.doc.revision()))
+    }
+
+    /// True while a schedule is being worked out.
+    pub fn schedule_pending(&self) -> bool {
+        self.cell.schedule_job.is_some()
+    }
+
+    fn poll_schedule(&mut self) -> bool {
+        let Some((revision, mut job)) = self.cell.schedule_job.take() else { return false };
+        match job.poll() {
+            None => {
+                self.cell.schedule_job = Some((revision, job));
+                false
+            }
+            Some(JobOutcome::Done(Some(schedule))) => {
+                self.cell.schedule = Some((revision, schedule));
+                true
+            }
+            Some(JobOutcome::Done(None) | JobOutcome::Failed(_)) => true,
+        }
     }
 }

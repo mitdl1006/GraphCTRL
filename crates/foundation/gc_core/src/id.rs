@@ -57,6 +57,8 @@ pub enum Kind {
     StateVar,
     /// A task: work defined on the structure, for whichever robot is given it.
     Task,
+    /// A kind of tool as a device: its signals, states and actions (work model).
+    ToolKit,
 }
 
 /// A value stored in a document under an [`Id`].
