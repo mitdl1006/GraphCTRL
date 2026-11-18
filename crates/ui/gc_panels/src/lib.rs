@@ -596,7 +596,13 @@ fn representations(ui: &mut Ui, session: &Session, lang: Lang, action: &mut Opti
                         let position = index.checked_sub(1);
                         let delete = tr!(lang, CmdDeleteItem, node.name);
                         let primary = !is_view && index == 0;
-                        let text = if node.active { format!("● {}", node.name) } else { node.name.clone() };
+                        let locked =
+                            is_view && session.representations().views.get(index).is_some_and(|v| v.locked);
+                        let mut text =
+                            if node.active { format!("● {}", node.name) } else { node.name.clone() };
+                        if locked {
+                            text.push_str(&format!(" ({})", tr!(lang, RepLocked)));
+                        }
                         let row = TreeRow {
                             icon: Icon::View,
                             text: &text,
@@ -630,6 +636,25 @@ fn representations(ui: &mut Ui, session: &Session, lang: Lang, action: &mut Opti
                             {
                                 *action = Some(activate.clone());
                                 ui.close();
+                            }
+                            // Copy: a view's copy becomes the active one, a position's copy keeps its overrides
+                            // (Inventor 2026 help, GUID-397F9263-12C3-47A1-B6A6-16FC05EDEF47 and
+                            // GUID-34C28C35-45CA-4476-9336-30146F7C9471).
+                            if ui.add_enabled(!primary, egui::Button::new(tr!(lang, CmdCopy))).clicked() {
+                                *action = if is_view {
+                                    edit(CellOp::CopyViewRepresentation(index))
+                                } else {
+                                    position.and_then(|p| edit(CellOp::CopyPositionalRepresentation(p)))
+                                };
+                                ui.close();
+                            }
+                            // Lock: the view's display no longer follows what is changed.
+                            if is_view {
+                                let text = if locked { tr!(lang, RepUnlock) } else { tr!(lang, RepLock) };
+                                if ui.button(text).clicked() {
+                                    *action = edit(CellOp::LockViewRepresentation { index, locked: !locked });
+                                    ui.close();
+                                }
                             }
                             if ui.add_enabled(!primary, egui::Button::new(delete.as_str())).clicked() {
                                 *action = edit(remove.clone());

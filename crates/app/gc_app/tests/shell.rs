@@ -7328,3 +7328,46 @@ fn update_brings_a_free_moved_component_back_to_its_relationships() {
     let back = harness.state().session.doc().get(moving).unwrap().placement;
     assert!(back.xyz[2] < 0.1, "snapped back from z = 0.5 to the mate: {back:?} (was {held:?})");
 }
+
+/// A view representation's menu locks it and copies it; a position's menu copies it (Inventor 2026 help,
+/// GUID-397F9263-12C3-47A1-B6A6-16FC05EDEF47, GUID-34C28C35-45CA-4476-9336-30146F7C9471).
+#[test]
+fn the_representation_menus_lock_and_copy() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("표현").click();
+    harness.run();
+    harness.get_by_label("새 뷰 표현").click();
+    harness.run();
+    harness.get_by_label("새 위치 표현").click();
+    harness.run();
+    let right_click = |h: &mut egui_kittest::Harness<'_, GraphCtrlApp>, label: &str| {
+        let at = h.get_all_by_label_contains(label).find(|n| n.rect().min.x < 300.0).unwrap().rect().center();
+        h.event(egui::Event::PointerMoved(at));
+        h.run_steps(2);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Secondary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+        h.run_steps(3);
+    };
+    right_click(&mut harness, "View:1");
+    harness.get_by_label("잠금 (Lock)").click();
+    harness.run_steps(3);
+    assert!(harness.state().session.representations().views[0].locked);
+    right_click(&mut harness, "View:1");
+    harness.get_all_by_label("복사").last().unwrap().click();
+    harness.run_steps(3);
+    assert_eq!(harness.state().session.representation_folder().views.len(), 2);
+    right_click(&mut harness, "Position:1");
+    harness.get_all_by_label("복사").last().unwrap().click();
+    harness.run_steps(3);
+    assert_eq!(harness.state().session.representation_folder().positions.len(), 3, "[Primary] and two");
+}

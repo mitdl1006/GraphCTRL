@@ -563,6 +563,14 @@
 - 테스트: `constrain.rs`의 `angle_tangent_and_symmetry_are_described_by_the_dialog`(필드→`Relationship`). 뷰에서 고르는 흐름은 UI 테스트 없음.
 - 한국어: 각도/접선/대칭/방향 각도/방향 없는 각도/명시 기준 벡터(영어 원문 병기 필요하면 말해 주세요).
 
+## 표현 노드 우클릭: Lock·Copy (백엔드 2fe39fd)
+
+근거: To Create, Edit, and Restore View Representations GUID-397F9263-12C3-47A1-B6A6-16FC05EDEF47(Copy: 복사본이 활성, Lock: 표시 변경을 막음), To Create, Edit, or Copy Positional Representations GUID-34C28C35-45CA-4476-9336-30146F7C9471.
+
+- 뷰 표현 행 우클릭: "복사"(`CopyViewRepresentation`), "잠금 (Lock)"/"잠금 해제 (Unlock)"(`LockViewRepresentation`), 잠기면 행에 "(잠김)". 위치 표현 행 우클릭: "복사"(`CopyPositionalRepresentation`; [Primary]는 비활성).
+- 백엔드가 곧 넣는 "새 뷰가 만들자마자 활성"·"위치 표현 활성 중 편집 거부"에 맞춰 표현 테스트를 고쳐야 하면 그때 맞춘다(지금 테스트는 통과).
+- 테스트: `the_representation_menus_lock_and_copy`.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

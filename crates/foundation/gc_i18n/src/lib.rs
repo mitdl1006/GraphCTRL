@@ -989,6 +989,9 @@ messages! {
     /// Browser, Representations folder: the positional representations.
     RepPositions => ("위치 표현", "Positional representation"),
     /// Browser, Representations folder: creates one. `{0}` is the kind.
+    RepLocked => ("잠김", "locked"),
+    RepLock => ("잠금 (Lock)", "Lock"),
+    RepUnlock => ("잠금 해제 (Unlock)", "Unlock"),
     RepNew => ("새 {0}", "New {0}"),
     /// Sketch ribbon, split buttons: the accessible name of the arrow. `{0}` is the group.
     SplitMore => ("{0} 더 보기", "More {0}"),
