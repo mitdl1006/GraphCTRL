@@ -24,6 +24,10 @@ pub struct PhysicalProperties {
     pub density: f64,
     /// True when the mass is an override (or, for the document, includes one).
     pub overridden: bool,
+    /// True when a mesh in it is not a closed solid (an edge without exactly two faces, as in an STL with
+    /// faces missing): its volume, and with it the mass and the centre of gravity, are then not to be
+    /// trusted; the area is.
+    pub open: bool,
 }
 
 /// Volume, area and the volume's centroid of a shape in its own frame.
@@ -33,6 +37,8 @@ struct Measure {
     area: f64,
     /// Volume times centroid (so measures add).
     moment: DVec3,
+    /// A mesh in it is not closed.
+    open: bool,
 }
 
 impl Measure {
@@ -44,6 +50,7 @@ impl Measure {
     fn plus(self, other: Measure) -> Measure {
         Measure {
             volume: self.volume + other.volume,
+            open: self.open || other.open,
             area: self.area + other.area,
             moment: self.moment + other.moment,
         }
@@ -53,17 +60,41 @@ impl Measure {
 fn primitive(shape: &Shape) -> Option<Measure> {
     use std::f64::consts::PI;
     Some(match *shape {
-        Shape::Box([x, y, z]) => {
-            Measure { volume: x * y * z, area: 2.0 * (x * y + y * z + z * x), moment: DVec3::ZERO }
-        }
+        Shape::Box([x, y, z]) => Measure {
+            volume: x * y * z,
+            area: 2.0 * (x * y + y * z + z * x),
+            moment: DVec3::ZERO,
+            open: false,
+        },
         Shape::Cylinder { radius: r, length: l } => {
-            Measure { volume: PI * r * r * l, area: 2.0 * PI * r * (r + l), moment: DVec3::ZERO }
+            Measure { volume: PI * r * r * l, area: 2.0 * PI * r * (r + l), moment: DVec3::ZERO, open: false }
         }
-        Shape::Sphere(r) => {
-            Measure { volume: 4.0 / 3.0 * PI * r * r * r, area: 4.0 * PI * r * r, moment: DVec3::ZERO }
-        }
+        Shape::Sphere(r) => Measure {
+            volume: 4.0 / 3.0 * PI * r * r * r,
+            area: 4.0 * PI * r * r,
+            moment: DVec3::ZERO,
+            open: false,
+        },
         Shape::Mesh { .. } => return None,
     })
+}
+
+/// True when every edge of a mesh has exactly two faces (corners matched by position, since STL files
+/// repeat them per face): the mesh then encloses a volume.
+fn closed(data: &gc_mesh::MeshData) -> bool {
+    let p = data.positions();
+    let key = |i: u32| p.get(i as usize).map(|v| v.map(f32::to_bits));
+    let mut edges: std::collections::HashMap<([u32; 3], [u32; 3]), u32> = std::collections::HashMap::new();
+    for tri in data.indices().chunks_exact(3) {
+        let (Some(a), Some(b), Some(c)) = (key(tri[0]), key(tri[1]), key(tri[2])) else { return false };
+        for (from, to) in [(a, b), (b, c), (c, a)] {
+            // A face of no size (two corners at one place) has no edge there.
+            if from != to {
+                *edges.entry(if from < to { (from, to) } else { (to, from) }).or_insert(0) += 1;
+            }
+        }
+    }
+    !edges.is_empty() && edges.values().all(|faces| *faces == 2)
 }
 
 /// A closed mesh's volume (by the divergence theorem: signed tetrahedra from the origin), area and centroid.
@@ -79,6 +110,7 @@ fn mesh(data: &gc_mesh::MeshData) -> Measure {
         m.moment += (a + b + c) / 4.0 * v;
         m.area += (b - a).cross(c - a).length() / 2.0;
     }
+    m.open = !closed(data);
     // A mesh wound inside out gives a negative volume; the shape is the same.
     if m.volume < 0.0 {
         m.volume = -m.volume;
@@ -199,6 +231,14 @@ impl Session {
             DVec3::ZERO
         };
         let density = if total.volume > 0.0 { mass / total.volume } else { gc_doc::DEFAULT_DENSITY };
-        Some(PhysicalProperties { mass, volume: total.volume, area: total.area, centre, density, overridden })
+        Some(PhysicalProperties {
+            mass,
+            volume: total.volume,
+            area: total.area,
+            centre,
+            density,
+            overridden,
+            open: total.open,
+        })
     }
 }

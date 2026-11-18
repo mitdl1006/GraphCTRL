@@ -182,6 +182,10 @@ fn trimmed(value: f64, decimals: u8) -> String {
     if !value.is_finite() {
         return format!("{value}");
     }
+    // Halves round away from zero (12.5 → 13), not to the even digit as formatting alone would.
+    let scale = 10.0_f64.powi(i32::from(decimals));
+    let rounded = (value * scale).round() / scale;
+    let value = if rounded.is_finite() { rounded } else { value };
     let text = format!("{value:.*}", usize::from(decimals));
     let text =
         if text.contains('.') { text.trim_end_matches('0').trim_end_matches('.') } else { text.as_str() };
@@ -196,6 +200,10 @@ mod tests {
     fn formatting_follows_the_units_and_precision() {
         let mut s = DocSettings::default();
         assert_eq!(s.format_length(0.0125), "12.5 mm");
+        let whole = DocSettings { linear_precision: 0, ..DocSettings::default() };
+        assert_eq!(whole.format_length(0.0125), "13 mm");
+        assert_eq!(whole.format_length(-0.0125), "-13 mm");
+        assert_eq!(whole.format_length(0.0124), "12 mm");
         assert_eq!(s.format_angle(std::f64::consts::FRAC_PI_6), "30 deg");
         s.length_unit = LengthUnit::In;
         s.linear_precision = 2;
