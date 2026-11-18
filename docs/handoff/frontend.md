@@ -400,6 +400,12 @@
 - 알려진 차이: 끌어 넣기 없음(행이 클릭만 감지), 한 번에 한 행(다중 선택 없음), 폴더 안 폴더·관계·스케치는 백엔드 범위 밖.
 - 테스트: `the_browser_makes_folders_and_moves_rows_into_them`.
 
+### 브라우저 끌어 놓기·여러 행
+
+- 근거: 기존 감사표(Assembly Browser 문서의 "Use drag and drop to move and rearrange", 위치 표현 문단은 표현 노드 한정 — 컴포넌트의 끌기 동작은 원문에서 확인하지 못함).
+- 트리 행이 끌기 원천(`Sense::click_and_drag`, 짧은 클릭은 그대로). 컴포넌트 행을 끌어 폴더 머리글에 놓으면 `FolderOp::Move`, 서브어셈블리 머리글에 놓으면 `SubassemblyOp::Move`. Ctrl+클릭으로 행을 여러 개 표시(선택 색)하고 그중 하나를 끌거나 "새 폴더(이 항목으로)"·"폴더로 이동"을 고르면 표시한 행이 한꺼번에 간다. 동작 후 표시는 지워진다.
+- 테스트: `dragging_a_browser_row_onto_a_folder_moves_it_in`. Ctrl+클릭 표시는 kittest가 수정 키를 못 넘겨 자동 테스트가 없다(코드로만).
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

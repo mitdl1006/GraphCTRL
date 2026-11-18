@@ -1537,7 +1537,10 @@ impl eframe::App for GraphCtrlApp {
                     self.params.origin_selected = self.viewport.origin_selected;
                     match gc_panels::browser(ui, &self.session, lang, &mut self.params) {
                         // A refusal (rows of two levels, a name taken) is explained in the status bar.
-                        Some(BrowserAction::Folder(op)) => drop(self.session.edit_folders(op)),
+                        Some(BrowserAction::Folder(op)) => {
+                            drop(self.session.edit_folders(op));
+                            self.params.marked.clear();
+                        }
                         Some(BrowserAction::Isolate(keep)) => drop(self.session.isolate(&keep)),
                         Some(BrowserAction::UndoIsolate) => drop(self.session.undo_isolate()),
                         Some(BrowserAction::SelectRole(role)) => self.viewport.role_selected = role,
@@ -1595,6 +1598,7 @@ impl eframe::App for GraphCtrlApp {
                             drop(self.session.edit_component(key));
                         }
                         Some(BrowserAction::Subassembly(op)) => {
+                            self.params.marked.clear();
                             // A refusal (a name in use) is explained in the status bar.
                             drop(self.session.edit_subassemblies(op));
                         }

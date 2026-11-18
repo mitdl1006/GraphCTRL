@@ -113,6 +113,8 @@ pub struct ParamsUi {
     /// The component row the pointer is over this frame: the view shows its bounding box (Inventor 2026
     /// help, assembly parity notes: hovering a browser node shows its bounding box in the graphics).
     pub hovered: Option<gc_core::AnyId>,
+    /// The rows marked with Ctrl+click (for moving several into a folder or subassembly at once).
+    pub marked: Vec<gc_doc::TreeKey>,
     /// The sketch role selected in the browser.
     pub role: Option<Id<gc_doc::SketchRole>>,
     /// The relationship selected in the browser, the value typed for it and which one that was loaded for.
@@ -832,6 +834,13 @@ fn component_rows(
                     Scope::Only(&folder.members),
                 );
             });
+        // Rows dragged onto the folder move into it.
+        if let Some(dropped) = opened.header_response.dnd_release_payload::<Vec<gc_doc::TreeKey>>() {
+            *action = Some(BrowserAction::Folder(gc_doc::FolderOp::Move {
+                members: (*dropped).clone(),
+                into: Some(folder.id),
+            }));
+        }
         opened.header_response.context_menu(|ui| {
             if ui.button(tr!(lang, CmdRename)).clicked() {
                 state.group_name = Some(GroupName::RenameFolder(folder.id, folder.name.clone()));
@@ -865,8 +874,11 @@ fn folder_menu(
     action: &mut Option<BrowserAction>,
     key: gc_doc::TreeKey,
 ) {
+    // The marked rows go together when this row is one of them.
+    let targets: Vec<gc_doc::TreeKey> =
+        if state.marked.contains(&key) { state.marked.clone() } else { vec![key] };
     if ui.button(tr!(lang, CmdNewFolder)).clicked() {
-        state.group_name = Some(GroupName::NewFolder(vec![key], String::new()));
+        state.group_name = Some(GroupName::NewFolder(targets.clone(), String::new()));
         ui.close();
     }
     let folders = session.folders();
@@ -875,7 +887,7 @@ fn folder_menu(
             for folder in &folders {
                 if ui.button(&folder.name).clicked() {
                     *action = Some(BrowserAction::Folder(gc_doc::FolderOp::Move {
-                        members: vec![key],
+                        members: targets.clone(),
                         into: Some(folder.id),
                     }));
                     ui.close();
@@ -966,6 +978,15 @@ fn component_rows_in(
                 }
                 if header.double_clicked() {
                     *action = Some(BrowserAction::EditComponent(row.key));
+                }
+                // Rows dragged onto a subassembly move into it.
+                if let Some(dropped) = header.dnd_release_payload::<Vec<gc_doc::TreeKey>>() {
+                    let members: Vec<gc_doc::TreeKey> =
+                        dropped.iter().copied().filter(|k| *k != row.key).collect();
+                    if !members.is_empty() {
+                        *action =
+                            Some(BrowserAction::Subassembly(SubassemblyOp::Move { members, into: Some(id) }));
+                    }
                 }
                 header.context_menu(|ui| {
                     // Isolate: the members of the subassembly stay, everything else is hidden.
@@ -1455,7 +1476,8 @@ fn node_row(
     let row = TreeRow {
         icon: node.icon,
         text: node.text,
-        selected: node.selected,
+        selected: node.selected
+            || (groundable && state.marked.contains(&gc_doc::TreeKey::Component(occurrence))),
         visible: Some((&mut visible, show_label.as_str())),
         delete: Some(&delete_label),
         edit: state.rename.as_mut().filter(|_| renaming).map(|(_, text)| text),
@@ -1490,6 +1512,20 @@ fn node_row(
     if result.toggled {
         let command = gc_doc::Command::SetVisible { item: node.any, visible };
         *action = Some(BrowserAction::Edit(Box::new(command)));
+    }
+    if groundable {
+        // Ctrl+click marks rows to move together; a drag takes the marked rows, or this one.
+        let key = gc_doc::TreeKey::Component(occurrence);
+        if result.row.clicked() && ui.input(|i| i.modifiers.command || i.modifiers.ctrl) {
+            if let Some(at) = state.marked.iter().position(|k| *k == key) {
+                state.marked.remove(at);
+            } else {
+                state.marked.push(key);
+            }
+        }
+        let payload: Vec<gc_doc::TreeKey> =
+            if state.marked.contains(&key) { state.marked.clone() } else { vec![key] };
+        result.row.dnd_set_drag_payload(payload);
     }
     if result.row.hovered() && matches!(node.any.kind, gc_core::Kind::Body | gc_core::Kind::RobotInstance) {
         state.hovered = Some(node.any);

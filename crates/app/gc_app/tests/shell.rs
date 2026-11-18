@@ -6461,3 +6461,52 @@ fn the_browser_makes_folders_and_moves_rows_into_them() {
     assert_eq!(harness.state().session.folders()[0].members.len(), 2);
     harness.get_by_label("Group (2)");
 }
+
+/// Dragging a browser row onto a folder moves it in (the row's drag payload is dropped on the folder's header).
+#[test]
+fn dragging_a_browser_row_onto_a_folder_moves_it_in() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let app = harness.state_mut();
+    let place = |xyz: [f64; 3]| gc_doc::Placement { xyz, rpy: [0.0; 3] };
+    let a = app.session.add_body(gc_doc::Solid::Box { size: [0.1; 3] }, place([0.0; 3])).unwrap();
+    let b = app.session.add_body(gc_doc::Solid::Box { size: [0.1; 3] }, place([0.5, 0.0, 0.0])).unwrap();
+    let key =
+        |id: gc_core::Id<gc_doc::Body>| gc_doc::TreeKey::Component(gc_doc::Occurrence::Item(id.erase()));
+    app.session.edit_folders(gc_doc::FolderOp::Add { name: "Group".into(), members: vec![key(a)] }).unwrap();
+    harness.run_steps(3);
+    let header = harness.get_by_label("Group (1)").rect().center();
+    let name = harness.state().session.doc().get(b).unwrap().name.clone();
+    let from = harness
+        .get_all_by_label_contains(&name)
+        .find(|n| n.rect().min.x < 100.0)
+        .expect("the second body's row")
+        .rect()
+        .center();
+    harness.event(egui::Event::PointerMoved(from));
+    harness.run_steps(2);
+    harness.event(egui::Event::PointerButton {
+        pos: from,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run_steps(2);
+    // The pointer travels to the folder's header in steps, then lets go there.
+    for step in 1..=6 {
+        let t = step as f32 / 6.0;
+        harness.event(egui::Event::PointerMoved(from + (header - from) * t));
+        harness.run_steps(2);
+    }
+    harness.event(egui::Event::PointerButton {
+        pos: header,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run_steps(4);
+    assert_eq!(harness.state().session.folders()[0].members.len(), 2, "the dragged row is in the folder");
+}

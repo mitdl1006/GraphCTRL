@@ -130,7 +130,8 @@ pub struct TreeRowResult {
 /// there for assistive technology.
 pub fn tree_row(ui: &mut Ui, row: TreeRow<'_>) -> TreeRowResult {
     const HEIGHT: f32 = 22.0;
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), HEIGHT), Sense::click());
+    let (rect, response) =
+        ui.allocate_exact_size(vec2(ui.available_width(), HEIGHT), Sense::click_and_drag());
     let hovered = ui.rect_contains_pointer(rect);
     let painter = ui.painter();
     if row.selected {
