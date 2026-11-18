@@ -265,6 +265,13 @@
 - 안내 글자는 그려진 텍스트 대신 레이블(Area)이라 접근성 노드가 있다 → 화면 테스트에서 모드 확인 가능.
 - 테스트: `the_spline_menu_inserts_points_and_closes_the_curve`에 안내 레이블·먼 클릭 무시 단언 추가.
 
+### 뷰 탭: 시각 스타일(Visual Style) 분할 버튼
+
+- 근거: Inventor 2026 도움말 GUID-8D59A8BF-49A8-4214-A3A7-F184DB73E68F (About Visual Styles in Models: View 탭 Appearance 패널에서 스타일 선택), 그림자·바닥 GUID-3395B47F-7D8B-47B4-ACDD-0A9489948DB4 / GUID-AC7970C5-72DB-409E-AED4-96B9C5E6C4A0.
+- 외형 패널의 분할 버튼: 음영 처리(모서리 없음) / 모서리가 있는 음영 처리(기본, 현재 렌더) / 와이어프레임(면 없이 모서리 전체). 면·모서리 그리기 여부만으로 되는 것이라 렌더러 변경 없이 `VisualStyle`(gc_viewport)로 처리.
+- 렌더러 지원이 필요한 나머지: 숨은 모서리 표시(음영/와이어프레임 + 숨은 모서리 점선·옅은 색: 깊이 반전 패스), 가시 모서리만 있는 와이어프레임(색 쓰기 없는 깊이 전용 패스), 사실적(재질), 흑백·수채화·스케치 일러스트.
+- 테스트: `the_visual_style_drop_down_switches_shaded_edges_and_wireframe`.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

@@ -5775,3 +5775,21 @@ fn the_helical_curve_dialog_then_two_clicks_make_a_helix() {
     assert_eq!(splines(&harness), 1);
     assert!(!harness.state().viewport().is_helixing());
 }
+
+/// Visual Style (View tab, Appearance panel; Inventor 2026 help, About Visual Styles in Models,
+/// GUID-8D59A8BF-49A8-4214-A3A7-F184DB73E68F): the drop-down chooses what the 3D view draws.
+#[test]
+fn the_visual_style_drop_down_switches_shaded_edges_and_wireframe() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("뷰").click();
+    harness.run();
+    assert_eq!(harness.state().viewport().style, gc_viewport::VisualStyle::ShadedWithEdges);
+    pick_variant(&mut harness, "시각 스타일", "와이어프레임");
+    assert_eq!(harness.state().viewport().style, gc_viewport::VisualStyle::Wireframe);
+    pick_variant(&mut harness, "시각 스타일", "음영 처리");
+    assert_eq!(harness.state().viewport().style, gc_viewport::VisualStyle::Shaded);
+}

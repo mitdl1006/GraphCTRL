@@ -38,7 +38,7 @@ pub use paint::{format_angle, format_length};
 pub use radial::ViewportRequest;
 pub use repr::{camera_from_json, camera_to_json, section_from_json, section_to_json};
 pub use section::{Section, SectionKind, SectionPlane};
-pub use target::Background;
+pub use target::{Background, VisualStyle};
 
 /// The plane a sketch lies in, with its in-plane axes.
 #[derive(Clone, Copy, Debug)]
@@ -152,6 +152,8 @@ pub struct Viewport {
     pub slice: bool,
     /// Whether the constraint glyphs are drawn (F8 shows them, F9 hides them).
     pub show_constraints: bool,
+    /// The visual style of the 3D view (View tab, Appearance panel).
+    pub style: VisualStyle,
     /// A selection box being dragged in a sketch: where the mouse went down.
     box_select: Option<egui::Pos2>,
     /// A point of a 3D sketch being dragged: the working plane's normal axis and the level it keeps.
@@ -352,6 +354,7 @@ impl Viewport {
             section: None,
             slice: false,
             show_constraints: true,
+            style: VisualStyle::default(),
             box_select: None,
             frame_time: 0.0,
             background: Background::new(render_state),
@@ -726,7 +729,7 @@ impl Viewport {
             });
             target::Slicing { planes: one.into_iter().collect(), union: false, cap: false }
         };
-        self.background.paint(ui, rect, &self.camera, &scene, slice);
+        self.background.paint(ui, rect, &self.camera, &scene, slice, self.style);
         paint::over(
             ui,
             rect,

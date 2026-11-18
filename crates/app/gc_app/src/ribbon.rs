@@ -654,6 +654,26 @@ pub(crate) fn show(
                     }
                 });
                 ribbon_group(ui, tr!(lang, GroupAppearance), |ui| {
+                    // Visual Style (GUID-8D59A8BF-49A8-4214-A3A7-F184DB73E68F): what the renderer can draw.
+                    let styles = [
+                        (gc_viewport::VisualStyle::Shaded, tr!(lang, VisualStyleShaded)),
+                        (gc_viewport::VisualStyle::ShadedWithEdges, tr!(lang, VisualStyleShadedEdges)),
+                        (gc_viewport::VisualStyle::Wireframe, tr!(lang, VisualStyleWireframe)),
+                    ];
+                    let items: Vec<gc_ui::SplitItem<'_>> = styles
+                        .iter()
+                        .map(|(style, label)| gc_ui::SplitItem {
+                            icon: Icon::View,
+                            label,
+                            active: viewport.style == *style,
+                        })
+                        .collect();
+                    let more = tr!(lang, SplitMore, tr!(lang, VisualStyleTitle));
+                    if let Some(index) = gc_ui::ribbon_split_button(ui, "visual_style", &more, &items, true)
+                        && let Some((style, _)) = styles.get(index)
+                    {
+                        viewport.style = *style;
+                    }
                     let kinds = [
                         (gc_viewport::SectionKind::Half, Msg::SectionHalf),
                         (gc_viewport::SectionKind::Quarter, Msg::SectionQuarter),

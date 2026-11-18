@@ -178,6 +178,10 @@ messages! {
     /// View: orthographic projection.
     ViewOrtho => ("직교", "Orthographic"),
     /// View: perspective projection.
+    VisualStyleTitle => ("시각 스타일", "Visual Style"),
+    VisualStyleShaded => ("음영 처리", "Shaded"),
+    VisualStyleShadedEdges => ("모서리가 있는 음영 처리", "Shaded with Edges"),
+    VisualStyleWireframe => ("와이어프레임", "Wireframe"),
     ViewPerspective => ("원근", "Perspective"),
     /// Panel title: model browser.
     PanelBrowser => ("모델", "Model"),
