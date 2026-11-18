@@ -139,7 +139,11 @@ impl Constrain {
 
     /// The unit a bare number in the value box means.
     fn unit(&self) -> gc_doc::Unit {
-        if self.kind == Type::Angle { gc_doc::Unit::Deg } else { gc_doc::Unit::Mm }
+        match self.kind {
+            Type::Angle => gc_doc::Unit::Deg,
+            Type::Motion if !self.translation => gc_doc::Unit::Scalar,
+            _ => gc_doc::Unit::Mm,
+        }
     }
 
     /// Predict Offset and Orientation: the current distance and the solution the layout suggests.
@@ -184,8 +188,8 @@ impl Constrain {
         let value = if self.kind == Type::Symmetry {
             0.0
         } else if self.kind == Type::Motion && !self.translation {
-            // A ratio has no unit (and, until the backend gives it a parameter, no expression).
-            self.offset.trim().parse::<f64>().ok().filter(|v| v.is_finite() && *v != 0.0)?
+            // A ratio has no unit; it may be an expression, and zero is refused.
+            gc_doc::evaluate_value(session.doc(), &self.offset, self.unit()).filter(|v| *v != 0.0)?
         } else {
             gc_doc::evaluate_value(session.doc(), &self.offset, self.unit())?
         };
@@ -385,11 +389,8 @@ impl Constrain {
                             ui.label(if angle { "deg" } else { "mm" });
                         }
                     });
-                    let valid = if self.kind == Type::Motion && !self.translation {
-                        self.offset.trim().parse::<f64>().is_ok_and(|v| v.is_finite() && v != 0.0)
-                    } else {
-                        gc_doc::evaluate_value(session.doc(), &self.offset, self.unit()).is_some()
-                    };
+                    let valid = gc_doc::evaluate_value(session.doc(), &self.offset, self.unit())
+                        .is_some_and(|v| self.kind != Type::Motion || self.translation || v != 0.0);
                     if !valid {
                         ui.colored_label(ui.visuals().error_fg_color, tr!(lang, ErrExpression));
                     }
@@ -446,7 +447,7 @@ impl Constrain {
             if crate::conflict::try_add(session, relationship, &mut self.conflict) {
                 // An expression is kept as typed: the constraint's model parameter takes it (Inventor 2026 help,
                 // About Parameters in Models, GUID-8E5C63EA-0540-4EBE-9B17-B8159C7FE40C).
-                if !matches!(self.kind, Type::Symmetry | Type::Motion)
+                if self.kind != Type::Symmetry
                     && self.offset.trim().parse::<f64>().is_err()
                     && let Some(id) = session.relationships().last().map(|(id, _)| *id)
                 {
@@ -504,6 +505,8 @@ pub(crate) enum JointType {
     Automatic,
     Rigid,
     Rotational,
+    /// Planar: sliding in a plane and turning about its normal stay free (the help does not describe it).
+    Planar,
 }
 
 /// The Joint dialog (Inventor's Assemble tab, Relationships panel, Joint): pick the origin on the
@@ -603,9 +606,14 @@ impl Joint {
             },
             JointType::Rigid => RelationKind::Rigid { flip: self.flip },
             JointType::Rotational => RelationKind::Rotational { flip: self.flip },
+            JointType::Planar => RelationKind::Planar { flip: self.flip },
         };
         let name = if self.name.trim().is_empty() {
-            let word = if matches!(kind, RelationKind::Rotational { .. }) { "Rotational" } else { "Rigid" };
+            let word = match kind {
+                RelationKind::Rotational { .. } => "Rotational",
+                RelationKind::Planar { .. } => "Planar",
+                _ => "Rigid",
+            };
             format!("{word}:{}", session.relationships().len() + 1)
         } else {
             self.name.trim().to_owned()
@@ -652,6 +660,7 @@ impl Joint {
                                     (JointType::Automatic, tr!(lang, JointAutomatic)),
                                     (JointType::Rigid, tr!(lang, JointRigid)),
                                     (JointType::Rotational, tr!(lang, JointRotational)),
+                                    (JointType::Planar, tr!(lang, JointPlanar)),
                                 ] {
                                     if ui.selectable_label(self.kind == kind, name).clicked() {
                                         self.kind = kind;
@@ -810,6 +819,14 @@ mod tests {
             dialog.relationship(&session).map(|r| r.kind),
             Some(RelationKind::Rotation { ratio, reverse: true }) if (ratio - 4.0).abs() < 1e-12
         ));
+        // A ratio may be an expression; a length in it is refused; zero is refused.
+        dialog.offset = "2 * 2".to_owned();
+        assert!(matches!(
+            dialog.relationship(&session).map(|r| r.kind),
+            Some(RelationKind::Rotation { ratio, .. }) if (ratio - 4.0).abs() < 1e-12
+        ));
+        dialog.offset = "3 mm".to_owned();
+        assert!(dialog.relationship(&session).is_none(), "a ratio has no unit");
         dialog.offset = "0".to_owned();
         assert!(dialog.relationship(&session).is_none(), "a ratio of zero is refused");
         dialog.translation = true;

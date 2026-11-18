@@ -120,7 +120,7 @@ pub(crate) fn reference_of(feature: &gc_session::Feature) -> Option<GripReferenc
         Feature::Edge(a, b) => gc_doc::GripLine::through(*a, *b).map(GripReference::Line),
         Feature::Point(p) => Some(GripReference::Point(*p)),
         Feature::Face { point, normal, .. } => Some(GripReference::Plane { point: *point, normal: *normal }),
-        Feature::Cylinder { .. } => None,
+        Feature::Cylinder { .. } | Feature::Cone { .. } => None,
     }
 }
 

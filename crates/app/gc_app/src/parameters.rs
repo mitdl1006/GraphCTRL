@@ -97,11 +97,11 @@ impl Parameters {
             }
         }
         // The assembly constraints' offsets and angles are model parameters too.
-        for (id, param, angle) in session.doc().relation_params() {
-            let (unit, value) = if angle {
-                ("deg", format!("{:.6}", param.value.to_degrees()))
-            } else {
-                ("mm", format!("{:.6}", param.value * 1000.0))
+        for (id, param, _angle) in session.doc().relation_params() {
+            let (unit, value) = match param.dim {
+                gc_doc::ParamDim::Angle => ("deg", format!("{:.6}", param.value.to_degrees())),
+                gc_doc::ParamDim::Ratio => ("", format!("{:.6}", param.value)),
+                gc_doc::ParamDim::Length => ("mm", format!("{:.6}", param.value * 1000.0)),
             };
             rows.push(Row {
                 name: param.name.clone(),

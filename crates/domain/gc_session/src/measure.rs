@@ -137,6 +137,16 @@ pub enum Feature {
         /// The length along the axis.
         length: f64,
     },
+    /// A conical face: its apex, the unit axis from the apex into the cone and the angle between axis and surface
+    /// (Inventor 2026 help, Place Tangent constraints in assemblies, GUID-FF270566-CA9E-420A-A00A-F52DD0FDFD8E).
+    Cone {
+        /// The apex.
+        apex: [f64; 3],
+        /// The unit axis, away from the apex.
+        axis: [f64; 3],
+        /// The angle between axis and surface, radians.
+        half_angle: f64,
+    },
     /// A flat face: a point of its plane, its unit normal and its area.
     Face {
         /// A point of the plane.
@@ -287,6 +297,8 @@ fn with_cylinder(centre: [f64; 3], axis: [f64; 3], radius: f64, length: f64, oth
                 ..FeaturePair::default()
             }
         }
+        // A cone is picked for constraints; it is not measured.
+        Feature::Cone { .. } => FeaturePair::default(),
     }
 }
 
@@ -351,8 +363,9 @@ pub fn measure_features(first: &Feature, second: &Feature) -> FeaturePair {
             }
             pair
         }
-        // Cylinders were measured above.
+        // Cylinders were measured above; a cone is picked for constraints and is not measured.
         (Feature::Cylinder { .. }, _) | (_, Feature::Cylinder { .. }) => FeaturePair::default(),
+        (Feature::Cone { .. }, _) | (_, Feature::Cone { .. }) => FeaturePair::default(),
         (Feature::Face { point: p1, normal: n1, .. }, Feature::Face { point: p2, normal: n2, .. }) => {
             let (n1, n2) = (v(*n1), v(*n2));
             let mut pair = FeaturePair { angle: Some(angle_between(n1, n2)), ..FeaturePair::default() };

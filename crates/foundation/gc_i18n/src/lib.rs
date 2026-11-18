@@ -690,6 +690,7 @@ messages! {
     /// Joint dialog: a joint that removes all freedom.
     JointRigid => ("강체", "Rigid"),
     /// Joint dialog: a joint with one rotation.
+    JointPlanar => ("평면 (Planar)", "Planar"),
     JointRotational => ("회전", "Rotational"),
     /// Joint dialog: the origin on the component that moves.
     JointFirst => ("첫 번째 원점", "First origin"),
@@ -983,6 +984,11 @@ messages! {
     /// Assemble tab: copies components; the dialog's tab.
     ReplicateCopy => ("복사", "Copy"),
     /// Assemble tab: replaces a component with another shape; the dialog's tab.
+    MirrorStateMirror => ("미러", "Mirror"),
+    MirrorStateReuse => ("재사용", "Reuse"),
+    MirrorNotReflected => ("거울상 형상을 만들지 못해 같은 형상을 돌려 놓았습니다: {0}", "Placed as the same shape turned, not mirrored: {0}"),
+    MirrorFlat => ("평평한 구조 만들기 (Create flat structure)", "Create flat structure"),
+    MirrorPattern => ("미러 패턴 만들기 (Create mirror pattern)", "Create mirror pattern"),
     ReplicateReplace => ("교체", "Replace"),
     /// Mirror/copy/replace dialog: the components the command works on.
     ReplicateComponents => ("컴포넌트", "Components"),
@@ -1314,6 +1320,7 @@ messages! {
     InterferenceSet1 => ("세트 #1 정의", "Define Set #1"),
     InterferenceSet2 => ("세트 #2 정의", "Define Set #2"),
     /// Interference: put every robot and body in set 1 (Inventor's tip: a crossing window over all).
+    InterferenceSubassemblies => ("서브어셈블리를 컴포넌트로 취급", "Treat subassemblies as components"),
     InterferenceAll => ("모든 컴포넌트를 세트 #1에", "All components in Set #1"),
     /// Interference: what to do while defining a set.
     InterferenceHint => ("세트 버튼을 누른 뒤 뷰포트나 브라우저에서 컴포넌트를 선택하십시오. 다시 선택하면 빠집니다. 세트 #2가 비어 있으면 세트 #1 안에서 서로 검사합니다.", "Press a set button, then select components in the view or the browser; selecting one again removes it. With Set #2 empty, Set #1 is checked among itself."),

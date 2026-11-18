@@ -194,6 +194,11 @@ impl Measure {
                     Group::Distance,
                     radius * 2.0,
                 ),
+                // A cone is never picked for Measure (the viewport leaves it out).
+                Feature::Cone { apex, .. } => {
+                    let [x, y, z] = apex.map(mm);
+                    line(colour, format!("{title}: {}", tr!(lang, MeasurePoint, x, y, z)))
+                }
                 Feature::Face { area, .. } => valued(
                     colour,
                     format!("{title}: {}", tr!(lang, MeasureFace, format!("{:.2}", area * 1e6))),
@@ -476,6 +481,11 @@ impl Measure {
                         let tip = [0, 1, 2].map(|i| point[i] + normal[i] * 0.05);
                         if let (Some(a), Some(b)) = (screen(*point), screen(tip)) {
                             painter.arrow(a, b - a, egui::Stroke::new(2.5, colour));
+                        }
+                    }
+                    Some(Feature::Cone { apex, .. }) => {
+                        if let Some(at) = screen(*apex) {
+                            painter.circle(at, 5.0, colour, egui::Stroke::new(1.5, egui::Color32::WHITE));
                         }
                     }
                     None => {}

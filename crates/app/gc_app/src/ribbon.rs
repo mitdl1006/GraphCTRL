@@ -206,12 +206,19 @@ pub(crate) fn show(
                 });
                 // Work features: the axis types of an assembly (Inventor 2026 help, To Create Work Features,
                 // GUID-38A9748E-FA2D-44D3-928C-DFE1326A9385).
+                let primary = session.representations().active_position.is_none();
                 ribbon_group(ui, tr!(lang, GroupWorkFeatures), |ui| {
                     use crate::work_feature::Category;
                     // The plane is the large button; the axis and the point are stacked beside it.
-                    if ribbon_button(ui, Icon::WorkPlane, tr!(lang, CmdWorkPlane), false, !sketching)
-                        .clicked()
-                    {
+                    let plane = ribbon_button(
+                        ui,
+                        Icon::WorkPlane,
+                        tr!(lang, CmdWorkPlane),
+                        false,
+                        !sketching && primary,
+                    );
+                    let plane = if primary { plane } else { plane.on_hover_text(tr!(lang, ErrPrimaryOnly)) };
+                    if plane.clicked() {
                         action = Some(RibbonAction::StartWorkFeature(Category::Plane));
                     }
                     let rows = [
@@ -219,13 +226,13 @@ pub(crate) fn show(
                             icon: Icon::WorkAxis,
                             label: tr!(lang, CmdWorkAxis),
                             selected: false,
-                            enabled: !sketching,
+                            enabled: !sketching && primary,
                         },
                         gc_ui::StackRow {
                             icon: Icon::WorkPoint,
                             label: tr!(lang, CmdWorkPoint),
                             selected: false,
-                            enabled: !sketching,
+                            enabled: !sketching && primary,
                         },
                     ];
                     match gc_ui::ribbon_stack(ui, &rows) {
@@ -850,22 +857,31 @@ fn assemble_tab(
     let mut action = None;
     let robot = session.doc().robots().iter().next().map(|(id, _)| id);
     let has_components = !session.components().is_empty();
+    // While a positional representation other than [Primary] is active, the commands that add or remove
+    // components are refused (Inventor 2026 help, Positional representations in assemblies,
+    // GUID-C728DFAC-1B45-4879-A004-45A8DC991954); they are shown disabled.
+    let primary = session.representations().active_position.is_none();
     ribbon_group(ui, tr!(lang, GroupComponent), |ui| {
-        if ribbon_button(ui, Icon::Import, tr!(lang, CmdPlace), false, true).clicked() {
+        let place = ribbon_button(ui, Icon::Import, tr!(lang, CmdPlace), false, primary);
+        let place = if primary { place } else { place.on_hover_text(tr!(lang, ErrPrimaryOnly)) };
+        if place.clicked() {
             action = Some(RibbonAction::Place);
         }
         let rows = [gc_ui::StackRow {
             icon: Icon::Select,
             label: tr!(lang, ReplicateReplace),
             selected: false,
-            enabled: has_components,
+            enabled: has_components && primary,
         }];
         if gc_ui::ribbon_stack(ui, &rows).is_some() {
             action = Some(RibbonAction::StartReplicate(crate::replicate::Mode::Replace));
         }
     });
     ribbon_group(ui, tr!(lang, PatternTitle), |ui| {
-        if ribbon_button(ui, Icon::RectPattern, tr!(lang, PatternTitle), false, has_components).clicked() {
+        let pattern =
+            ribbon_button(ui, Icon::RectPattern, tr!(lang, PatternTitle), false, has_components && primary);
+        let pattern = if primary { pattern } else { pattern.on_hover_text(tr!(lang, ErrPrimaryOnly)) };
+        if pattern.clicked() {
             action = Some(RibbonAction::StartPattern);
         }
         let rows = [
@@ -873,13 +889,13 @@ fn assemble_tab(
                 icon: Icon::Mirror,
                 label: tr!(lang, ReplicateMirror),
                 selected: false,
-                enabled: has_components,
+                enabled: has_components && primary,
             },
             gc_ui::StackRow {
                 icon: Icon::Cuboid,
                 label: tr!(lang, ReplicateCopy),
                 selected: false,
-                enabled: has_components,
+                enabled: has_components && primary,
             },
         ];
         match gc_ui::ribbon_stack(ui, &rows) {

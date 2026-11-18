@@ -1854,6 +1854,18 @@ impl Viewport {
         at: [f64; 2],
         size: [f64; 2],
     ) -> Option<(gc_session::CellItem, gc_session::Feature)> {
+        self.pick_feature_with(session, at, size, false)
+    }
+
+    /// [`Viewport::pick_feature`], with conical faces reported as `Feature::Cone` when `cones` is set (the picks
+    /// that become constraint geometry; Measure does not measure cones).
+    pub fn pick_feature_with(
+        &mut self,
+        session: &Session,
+        at: [f64; 2],
+        size: [f64; 2],
+        cones: bool,
+    ) -> Option<(gc_session::CellItem, gc_session::Feature)> {
         use gc_session::Feature;
         let scene = Scene::of(session);
         let hit = self.picker.pick_surface(&scene, &self.camera.ray(at, size))?;
@@ -1864,6 +1876,10 @@ impl Viewport {
         if let Some((centre, axis, radius, length)) = hit.cylinder {
             let feature =
                 Feature::Cylinder { centre: centre.to_array(), axis: axis.to_array(), radius, length };
+            return Some((hit.owner, feature));
+        }
+        if let Some((apex, axis, half_angle)) = hit.cone.filter(|_| cones) {
+            let feature = Feature::Cone { apex: apex.to_array(), axis: axis.to_array(), half_angle };
             return Some((hit.owner, feature));
         }
         let Some((normal, point, area, outline)) = hit.face else {
@@ -2058,7 +2074,7 @@ impl Viewport {
             if alt
                 && response.drag_started_by(PointerButton::Primary)
                 && let Some(press) = ui.input(|i| i.pointer.press_origin()).map(to_view)
-                && let Some((item, feature)) = self.pick_feature(session, press, size)
+                && let Some((item, feature)) = self.pick_feature_with(session, press, size, true)
                 && let Some(first) = altdrag::selection_of(item, &feature)
             {
                 self.alt_drag = Some(altdrag::AltDrag { first, from: press, target: None });
@@ -2073,7 +2089,7 @@ impl Viewport {
         if let Some(at) = response.hover_pos().or_else(|| ui.input(|i| i.pointer.latest_pos())) {
             let at = to_view(at);
             drag.target = self
-                .pick_feature(session, at, size)
+                .pick_feature_with(session, at, size, true)
                 .and_then(|(item, feature)| altdrag::selection_of(item, &feature))
                 .filter(|second| altdrag::offers(session, &drag.first, second))
                 .map(|second| (second, at));
