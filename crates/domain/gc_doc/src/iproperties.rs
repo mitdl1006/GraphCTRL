@@ -86,9 +86,31 @@ pub struct IProperties {
     pub density: Option<f64>,
     /// Physical: a mass entered by hand, kg, used instead of the one worked out (an override).
     pub mass_override: Option<f64>,
+    /// Status: "In the Status field, enter any status classification" (iProperties Reference,
+    /// GUID-8ABF17C5-B9EB-47B5-92CF-9FBD335334E3).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub status: String,
+    /// Custom: iProperties the user adds, by name ("Custom iProperties added in the BOM dialog box are
+    /// automatically saved to the Custom tab", same page). Names are not empty and not repeated.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub custom: Vec<CustomProperty>,
+}
+
+/// A custom iProperty: a name and its value as text.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CustomProperty {
+    /// Its name (the column's title when it is shown in the BOM).
+    pub name: String,
+    /// Its value.
+    pub value: String,
 }
 
 impl IProperties {
+    /// The value of a custom iProperty, when there is one of that name.
+    pub fn custom_value(&self, name: &str) -> Option<&str> {
+        self.custom.iter().find(|p| p.name == name).map(|p| p.value.as_str())
+    }
+
     /// True when nothing is set.
     pub fn is_empty(&self) -> bool {
         *self == Self::default()
@@ -97,7 +119,10 @@ impl IProperties {
     /// True when the numbers can be used: a density and a mass override, when given, positive and finite.
     pub fn is_valid(&self) -> bool {
         let ok = |v: Option<f64>| v.is_none_or(|v| v.is_finite() && v > 0.0);
-        ok(self.density) && ok(self.mass_override)
+        let named = self.custom.iter().enumerate().all(|(i, p)| {
+            !p.name.trim().is_empty() && self.custom.iter().skip(i + 1).all(|other| other.name != p.name)
+        });
+        ok(self.density) && ok(self.mass_override) && named
     }
 
     /// The density used, kg/m³.

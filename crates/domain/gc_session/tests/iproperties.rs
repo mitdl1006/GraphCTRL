@@ -118,3 +118,38 @@ fn a_mesh_that_is_not_closed_is_flagged() {
     let primitive = body(&mut s, Solid::Sphere { radius: 0.1 }, [1.0, 0.0, 0.0]);
     assert!(!s.physical_properties(Some(Occurrence::Item(primitive.erase()))).unwrap().open);
 }
+
+/// Status and Custom iProperties (Inventor 2026 help, iProperties Reference,
+/// GUID-8ABF17C5-B9EB-47B5-92CF-9FBD335334E3): a status classification of any text, and properties the
+/// user adds by name.
+#[test]
+fn status_and_custom_iproperties_are_kept_and_saved() {
+    use gc_doc::CustomProperty;
+    let mut s = Session::new();
+    let body = s
+        .add_body(gc_doc::Solid::Box { size: [0.1; 3] }, gc_doc::Placement { xyz: [0.0; 3], rpy: [0.0; 3] })
+        .unwrap();
+    let occ = Occurrence::Item(body.erase());
+    let custom = |name: &str, value: &str| CustomProperty { name: name.into(), value: value.into() };
+    let props = IProperties {
+        status: "Released".into(),
+        custom: vec![custom("Supplier code", "A-17"), custom("Lead time", "3 weeks")],
+        ..IProperties::default()
+    };
+    s.set_properties(Some(occ), props.clone()).unwrap();
+    let kept = s.properties(Some(occ));
+    assert_eq!(kept, props);
+    assert_eq!(kept.custom_value("Lead time"), Some("3 weeks"));
+    assert_eq!(kept.custom_value("Nothing"), None);
+    // A name is needed, and only once.
+    let before = s.doc().clone();
+    for bad in [vec![custom("", "x")], vec![custom("  ", "x")], vec![custom("A", "1"), custom("A", "2")]] {
+        let refused = IProperties { custom: bad, ..IProperties::default() };
+        assert!(s.set_properties(Some(occ), refused).is_err());
+    }
+    assert!(s.doc().same_content(&before));
+    // Saved and opened again.
+    let text = gc_persist::to_text(s.doc()).unwrap();
+    let opened = gc_persist::from_text(&text).unwrap().doc;
+    assert!(opened.same_content(s.doc()));
+}

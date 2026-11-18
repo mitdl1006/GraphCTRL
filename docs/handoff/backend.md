@@ -124,6 +124,16 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — iProperties: Status, Custom
+
+근거: iProperties Reference(`GUID-8ABF17C5-B9EB-47B5-92CF-9FBD335334E3`) — Status "In the Status field, enter any status classification", Custom "Adds custom iProperties to the selected file … Custom iProperties added in the BOM dialog box are automatically saved to the Custom tab".
+
+- `IProperties.status: String`, `IProperties.custom: Vec<CustomProperty { name, value }>`(추가, serde default). 기존 `session.set_properties(target, props)` / `properties(target)`로 읽고 쓴다. `props.custom_value(name)`.
+- 유효성: 사용자 정의 이름은 비어 있지 않고 겹치지 않아야 한다(아니면 `BadValue`). 값은 텍스트다(원문 페이지에 형식 목록이 없어 텍스트로 뒀다).
+- BOM에 사용자 정의 열을 보이려면 행의 `keys`로 `properties(..).custom_value(이름)`을 읽으면 된다(여러 컴포넌트가 합쳐진 행에서 값이 다르면 "Varies"로 보이는 것은 프런트가 Description과 같은 규칙으로).
+- 남은 것(제안): Summary·Project 탭의 나머지 필드(탭별 참조 페이지 확인 필요), Physical의 관성 모멘트·Requested Accuracy·클립보드 보고서·"Include QTY Overrides"(Static Quantity를 질량에 반영), Occurrence 탭(이미 있는 op들의 묶음 화면).
+- 테스트: `gc_session/tests/iproperties.rs::status_and_custom_iproperties_are_kept_and_saved`.
+
 ## 2026-11-18 — 원형 모서리·구 면 인식과 `Feature::{Circle, Sphere}` (프런트 요청)
 
 근거: To Place Insert Constraints(`GUID-97DD5557-FAEE-46FA-845D-11123D725BA9`, 원형 모서리), Place Tangent constraints(`GUID-FF270566-CA9E-420A-A00A-F52DD0FDFD8E`, 구).
