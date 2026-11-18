@@ -70,6 +70,8 @@ pub(crate) enum InterfaceElement {
     Browser,
     Properties,
     StatusBar,
+    /// The marking menu (off = the classic context menu).
+    MarkingMenu,
 }
 
 /// Which elements of the window are shown right now, and whether Clean Screen is on.
@@ -80,6 +82,7 @@ pub(crate) struct Interface {
     pub browser: bool,
     pub properties: bool,
     pub status_bar: bool,
+    pub marking_menu: bool,
     pub clean_screen: bool,
 }
 
@@ -787,6 +790,7 @@ pub(crate) fn show(
                             (InterfaceElement::Browser, tr!(lang, UiBrowser), interface.browser),
                             (InterfaceElement::Properties, tr!(lang, UiProperties), interface.properties),
                             (InterfaceElement::StatusBar, tr!(lang, UiStatusBar), interface.status_bar),
+                            (InterfaceElement::MarkingMenu, tr!(lang, UiMarkingMenu), interface.marking_menu),
                         ] {
                             let mut on = shown;
                             if ui.checkbox(&mut on, label).changed() {

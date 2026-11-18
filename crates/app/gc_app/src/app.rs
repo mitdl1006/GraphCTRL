@@ -410,6 +410,7 @@ impl GraphCtrlApp {
         let mut viewport = Viewport::new(cc.wgpu_render_state.clone());
         viewport.show_view_cube = !saved.hide_view_cube;
         viewport.show_nav_bar = !saved.hide_nav_bar;
+        viewport.classic_menu = saved.classic_context_menu;
         Self {
             options,
             frames: 0,
@@ -1261,6 +1262,7 @@ impl GraphCtrlApp {
             hide_view_cube: !self.viewport.show_view_cube,
             hide_nav_bar: !self.viewport.show_nav_bar,
             hide_status_bar: !self.show_status,
+            classic_context_menu: self.viewport.classic_menu,
             browser_closed: !self.clean_screen.unwrap_or(self.left_open),
             properties_closed: !self.right_open,
             ..Default::default()
@@ -1457,6 +1459,7 @@ impl eframe::App for GraphCtrlApp {
             browser: self.left_open,
             properties: self.right_open,
             status_bar: self.show_status,
+            marking_menu: !self.viewport.classic_menu,
             clean_screen: self.clean_screen.is_some(),
         };
         // Clean Screen hides the ribbon.
@@ -1505,6 +1508,7 @@ impl eframe::App for GraphCtrlApp {
                     ribbon::InterfaceElement::Browser => self.left_open = on,
                     ribbon::InterfaceElement::Properties => self.right_open = on,
                     ribbon::InterfaceElement::StatusBar => self.show_status = on,
+                    ribbon::InterfaceElement::MarkingMenu => self.viewport.classic_menu = !on,
                 }
                 self.save_settings();
             }

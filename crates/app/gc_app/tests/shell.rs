@@ -7140,3 +7140,63 @@ fn the_productivity_panel_grounds_components_in_its_dialog() {
     harness.run_steps(3);
     harness.get_by_label("원점에 맞출 기존 컴포넌트를 선택하십시오");
 }
+
+/// The marking menu (Inventor 2026 help, To Work with Marking Menus, GUID-756BC728-3366-497D-B480-4A06E932ED20):
+/// the Down key moves to a command and a click confirms it; Esc does not dismiss the menu, a click in the centre
+/// does. With the classic context menu (GUID-1A2766FB-EB3E-476B-9C44-D500A5137478) the commands are a list.
+#[test]
+fn the_marking_menu_takes_the_keys_and_can_be_the_classic_list() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let centre = egui::pos2(500.0, 450.0);
+    let right_click = |h: &mut egui_kittest::Harness<'_, GraphCtrlApp>| {
+        h.event(egui::Event::PointerMoved(centre));
+        h.run_steps(2);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: centre,
+                button: egui::PointerButton::Secondary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+        h.run_steps(3);
+    };
+    let left_click = |h: &mut egui_kittest::Harness<'_, GraphCtrlApp>| {
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: centre,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+        h.run_steps(3);
+    };
+    // Esc leaves the menu open.
+    right_click(&mut harness);
+    harness.get_by_label("구속");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(2);
+    harness.get_by_label("구속");
+    // Down moves to the first command (north: Constrain); a click confirms it.
+    harness.key_press(egui::Key::ArrowDown);
+    harness.run_steps(2);
+    left_click(&mut harness);
+    harness.get_by_label("첫 번째 선택: 뷰에서 선택");
+    harness.get_by_label("취소").click();
+    harness.run_steps(3);
+    // A click in the centre without a chosen command dismisses the menu.
+    right_click(&mut harness);
+    left_click(&mut harness);
+    assert!(harness.query_all_by_label("구속").next().is_none());
+    // Classic context menu: the same commands as a list.
+    harness.state_mut().viewport_mut().classic_menu = true;
+    right_click(&mut harness);
+    harness.get_by_label("구속").click();
+    harness.run_steps(3);
+    harness.get_by_label("첫 번째 선택: 뷰에서 선택");
+}

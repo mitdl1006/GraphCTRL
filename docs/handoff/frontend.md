@@ -512,6 +512,14 @@
 - 우클릭 항목(앞선 커밋)은 그대로 둔다. 한국어 표기는 한국어 도움말을 못 읽어 한국어 + 영어 원문 병기.
 - 남은 지시: ② 마킹 메뉴 원문 조사·구현, ③ 리본 탭 배치를 Ribbon reference와 대조.
 
+## 마킹 메뉴 원문 반영
+
+근거(원문, curl): About Marking Menus GUID-4B081B74-45EA-451E-84BE-9FFE0E2ACAE3, To Work with Marking Menus GUID-756BC728-3366-497D-B480-4A06E932ED20, Reference for Marking Menu Tab of Customize Dialog GUID-1A2766FB-EB3E-476B-9C44-D500A5137478.
+
+- 이미 있던 것: 우클릭 방사형 메뉴(중심은 커서), 누른 채 끌어 빨리 놓는 마크(제스처) 즉시 선택, 클릭하면 메뉴+오버플로 목록, 환경별 기본 명령(조립: Constrain·Place Component·Move·Rotate, 스케치: Center Point Circle·Line·Two Point Rectangle·Finish Sketch).
+- 이번에 맞춘 것: ① Esc는 메뉴를 닫지 않는다(원문: Esc는 진행 중 명령을 취소하니 쓰지 말고 중앙 클릭으로 닫는다) — QA 스플라인 테스트가 Esc로 닫던 것을 중앙 클릭으로 고쳤다. ② 위/아래 화살표로 명령을 옮기고 클릭으로 확정(방사형 순서, 북쪽부터 시계 방향). ③ View > User Interface의 "마킹 메뉴" 체크 해제 = "Use Classic Context Menu": 명령 전체를 목록으로(설정 `classic_context_menu`로 저장).
+- 하지 않은 것(원문에 있으나 우리 범위 밖): Customize 대화상자의 명령 배치 편집·XML 가져오기/내보내기, Ctrl+우클릭 사용자 메뉴, 표시 형식(글자만/아이콘만), 오버플로 형식(전체/방사형만/짧게). 방향별 기본 항목 표는 2026 원문에 없다(위치는 우리가 북·동·남·서로 정함).
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

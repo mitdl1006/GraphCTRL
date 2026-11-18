@@ -201,6 +201,7 @@ messages! {
     UiNavBar => ("탐색 막대", "Navigation Bar"),
     UiBrowser => ("브라우저", "Browser"),
     UiProperties => ("속성", "Properties"),
+    UiMarkingMenu => ("마킹 메뉴", "Marking Menu"),
     UiStatusBar => ("상태 표시줄", "Status Bar"),
     CleanScreen => ("전체 화면(Ctrl+0)", "Clean Screen (Ctrl+0)"),
     GroundPlane => ("바닥 평면", "Ground Plane"),

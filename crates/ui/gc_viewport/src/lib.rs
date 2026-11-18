@@ -169,6 +169,8 @@ pub struct Viewport {
     pub show_view_cube: bool,
     /// The navigation bar is shown.
     pub show_nav_bar: bool,
+    /// Right-click opens the classic context menu (a list) instead of the radial marking menu.
+    pub classic_menu: bool,
     /// Object Visibility (View tab, Visibility panel).
     pub visibility: ObjectVisibility,
     /// A selection box being dragged in a sketch: where the mouse went down.
@@ -506,6 +508,7 @@ impl Viewport {
             browser_hover: None,
             show_view_cube: true,
             show_nav_bar: true,
+            classic_menu: false,
             visibility: ObjectVisibility::default(),
             box_select: None,
             frame_time: 0.0,
@@ -905,15 +908,36 @@ impl Viewport {
             }
         }
         if self.marking.is_open() {
-            let radial: Vec<Option<gc_ui::marking::MarkingItem>> =
-                self.marking_set.radial.iter().map(|cmd| cmd.map(|cmd| cmd.item(session, lang))).collect();
-            let overflow: Vec<gc_ui::marking::MarkingItem> =
-                self.marking_set.overflow.iter().map(|cmd| cmd.item(session, lang)).collect();
+            // The classic context menu lists every command, the radial ones first (Inventor 2026 help, Reference for
+            // Marking Menu Tab of Customize Dialog, GUID-1A2766FB-EB3E-476B-9C44-D500A5137478: Use Classic Context Menu).
+            let classic = self.classic_menu;
+            let listed: Vec<radial::Cmd> = if classic {
+                self.marking_set
+                    .radial
+                    .iter()
+                    .flatten()
+                    .chain(self.marking_set.overflow.iter())
+                    .copied()
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            let radial: Vec<Option<gc_ui::marking::MarkingItem>> = if classic {
+                Vec::new()
+            } else {
+                self.marking_set.radial.iter().map(|cmd| cmd.map(|cmd| cmd.item(session, lang))).collect()
+            };
+            let overflow: Vec<gc_ui::marking::MarkingItem> = if classic {
+                listed.iter().map(|cmd| cmd.item(session, lang)).collect()
+            } else {
+                self.marking_set.overflow.iter().map(|cmd| cmd.item(session, lang)).collect()
+            };
             let picked = self.marking.show(ui.ctx(), &radial, &overflow);
             let cmd = picked.and_then(|pick| match pick {
                 gc_ui::marking::MarkingPick::Radial(sector) => {
                     self.marking_set.radial.get(sector).copied().flatten()
                 }
+                gc_ui::marking::MarkingPick::Overflow(index) if classic => listed.get(index).copied(),
                 gc_ui::marking::MarkingPick::Overflow(index) => self.marking_set.overflow.get(index).copied(),
             });
             if let Some(cmd) = cmd {

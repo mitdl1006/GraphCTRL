@@ -87,6 +87,8 @@ pub struct Settings {
     pub hide_nav_bar: bool,
     /// The status bar is hidden.
     pub hide_status_bar: bool,
+    /// The classic context menu is used instead of the marking menu.
+    pub classic_context_menu: bool,
     /// The browser is collapsed.
     pub browser_closed: bool,
     /// The properties panel is collapsed.

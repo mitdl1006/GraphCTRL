@@ -49,6 +49,8 @@ pub struct MarkingMenu {
     open: Option<(egui::Pos2, f64)>,
     /// True while the right button is still held from the press that opened it (mark mode).
     marking: bool,
+    /// The command the Up and Down keys moved to (a click confirms it).
+    keyed: Option<usize>,
 }
 
 /// The sector a direction points into (0 = north, clockwise), or `None` for a direction too short to
@@ -88,12 +90,14 @@ impl MarkingMenu {
     pub fn press(&mut self, at: egui::Pos2, time: f64) {
         self.open = Some((at, time));
         self.marking = true;
+        self.keyed = None;
     }
 
     /// Closes the menu.
     pub fn close(&mut self) {
         self.open = None;
         self.marking = false;
+        self.keyed = None;
     }
 
     /// Draws the menu and handles the pointer. `radial` has up to [`SECTORS`] commands, in sector order
@@ -105,20 +109,33 @@ impl MarkingMenu {
         overflow: &[MarkingItem],
     ) -> Option<MarkingPick> {
         let (centre, opened) = self.open?;
-        let (pointer, released, time, escape, primary) = ctx.input(|i| {
+        // Esc is left alone: it can cancel a command in progress (Inventor 2026 help, To Work with Marking
+        // Menus, GUID-756BC728-3366-497D-B480-4A06E932ED20: dismiss by clicking the centre instead).
+        let (pointer, released, time, primary, down, up) = ctx.input(|i| {
             (
                 i.pointer.latest_pos(),
                 i.pointer.button_released(egui::PointerButton::Secondary),
                 i.time,
-                i.key_pressed(egui::Key::Escape),
                 i.pointer.button_clicked(egui::PointerButton::Primary),
+                i.key_pressed(egui::Key::ArrowDown),
+                i.key_pressed(egui::Key::ArrowUp),
             )
         });
-        if escape {
-            self.close();
-            return None;
-        }
         let item = |sector: usize| radial.get(sector).and_then(Option::as_ref).filter(|item| item.enabled);
+        // Up and Down move through the enabled commands (clockwise from north); a click then confirms.
+        if down || up {
+            let enabled: Vec<usize> = (0..SECTORS).filter(|s| item(*s).is_some()).collect();
+            if !enabled.is_empty() {
+                let at = self.keyed.and_then(|k| enabled.iter().position(|s| *s == k));
+                let next = match (at, down) {
+                    (None, true) => 0,
+                    (None, false) => enabled.len() - 1,
+                    (Some(i), true) => (i + 1) % enabled.len(),
+                    (Some(i), false) => (i + enabled.len() - 1) % enabled.len(),
+                };
+                self.keyed = Some(enabled[next]);
+            }
+        }
         // Mark mode: a quick stroke toward a command picks it on release.
         if self.marking {
             let direction = pointer.map(|p| p - centre).unwrap_or_default();
@@ -135,7 +152,11 @@ impl MarkingMenu {
             // A held button that has not marked yet still shows the menu (menu mode).
         }
 
-        let hovered_sector = pointer.and_then(|p| sector_of(p - centre, MARK_LENGTH));
+        let hovered_sector = if self.keyed.is_some() && !self.marking {
+            self.keyed
+        } else {
+            pointer.and_then(|p| sector_of(p - centre, MARK_LENGTH))
+        };
         let mut picked = None;
         let painter =
             ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("marking_menu")));
@@ -205,8 +226,15 @@ impl MarkingMenu {
             });
         if picked.is_some() {
             self.close();
+        } else if primary
+            && !self.marking
+            && let Some(sector) = self.keyed.filter(|k| item(*k).is_some())
+        {
+            // The command the keys moved to is confirmed by a click.
+            self.close();
+            return Some(MarkingPick::Radial(sector));
         } else if primary && !self.marking {
-            // A click anywhere else closes the menu (after the area buttons had their chance).
+            // A click anywhere else (the centre included) closes the menu, after the area buttons had their chance.
             let on_overflow = ctx
                 .layer_id_at(pointer.unwrap_or_default())
                 .is_some_and(|l| l.id == egui::Id::unique("marking_overflow"));
