@@ -558,7 +558,14 @@ fn the_ur5e_follows_a_sketched_polyline() {
     harness.run();
     let session = &harness.state().session;
     let path = session.doc().paths().iter().next().unwrap().0;
-    assert_eq!(session.doc().get(path).unwrap().linear, vec![false, true, true]);
+    // Sketch -> path makes a path that follows the sketch's path role (no copied waypoints).
+    assert!(!session.doc().get(path).unwrap().follow.is_empty(), "the path follows the sketch's role");
+    // The path panel lists the role it follows (name, how it is travelled) instead of waypoints.
+    let role = session.doc().get(path).unwrap().follow[0];
+    let role_name = session.doc().get(role).unwrap().name.clone();
+    // (Once in the browser below the sketch, once in the path panel.)
+    assert!(harness.get_all_by_label_contains(&role_name).count() >= 2);
+    let session = &harness.state().session;
     assert_eq!(session.plan_status(path), gc_session::PlanStatus::Ready, "{:?}", session.plan_error(path));
     // The tool passes through the three sketch points, and between them stays on the lines' height.
     let tips: Vec<[f64; 3]> = session.planned(path).unwrap().tip_path().collect();
@@ -6198,4 +6205,146 @@ fn editing_a_dimension_starts_from_the_expression_or_the_value_as_the_document_s
     app.session.set_doc_settings(settings).unwrap();
     viewport.edit_dimension(&app.session, id);
     assert_eq!(viewport.dimension_edit_text(), Some("50 mm"));
+}
+
+/// Bend with Equal on (3D sketch; Inventor 2026 help, To Create Lines, Arcs, and Bends,
+/// GUID-4F861674-F74C-474E-869A-4C190ED6EC4B): the second bend takes the first one's radius and the command
+/// stays open for it.
+#[test]
+fn the_bend_command_keeps_the_first_radius_with_equal_on() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    pick_variant(&mut harness, "스케치", "3D 스케치");
+    harness.run();
+    // Three lines in a staircase in the front plane (the view looks along Y), drawn through the session.
+    let app = harness.state_mut();
+    app.session.set_tool(ToolKind::Line);
+    let origin = *app.session.active_sketch().unwrap().1.points.keys().next().unwrap();
+    app.session.spatial_click([0.0; 3], Some(origin), None);
+    app.session.spatial_click([0.04, 0.0, 0.0], None, Some(0));
+    app.session.spatial_click([0.04, 0.0, 0.04], None, Some(2));
+    app.session.spatial_click([0.08, 0.0, 0.04], None, Some(0));
+    app.session.tool_event(ToolEvent::Key(gc_tools::Key::Escape));
+    harness.run();
+    let arcs = |h: &egui_kittest::Harness<'_, GraphCtrlApp>| {
+        h.state()
+            .session
+            .active_sketch()
+            .unwrap()
+            .1
+            .curves
+            .values()
+            .filter(|c| matches!(c.geom, gc_sketch::CurveGeom::Arc { .. }))
+            .count()
+    };
+    assert_eq!(arcs(&harness), 0);
+    harness.get_by_label("굽힘").click();
+    harness.run_steps(2);
+    harness.get_by_label("같음");
+    let click_at = |h: &mut egui_kittest::Harness<'_, GraphCtrlApp>, world: gc_math::DVec3| {
+        let at = h.state().viewport().screen_of(world).unwrap();
+        h.event(egui::Event::PointerMoved(at));
+        h.run_steps(2);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            h.run_steps(2);
+        }
+        // Not a double click with the next one.
+        h.run_steps(40);
+    };
+    let enter = |h: &mut egui_kittest::Harness<'_, GraphCtrlApp>| {
+        h.key_press(egui::Key::Enter);
+        h.run_steps(3);
+    };
+    // First bend: the first and second lines, Enter in the radius box.
+    click_at(&mut harness, gc_math::DVec3::new(0.02, 0.0, 0.0));
+    click_at(&mut harness, gc_math::DVec3::new(0.04, 0.0, 0.02));
+    enter(&mut harness);
+    assert_eq!(arcs(&harness), 1);
+    assert!(harness.state().viewport().is_bending(), "the command stays open for the next bend");
+    // Second bend: the second and third lines, with Equal on and the radius unchanged.
+    click_at(&mut harness, gc_math::DVec3::new(0.04, 0.0, 0.02));
+    click_at(&mut harness, gc_math::DVec3::new(0.06, 0.0, 0.04));
+    enter(&mut harness);
+    assert_eq!(arcs(&harness), 2);
+    let sketch = harness.state().session.active_sketch().unwrap().1.clone();
+    let radii: Vec<f64> = sketch
+        .curves
+        .values()
+        .filter_map(|c| match c.geom {
+            gc_sketch::CurveGeom::Arc { c, s, .. } => {
+                let (centre, start) = (sketch.pos(c)?, sketch.pos(s)?);
+                Some(
+                    ((centre[0] - start[0]).powi(2)
+                        + (centre[1] - start[1]).powi(2)
+                        + (centre[2] - start[2]).powi(2))
+                    .sqrt(),
+                )
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(radii.len() == 2 && (radii[0] - radii[1]).abs() < 1e-9, "{radii:?}");
+}
+
+/// Create Path (Robot tab; sketch roles, plan 9.1): click two sketch points and the robot gets a planned path
+/// between them (a waypoint of the robot at each point).
+#[test]
+fn create_path_makes_a_planned_path_between_two_clicked_sketch_points() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("로봇").click();
+    harness.run();
+    harness.get_by_label("로봇 추가").click();
+    harness.run();
+    harness.get_by_label("UR5e 로봇").click();
+    harness.run();
+    let app = harness.state_mut();
+    let robot = app.session.doc().robots().iter().next().unwrap().0;
+    app.session.jog(robot, &[0.0, -1.57, 1.57, -1.57, -1.57, 0.0]);
+    app.session.end_jog();
+    // Two points in the air, 250 mm above the floor, as the ends of one line.
+    app.session.create_sketch_3d().unwrap();
+    app.session.set_tool(ToolKind::Line);
+    app.session.spatial_click([0.45, -0.15, 0.25], None, None);
+    app.session.spatial_click([0.45, 0.15, 0.25], None, Some(1));
+    app.session.tool_event(ToolEvent::Key(gc_tools::Key::Escape));
+    app.session.finish_sketch();
+    harness.run();
+    assert!(harness.state().session.doc().paths().is_empty());
+    harness.get_by_label("경로 생성").click();
+    harness.run_steps(2);
+    assert!(harness.state().viewport().is_routing());
+    let click_at = |h: &mut egui_kittest::Harness<'_, GraphCtrlApp>, world: gc_math::DVec3| {
+        let at = h.state().viewport().screen_of(world).unwrap();
+        h.event(egui::Event::PointerMoved(at));
+        h.run_steps(2);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            h.run_steps(2);
+        }
+        h.run_steps(40);
+    };
+    click_at(&mut harness, gc_math::DVec3::new(0.45, -0.15, 0.25));
+    click_at(&mut harness, gc_math::DVec3::new(0.45, 0.15, 0.25));
+    let session = &harness.state().session;
+    assert_eq!(session.doc().paths().len(), 1, "a path between the two points");
+    assert!(!harness.state().viewport().is_routing());
+    assert_eq!(session.doc().waypoints().len(), 2, "a waypoint at each point");
 }

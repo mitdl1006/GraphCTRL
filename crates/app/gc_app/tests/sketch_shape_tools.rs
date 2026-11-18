@@ -872,3 +872,113 @@ fn the_constrain_panel_has_a_smooth_g2_button() {
     harness.run();
     assert_eq!(harness.state().session.tool(), ToolKind::Constraint(gc_tools::ConstraintKind::Smooth));
 }
+
+/// Sketch roles (plan 9.1): the right-click menu of a sketch point and of a curve offers "웨이포인트로 지정" and
+/// "경로로 지정"; the chain of curves joined to the one clicked becomes one path.
+#[test]
+fn the_sketch_menu_makes_waypoints_and_paths() {
+    let mut harness = sketching();
+    // Two lines that join: one polyline, drawn with the Line tool.
+    harness.state_mut().session.set_tool(ToolKind::Line);
+    for p in [mm(-60.0, 0.0), mm(0.0, 40.0), mm(60.0, 0.0)] {
+        click(harness.state_mut(), p, false);
+    }
+    harness.state_mut().session.tool_event(ToolEvent::Key(gc_tools::Key::Escape));
+    harness.state_mut().session.set_tool(ToolKind::Select);
+    harness.run_steps(3);
+    let screen = |h: &Harness<'_>, p: [f64; 2]| {
+        h.state().viewport().screen_of(gc_math::DVec3::new(p[0], p[1], 0.0)).unwrap()
+    };
+    let sketch = harness.state().session.active_sketch().unwrap().0;
+    assert!(harness.state().session.doc().roles().is_empty());
+
+    // A point: Make Waypoint.
+    let at = screen(&harness, mm(60.0, 0.0));
+    right_click(&mut harness, at);
+    harness.get_by_label("웨이포인트로 지정").click();
+    harness.run_steps(3);
+    assert_eq!(harness.state().session.sketch_roles(sketch).len(), 1);
+
+    // The middle of the first line: Make Path takes the whole chain (both lines).
+    let at = screen(&harness, mm(-30.0, 20.0));
+    right_click(&mut harness, at);
+    harness.get_by_label("경로로 지정").click();
+    harness.run_steps(3);
+    let roles = harness.state().session.sketch_roles(sketch);
+    assert_eq!(roles.len(), 2);
+    let path = roles
+        .iter()
+        .find_map(|id| match &harness.state().session.doc().get(*id)?.kind {
+            gc_doc::RoleKind::Path { curves, .. } => Some(curves.len()),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(path, 2, "both lines belong to the path");
+    // A curve that is in a path already offers nothing more.
+    let at = screen(&harness, mm(30.0, 20.0));
+    right_click(&mut harness, at);
+    assert!(harness.query_by_label("경로로 지정").is_none());
+}
+
+/// The browser lists a sketch's roles below it; clicking one selects it, and the view marks it.
+#[test]
+fn the_browser_lists_sketch_roles_and_selects_them() {
+    let mut harness = sketching();
+    let sketch = harness.state().session.active_sketch().unwrap().0;
+    harness.state_mut().session.set_tool(ToolKind::Point);
+    click(harness.state_mut(), mm(10.0, 10.0), false);
+    harness.state_mut().session.set_tool(ToolKind::Select);
+    let point = *harness
+        .state()
+        .session
+        .active_sketch()
+        .unwrap()
+        .1
+        .points
+        .keys()
+        .find(|p| {
+            harness
+                .state()
+                .session
+                .point_pos(**p)
+                .is_some_and(|pos| (pos[0] - 0.01).abs() < 1e-9 && (pos[1] - 0.01).abs() < 1e-9)
+        })
+        .unwrap();
+    let role = harness.state_mut().session.add_waypoint_role(sketch, point).unwrap();
+    harness.run_steps(3);
+    let name = harness.state().session.doc().get(role).unwrap().name.clone();
+    harness.get_by_label(&name).click();
+    harness.run_steps(3);
+    assert_eq!(harness.state().viewport().role_selected, Some(role));
+}
+
+/// The properties of a selected path role: motion, direction and speed are edited in the panel.
+#[test]
+fn the_properties_panel_edits_a_path_role() {
+    let mut harness = sketching();
+    harness.state_mut().session.set_tool(ToolKind::Line);
+    for p in [mm(-60.0, 0.0), mm(60.0, 0.0)] {
+        click(harness.state_mut(), p, false);
+    }
+    harness.state_mut().session.tool_event(ToolEvent::Key(gc_tools::Key::Escape));
+    harness.state_mut().session.set_tool(ToolKind::Select);
+    let (sketch, curve) = {
+        let (id, s) = harness.state().session.active_sketch().unwrap();
+        (id, *s.curves.keys().next().unwrap())
+    };
+    let role = harness.state_mut().session.add_path_role(sketch, &[curve]).unwrap();
+    harness.state_mut().viewport_mut().role_selected = Some(role);
+    harness.run_steps(3);
+    harness.get_by_label("직선 이동").click();
+    harness.run_steps(2);
+    harness.get_by_label("경로 방향 뒤집기").click();
+    harness.run_steps(2);
+    let kind = harness.state().session.doc().get(role).unwrap().kind.clone();
+    match kind {
+        gc_doc::RoleKind::Path { motion, reversed, .. } => {
+            assert_eq!(motion, gc_doc::PathMotion::Linear);
+            assert!(reversed);
+        }
+        other => panic!("{other:?}"),
+    }
+}

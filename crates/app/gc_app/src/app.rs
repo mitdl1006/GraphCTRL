@@ -1508,6 +1508,10 @@ impl eframe::App for GraphCtrlApp {
         if self.measure.open {
             self.measure.window(&ctx, &self.session, lang);
         }
+        // A path made by Create Path in the view becomes the one the panel works on.
+        if let Some(path) = self.viewport.take_route_made() {
+            self.cell.path = Some(path);
+        }
         // The browser row under the pointer is boxed in the view, from the next frame on.
         if !self.left_open {
             self.params.hovered = None;
@@ -1531,6 +1535,7 @@ impl eframe::App for GraphCtrlApp {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     self.params.origin_selected = self.viewport.origin_selected;
                     match gc_panels::browser(ui, &self.session, lang, &mut self.params) {
+                        Some(BrowserAction::SelectRole(role)) => self.viewport.role_selected = role,
                         Some(BrowserAction::FindInWindow(any)) => {
                             self.viewport.find_in_window(&self.session, any);
                         }
@@ -1649,6 +1654,13 @@ impl eframe::App for GraphCtrlApp {
             |ui| {
                 ui.set_max_width(ui.available_width());
                 egui::ScrollArea::vertical().show(ui, |ui| {
+                    // A sketch role selected in the browser has its own properties.
+                    if let Some(role) =
+                        self.viewport.role_selected.filter(|id| self.session.doc().get(*id).is_some())
+                    {
+                        gc_panels::role_properties(ui, &mut self.session, lang, role);
+                        ui.separator();
+                    }
                     gc_panels::properties(ui, &mut self.session, lang, &mut self.expression);
                     self.cell.hold_previews = self.viewport.is_grip_snapping();
                     gc_panels::cell(ui, &mut self.session, lang, &mut self.cell);

@@ -157,6 +157,12 @@ pub struct Viewport {
     /// The ground plane (the floor grid) is shown; a sketch's own grid stays (View tab, Appearance panel;
     /// on and off are session-based).
     pub show_ground: bool,
+    /// "Create Path" (sketch roles, plan 9.1): the robot, the first point and the straight-line choice.
+    route: Option<RouteState>,
+    /// The path the last "Create Path" made; the application takes it.
+    route_made: Option<Id<gc_doc::MotionPath>>,
+    /// The sketch role selected in the browser: marked strongly in the view.
+    pub role_selected: Option<Id<gc_doc::SketchRole>>,
     /// The browser row the pointer is over: its component's bounding box is drawn.
     pub browser_hover: Option<gc_core::AnyId>,
     /// The ViewCube is shown (View tab, Windows panel, User Interface); the navigation bar keeps its own.
@@ -330,6 +336,15 @@ impl ObjectVisibility {
     }
 }
 
+/// Create Path: two sketch points are clicked and a path of the robot between them is made and planned.
+#[derive(Clone, Debug)]
+struct RouteState {
+    robot: Id<gc_doc::Robot>,
+    first: Option<(Id<gc_doc::Sketch>, Id<gc_sketch::SkPoint>)>,
+    /// The second move in a straight line of the tool tip.
+    linear: bool,
+}
+
 /// The Bend command of a 3D sketch (Inventor 2026 help, To Create Lines, Arcs, and Bends,
 /// GUID-4F861674-F74C-474E-869A-4C190ED6EC4B): two lines are clicked, then the radius is typed.
 #[derive(Clone, Debug)]
@@ -337,6 +352,10 @@ struct BendState {
     lines: Vec<Id<gc_sketch::Curve>>,
     radius: String,
     fresh: bool,
+    /// The Equal check box (default on): the next bends take the radius of the first one.
+    equal: bool,
+    /// The arc of the first bend made, and the radius typed for it: what Equal follows.
+    first: Option<(Id<gc_sketch::Curve>, String)>,
 }
 
 /// The Helical Curve command of a 3D sketch (Inventor 2026 help, To Draw 3D Curves,
@@ -452,6 +471,9 @@ impl Viewport {
             show_constraints: true,
             style: VisualStyle::default(),
             show_ground: true,
+            route: None,
+            route_made: None,
+            role_selected: None,
             browser_hover: None,
             show_view_cube: true,
             show_nav_bar: true,
@@ -739,6 +761,39 @@ impl Viewport {
                                     <= gc_tools::tolerance::POINT_PX
                             })
                     };
+                    // Sketch roles (plan 9.1): the point or the open curve under the cursor can become a
+                    // waypoint or a path of the robot work.
+                    if let Some((sketch_id, sketch)) = session.active_sketch() {
+                        menu.waypoint = sketch
+                            .points
+                            .keys()
+                            .copied()
+                            .find(|p| near_point(*p) && session.waypoint_role(sketch_id, *p).is_none())
+                            .map(|p| (sketch_id, p));
+                        if menu.waypoint.is_none() {
+                            let mut best: Option<(f64, Id<gc_sketch::Curve>)> = None;
+                            for curve in sketch.curves.keys() {
+                                if session.path_role(sketch_id, *curve).is_some() {
+                                    continue;
+                                }
+                                let Some(run) = sketch.curve_run(*curve) else { continue };
+                                let on_screen: Vec<[f64; 2]> = run
+                                    .iter()
+                                    .filter_map(|p| self.camera.project(plane.world(*p), size))
+                                    .collect();
+                                let distance = on_screen
+                                    .windows(2)
+                                    .map(|w| segment_distance(at, w[0], w[1]))
+                                    .fold(f64::INFINITY, f64::min);
+                                if distance <= 6.0 && best.is_none_or(|(d, _)| distance < d) {
+                                    best = Some((distance, *curve));
+                                }
+                            }
+                            menu.path = best
+                                .filter(|(_, curve)| !session.chain_at(sketch_id, *curve).is_empty())
+                                .map(|(_, curve)| (sketch_id, curve));
+                        }
+                    }
                     if let Some((_, sketch)) = session.active_sketch() {
                         for (curve, c) in &sketch.curves {
                             let gc_sketch::CurveGeom::Spline { points } = &c.geom else { continue };
@@ -880,6 +935,68 @@ impl Viewport {
                 camera.distance * 0.6,
                 self.work_selected,
             );
+        }
+        // Sketch roles: a waypoint is a diamond with the tool's pointing axis, a path a line with an arrow
+        // head; the one selected in the browser is drawn thick.
+        {
+            let painter = ui.painter_at(rect);
+            let screen = |world: [f64; 3]| {
+                self.camera.project(DVec3::from_array(world), size).map(|q| {
+                    #[allow(clippy::cast_possible_truncation, reason = "screen coordinates fit f32")]
+                    egui::pos2(rect.left() + q[0] as f32, rect.top() + q[1] as f32)
+                })
+            };
+            for (id, role) in session.doc().roles().iter() {
+                if !session.doc().is_visible(role.sketch.erase()) || session.doc().is_inactive(id.erase()) {
+                    continue;
+                }
+                let chosen = self.role_selected == Some(id);
+                let color = if chosen { colors::SELECTED } else { colors::ACCENT.gamma_multiply(0.8) };
+                match role.kind {
+                    gc_doc::RoleKind::Waypoint { .. } => {
+                        if let Some(pose) = session.role_pose(id)
+                            && let Some(at) = screen(pose.translation.to_array())
+                        {
+                            let r = if chosen { 7.0 } else { 5.0 };
+                            painter.add(egui::Shape::convex_polygon(
+                                vec![
+                                    at + egui::vec2(0.0, -r),
+                                    at + egui::vec2(r, 0.0),
+                                    at + egui::vec2(0.0, r),
+                                    at + egui::vec2(-r, 0.0),
+                                ],
+                                color.gamma_multiply(0.35),
+                                egui::Stroke::new(if chosen { 2.0 } else { 1.2 }, color),
+                            ));
+                            // The tool's pointing direction (its Z).
+                            let tip =
+                                pose.translation + pose.rotation * DVec3::Z * (self.camera.distance * 0.06);
+                            if let Some(end) = screen(tip.to_array()) {
+                                painter.line_segment([at, end], egui::Stroke::new(1.2, color));
+                            }
+                        }
+                    }
+                    gc_doc::RoleKind::Path { .. } => {
+                        if let Some(line) = session.role_polyline(id) {
+                            let points: Vec<egui::Pos2> = line.iter().filter_map(|p| screen(*p)).collect();
+                            let stroke = egui::Stroke::new(if chosen { 3.5 } else { 2.0 }, color);
+                            for w in points.windows(2) {
+                                painter.line_segment([w[0], w[1]], stroke);
+                            }
+                            // An arrow head at the far end shows the direction.
+                            if let [.., a, b] = points[..] {
+                                let d = (b - a).normalized();
+                                let n = egui::vec2(-d.y, d.x);
+                                painter.add(egui::Shape::convex_polygon(
+                                    vec![b, b - d * 11.0 + n * 5.0, b - d * 11.0 - n * 5.0],
+                                    color,
+                                    egui::Stroke::NONE,
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
         }
         // Hovering a browser row shows the component's bounding box in the graphics.
         if let Some(item) = self.browser_hover.and_then(cell_item) {
@@ -1836,7 +1953,18 @@ impl Viewport {
 
     /// Starts Bend in the 3D sketch being edited: click two lines that meet, then type the radius.
     pub fn start_bend(&mut self) {
-        self.bend = Some(BendState { lines: Vec::new(), radius: "10 mm".to_owned(), fresh: true });
+        self.bend = Some(BendState {
+            lines: Vec::new(),
+            radius: "10 mm".to_owned(),
+            fresh: true,
+            equal: true,
+            first: None,
+        });
+    }
+
+    /// How many lines the running Bend has picked so far.
+    pub fn bend_picked(&self) -> usize {
+        self.bend.as_ref().map_or(0, |bend| bend.lines.len())
     }
 
     /// Whether Bend is running.
@@ -1847,6 +1975,10 @@ impl Viewport {
     /// Bend's prompt, and the radius box once both lines are picked. Enter makes the bend, Esc ends.
     fn bend_box(&mut self, ui: &egui::Ui, session: &mut Session, rect: egui::Rect, lang: Lang) {
         let Some(mut bend) = self.bend.take() else { return };
+        if bend.lines.len() < 2 {
+            // The radius box takes the keyboard each time it comes up.
+            bend.fresh = true;
+        }
         if !session.sketch_is_spatial() || ui.input(|i| i.key_pressed(Key::Escape)) {
             return;
         }
@@ -1856,14 +1988,16 @@ impl Viewport {
             _ => tr!(lang, BendRadius),
         };
         let mut make = false;
+        // In the bottom-left corner, out of the way of the lines being picked.
         egui::Area::new(egui::Id::unique("gc_bend"))
-            .fixed_pos(rect.center_top() + egui::vec2(0.0, 14.0))
-            .pivot(egui::Align2::CENTER_TOP)
+            .fixed_pos(rect.left_bottom() + egui::vec2(14.0, -14.0))
+            .pivot(egui::Align2::LEFT_BOTTOM)
             .order(egui::Order::Foreground)
             .show(ui.ctx(), |ui| {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
                     ui.strong(tr!(lang, ToolBend));
                     ui.label(prompt);
+                    ui.checkbox(&mut bend.equal, tr!(lang, BendEqual));
                     if bend.lines.len() == 2 {
                         let field = ui.add(egui::TextEdit::singleline(&mut bend.radius).desired_width(90.0));
                         field.widget_info(|| {
@@ -1879,16 +2013,122 @@ impl Viewport {
                 });
             });
         if make && let [a, b] = bend.lines[..] {
-            // A refusal (lines that do not meet, a radius too big) is explained in the status bar; the
-            // command stays open to try again.
-            if session
-                .edit_active_sketch(gc_doc::SketchOp::Bend { lines: [a, b], radius: bend.radius.clone() })
-                .is_ok()
-            {
-                return;
+            // With Equal on and the radius unchanged, a bend after the first takes the first one's radius
+            // (Bend Equal); otherwise it is a Bend of the radius typed, and becomes the one to follow. A refusal
+            // (lines that do not meet, a radius too big) is explained in the status bar; the command stays
+            // open to try again, and after a bend it stays open for the next one (Esc ends).
+            let follow = bend
+                .first
+                .as_ref()
+                .filter(|(_, radius)| bend.equal && *radius == bend.radius)
+                .map(|(arc, _)| *arc);
+            let op = match follow {
+                Some(to) => gc_doc::SketchOp::BendEqual { lines: [a, b], to },
+                None => gc_doc::SketchOp::Bend { lines: [a, b], radius: bend.radius.clone() },
+            };
+            if let Ok(made) = session.edit_active_sketch(op) {
+                if follow.is_none()
+                    && let Some(arc) = made.iter().find_map(|c| match c {
+                        gc_doc::Created::Curve(id) => Some(*id),
+                        _ => None,
+                    })
+                {
+                    bend.first = Some((arc, bend.radius.clone()));
+                }
+                bend.lines.clear();
             }
         }
         self.bend = Some(bend);
+    }
+
+    /// Starts Create Path for a robot: click a point of any visible sketch, then a second one (Esc ends).
+    pub fn start_route(&mut self, robot: Id<gc_doc::Robot>) {
+        self.route = Some(RouteState { robot, first: None, linear: false });
+    }
+
+    /// Whether Create Path is running.
+    pub fn is_routing(&self) -> bool {
+        self.route.is_some()
+    }
+
+    /// The path Create Path made since the last call.
+    pub fn take_route_made(&mut self) -> Option<Id<gc_doc::MotionPath>> {
+        self.route_made.take()
+    }
+
+    /// Create Path outside sketches: the prompt, the straight-line check box, and the two clicks.
+    fn route_step(
+        &mut self,
+        ui: &egui::Ui,
+        response: &egui::Response,
+        session: &mut Session,
+        size: [f64; 2],
+        to_view: &impl Fn(egui::Pos2) -> [f64; 2],
+        rect: egui::Rect,
+        lang: Lang,
+    ) -> bool {
+        let Some(mut route) = self.route.take() else { return false };
+        if ui.input(|i| i.key_pressed(Key::Escape)) || response.secondary_clicked() {
+            return true;
+        }
+        let prompt =
+            if route.first.is_none() { tr!(lang, RoutePickFirst) } else { tr!(lang, RoutePickSecond) };
+        egui::Area::new(egui::Id::unique("gc_route"))
+            .fixed_pos(rect.left_bottom() + egui::vec2(14.0, -14.0))
+            .pivot(egui::Align2::LEFT_BOTTOM)
+            .order(egui::Order::Foreground)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.strong(tr!(lang, CmdRouteBetween));
+                    ui.label(prompt);
+                    ui.checkbox(&mut route.linear, tr!(lang, RouteLinear));
+                });
+            });
+        if response.clicked_by(PointerButton::Primary)
+            && let Some(at) = response.interact_pointer_pos()
+        {
+            let screen = to_view(at);
+            // The nearest point of the sketches that are shown.
+            let mut best: Option<(f64, Id<gc_doc::Sketch>, Id<gc_sketch::SkPoint>)> = None;
+            for (sketch_id, sketch) in session.doc().sketches().iter() {
+                if !session.doc().is_visible(sketch_id.erase()) {
+                    continue;
+                }
+                let plane = plane_of(session, sketch);
+                for point in sketch.points.keys() {
+                    let Some(pos) = sketch.pos(*point) else { continue };
+                    let Some(p) = self.camera.project(plane.world(pos), size) else { continue };
+                    let d = gc_math::fm::hypot(p[0] - screen[0], p[1] - screen[1]);
+                    if d <= gc_tools::tolerance::POINT_PX * 1.5 && best.is_none_or(|(b, ..)| d < b) {
+                        best = Some((d, sketch_id, *point));
+                    }
+                }
+            }
+            if let Some((_, sketch, point)) = best {
+                match route.first {
+                    None => route.first = Some((sketch, point)),
+                    Some(from) if from != (sketch, point) => {
+                        let planner = session.planner_choices().first().map(|(id, ..)| id.clone());
+                        // A refusal is explained in the status bar; the command stays for another try.
+                        if let Some(planner) = planner
+                            && let Ok(path) = session.route_between(
+                                route.robot,
+                                from,
+                                (sketch, point),
+                                &planner,
+                                route.linear,
+                            )
+                        {
+                            self.route_made = Some(path);
+                            return true;
+                        }
+                    }
+                    Some(_) => {}
+                }
+            }
+        }
+        self.route = Some(route);
+        true
     }
 
     /// Starts Helical Curve in the 3D sketch being edited: the dialog first.
@@ -2224,6 +2464,9 @@ impl Viewport {
             self.open_select_other(session, at, size, &to_view);
         }
         if self.grip_step(ui, response, session, size, &to_view, lang) {
+            return;
+        }
+        if self.route.is_some() && self.route_step(ui, response, session, size, &to_view, rect, lang) {
             return;
         }
         // Paste: a see-through ghost of the copy follows the cursor (nothing is made yet); a click pastes

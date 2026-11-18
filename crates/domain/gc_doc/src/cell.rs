@@ -1211,7 +1211,11 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
                 .waypoints()
                 .iter()
                 .any(|(_, w)| matches!(w.target, WaypointTarget::InFrame { frame, .. } if frame == *id));
-            if used {
+            // A sketch role whose tool attitude is measured from the frame keeps it too.
+            let aimed = txn.doc().roles().iter().any(
+                |(_, r)| matches!(r.aim.reference, crate::role::AimReference::Frame(frame) if frame == *id),
+            );
+            if used || aimed {
                 return Err(EditError::InUse);
             }
             txn.remove(*id)?;

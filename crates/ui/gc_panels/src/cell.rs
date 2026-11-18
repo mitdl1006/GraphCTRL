@@ -618,7 +618,11 @@ fn paths(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) {
         drop(session.execute(&Command::Cell(CellOp::SetPlanner { id: path_id, planner, seed })));
     }
     gc_ui::panel::section(ui, tr!(lang, PropSteps));
-    steps(ui, session, lang, path_id, &path);
+    if path.follow.is_empty() {
+        steps(ui, session, lang, path_id, &path);
+    } else {
+        follow_steps(ui, session, lang, path_id, &path);
+    }
     tcp_speed(ui, session, lang, path_id, path.tcp_speed);
     let status = session.plan_status(path_id);
     let color = match status {
@@ -675,6 +679,58 @@ fn paths(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut CellUi) {
     if state.playing || (time - before).abs() > 1e-9 || session.playback().is_some() {
         session.set_playback(Some((path_id, time)));
     }
+}
+
+/// The sketch roles a path follows, in order (a path made from a sketch has these instead of waypoints):
+/// each with how it is travelled and its speed, buttons to move it up or down or take it out.
+fn follow_steps(
+    ui: &mut Ui,
+    session: &mut Session,
+    lang: Lang,
+    path_id: gc_core::Id<gc_doc::MotionPath>,
+    path: &gc_doc::MotionPath,
+) {
+    let mut follow = path.follow.clone();
+    let count = follow.len();
+    let mut action = None;
+    for (index, role_id) in follow.iter().enumerate() {
+        let Some(role) = session.doc().get(*role_id) else { continue };
+        let detail = match &role.kind {
+            gc_doc::RoleKind::Waypoint { .. } => tr!(lang, RoleWaypoint).to_owned(),
+            gc_doc::RoleKind::Path { motion, tcp_speed, reversed, .. } => {
+                let motion = match motion {
+                    gc_doc::PathMotion::Follow => tr!(lang, RoleFollow),
+                    gc_doc::PathMotion::Linear => tr!(lang, RoleLinear),
+                    gc_doc::PathMotion::Joint => tr!(lang, RoleJoint),
+                };
+                let speed = tcp_speed.map_or_else(String::new, |v| format!(", {} mm/s", v * 1000.0));
+                let reverse = if *reversed { ", ↔" } else { "" };
+                format!("{motion}{speed}{reverse}")
+            }
+        };
+        ui.horizontal(|ui| {
+            if ui.add_enabled(index > 0, egui::Button::new(tr!(lang, StepUp)).small()).clicked() {
+                action = Some((index, Step::Up));
+            }
+            if ui.add_enabled(index + 1 < count, egui::Button::new(tr!(lang, StepDown)).small()).clicked() {
+                action = Some((index, Step::Down));
+            }
+            if ui.add_enabled(count > 1, egui::Button::new(tr!(lang, StepRemove)).small()).clicked() {
+                action = Some((index, Step::Remove));
+            }
+            ui.label(format!("{} — {detail}", role.name));
+        });
+    }
+    match action {
+        Some((index, Step::Up)) if index > 0 => follow.swap(index, index - 1),
+        Some((index, Step::Down)) if index + 1 < count => follow.swap(index, index + 1),
+        Some((index, Step::Remove)) if count > 1 && index < count => {
+            follow.remove(index);
+        }
+        _ => return,
+    }
+    // A refusal is shown in the status bar.
+    drop(session.set_path_follow(path_id, &follow));
 }
 
 /// The planner comparison of a path: a button to run it, its progress, and the table.

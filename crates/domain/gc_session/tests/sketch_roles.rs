@@ -292,7 +292,7 @@ fn a_spline_in_a_3d_sketch_is_a_path_and_the_tool_can_be_aimed_from_a_work_frame
     assert!((pose.rotation * DVec3::Z + DVec3::X).length() < 1e-9);
     assert!(near(pose.translation.to_array(), fit[2], 1e-12));
     // The frame cannot go while a role is aimed from it.
-    assert!(session.execute(&Command::Cell(CellOp::DeleteFrame(frame))).is_err());
+    assert_eq!(session.execute(&Command::Cell(CellOp::DeleteFrame(frame))), Err(EditError::InUse));
 
     // A closed curve is no path.
     let sketch2 = session.create_sketch("XY").unwrap();

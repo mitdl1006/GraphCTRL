@@ -1172,6 +1172,13 @@ fn robot_tab(
                 selected: false,
                 enabled: robot.is_some() && sketch.is_some(),
             },
+            // Create Path: two sketch points, a planned path between them (sketch roles, plan 9.1).
+            gc_ui::StackRow {
+                icon: Icon::Path,
+                label: tr!(lang, CmdRouteBetween),
+                selected: viewport.is_routing(),
+                enabled: robot.is_some(),
+            },
         ];
         match gc_ui::ribbon_stack(ui, &rows) {
             Some(0) => {
@@ -1184,6 +1191,12 @@ fn robot_tab(
             Some(1) => {
                 if let (Some(robot), Some(sketch)) = (robot, sketch) {
                     cell.path = session.path_from_sketch(robot, sketch).ok();
+                }
+            }
+            Some(2) => {
+                if let Some(robot) = robot {
+                    session.set_tool(ToolKind::Select);
+                    viewport.start_route(robot);
                 }
             }
             _ => {}
