@@ -445,3 +445,41 @@ fn auto_dimension_applies_and_removes() {
     harness.run();
     assert!(harness.query_by_label("자동 치수").is_none());
 }
+
+/// Flip Direction (To Work with Sketch Dimensions, GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185): enabled
+/// for a selected dimension with a direction, it puts the geometry on the other side.
+#[test]
+fn flip_direction_on_the_ribbon() {
+    use gc_doc::SketchOp;
+    let mut harness = sketching();
+    let app = harness.state_mut();
+    app.session.set_tool(ToolKind::Point);
+    click(app, mm(0.0, 20.0), false);
+    let (_, sketch) = app.session.active_sketch().unwrap();
+    let origin = *sketch.points.keys().find(|p| sketch.pos(**p) == Some([0.0; 3])).unwrap();
+    let point = *sketch.points.keys().find(|p| sketch.pos(**p).is_some_and(|q| q[1] > 0.0)).unwrap();
+    let created = app
+        .session
+        .edit_active_sketch(SketchOp::AddDimension {
+            kind: gc_sketch::DimKind::VDistance { p: origin, q: point, sign: 1.0 },
+            source: "20".into(),
+            text_pos: [0.0; 2],
+        })
+        .unwrap();
+    let dim = created
+        .iter()
+        .find_map(|c| if let gc_doc::Created::Dimension(d) = c { Some(*d) } else { None })
+        .unwrap();
+    app.session.set_tool(ToolKind::Select);
+    app.session.tool_event(ToolEvent::ClickItem {
+        item: Some(gc_sketch::Item::Dimension(dim)),
+        pos: [0.0; 2],
+        modifier: false,
+    });
+    assert!(app.session.can_flip_selected());
+    harness.run();
+    harness.get_by_label("방향 뒤집기").click();
+    harness.run();
+    let (_, sketch) = harness.state().session.active_sketch().unwrap();
+    assert!((sketch.pos(point).unwrap()[1] + 0.02).abs() < 1e-9, "below the origin now");
+}

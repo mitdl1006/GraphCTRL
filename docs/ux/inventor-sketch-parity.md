@@ -121,7 +121,7 @@
 | 치수 편집 [S14] | 더블클릭, 또는 Dimension 명령 중 클릭, 또는 우클릭 메뉴. **Edit Dimension 대화상자**: 값 직접 입력, 화살표 메뉴에서 Measure(기하를 클릭해 측정값 사용)·Show Dimensions(브라우저에서 피처 선택 → 그 치수 클릭해 참조)·목록 값 선택. 체크 표시(OK)로 확정. 식 입력 가능: `HGHT = 5mm`은 매개변수 HGHT를 만들고 5 mm를 할당. 치수 텍스트 위에서 이동 커서가 나오면 드래그로 위치 변경 | 더블클릭 | 값 상자에서 수식·매개변수 지원(`gc_expr`, PLAN 5.5 `source`). 치수 더블클릭 편집(스케치 캔버스)은 (미확인). Measure·Show Dimensions 메뉴 없음 | 편집 진입점, 대화상자 구성 | P1 | FE |
 | 구동/참조 치수 (Driven) [S14] | 완전 구속 스케치에 치수를 넣으면 **과구속 알림 후 Accept(= 괄호로 표시되는 참조 치수) / Cancel**. 구동 치수를 일반으로 바꾸려면 완전 구속이 아니어야 하며, 선택 후 Format 패널의 **Driven Dimension 토글**을 끈다. 구동 치수 값은 복사해 일반 치수 입력에 붙여넣기 가능(2024.1) [S33] | | 과구속 프롬프트(수락 = 괄호 참조 치수, 취소 = 문서 불변)(S3 시나리오). Format 토글 없음 | 토글 추가 | P1 | FE+BE |
 | 치수 표시 형식 [S14] | 상태바 아이콘: Value / Name / Expression / Tolerance / Precise Value. 수식 치수는 `fx:` 접두. 색: 호버 = 주황, 선택 = 파랑, 기본 = 검정 [S27] | | 값만 표시(`"60 mm"`). `fx` 표시 (미확인) | 표시 모드 5종 | P2 | FE |
-| 치수 방향 뒤집기 (Flip Direction) [S14,S33] | 우클릭 Flip Direction(평행선 거리·점-선 거리·점쌍 수평/수직·선-호 거리·호-호 거리·각도), 다중 선택 가능 | | 없음 | | P3 | BE+FE |
+| 치수 방향 뒤집기 (Flip Direction) [S14,S33] | 우클릭 Flip Direction(평행선 거리·점-선 거리·점쌍 수평/수직·선-호 거리·호-호 거리·각도), 다중 선택 가능 | | **완료**(handoff "치수 방향 뒤집기") — 리본 버튼, 선택한 치수 | 선-호·호-호 거리 종류 없음 | P3 | BE+FE |
 | 삭제·표시 [S14] | 선택 후 Delete 또는 우클릭 Delete | Delete | Delete 있음 | - | - |
 | Automatic Dimensions and Constraints (자동 치수) [S15] | Constrain 패널. Auto Dimension 대화상자: Curves 선택, 체크박스 Dimensions/Constraints(기본 켜짐), "Dimensions Required"(필요 수, 제외 항목은 합계에서 뺌). 선택 없음 = 전체 스케치. Apply/Remove/Done | (미확인) | **완료**(handoff "자동 치수 및 구속") | 창 안 Curves 선택기 없음 | P2 | BE+FE |
 

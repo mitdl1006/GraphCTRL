@@ -425,6 +425,19 @@ pub(crate) fn show(
                             if auto.clicked() {
                                 action = Some(RibbonAction::StartAutoDimension);
                             }
+                            // Flip Direction for the selected dimensions (Inventor's right-click entry;
+                            // To Work with Sketch Dimensions, GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185).
+                            let flip = gc_ui::ribbon_small_button(
+                                ui,
+                                Icon::Text("<>"),
+                                tr!(lang, ToolFlipDimension),
+                                false,
+                                sketching && session.can_flip_selected(),
+                            );
+                            if flip.clicked() {
+                                // A refusal shows in the status bar.
+                                drop(session.flip_selected_dimensions());
+                            }
                         });
                     }
                 });

@@ -1185,6 +1185,32 @@ impl Session {
         self.edit_active_sketch(SketchOp::Delete(gone)).map(|_| ())
     }
 
+    /// The dimensions selected in the sketch being edited.
+    pub fn selected_dimensions(&self) -> Vec<Id<gc_sketch::Dimension>> {
+        self.selection
+            .iter()
+            .filter_map(|i| if let Item::Dimension(d) = i { Some(*d) } else { None })
+            .collect()
+    }
+
+    /// Whether Flip Direction applies: dimensions are selected and every one of them has a direction
+    /// (Inventor shows the menu entry only then).
+    pub fn can_flip_selected(&self) -> bool {
+        let Some((_, sketch)) = self.active_sketch() else { return false };
+        let dims = self.selected_dimensions();
+        !dims.is_empty()
+            && dims
+                .iter()
+                .all(|d| sketch.dimensions.get(d).is_some_and(|d| gc_doc::flipped(&d.kind).is_some()))
+    }
+
+    /// Flip Direction on the selected dimensions (one undo step; refused, with the reason in the status bar,
+    /// when the sketch cannot take it).
+    pub fn flip_selected_dimensions(&mut self) -> Result<(), EditError> {
+        let dims = self.selected_dimensions();
+        self.edit_active_sketch(SketchOp::FlipDimensions(dims)).map(|_| ())
+    }
+
     /// The Auto Dimension dialog's Dimensions Required: the freedom left in the sketch being edited.
     pub fn dimensions_required(&self) -> usize {
         self.report().map_or(0, |r| r.dof)

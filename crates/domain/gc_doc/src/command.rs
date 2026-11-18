@@ -431,6 +431,11 @@ pub enum SketchOp {
         /// Break and recompute what holds the curves back.
         relax: bool,
     },
+    /// Flip Direction (Inventor 2026 help, To Work with Sketch Dimensions,
+    /// GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185): the geometry goes to the other side of the dimensions —
+    /// a point-line or parallel-line distance, a horizontal or vertical distance between points, an angle
+    /// (the second line turns the other way). Refused when one of them is of another kind.
+    FlipDimensions(Vec<Id<gc_sketch::Dimension>>),
     /// Automatic Dimensions and Constraints (Inventor 2026 help, To Apply 2D Sketch Dimensions
     /// Automatically, GUID-1DC71C6F-9F6D-4846-8E73-9CB7D3452882): adds the constraints the curves nearly
     /// have (horizontal, vertical, ends that meet) and dimensions (lengths, radii, then positions from the
@@ -1232,6 +1237,18 @@ fn tangent_circle(sketch: &Sketch, lines: &[Id<Curve>; 3], near: &[[f64; 2]; 3])
         }
     }
     best.map(|(_, c, r)| (c, r))
+}
+
+/// A dimension of the other direction (Flip Direction), or `None` for a kind that has none.
+pub fn flipped(kind: &DimKind) -> Option<DimKind> {
+    Some(match *kind {
+        DimKind::PointLine { p, line, side } => DimKind::PointLine { p, line, side: -side },
+        DimKind::HDistance { p, q, sign } => DimKind::HDistance { p, q, sign: -sign },
+        DimKind::VDistance { p, q, sign } => DimKind::VDistance { p, q, sign: -sign },
+        // The same angle measured the other way round: the second line turns to the other side.
+        DimKind::Angle { l1, rev1, l2, rev2 } => DimKind::Angle { l1: l2, rev1: rev2, l2: l1, rev2: rev1 },
+        _ => return None,
+    })
 }
 
 /// Automatic Dimensions and Constraints over `curves` (see [`SketchOp::AutoDimension`]): every candidate
@@ -2521,6 +2538,16 @@ fn sketch_op(
                 sketch.move_placed(ids, curves, &place, turned, *relax)?;
                 if turned { "Rotate" } else { "Move" }
             }
+        }
+        SketchOp::FlipDimensions(dims) => {
+            if dims.is_empty() {
+                return Err(SketchError::InvalidValue.into());
+            }
+            for id in dims {
+                let dimension = sketch.dimensions.get_mut(id).ok_or(SketchError::MissingItem)?;
+                dimension.kind = flipped(&dimension.kind).ok_or(SketchError::InvalidValue)?;
+            }
+            "Flip direction"
         }
         SketchOp::AutoDimension { curves, dimensions, constraints } => {
             if sketch.is_spatial() {

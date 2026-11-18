@@ -1081,6 +1081,7 @@ messages! {
     TransformCopy => ("복사본으로", "Copy"),
     TransformRelax => ("구속 풀기(치수 다시 계산·구속 끊기)", "Relax (recompute dimensions, break constraints)"),
     ToolAutoDimension => ("자동 치수 및 구속", "Automatic Dimensions and Constraints"),
+    ToolFlipDimension => ("방향 뒤집기", "Flip Direction"),
     AutoDimTitle => ("자동 치수", "Auto Dimension"),
     AutoDimDimensions => ("치수", "Dimensions"),
     AutoDimConstraints => ("구속", "Constraints"),

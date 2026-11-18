@@ -33,7 +33,7 @@ pub use cell::{
 };
 pub use command::{
     Applied, ArcSlotKind, ChamferKind, Command, Created, DimSlot, EditError, EndSnap, Motion, SketchOp,
-    SketchPatternDirection, SlotKind, TangentArc, apply, preview_sketch_op, tangent_arc,
+    SketchPatternDirection, SlotKind, TangentArc, apply, flipped, preview_sketch_op, tangent_arc,
 };
 pub use design::{
     Assembly, AssemblyMesh, AssemblyPart, ComponentFlag, Components, ContactSolver, Extent, Extrude, Feature,
