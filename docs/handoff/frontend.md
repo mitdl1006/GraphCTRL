@@ -128,6 +128,14 @@
 - 테스트 `shift_right_click_opens_the_select_menu`, `the_work_feature_priority_leaves_bodies_unselected`.
 - 원문과 차이: 원문의 모드(본체·피처·면·스케치 선택, 부품 우선 등)는 앱에 해당 선택 대상이 없어 둘만 둔다. 상태 표시(어느 우선순위인지)는 메뉴에서만 보인다. 면과 모서리 선택은 측정 명령에서만.
 
+### 조인트 한계 (Limits 탭)
+
+- 근거: To Define and Manage Joint Relationships, GUID-21DC3336-5C51-42C1-90FB-4299CD66E0C6 (Limits 탭: Start / Current / End). 백엔드 `set_joint_limits` / `joint_limits` / `joint_position`.
+- 브라우저 조인트 행 우클릭 > "한계…" 로 "조인트 한계" 창. 회전 조인트는 각도(°), 슬라이더는 선형(mm), 원통형은 둘 다(`takes_limits`). 각 한계는 체크로 켜고 시작·끝, "현재"를 체크하면 그 값에 고정. 현재 위치(`joint_position`)를 창에 표시. 확인/적용/취소. 값이 숫자가 아니거나 시작>끝, 현재가 범위 밖이면 버튼이 막힌다.
+- 한계가 있는 조인트 행은 이름 뒤에 `+/-`. 구동(Drive) 대화상자의 시작·끝 기본값이 조인트 한계(시작·끝)가 된다.
+- 증거: `docs/evidence/img/review-56-joint-limits.png`, 테스트 `a_rotational_joint_gets_angular_limits_from_its_dialog`.
+- 원문과 차이: 원문은 조인트 편집 대화상자의 탭이지만 우리는 조인트 만들기 대화상자에 탭이 없어 별도 창으로 둔다. 슬라이더·원통형 입력은 같은 코드지만 테스트는 회전 조인트만. 한계에서 막힌 위치를 뷰에 그리지 않는다.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

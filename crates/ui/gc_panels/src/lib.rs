@@ -47,6 +47,8 @@ pub enum BrowserAction {
     JointLock(gc_core::Id<gc_doc::Relationship>, bool),
     /// Protect a joint's freedom, or not.
     JointProtect(gc_core::Id<gc_doc::Relationship>, bool),
+    /// Open the joint's Limits dialog.
+    JointLimits(gc_core::Id<gc_doc::Relationship>),
     /// Edit a work feature (double-click, or its menu).
     EditWorkFeature(Id<gc_doc::WorkFeature>),
     /// Edit a component or subassembly in place (double-click in the browser).
@@ -191,10 +193,20 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
                     let condition = session.joint_condition(id);
                     let locked = condition.locked.is_some();
                     let delete = tr!(lang, CmdDeleteItem, relationship.name);
+                    // A joint with Limits is marked +/- (Inventor 2026 help, GUID-21DC3336-5C51-42C1-90FB-4299CD66E0C6).
+                    let limited = is_joint && {
+                        let (angular, linear) = session.joint_limits(id);
+                        angular.is_some() || linear.is_some()
+                    };
+                    let label = if limited {
+                        format!("{} +/-", relationship.name)
+                    } else {
+                        relationship.name.clone()
+                    };
                     let row = TreeRow {
                         // A locked joint shows a padlock.
                         icon: if locked { Icon::Lock } else { Icon::Path },
-                        text: &relationship.name,
+                        text: &label,
                         selected: false,
                         visible: None,
                         delete: Some(&delete),
@@ -224,6 +236,10 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
                         if is_joint {
                             if ui.checkbox(&mut { locked }, tr!(lang, JointLockItem)).clicked() {
                                 action = Some(BrowserAction::JointLock(id, !locked));
+                                ui.close();
+                            }
+                            if ui.button(tr!(lang, JointLimitsItem)).clicked() {
+                                action = Some(BrowserAction::JointLimits(id));
                                 ui.close();
                             }
                             if ui

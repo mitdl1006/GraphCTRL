@@ -234,6 +234,14 @@ impl Drive {
                     self.end = round(max);
                 }
             }
+            // A joint's Limits (Start, End) are the defaults too (GUID-21DC3336-5C51-42C1-90FB-4299CD66E0C6).
+            let (angular, linear) = session.joint_limits(id);
+            let range = if rotational { angular } else { linear };
+            if let Some(range) = range {
+                let round = |v: f64| (v * factor * 1000.0).round() / 1000.0;
+                self.start = round(range.start);
+                self.end = round(range.end);
+            }
             self.index = 0;
             self.playing = Playing::Stopped;
             self.collided = None;

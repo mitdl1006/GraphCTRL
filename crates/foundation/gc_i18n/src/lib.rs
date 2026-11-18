@@ -900,6 +900,14 @@ messages! {
     CmdReturnTop => ("최상위로", "Return to Top"),
     /// Browser, right-click a joint: refuse relationships that take its freedom away.
     JointProtectItem => ("보호", "Protect"),
+    JointLimitsItem => ("한계…", "Limits…"),
+    JointLimitsTitle => ("조인트 한계", "Joint Limits"),
+    LimitAngular => ("각도 한계", "Angular limits"),
+    LimitLinear => ("선형 한계", "Linear limits"),
+    LimitStart => ("시작", "Start"),
+    LimitCurrent => ("현재", "Current"),
+    LimitEnd => ("끝", "End"),
+    LimitNow => ("현재 위치: {0}", "Now at {0}"),
     /// Assemble tab: the Assemble command (pick geometry, the geometry decides the constraint types).
     AssembleTitle => ("어셈블", "Assemble"),
     /// Assemble command: the two selections allow no constraint.
