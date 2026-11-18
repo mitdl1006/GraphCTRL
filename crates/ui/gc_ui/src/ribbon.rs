@@ -1,4 +1,4 @@
-//! Ribbon widgets: tabs, titled groups and large icon buttons.
+//! Ribbon widgets: tabs, titled groups, large icon buttons and split buttons.
 
 use egui::{Response, Role, Sense, Ui, WidgetInfo, vec2};
 
@@ -93,6 +93,110 @@ pub fn ribbon_button(ui: &mut Ui, icon: Icon, label: &str, selected: bool, enabl
         );
     }
     response
+}
+
+/// One variant of a split button.
+pub struct SplitItem<'a> {
+    /// Its icon.
+    pub icon: Icon,
+    /// Its name: the button shows it while it is the current variant.
+    pub label: &'a str,
+    /// Whether the command is running now (the tool is the active one).
+    pub active: bool,
+}
+
+/// An Inventor-style split button: the large body runs the variant last used and shows its icon and name;
+/// the arrow under it opens a list to choose another variant, which then becomes the body. Returns the index
+/// of the variant to run when the body was clicked or a variant was chosen. The choice is remembered while
+/// the program runs, under `id_salt`.
+///
+/// Accessible names: the body is the current variant's name, the arrow is `more` ("<group> more").
+pub fn ribbon_split_button(
+    ui: &mut Ui,
+    id_salt: impl std::hash::Hash + std::fmt::Debug,
+    more: &str,
+    items: &[SplitItem<'_>],
+    enabled: bool,
+) -> Option<usize> {
+    if items.is_empty() {
+        return None;
+    }
+    let id = egui::Id::unique("gc_split_button").with(id_salt);
+    let remembered = ui.data(|data| data.get_temp::<usize>(id)).unwrap_or(0);
+    // The variant that is running wins, so the button follows keys and menus that start a tool.
+    let current = items.iter().position(|item| item.active).unwrap_or(remembered.min(items.len() - 1));
+    let item = &items[current];
+    let selected = items.iter().any(|item| item.active);
+
+    let font = egui::FontId::proportional(11.5);
+    // As wide as the current name needs: the button changes width with the variant, as Inventor's does.
+    let widest = ui
+        .fonts_mut(|fonts| fonts.layout_no_wrap(item.label.to_owned(), font.clone(), egui::Color32::BLACK))
+        .size()
+        .x;
+    let size = vec2(BUTTON_SIZE.x.max(widest + 10.0), BUTTON_SIZE.y);
+    let sense = if enabled { Sense::click() } else { Sense::hover() };
+    let (rect, body) = ui.allocate_exact_size(size, sense);
+    body.widget_info(|| WidgetInfo::selected(Role::Button, enabled, selected, item.label));
+    // The arrow strip along the bottom edge, over the body.
+    let arrow_rect =
+        egui::Rect::from_min_max(egui::pos2(rect.left(), rect.bottom() - 15.0), rect.right_bottom());
+    let arrow = ui.interact(arrow_rect, id.with("arrow"), sense);
+    arrow.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, more));
+
+    if ui.is_rect_visible(rect) {
+        let visuals = ui.visuals();
+        let fill = if selected {
+            visuals.selection.bg_fill
+        } else if (body.hovered() || arrow.hovered()) && enabled {
+            visuals.widgets.hovered.weak_bg_fill
+        } else {
+            egui::Color32::TRANSPARENT
+        };
+        let color = if selected {
+            colors::ACCENT
+        } else if enabled {
+            colors::text()
+        } else {
+            egui::Color32::from_rgb(0xA3, 0xA9, 0xB2)
+        };
+        let painter = ui.painter();
+        painter.rect_filled(rect, 4.0, fill);
+        if arrow.hovered() && enabled {
+            painter.rect_filled(arrow_rect, 4.0, visuals.widgets.hovered.bg_fill);
+        }
+        let icon_rect = egui::Rect::from_center_size(rect.center_top() + vec2(0.0, 18.0), vec2(24.0, 24.0));
+        item.icon.paint(painter, icon_rect, color);
+        painter.text(
+            egui::pos2(rect.center().x, rect.bottom() - 17.0),
+            egui::Align2::CENTER_BOTTOM,
+            item.label,
+            font,
+            color,
+        );
+        // A small downward triangle.
+        let c = arrow_rect.center();
+        painter.add(egui::Shape::convex_polygon(
+            vec![c + vec2(-4.0, -2.0), c + vec2(4.0, -2.0), c + vec2(0.0, 2.5)],
+            color,
+            egui::Stroke::NONE,
+        ));
+    }
+
+    let mut run = body.clicked().then_some(current);
+    egui::Popup::menu(&arrow).show(|ui| {
+        for (index, item) in items.iter().enumerate() {
+            let label = ui.selectable_label(index == current, item.label);
+            if label.clicked() {
+                run = Some(index);
+                ui.close();
+            }
+        }
+    });
+    if let Some(index) = run {
+        ui.data_mut(|data| data.insert_temp(id, index));
+    }
+    run
 }
 
 /// A group of ribbon buttons with its title underneath and a separator after it.

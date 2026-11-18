@@ -50,6 +50,25 @@ fn line(app: &mut GraphCtrlApp, a: [f64; 2], b: [f64; 2]) {
     app.session.set_tool(ToolKind::Select);
 }
 
+/// Chooses a variant of a split button of the sketch ribbon: the arrow ("<group> 더 보기") opens the list,
+/// the variant's name picks it. (The arrow is drawn with `ui.interact`, so it takes pointer events.)
+fn pick_variant(harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, group: &str, variant: &str) {
+    let at = harness.get_by_label(&format!("{group} 더 보기")).rect().center();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run_steps(3);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run_steps(3);
+    }
+    harness.get_by_label(variant).click();
+    harness.run_steps(3);
+}
+
 #[test]
 fn the_point_button_places_points_and_the_center_point_toggle_switches_their_kind() {
     let mut harness = sketching();
@@ -93,8 +112,7 @@ fn the_slot_buttons_start_each_slot_kind() {
     harness.get_by_label("슬롯").click();
     harness.run();
     assert_eq!(harness.state().session.tool(), ToolKind::Slot(SlotKind::CenterToCenter));
-    harness.get_by_label("전체 슬롯").click();
-    harness.run();
+    pick_variant(&mut harness, "슬롯", "전체 슬롯");
     assert_eq!(harness.state().session.tool(), ToolKind::Slot(SlotKind::Overall));
     harness.get_by_label("슬롯의 첫 점을 클릭하십시오");
     click(harness.state_mut(), mm(0.0, 0.0), false);
@@ -216,8 +234,7 @@ fn another_command_closes_the_dialog() {
 #[test]
 fn the_arc_slot_buttons_draw_arc_slots() {
     let mut harness = sketching();
-    harness.get_by_label("중심점 호 슬롯").click();
-    harness.run();
+    pick_variant(&mut harness, "슬롯", "중심점 호 슬롯");
     assert_eq!(harness.state().session.tool(), ToolKind::ArcSlot(gc_doc::ArcSlotKind::CenterPoint));
     harness.get_by_label("슬롯 중심 호의 중심을 클릭하십시오");
     for at in [mm(0.0, 0.0), mm(30.0, 0.0), mm(0.0, 30.0), mm(35.0, 0.0)] {
@@ -225,8 +242,7 @@ fn the_arc_slot_buttons_draw_arc_slots() {
     }
     harness.run();
     assert_eq!(curves(&harness), 4, "outer, inner and two ends");
-    harness.get_by_label("3점 호 슬롯").click();
-    harness.run();
+    pick_variant(&mut harness, "슬롯", "3점 호 슬롯");
     assert_eq!(harness.state().session.tool(), ToolKind::ArcSlot(gc_doc::ArcSlotKind::ThreePoint));
 }
 
@@ -330,9 +346,8 @@ fn the_three_dimensional_sketch_offers_parallel_perpendicular_and_equal() {
     }
     // And Center Point Arc and Three Point Arc (To Create Lines, Arcs, and Bends,
     // GUID-4F861674-F74C-474E-869A-4C190ED6EC4B).
-    for (label, kind) in [("호", ToolKind::Arc), ("3점 호", ToolKind::Arc3)] {
-        harness.get_by_label(label).click();
-        harness.run();
+    for (label, kind) in [("중심점 호", ToolKind::Arc), ("3점 호", ToolKind::Arc3)] {
+        pick_variant(&mut harness, "호", label);
         assert_eq!(harness.state().session.tool(), kind);
     }
 }
@@ -356,14 +371,13 @@ fn cancel_sketch_on_the_ribbon_throws_a_new_sketch_away() {
 #[test]
 fn the_ribbon_starts_midpoint_line_tangent_circle_and_the_center_rectangles() {
     let mut harness = sketching();
-    for (label, kind) in [
-        ("중점 선", ToolKind::MidpointLine),
-        ("접선 원", ToolKind::TangentCircle),
-        ("2점 중심 직사각형", ToolKind::CenterRectangle),
-        ("3점 중심 직사각형", ToolKind::CenterRectangle3),
+    for (group, label, kind) in [
+        ("선", "중점 선", ToolKind::MidpointLine),
+        ("원", "접선 원", ToolKind::TangentCircle),
+        ("직사각형", "2점 중심 직사각형", ToolKind::CenterRectangle),
+        ("직사각형", "3점 중심 직사각형", ToolKind::CenterRectangle3),
     ] {
-        harness.get_by_label(label).click();
-        harness.run();
+        pick_variant(&mut harness, group, label);
         assert_eq!(harness.state().session.tool(), kind);
     }
     harness.get_by_label("직사각형의 중심을 클릭하십시오");
