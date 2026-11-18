@@ -1678,6 +1678,10 @@ impl eframe::App for GraphCtrlApp {
                         ui.separator();
                     }
                     gc_panels::properties(ui, &mut self.session, lang, &mut self.expression);
+                    // The tool kind fitted to the selected robot.
+                    if let Some(gc_session::CellItem::Robot(robot)) = self.session.selected_item() {
+                        gc_panels::robot_tool_kit(ui, &mut self.session, lang, robot);
+                    }
                     self.cell.hold_previews = self.viewport.is_grip_snapping();
                     gc_panels::cell(ui, &mut self.session, lang, &mut self.cell);
                 });

@@ -6614,3 +6614,46 @@ fn selecting_a_task_shows_its_editor() {
     harness.get_by_label("시작 조건");
     harness.get_by_label("우선순위");
 }
+
+/// Kinds of tool (plan 9.4): the work node lists them, their editor offers signals, states and actions, and a
+/// selected robot offers to fit one.
+#[test]
+fn a_tool_kind_is_edited_and_fitted_to_a_robot() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("로봇").click();
+    harness.run();
+    harness.get_by_label("로봇 추가").click();
+    harness.run();
+    harness.get_by_label("UR5e 로봇").click();
+    harness.run();
+    let robot = harness.state().session.doc().robots().iter().next().unwrap().0;
+    let kit = gc_doc::ToolKit {
+        name: "Gripper".into(),
+        signals: vec![gc_doc::IoSignal { name: "close".into(), direction: gc_doc::IoDirection::Out, pin: 0 }],
+        states: vec!["open".into(), "closed".into()],
+        actions: Vec::new(),
+    };
+    let id = harness.state_mut().session.edit_work(gc_doc::WorkOp::AddToolKit(kit)).unwrap().unwrap();
+    harness.run_steps(3);
+    // The robot, selected, offers the kind.
+    harness.state_mut().session.select_item(Some(gc_session::CellItem::Robot(robot)));
+    harness.run_steps(3);
+    harness.get_by_label("툴 종류 장착");
+    // Fitted through the session; the robot's state follows (the first state).
+    harness
+        .state_mut()
+        .session
+        .edit_work(gc_doc::WorkOp::SetRobotTool {
+            robot,
+            kit: Some(gc_core::Id::from_raw(id.raw)),
+            state: None,
+        })
+        .unwrap();
+    harness.run_steps(3);
+    assert!(harness.state().session.robot_tool_kit(robot).is_some());
+    harness.get_by_label("툴 상태");
+}

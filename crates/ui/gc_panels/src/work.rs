@@ -23,6 +23,8 @@ pub enum WorkItem {
     Var(Id<StateVar>),
     /// A task.
     Task(Id<Task>),
+    /// A kind of tool (a device with signals, states and actions).
+    Kit(Id<gc_doc::ToolKit>),
 }
 
 impl WorkItem {
@@ -32,6 +34,7 @@ impl WorkItem {
             Self::Object(id) => id.erase(),
             Self::Var(id) => id.erase(),
             Self::Task(id) => id.erase(),
+            Self::Kit(id) => id.erase(),
         }
     }
 
@@ -41,6 +44,7 @@ impl WorkItem {
             Self::Object(id) => WorkOp::DeleteObject(id),
             Self::Var(id) => WorkOp::DeleteStateVar(id),
             Self::Task(id) => WorkOp::DeleteTask(id),
+            Self::Kit(id) => WorkOp::DeleteToolKit(id),
         }
     }
 }
@@ -126,6 +130,24 @@ pub fn work_browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut Work
                 ui.close();
             }
         });
+        // Kinds of tool.
+        let header = egui::CollapsingHeader::new(tr!(lang, WorkToolKits)).default_open(true).show(ui, |ui| {
+            for (id, kit) in doc.tool_kits().iter() {
+                item_row(ui, session, lang, state, &mut action, WorkItem::Kit(id), &kit.name, None);
+            }
+        });
+        header.header_response.context_menu(|ui| {
+            if ui.button(tr!(lang, WorkNew)).clicked() {
+                let taken: Vec<String> = doc.tool_kits().iter().map(|(_, k)| k.name.clone()).collect();
+                action = Some(BrowserAction::Work(WorkOp::AddToolKit(gc_doc::ToolKit {
+                    name: free_name(tr!(lang, WorkKitBase), &taken),
+                    signals: Vec::new(),
+                    states: Vec::new(),
+                    actions: Vec::new(),
+                })));
+                ui.close();
+            }
+        });
         // Tasks.
         let header = egui::CollapsingHeader::new(tr!(lang, WorkTasks)).default_open(true).show(ui, |ui| {
             for (id, task) in doc.tasks().iter() {
@@ -187,6 +209,7 @@ fn item_row(
         WorkItem::Object(_) => Icon::Waypoint,
         WorkItem::Var(_) => Icon::Text("x"),
         WorkItem::Task(_) => Icon::Path,
+        WorkItem::Kit(_) => Icon::Text("T"),
     };
     let was_selected = state.selected == Some(item);
     let row = TreeRow {
@@ -255,17 +278,17 @@ fn committed_text(ui: &mut Ui, key: egui::Id, current: &str, width: f32) -> (egu
 }
 
 /// A list of choices as a combo box; true when another was chosen.
-fn choice<T: Copy + PartialEq>(
+fn choice<T: Clone + PartialEq>(
     ui: &mut Ui,
     salt: impl std::hash::Hash + std::fmt::Debug,
     current: &mut T,
     options: &[(T, String)],
 ) -> bool {
-    let before = *current;
+    let before = current.clone();
     let shown = options.iter().find(|(v, _)| *v == *current).map_or_else(String::new, |(_, n)| n.clone());
     egui::ComboBox::from_id_salt(salt).selected_text(shown).show_ui(ui, |ui| {
         for (value, name) in options {
-            ui.selectable_value(current, *value, name);
+            ui.selectable_value(current, value.clone(), name);
         }
     });
     *current != before
@@ -299,6 +322,7 @@ pub fn work_properties(ui: &mut Ui, session: &mut Session, lang: Lang, state: &W
         Some(WorkItem::Type(id)) => type_properties(ui, session, lang, id),
         Some(WorkItem::Object(id)) => object_properties(ui, session, lang, id),
         Some(WorkItem::Var(id)) => var_properties(ui, session, lang, id),
+        Some(WorkItem::Kit(id)) => kit_properties(ui, session, lang, id),
         None => {}
     }
 }
@@ -543,6 +567,21 @@ fn task_properties(ui: &mut Ui, session: &mut Session, lang: Lang, id: Id<Task>)
         std::iter::once((None, tr!(lang, WorkNoObject).to_owned()))
             .chain(session.doc().objects().iter().map(|(oid, o)| (Some(oid), o.name.clone())))
             .collect();
+    // With kinds of tool defined, signals and actions are chosen from theirs (the names are text otherwise).
+    let mut out_names: Vec<(String, String)> = Vec::new();
+    let mut action_names: Vec<(String, String)> = Vec::new();
+    for (_, kit) in session.doc().tool_kits().iter() {
+        for signal in kit.signals.iter().filter(|s| s.direction == gc_doc::IoDirection::Out) {
+            if !out_names.iter().any(|(n, _)| *n == signal.name) {
+                out_names.push((signal.name.clone(), signal.name.clone()));
+            }
+        }
+        for action in &kit.actions {
+            if !action_names.iter().any(|(n, _)| *n == action.name) {
+                action_names.push((action.name.clone(), action.name.clone()));
+            }
+        }
+    }
     let count = next.steps.len();
     let mut swap: Option<(usize, usize)> = None;
     let mut remove = None;
@@ -570,11 +609,19 @@ fn task_properties(ui: &mut Ui, session: &mut Session, lang: Lang, id: Id<Task>)
                 }
                 Step::SetIo { name, value } => {
                     ui.label(tr!(lang, WorkSetIo));
-                    let key = egui::Id::unique("gc_task_io").with((id, index));
-                    let current = name.clone();
-                    if let (_, Some(text)) = committed_text(ui, key, &current, 90.0) {
-                        *name = text;
-                        changed = true;
+                    if out_names.is_empty() {
+                        let key = egui::Id::unique("gc_task_io").with((id, index));
+                        let current = name.clone();
+                        if let (_, Some(text)) = committed_text(ui, key, &current, 90.0) {
+                            *name = text;
+                            changed = true;
+                        }
+                    } else {
+                        let mut options = out_names.clone();
+                        if !options.iter().any(|(n, _)| n == name) {
+                            options.push((name.clone(), name.clone()));
+                        }
+                        changed |= choice(ui, salt, name, &options);
                     }
                     changed |= ui.checkbox(value, "").changed();
                 }
@@ -591,11 +638,19 @@ fn task_properties(ui: &mut Ui, session: &mut Session, lang: Lang, id: Id<Task>)
                 }
                 Step::ToolAction { action, target } => {
                     ui.label(tr!(lang, WorkToolAction));
-                    let key = egui::Id::unique("gc_task_tool").with((id, index));
-                    let current = action.clone();
-                    if let (_, Some(text)) = committed_text(ui, key, &current, 80.0) {
-                        *action = text;
-                        changed = true;
+                    if action_names.is_empty() {
+                        let key = egui::Id::unique("gc_task_tool").with((id, index));
+                        let current = action.clone();
+                        if let (_, Some(text)) = committed_text(ui, key, &current, 80.0) {
+                            *action = text;
+                            changed = true;
+                        }
+                    } else {
+                        let mut options = action_names.clone();
+                        if !options.iter().any(|(n, _)| n == action) {
+                            options.push((action.clone(), action.clone()));
+                        }
+                        changed |= choice(ui, ("gc_task_tool_name", id, index), action, &options);
                     }
                     changed |= choice(ui, salt, target, &objects);
                 }
@@ -757,5 +812,257 @@ fn task_properties(ui: &mut Ui, session: &mut Session, lang: Lang, id: Id<Task>)
     if changed && next != task {
         // A refusal (a condition that does not read, a name taken) shows in the status bar.
         drop(session.edit_work(WorkOp::SetTask { id, task: next }));
+    }
+}
+
+/// The editor of a kind of tool: its signals (name, direction, pin), its states and its actions.
+fn kit_properties(ui: &mut Ui, session: &mut Session, lang: Lang, id: Id<gc_doc::ToolKit>) {
+    use gc_doc::{IoDirection, IoSignal, ToolAction};
+    let Some(kit) = session.doc().get(id).cloned() else { return };
+    gc_ui::panel::header(ui, &kit.name);
+    let mut next = kit.clone();
+    let mut changed = false;
+    // Signals.
+    gc_ui::panel::section(ui, tr!(lang, WorkSignals));
+    let mut remove = None;
+    for index in 0..next.signals.len() {
+        ui.horizontal(|ui| {
+            let key = egui::Id::unique("gc_kit_signal").with((id, index));
+            let current = next.signals[index].name.clone();
+            if let (_, Some(text)) = committed_text(ui, key, &current, 80.0) {
+                next.signals[index].name = text;
+                changed = true;
+            }
+            let directions = [
+                (IoDirection::In, tr!(lang, WorkSignalIn).to_owned()),
+                (IoDirection::Out, tr!(lang, WorkSignalOut).to_owned()),
+            ];
+            changed |= choice(ui, ("gc_kit_dir", id, index), &mut next.signals[index].direction, &directions);
+            let r = ui.add(egui::DragValue::new(&mut next.signals[index].pin).range(0..=255).prefix("#"));
+            changed |= r.drag_stopped() || (r.lost_focus() && r.changed());
+            if ui.small_button("✕").clicked() {
+                remove = Some(index);
+            }
+        });
+    }
+    if let Some(index) = remove {
+        next.signals.remove(index);
+        changed = true;
+    }
+    if ui.button(tr!(lang, WorkAddSignal)).clicked() {
+        let taken: Vec<String> = next.signals.iter().map(|s| s.name.clone()).collect();
+        let pin = next.signals.iter().map(|s| s.pin).max().map_or(0, |p| p.saturating_add(1));
+        next.signals.push(IoSignal {
+            name: free_name(tr!(lang, WorkSignalBase), &taken),
+            direction: IoDirection::Out,
+            pin,
+        });
+        changed = true;
+    }
+    // States of the tool (open, closed).
+    gc_ui::panel::section(ui, tr!(lang, WorkStates));
+    let mut remove = None;
+    for index in 0..next.states.len() {
+        ui.horizontal(|ui| {
+            let key = egui::Id::unique("gc_kit_state").with((id, index));
+            let current = next.states[index].clone();
+            if let (_, Some(text)) = committed_text(ui, key, &current, 120.0) {
+                next.states[index] = text;
+                changed = true;
+            }
+            if ui.small_button("✕").clicked() {
+                remove = Some(index);
+            }
+        });
+    }
+    if let Some(index) = remove {
+        next.states.remove(index);
+        changed = true;
+    }
+    if ui.button(tr!(lang, WorkAddState)).clicked() {
+        let taken = next.states.clone();
+        next.states.push(free_name(tr!(lang, WorkStateBase), &taken));
+        changed = true;
+    }
+    // Actions.
+    gc_ui::panel::section(ui, tr!(lang, WorkActions));
+    let outs: Vec<(Option<String>, String)> = std::iter::once((None, tr!(lang, WorkNoSignal).to_owned()))
+        .chain(
+            kit.signals
+                .iter()
+                .filter(|s| s.direction == IoDirection::Out)
+                .map(|s| (Some(s.name.clone()), s.name.clone())),
+        )
+        .collect();
+    let ins: Vec<(Option<String>, String)> = std::iter::once((None, tr!(lang, WorkNoSignal).to_owned()))
+        .chain(
+            kit.signals
+                .iter()
+                .filter(|s| s.direction == IoDirection::In)
+                .map(|s| (Some(s.name.clone()), s.name.clone())),
+        )
+        .collect();
+    let tool_states: Vec<(Option<String>, String)> =
+        std::iter::once((None, tr!(lang, WorkNoState).to_owned()))
+            .chain(kit.states.iter().map(|s| (Some(s.clone()), s.clone())))
+            .collect();
+    let types: Vec<(Option<Id<ObjectType>>, String)> =
+        std::iter::once((None, tr!(lang, WorkNoObject).to_owned()))
+            .chain(session.doc().object_types().iter().map(|(t, ty)| (Some(t), ty.name.clone())))
+            .collect();
+    let mut remove = None;
+    for index in 0..next.actions.len() {
+        let action = next.actions[index].clone();
+        ui.group(|ui| {
+            ui.horizontal(|ui| {
+                let key = egui::Id::unique("gc_kit_action").with((id, index));
+                if let (_, Some(text)) = committed_text(ui, key, &action.name, 110.0) {
+                    next.actions[index].name = text;
+                    changed = true;
+                }
+                if ui.small_button("✕").clicked() {
+                    remove = Some(index);
+                }
+            });
+            // The signal it sets (and to what), the one that confirms it.
+            let mut set_name = action.set.as_ref().map(|(n, _)| n.clone());
+            let mut set_value = action.set.as_ref().is_none_or(|(_, v)| *v);
+            ui.horizontal(|ui| {
+                ui.label(tr!(lang, WorkActionSet));
+                let moved = choice(ui, ("gc_kit_set", id, index), &mut set_name, &outs);
+                let toggled = ui.checkbox(&mut set_value, "").changed();
+                if moved || toggled {
+                    next.actions[index].set = set_name.clone().map(|n| (n, set_value));
+                    changed = true;
+                }
+            });
+            let mut confirm_name = action.confirm.as_ref().map(|(n, _)| n.clone());
+            let mut confirm_value = action.confirm.as_ref().is_none_or(|(_, v)| *v);
+            ui.horizontal(|ui| {
+                ui.label(tr!(lang, WorkActionConfirm));
+                let moved = choice(ui, ("gc_kit_confirm", id, index), &mut confirm_name, &ins);
+                let toggled = ui.checkbox(&mut confirm_value, "").changed();
+                if moved || toggled {
+                    next.actions[index].confirm = confirm_name.clone().map(|n| (n, confirm_value));
+                    changed = true;
+                }
+            });
+            let mut tool_state = action.tool_state.clone();
+            ui.horizontal(|ui| {
+                ui.label(tr!(lang, WorkActionToolState));
+                if choice(ui, ("gc_kit_tool_state", id, index), &mut tool_state, &tool_states) {
+                    next.actions[index].tool_state = tool_state.clone();
+                    changed = true;
+                }
+            });
+            // The kind of object it works on, and the state that object ends in.
+            let mut target = action.target;
+            ui.horizontal(|ui| {
+                ui.label(tr!(lang, WorkActionTarget));
+                if choice(ui, ("gc_kit_target", id, index), &mut target, &types) {
+                    next.actions[index].target = target;
+                    next.actions[index].target_state = None;
+                    changed = true;
+                }
+            });
+            if let Some(ty) = target.and_then(|t| session.doc().get(t).cloned()) {
+                let object_states: Vec<(Option<String>, String)> =
+                    std::iter::once((None, tr!(lang, WorkNoState).to_owned()))
+                        .chain(ty.states.iter().map(|s| (Some(s.clone()), s.clone())))
+                        .collect();
+                let mut target_state = action.target_state.clone();
+                ui.horizontal(|ui| {
+                    ui.label(tr!(lang, WorkActionTargetState));
+                    if choice(ui, ("gc_kit_target_state", id, index), &mut target_state, &object_states) {
+                        next.actions[index].target_state = target_state.clone();
+                        changed = true;
+                    }
+                });
+            }
+            // When it may be done (tool.state, target.state and the variables), and how long it takes.
+            ui.label(tr!(lang, WorkPrecondition));
+            let key = egui::Id::unique("gc_kit_pre").with((id, index));
+            if let Some(text) = condition_box(ui, session, key, &action.precondition, true) {
+                next.actions[index].precondition = text;
+                changed = true;
+            }
+            ui.horizontal(|ui| {
+                ui.label(tr!(lang, WorkActionDuration));
+                let r = ui.add(
+                    egui::DragValue::new(&mut next.actions[index].duration)
+                        .speed(0.05)
+                        .range(0.0..=3600.0)
+                        .suffix(" s"),
+                );
+                changed |= r.drag_stopped() || (r.lost_focus() && r.changed());
+                ui.label(tr!(lang, WorkActionTimeout));
+                let r = ui.add(
+                    egui::DragValue::new(&mut next.actions[index].timeout)
+                        .speed(0.1)
+                        .range(0.0..=3600.0)
+                        .suffix(" s"),
+                );
+                changed |= r.drag_stopped() || (r.lost_focus() && r.changed());
+            });
+        });
+    }
+    if let Some(index) = remove {
+        next.actions.remove(index);
+        changed = true;
+    }
+    if ui.button(tr!(lang, WorkAddAction)).clicked() {
+        let taken: Vec<String> = next.actions.iter().map(|a| a.name.clone()).collect();
+        next.actions.push(ToolAction {
+            name: free_name(tr!(lang, WorkActionBase), &taken),
+            target: None,
+            precondition: String::new(),
+            set: None,
+            confirm: None,
+            tool_state: None,
+            target_state: None,
+            duration: 0.0,
+            timeout: 0.0,
+        });
+        changed = true;
+    }
+    if changed && next != kit {
+        // A refusal (a name twice, a signal used twice, an action still used by a task) shows in the status bar.
+        drop(session.edit_work(WorkOp::SetToolKit { id, kit: next }));
+    }
+}
+
+/// The tool kind fitted to a robot: a list to choose from, and the state it starts in. A refusal shows in
+/// the status bar.
+pub fn robot_tool_kit(ui: &mut Ui, session: &mut Session, lang: Lang, robot: Id<gc_doc::Robot>) {
+    let fitted = session.robot_tool_kit(robot);
+    let kits: Vec<(Option<Id<gc_doc::ToolKit>>, String)> =
+        std::iter::once((None, tr!(lang, WorkNoKit).to_owned()))
+            .chain(session.doc().tool_kits().iter().map(|(k, kit)| (Some(k), kit.name.clone())))
+            .collect();
+    let mut kit = fitted.as_ref().map(|(k, _)| *k);
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        ui.label(tr!(lang, WorkFitKit));
+        changed |= choice(ui, ("gc_robot_kit", robot), &mut kit, &kits);
+    });
+    let mut state = fitted.as_ref().and_then(|(_, s)| s.clone());
+    if let Some(kit_id) = kit
+        && let Some(def) = session.doc().get(kit_id).cloned()
+        && !def.states.is_empty()
+    {
+        let states: Vec<(Option<String>, String)> =
+            def.states.iter().map(|s| (Some(s.clone()), s.clone())).collect();
+        if state.is_none() {
+            state = def.states.first().cloned();
+        }
+        ui.horizontal(|ui| {
+            ui.label(tr!(lang, WorkToolStateNow));
+            changed |= choice(ui, ("gc_robot_kit_state", robot), &mut state, &states);
+        });
+    } else {
+        state = None;
+    }
+    if changed {
+        drop(session.edit_work(WorkOp::SetRobotTool { robot, kit, state }));
     }
 }
