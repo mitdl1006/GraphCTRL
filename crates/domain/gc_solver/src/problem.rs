@@ -182,7 +182,9 @@ impl Problem {
     /// jumped to another branch and is retried shorter.
     fn angle_jump(&self, before: &[f64], after: &[f64]) -> bool {
         self.rows.iter().zip(before.iter().zip(after)).any(|(row, (a, b))| match row.kind {
-            RowKind::Angle { scale, .. } => (b - a).abs() > std::f64::consts::FRAC_PI_2 * scale,
+            RowKind::Angle { scale, .. } | RowKind::Angle3 { scale, .. } => {
+                (b - a).abs() > std::f64::consts::FRAC_PI_2 * scale
+            }
             _ => false,
         })
     }

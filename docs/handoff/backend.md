@@ -3,6 +3,25 @@
 브랜치 `claude/ur-robot-control-simulator-jsmhze-backend`. 아래 "현황"이 요약, 그 다음 "작업 기록"이 최신 순 상세(근거 링크·API·차이).
 인벤터 원문은 `https://help.autodesk.com/cloudhelp/2026/ENU/Inventor-Help/files/GUID-….htm`.
 
+## 남은 백엔드 일 — 우선순위(리드 ②, 2026-11-18)
+
+`docs/ux/inventor-sketch-parity.md`·`inventor-assembly-parity.md`에서 "없음/신규/남음"이고 담당에 BE가 있는 행을 코드(`ToolKind`·`SketchOp`·`CellOp`)와 맞춰
+본 결과. 문서의 "현재" 열이 오래된 행(Trim·Fillet·3점 호·관계·조인트·표현·측정 등 이미 된 것)은 뺐다. 위에서부터 진행.
+
+| # | 항목 | 문서 행 | 지금 | 할 일 |
+|---|---|---|---|---|
+| 1 | ~~3D 스케치 구속: 평행·직각·동일(선 길이)·동일선상·점-선 위·중점, 3D 각도 치수~~ **완료** | 스케치 §3D(리드 지정) | — | 아래 작업 기록 |
+| 2 | 3D 호(중심·시작·끝, 세 점이 이루는 평면 위) | 리드 지정 | 3D 스케치에서 원·호는 `WrongSpace` | 3D 반지름 행 + 평면 행, 그리기 경로 |
+| 3 | Cancel Sketch(스케치 편집을 한 번에 취소) | 스케치 32 (P2) | 없음 | 세션: 편집 시작 시점 기록 → 되돌리기 |
+| 4 | Tangent Circle·Midpoint Line·중심 사각형 2종 | 44, 46, 57 (P2) | 없음 | `SketchOp` + 도구 |
+| 5 | Chamfer·Split | 65, 81 (P2) | 없음(Split은 Trim 내부만) | `SketchOp` + 도구 |
+| 6 | Move·Copy·Rotate(스케치) / Scale·Stretch | 76–78 (P2) / 83–84 (P3) | 드래그만 | 선택 형상 변환 명령(치수 완화 옵션 포함) |
+| 7 | Auto-project(모서리 자동 투영) | 68 (P2) | 없음 | 그리기 중 모델 모서리 스냅 → 투영 |
+| 8 | Automatic Dimensions and Constraints | 126 (P2) | 없음 | 남은 자유도를 치수로 채우기 |
+| 9 | 치수 방향 뒤집기(Flip) | 124 (P3) | 확인 필요 | |
+| 10 | 타원·스플라인(+ Smooth G2) | 60, 61, 108 (P3) | `CurveGeom`에 없음 | 새 곡선 종류 — 영향 큼 |
+| 11 | 어셈블리: 서브어셈블리 계층·활성화, 조인트 Lock/Protect, 3D 그립 스냅, 어셈블리 스케치 소유자, 원기둥 축 작업 축 | 어셈블리 43, 90, 61, 98, 157 | 없음 또는 일부(확인 필요) | 행마다 원문 확인 후 범위 결정 |
+
 ## 현황 — 완료
 
 | 영역 | 무엇 | 세션/문서 API(대표) | 테스트 |
@@ -34,6 +53,46 @@
 | 모션(오래된 남은 일) | 맨 아래 "남은 일(백엔드)" 절 그대로 |
 
 # 작업 기록(최신 순)
+
+## 2026-11-18 — 3D 스케치 구속: 평행·직각·동일선상·동일·점-선 위·중점·각도(우선순위 표 1)
+
+- **원문**: To Apply Geometric Constraints `GUID-A85A7A30-7D81-4C75-8769-CAD034EEA930.htm`.
+  - 3D Sketch 탭 Constrain 패널에 Coincident(점-곡선 포함), Collinear, Parallel, Perpendicular, Equal, Fix, 축·평면 평행이 있다.
+  - Tangent는 3D에서 스플라인이 먼저여야 해서 해당 없음.
+- **gc_solver**:
+  - `Line3` 추가.
+  - 구속: `Constraint::{Parallel3, Perpendicular3, Collinear3, EqualLength3, PointOnLine3, Midpoint3, Angle3}`.
+  - 행: `Cross3`, `Dot3`, `EqualLen3`, `PointLine3`, `Angle3`. 각도는 atan2(|u×w|, u·w)로 0~180°.
+  - 평행·점-선은 외적 성분 중 방향의 가장 큰 축을 뺀 두 개(내리기 때문에 정함)라서, 행 수가 곧 없애는 자유도다.
+  - 외적·내적·점-선은 현재 길이로 나눈다(사인·코사인·거리). 고정 길이로 나누던 첫 구현에서는 솔버가 선을 점으로 줄여 동일선상을 "만족"시켰다.
+  - `MAX_VARS` 8 → 12(3D 선 두 개). solver perf 보고(release)는 100·300 미지수에서 차이 없음.
+- **gc_sketch `bind.rs`**:
+  - 3D 갈래 추가. 3D의 Horizontal·Vertical·Tangent·Concentric·Symmetric은 `WrongSpace`.
+  - 3D 각도 치수는 180° 이상이면 거부한다. `measure`도 3D 각도를 잰다.
+- **gc_tools**: 3D 치수 도구에서 두 선은 3D 각도. 평행선과 점-선 조합은 3D에서 치수 없음.
+- **리본 3D 구속 패널**: 일치·동일선상·평행·직각·동일·중점·고정·X/Y/Z·XY/YZ/ZX(13개, 두 줄).
+- **테스트**: `gc_sketch/tests/sketch.rs` three_dimensional_line_relations(제거 자유도·성립·각도·거부), 앱 kittest the_three_dimensional_sketch_offers….
+- **다음(표 2)**: 3D 호.
+
+## 2026-11-18 — 큰 스케치 패턴 지연 해결(리드 ①, KNOWN_ISSUES "직사각형 스케치 패턴 60×60 이상 지연")
+
+- **측정**(QA `pattern_times`, 테스트 프로필): 10×10 11.5 s, 12×12 48 s.
+- **원인**:
+  - 패턴 구속 하나마다 `try_add_constraint`가 스케치 전체를 다시 묶고 순위 검사를 했다. 요소당 구속이 여러 개라 요소 수 n에 대해 n × (밀집 QR)이었다.
+  - 모든 복사본이 앞 복사본·첫 간격선에 묶여 한 성분이 되었다. 검사를 마지막 한 번으로 줄여도 100×100은 약 4만 미지수의 밀집 QR이라 1 s가 불가능했다.
+- **바꾼 구성**:
+  - 풀이에 남는 것은 방향마다 구성 간격선 하나(첫 원본 점 → 구성 점, 방향선과 평행, 간격 치수)다. 원형은 축 → 원본 점 바큇살과 같은 길이로 돌린 바큇살 하나(각도 치수)다.
+  - 복사본 점과 복사된 원의 반지름은 바인딩 때 솔버 안에서 고정된다(`Sketch::pattern_held`, 사용자에게 보이는 Fix 구속 아님).
+  - `Sketch::solve` 뒤에 `refresh_patterns`가 원본과 간격선/바큇살에서 복사본 위치를 다시 계산한다. 움직였으면 한 번 더 풀어서 복사본에 걸린 사용자 형상도 따라오게 한다.
+  - 기록에 `step: PatternStep::{Translate, Rotate}`, `places`, `copies`, `circles`가 추가되었다.
+- **결과**:
+  - 자유도는 같다(간격선 2 미지수, 평행 + 치수 2개).
+  - 간격·각도 치수는 그대로 있어 더블클릭 편집과 식(매개변수)이 된다.
+  - 10×10 0.5 ms, 60×60 생성 20 ms·간격 편집 29 ms, 100×100 생성 56 ms·간격 편집 88 ms(`gc_session/tests/sketch_shape_tools.rs` large_rectangular…, 1 s 단언).
+- **달라진 점**:
+  - 원본을 끄는 동안(드래그 프레임) 복사본이 따라오지 않고, 놓으면 따라간다.
+  - ba1c3ab 형식(1시간 전)으로 저장한 패턴 기록은 새 필드가 없어 열리지 않는다(그 이전 파일은 기록이 없어 예전 구속식 그대로 동작).
+- **KNOWN_ISSUES 항목은 리드가 닫아 주세요**(백엔드는 그 파일을 고치지 않음).
 
 ## 2026-11-18 — 점 도구 HUD X/Y(리드 ④)
 

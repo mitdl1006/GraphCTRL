@@ -26,4 +26,4 @@ pub use gc_solver::{DepKind, DragRefused, FrameOutcome, Status};
 pub use model::{
     Curve, CurveGeom, DimKind, Dimension, ExternalRef, GeoConstraint, PointKind, SkPoint, Sketch, Space,
 };
-pub use pattern::{PatternDefinition, PatternDirection, SketchPattern};
+pub use pattern::{PatternCopy, PatternDefinition, PatternDirection, PatternStep, SketchPattern};

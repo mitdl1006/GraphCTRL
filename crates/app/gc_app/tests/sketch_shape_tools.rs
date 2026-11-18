@@ -306,3 +306,26 @@ fn the_point_tool_takes_typed_x_and_y_in_the_heads_up_boxes() {
     let placed = sketch.points.values().find(|p| p.pos[1] < 0.0).unwrap();
     assert!((placed.pos[0] - 0.01).abs() < 1e-9 && (placed.pos[1] + 0.005).abs() < 1e-9, "{:?}", placed.pos);
 }
+
+/// The 3D Sketch tab's Constrain panel (Inventor 2026 help, To Apply Geometric Constraints,
+/// GUID-A85A7A30-7D81-4C75-8769-CAD034EEA930) has Parallel, Perpendicular, Collinear and Equal too.
+#[test]
+fn the_three_dimensional_sketch_offers_parallel_perpendicular_and_equal() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("3D 스케치").click();
+    harness.run();
+    assert!(harness.state().session.active_sketch().unwrap().1.is_spatial());
+    for (label, kind) in [
+        ("평행", gc_tools::ConstraintKind::Parallel),
+        ("직각", gc_tools::ConstraintKind::Perpendicular),
+        ("동일", gc_tools::ConstraintKind::Equal),
+    ] {
+        harness.get_by_label(label).click();
+        harness.run();
+        assert_eq!(harness.state().session.tool(), ToolKind::Constraint(kind));
+    }
+}

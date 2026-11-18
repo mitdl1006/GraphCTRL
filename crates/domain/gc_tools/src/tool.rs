@@ -401,6 +401,27 @@ fn dimension_for(sketch: &Sketch, picks: &[Item]) -> Option<DimKind> {
             Some(DimKind::PlaneDistance { p, axis: 2, side })
         }
         [Item::Point(p), Item::Point(q)] if p != q => Some(DimKind::Distance { p, q }),
+        // In space: the angle between two lines (0 to 180°, no sense of turning); parallel lines and a point
+        // and a line have no dimension there.
+        [Item::Curve(l1), Item::Curve(l2)] if sketch.is_spatial() && l1 != l2 => {
+            let ((a1, b1), (a2, b2)) = (sketch.line(l1)?, sketch.line(l2)?);
+            let dir = |a, b| {
+                let (a, b) = (sketch.pos(a)?, sketch.pos(b)?);
+                Some([b[0] - a[0], b[1] - a[1], b[2] - a[2]])
+            };
+            let (u, w) = (dir(a1, b1)?, dir(a2, b2)?);
+            let cross = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
+            let across = (cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2]).sqrt();
+            let along = u[0] * w[0] + u[1] * w[1] + u[2] * w[2];
+            let angle = fm::atan2(across, along);
+            (angle > 1e-6 && angle < std::f64::consts::PI - 1e-6).then_some(DimKind::Angle {
+                l1,
+                rev1: false,
+                l2,
+                rev2: false,
+            })
+        }
+        [Item::Point(_), Item::Curve(_)] | [Item::Curve(_), Item::Point(_)] if sketch.is_spatial() => None,
         [Item::Point(p), Item::Curve(line)] | [Item::Curve(line), Item::Point(p)] => {
             Some(DimKind::PointLine { p, line, side: side_of(p, line)? })
         }

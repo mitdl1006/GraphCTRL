@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use gc_core::Id;
-use gc_solver::{Constraint, ConstraintId, Line2, P2, P3, ParamId, Round, System};
+use gc_solver::{Constraint, ConstraintId, Line2, Line3, P2, P3, ParamId, Round, System};
 
 use crate::edit::SketchError;
 use crate::model::{Curve, CurveGeom, DimKind, Dimension, GeoConstraint, PointKind, SkPoint, Sketch};
@@ -42,6 +42,11 @@ impl Binding {
     fn line(&self, sketch: &Sketch, curve: Id<Curve>) -> Result<Line2, SketchError> {
         let (a, b) = sketch.line(curve).ok_or(SketchError::WrongCurveKind)?;
         Ok(Line2 { a: self.p2(a)?, b: self.p2(b)? })
+    }
+
+    fn line3(&self, sketch: &Sketch, curve: Id<Curve>) -> Result<Line3, SketchError> {
+        let (a, b) = sketch.line(curve).ok_or(SketchError::WrongCurveKind)?;
+        Ok(Line3 { a: self.p3(a)?, b: self.p3(b)? })
     }
 
     fn round(&self, sketch: &Sketch, curve: Id<Curve>) -> Result<Round, SketchError> {
@@ -119,6 +124,35 @@ impl Binding {
         Ok(match *c {
             GeoConstraint::Coincident(p, q) if spatial => Constraint::Coincident3(self.p3(p)?, self.p3(q)?),
             GeoConstraint::Coincident(p, q) => Constraint::Coincident(self.p2(p)?, self.p2(q)?),
+            // A 3D sketch has lines only; their relations are written in space (Inventor 2026 help, To Apply
+            // Geometric Constraints, GUID-A85A7A30-7D81-4C75-8769-CAD034EEA930).
+            GeoConstraint::PointOnCurve(p, curve) if spatial => {
+                Constraint::PointOnLine3(self.p3(p)?, self.line3(sketch, curve)?)
+            }
+            GeoConstraint::Midpoint(p, line) if spatial => {
+                Constraint::Midpoint3(self.p3(p)?, self.line3(sketch, line)?)
+            }
+            GeoConstraint::Parallel(a, b) if spatial => {
+                Constraint::Parallel3(self.line3(sketch, a)?, self.line3(sketch, b)?)
+            }
+            GeoConstraint::Perpendicular(a, b) if spatial => {
+                Constraint::Perpendicular3(self.line3(sketch, a)?, self.line3(sketch, b)?)
+            }
+            GeoConstraint::Collinear(a, b) if spatial => {
+                Constraint::Collinear3(self.line3(sketch, a)?, self.line3(sketch, b)?)
+            }
+            GeoConstraint::Equal(a, b) if spatial => {
+                Constraint::EqualLength3(self.line3(sketch, a)?, self.line3(sketch, b)?)
+            }
+            GeoConstraint::Horizontal(..)
+            | GeoConstraint::Vertical(..)
+            | GeoConstraint::Tangent { .. }
+            | GeoConstraint::Concentric(..)
+            | GeoConstraint::Symmetric { .. }
+                if spatial =>
+            {
+                return Err(SketchError::WrongSpace);
+            }
             GeoConstraint::PointOnCurve(p, curve) => match self.line(sketch, curve) {
                 Ok(line) => Constraint::PointOnLine(self.p2(p)?, line),
                 Err(_) => Constraint::PointOnCircle(self.p2(p)?, self.round(sketch, curve)?),
@@ -207,6 +241,19 @@ impl Binding {
             DimKind::PointLine { p, line, side } => {
                 Constraint::PointLineDistance { p: self.p2(p)?, line: self.line(sketch, line)?, side, value }
             }
+            // In space the angle has no sense of turning: it is between 0 and 180°.
+            DimKind::Angle { l1, rev1, l2, rev2 } if sketch.is_spatial() => {
+                if value >= std::f64::consts::PI {
+                    return Err(SketchError::InvalidValue);
+                }
+                Constraint::Angle3 {
+                    l1: self.line3(sketch, l1)?,
+                    rev1,
+                    l2: self.line3(sketch, l2)?,
+                    rev2,
+                    value,
+                }
+            }
             DimKind::Angle { l1, rev1, l2, rev2 } => Constraint::Angle {
                 l1: self.line(sketch, l1)?,
                 rev1,
@@ -261,6 +308,19 @@ impl Sketch {
         for (id, point) in &self.points {
             if matches!(point.kind, PointKind::External(_)) {
                 binding.sys.add(solver_id(*id), Constraint::Fix(binding.params(*id)?.to_vec()));
+            }
+        }
+        // Pattern copies follow their originals after the solve (`refresh_patterns`), not in it.
+        let (held_points, held_circles) = self.pattern_held();
+        for id in held_points {
+            if let Ok(params) = binding.params(id) {
+                let params = params.to_vec();
+                binding.sys.add(solver_id(id), Constraint::Fix(params));
+            }
+        }
+        for id in held_circles {
+            if let Some(param) = binding.radii.get(&id).copied() {
+                binding.sys.add(solver_id(id), Constraint::Fix(vec![param]));
             }
         }
         for (id, constraint) in &self.constraints {
@@ -331,6 +391,18 @@ impl Sketch {
                     return None;
                 }
                 side * (dx * (p[1] - a[1]) - dy * (p[0] - a[0])) / length
+            }
+            DimKind::Angle { l1, rev1, l2, rev2 } if self.is_spatial() => {
+                let dir3 = |line: Id<Curve>, reversed: bool| -> Option<[f64; 3]> {
+                    let (a, b) = self.line(line)?;
+                    let (a, b) = (pos(a)?, pos(b)?);
+                    let sign = if reversed { -1.0 } else { 1.0 };
+                    Some([0, 1, 2].map(|k| sign * (b[k] - a[k])))
+                };
+                let (u, w) = (dir3(l1, rev1)?, dir3(l2, rev2)?);
+                let cross = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
+                let across = (cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2]).sqrt();
+                gc_math::fm::atan2(across, u[0] * w[0] + u[1] * w[1] + u[2] * w[2])
             }
             DimKind::Angle { l1, rev1, l2, rev2 } => {
                 let (u, w) = (dir(l1, rev1)?, dir(l2, rev2)?);
