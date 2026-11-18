@@ -521,3 +521,121 @@ fn trim_highlights_the_piece_that_would_go() {
         image.save(out.join("review-57-trim-preview.png")).unwrap();
     }
 }
+
+/// The Spline (Interpolation) tool is in the Line split button; clicks place fit points, Enter finishes
+/// (backend: spline_tool.rs); the curve is drawn through the points. The screenshot is the evidence.
+#[test]
+fn the_spline_tool_is_in_the_line_split_button_and_draws_a_curve() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("XY 스케치").click();
+    harness.run();
+    pick_variant(&mut harness, "선", "스플라인(보간)");
+    assert_eq!(harness.state().session.tool(), ToolKind::Spline);
+    let app = harness.state_mut();
+    for p in [mm(-60.0, 0.0), mm(-20.0, 40.0), mm(20.0, -30.0), mm(60.0, 20.0)] {
+        click(app, p, false);
+    }
+    app.session.tool_event(ToolEvent::Key(gc_tools::Key::Enter));
+    harness.run_steps(3);
+    let (_, sketch) = harness.state().session.active_sketch().unwrap();
+    assert!(
+        sketch.curves.values().any(|c| matches!(c.geom, gc_sketch::CurveGeom::Spline { .. })),
+        "a spline was made"
+    );
+    if gpu {
+        let image = harness.render().unwrap();
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        image.save(out.join("review-60-spline.png")).unwrap();
+    }
+}
+
+/// Right-clicking an inner fit point of a spline offers Split Spline (Inventor 2026 help, To Create, Lock
+/// Spline Length, and Edit Splines, GUID-DB15C479-66F2-456A-9E54-40A60F83DC92: "To split a spline,
+/// right-click a point and choose Split Spline").
+#[test]
+fn the_right_click_menu_of_a_spline_fit_point_splits_the_spline() {
+    let mut harness = sketching();
+    harness.state_mut().session.set_tool(ToolKind::Spline);
+    let points = [mm(-60.0, 0.0), mm(-20.0, 40.0), mm(20.0, -30.0), mm(60.0, 20.0)];
+    for p in points {
+        click(harness.state_mut(), p, false);
+    }
+    harness.state_mut().session.tool_event(ToolEvent::Key(gc_tools::Key::Enter));
+    harness.state_mut().session.set_tool(ToolKind::Select);
+    harness.run_steps(3);
+    let splines = |h: &Harness<'_>| {
+        let (_, sketch) = h.state().session.active_sketch().unwrap();
+        sketch.curves.values().filter(|c| matches!(c.geom, gc_sketch::CurveGeom::Spline { .. })).count()
+    };
+    assert_eq!(splines(&harness), 1);
+    // A press and release without moving opens the menu list.
+    let at =
+        harness.state().viewport().screen_of(gc_math::DVec3::new(points[1][0], points[1][1], 0.0)).unwrap();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run_steps(2);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+    harness.run_steps(3);
+    harness.get_by_label("스플라인 분할").click();
+    harness.run_steps(3);
+    assert_eq!(splines(&harness), 2, "the spline was cut in two at the point");
+}
+
+/// The Offset tool takes an ellipse and a spline like any other curve (Inventor 2026 help, To Create 2D Shape
+/// Geometry, GUID-D489CE6D-7299-4211-A43A-F3580A4BA357). The screenshot, with the previews of both and the
+/// results, is the evidence.
+#[test]
+fn offset_works_on_an_ellipse_and_a_spline_on_screen() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("XY 스케치").click();
+    harness.run();
+    let app = harness.state_mut();
+    app.session.set_tool(ToolKind::Ellipse);
+    for p in [mm(-40.0, 30.0), mm(0.0, 30.0), mm(-40.0, 50.0)] {
+        click(app, p, false);
+    }
+    app.session.set_tool(ToolKind::Spline);
+    for p in [mm(20.0, 10.0), mm(40.0, 50.0), mm(60.0, 20.0), mm(80.0, 55.0)] {
+        click(app, p, false);
+    }
+    app.session.tool_event(ToolEvent::Key(gc_tools::Key::Enter));
+    let curves = |app: &GraphCtrlApp| {
+        let (_, sketch) = app.session.active_sketch().unwrap();
+        sketch.curves.values().filter(|c| !c.construction).count()
+    };
+    let before = curves(app);
+    app.session.set_tool(ToolKind::Offset);
+    // Pick the ellipse (on its right end), then the side and distance; the same for the spline.
+    for p in [mm(0.0, 30.0), mm(10.0, 30.0)] {
+        app.session.tool_event(ToolEvent::Move { pos: p, px: PX, suppress_snap: true });
+        app.session.tool_event(ToolEvent::Click { pos: p, px: PX, modifier: false });
+    }
+    // The spline's fit point at (40, 50) mm, then a click above it.
+    for p in [mm(40.0, 50.0), mm(40.0, 58.0)] {
+        app.session.tool_event(ToolEvent::Move { pos: p, px: PX, suppress_snap: true });
+        app.session.tool_event(ToolEvent::Click { pos: p, px: PX, modifier: false });
+    }
+    assert!(curves(app) >= before + 2, "an offset of each: {before} -> {}", curves(app));
+    harness.run_steps(3);
+    if gpu {
+        let image = harness.render().unwrap();
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        image.save(out.join("review-62-offset.png")).unwrap();
+    }
+}

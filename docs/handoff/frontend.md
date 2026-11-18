@@ -158,6 +158,62 @@
 - `Preview.cut`(Trim이 지울 조각)을 스케치 뷰에서 빨간 점선(2.6 px)으로 그린다. `Piece::polyline`으로 선분·호·원·타원호(`EllipseArc`)를 모두 그린다.
 - 증거 `docs/evidence/img/review-57-trim-preview.png`, 테스트 `trim_highlights_the_piece_that_would_go`.
 
+### 단축키: F5 / Shift+F5, S
+
+- 근거: 단축키 원문 GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E ("F5 Returns to the previous view", "Shift + F5 Switches to the next view", "S Creates a 2D sketch on a face or plane").
+- F5 이전 뷰 / Shift+F5 다음 뷰: 카메라가 0.35초 이상 멈춘 자세를 기록(50개)해 오간다. S(스케치 밖): 선택한 원점 평면·작업 평면, 없으면 XY에 2D 스케치를 만들고 선 도구로 시작. 테스트 `f5_walks_the_views_and_s_makes_a_sketch`.
+- 아직 없는 원문 단축키: E·H 등 파트 모델링 명령(앱에 해당 기능 없음), Alt+F8·Alt+F11(매크로·VBA), Spacebar(3D 회전 전환), F1 도움말.
+
+### 단축키: Tab / Shift+Tab, Alt+드래그, Ctrl+C/V, F10
+
+- 근거: 단축키 원문 GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E ("Tab Demote", "Shift + Tab Promote", "Alt + drag mouse: In assemblies, applies a mate constraint", "F10 Sketch visibility", Windows 키 Ctrl+C/V), Alt+드래그 본문 GUID-0F500089-4F69-41C5-AFE8-B58AC9E8E15E ("To drag a component into position and place a Mate constraint").
+- **Tab**: 선택한 구성요소의 Demote(브라우저 메뉴와 같이 새 서브어셈블리 이름 입력 줄), **Shift+Tab**: 한 단계 위로 Promote(소속 서브어셈블리의 부모로 이동, 최상위면 최상위로). 테스트 `tab_demotes_and_shift_tab_promotes_the_selected_component`.
+- **Alt+드래그**: Alt를 누른 채 구성요소의 면·원통을 눌러 다른 구성요소의 면·원통으로 끌어 놓으면 미리보기 선(초록=가능, 회색=불가)이 보이고, 놓으면 `possible_relations`의 첫 해(평면끼리 Mate, 원통끼리 축 Mate)를 오프셋 0으로 만든다(풀 수 없으면 구속 오류 대화상자). 테스트 `alt_drag_places_a_mate_between_two_faces`. 원문과 차이: 끄는 동안 구성요소 자체는 움직이지 않고 놓을 때 해에 따라 이동하며(원문은 접근하는 위치를 미리 보여 준다), 평면·원통 외 형상(모서리·점)과 평면의 Flush 자동 선택은 없다.
+- **Ctrl+C / Ctrl+V**: Ctrl+C는 선택한 구성요소(본체·로봇과 툴·가져온 어셈블리)를 `copy_to_clipboard`로 기억한다. Ctrl+V는 아직 아무것도 만들지 않고 커서를 따라다니는 고리만 보인다(`start_paste`); 클릭하면 클릭한 점과 복사본 첫 구성요소 위치의 차이를 offset으로 `paste(offset)`을 한 번만 호출해(관계 없이, 같은 방향) **Undo 한 단계**로 붙여넣는다. Esc·우클릭은 아무것도 하지 않는다. 원문 GUID-249C50F9-5A8C-48BD-8341-D1BDB7A16B19("Use Copy and Paste to place new instances using the same orientation"). 테스트 `ctrl_c_and_ctrl_v_paste_a_copy_of_the_selected_body`. 원문과 차이: 끄는 동안 붙여넣을 모양의 미리보기는 고리 표시뿐(복사본이 아직 없다 — 원본을 움직여 보이면 오해를 주어 쓰지 않았다), 서브어셈블리 행 자체를 복사하는 키 경로는 없다(API는 지원), 한 번 붙이면 한 번만 놓인다.
+- **F10**: 편집 중인 스케치(없으면 마지막 스케치)의 가시성을 토글. 테스트 `f10_toggles_the_visibility_of_the_latest_sketch`.
+
+### 리본 아이콘 정리
+
+- 3D 모델 탭의 작업 평면·작업 축·작업 점과 조립 탭의 그립 스냅이 모두 같은 "이동(Pan)" 아이콘이어서 구분이 안 됐다. 각각 직접 그린 아이콘(`Icon::WorkPlane` / `WorkAxis` / `WorkPoint` / `GripSnap`, 인벤터 그림 사용 안 함)으로 바꿨다. 증거 `docs/evidence/img/review-58-*.png`.
+- 큰/작은 버튼 혼합: 7개 탭을 모두 렌더해 보니 큰 버튼 탭(3D 모델·조립·로봇·검사·관리·뷰)과 큰+작은 혼합 탭(스케치: 작성·수정·구속)이 인벤터처럼 역할별로 나뉘어 있고 폭도 1280 px 안에 들어간다(`every_ribbon_tab_fits_1280_px`). 분할 버튼은 아래쪽 화살표 때문에 이름이 한 줄 위에 앉는 점이 인벤터와 같다. 따로 더 합칠 항목은 찾지 못했다.
+
+### 구속 한계 / 조인트 한계 탭 / 리본 큰·작은 버튼
+
+- **구속 대화상자 "더 보기"**: 이름, 최대·최소(체크+값, mm), "오프셋을 휴지 위치로" → `Relationship.limits`. 원문 GUID-0F500089-4F69-41C5-AFE8-B58AC9E8E15E("To change the name of the constraint or set limits, click the More button… Check Maximum… Check Minimum… Use Offset As Resting Position"). 최소>최대나 숫자가 아닌 값이면 확인이 막힌다. 테스트 `the_constrain_dialogs_more_section_sets_the_name_and_limits`. 원문과 차이: 값은 오프셋(mm)만, 각도 구속의 한계는 아직 UI 없음, 체크를 풀어도 값이 유지되는("inactive state") 동작은 대화상자를 닫으면 사라진다.
+- **조인트 대화상자에 "조인트 / 한계" 탭**(GUID-21DC3336-5C51-42C1-90FB-4299CD66E0C6 Limits 탭): 만들 때 한계 탭의 값은 조인트가 만들어진 뒤 `set_joint_limits`로 함께 저장. 브라우저 우클릭 "한계…"는 같은 대화상자를 한계 탭으로 연다(이미 있는 조인트는 원점·종류 읽기 전용, 한계만 수정). 별도 "조인트 한계" 창은 없앴다. 테스트 `a_rotational_joint_gets_angular_limits_from_its_dialog`, `the_joint_dialogs_limits_tab_goes_with_a_new_rotational_joint`.
+- **리본 큰/작은 버튼**: 인벤터처럼 패널마다 가장 쓰는 명령은 큰 버튼, 나머지는 아이콘+이름 작은 버튼 세로 묶음(`gc_ui::ribbon_stack`, 최대 3줄). 조립 탭: 배치 / 패턴 / 구속·조인트는 큰 버튼, 교체 / 미러·복사 / 어셈블·구동 / 그립 스냅·접지는 작은 버튼. 3D 모델 탭: 작업 평면 큰 버튼, 작업 축·점 작은 버튼. 1280 px 단언은 그대로 통과. 증거 `docs/evidence/img/review-59-*.png`. 접근성 이름은 이전과 같다(버튼 이름 = 라벨).
+- 스케치 탭은 원래 큰+작은 혼합 구성이라 그대로 두었다.
+
+### 열기 경고 토스트 / 스플라인 화면 점검
+
+- 파일을 열 때(열기·복구 모두) `Session::load_warnings()`가 비어 있지 않으면 상태 표시줄에 "열었지만 쓸 수 없는 데이터 N건을 버렸습니다: …"를 보인다(수리 안내보다 우선). 테스트 `opening_a_file_with_a_damaged_joint_range_reports_the_warning`(조인트 한계 시작>끝으로 손상시킨 파일).
+- 스플라인(보간): 스케치 탭 선▾에서 고르고, 클릭으로 맞춤점, Enter로 마침 — 점들을 지나는 매끄러운 곡선이 그려진다(테스트 `the_spline_tool_is_in_the_line_split_button_and_draws_a_curve`, 증거 `docs/evidence/img/review-60-spline.png`). 이상 없음. 참고: 아이콘은 글자 "~"(전용 아이콘 아님).
+
+### 글자 아이콘을 벡터로 / 로봇·검사·뷰 탭의 큰·작은 버튼
+
+- 스케치 탭의 글자 아이콘(`-+-`, `~`, `(/)`, `[+]`, 슬롯 변형, 분할·이동·축척·트림·모깎기·모따기·복사·회전·늘이기·연장 등 20개)을 직접 그린 벡터 `Icon`으로 교체했다(인벤터 그림 사용 안 함). 구속 기호(`::`, `--`, `(o)` 등)와 `fx`, `x`는 글자 그대로 둔다(인벤터도 구속 기호는 글자 모양 아이콘).
+- 로봇 탭: 로봇 추가·경로 만들기·계획·재생은 큰 버튼, 가져오기 2개 / 모양 3개 / 웨이포인트 추가 3종 / 좌표계·스케치 경로는 작은 버튼 묶음. 검사 탭: 측정·간섭 분석 큰 버튼, 접촉 솔버 작은 버튼(`ribbon_stack_responses`로 메뉴 유지). 뷰 탭: 홈·전체 보기·자유도·단면 삭제 큰 버튼, 정면·평면·우측 / 직교·원근 / 단면 3종 / 패널 토글은 작은 버튼. 1280 px 단언 유지. 증거 `docs/evidence/img/review-61-ribbon-tabs.png`.
+- 접근성 이름은 그대로(버튼 이름 = 라벨).
+
+### Flexible 서브어셈블리 / 스플라인 분할 / 타원·스플라인 간격띄우기
+
+- **Flexible**: 원문 Create and edit flexible components, GUID-30817F08-A5C2-44B7-B237-4791ACA3F854("Right-click the placed subassembly in the graphics window or the browser, and then select Flexible ... An icon denoting the flexible state marks the subassembly in the browser ... clear the check mark"). 브라우저 서브어셈블리 행 우클릭 메뉴에 "유연" 체크(`SubassemblyOp::SetFlexible`, Undo 1단계), 유연한 행에는 용수철 아이콘(`Icon::Flexible`)이 오른쪽에 붙는다. 그래픽 창 우클릭 마킹 메뉴 목록에도 "유연"(현재 상태면 ✓)이 서브어셈블리 소속 구성요소에서 나온다. 자유 이동/회전과 그립 스냅은 `Session::unit_moves`로 강체 서브어셈블리만 통째로 움직이고(미리보기도 `preview_components`), 유연한 서브어셈블리는 구성요소별로 끌린다. 테스트 `flexible_subassemblies_are_dragged_component_by_component`(+ 기존 통째 이동 테스트).
+- **스플라인 분할**: 원문 GUID-DB15C479-66F2-456A-9E54-40A60F83DC92("To split a spline, right-click a point and choose Split Spline"). 스케치에서 스플라인의 안쪽 맞춤점을 우클릭(멈춤 메뉴 모드)하면 목록에 "스플라인 분할"이 나오고 `SketchOp::SplitSpline`을 실행한다. 테스트 `the_right_click_menu_of_a_spline_fit_point_splits_the_spline`. 차이: 끝점에서는 항목이 나오지 않는다(백엔드가 거부), 핸들 재설정 메뉴는 없다.
+- **간격띄우기**(GUID-D489CE6D…): 타원·스플라인도 받는다. 화면 점검 — 안쪽 타원과 스플라인 사본이 그려진다(`docs/evidence/img/review-62-offset.png`, 테스트 `offset_works_on_an_ellipse_and_a_spline_on_screen`). 이상 없음.
+
+### 브라우저 동작 점검 (구성요소 메뉴·행 아이콘·찾기)
+
+- 원문: Working with the Assembly Browser GUID-5F975252-BDB4-488C-A2C5-8B15C7D3C641(브라우저 메뉴: Find, Edit Values in Browser, Display Preferences = Hide Work Features / Hide Fully Constrained / Show Constraint State …, 우클릭 메뉴는 구성요소·관계에 대한 작업), Assembly Browser Reference GUID-CB6B1637-71AD-4753-8CC9-19559BFEE3A5(접지 = 압정 아이콘 변형, Disabled·Invisible 변형, 구속 상태 점).
+- 점검 결과 이미 있던 것: 가시성 체크, 억제(+흐린 이름), 이름 바꾸기, 삭제, 제자리 편집(더블클릭), 구속 상태 점(검은/속 빈/대시), 관계 행의 잠금 아이콘·+/-.
+- 이번에 채운 것: ① 구성요소 행 우클릭 메뉴에 **활성(Enabled)**·**접지(Grounded)** 체크 항목(`Command::SetComponent`, 항목 순서: 메뉴 고유 항목 → 이름 바꾸기 → 가시성 → 활성 → 접지 → 억제 → 삭제). ② 접지된 구성요소 아이콘 모서리에 **압정**(`Icon::Pin`), 비활성(Disabled)이나 숨긴(Invisible) 구성요소 이름은 배경 스타일(흐림). ③ 브라우저 위 **찾기** 상자(이름의 일부, 대소문자 무시): 구성요소·서브어셈블리 폴더(이름이 맞으면 안의 것 전부)·스케치·관계 행만 남긴다. 테스트 `the_browser_menu_enables_and_grounds_components_and_find_filters_the_rows`, 증거 `docs/evidence/img/review-63-browser-pin.png`.
+- 아직 없는 것(앱에 대상이 없거나 보류): 적응(Adaptive)·BOM 제외 메뉴(앱에 적응성·BOM 없음), 사용자 정의 폴더, 찾기의 조건 검색(문제 있는 관계·억제된 항목 등 조합), Hide UCS·Hide Notes·Hide Documents·Show Children Only·Show Extended Names(대상 없음).
+
+### 브라우저 메뉴: Display Preferences / Edit Values in Browser
+
+- 원문: Working with the Assembly Browser GUID-5F975252-BDB4-488C-A2C5-8B15C7D3C641("Hide Work Features turns the display of all work features and the Origin folder off or on", "Hide Fully Constrained only displays components that have constraint issues", "Show Constraint State displays all constraint status", "Edit Values in Browser turns the display of the browser edit box off or on ... used for changing or measuring constraint geometry").
+- 찾기 상자 옆 "…"(접근성 이름 "브라우저 메뉴") 메뉴에 네 개 체크: **작업 피처 숨기기**(문서·구성요소 원점 폴더와 작업 피처 목록을 감춤), **완전 구속 숨기기**(완전 구속 구성요소·관계 행을 감춤), **구속 상태 표시**(점 표시, 기본 켬), **브라우저에서 값 편집**(기본 켬). 값 편집: 구속 행을 클릭하면 그 아래 값 상자("관계 값", 오프셋 mm / 각도 °)가 나타나고 Enter로 `SetRelationship` 적용(Undo 1단계). 조인트·강체 같은 값 없는 관계는 상자가 없다. 테스트 `the_browser_menu_hides_work_features_and_edits_a_constraint_value_in_place`.
+- 원문과 차이: 값을 바꾸면 인벤터처럼 상자가 닫히지 않고 선택이 유지된다, 측정 전용 동작(값 읽기)은 없다. 설정은 세션 동안만 유지(파일에 저장하지 않음).
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

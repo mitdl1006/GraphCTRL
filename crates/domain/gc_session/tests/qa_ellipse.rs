@@ -485,8 +485,7 @@ fn trim_split_extend_offset_and_fillet_refuse_ellipses() {
         .unwrap();
         curve_of(&created)
     };
-    // Trim and Extend of ellipses arrived later (an elliptical arc, as in Inventor): either refused with no
-    // trace or a sane result undone in one step. Split still refuses ellipses.
+    // Trim and Extend of ellipses and elliptical arcs came later (see qa_ellipse_cut.rs): refused or sane.
     refused_or_sane(&mut s, k, "trim", SketchOp::Trim { curve: e, at: [0.0, 0.02] });
     refused(&mut s, k, "split", SketchOp::Split { curve: e, at: [0.0, 0.02] });
     refused_or_sane(&mut s, k, "extend", SketchOp::Extend { curve: e, at: [0.04, 0.0] });

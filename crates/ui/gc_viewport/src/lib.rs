@@ -4,6 +4,7 @@
 //! is painted under that image and sketches, dimensions, traces and tool previews over it with egui's
 //! painter, through the same camera. Without a GPU everything still works; only the solids are missing.
 
+mod altdrag;
 mod dof;
 mod freemove;
 mod gizmo;
@@ -116,10 +117,21 @@ pub struct Viewport {
     /// A component being dragged with it.
     free_drag: Option<freemove::FreeDrag>,
     placing: Option<place::Placing>,
+    /// A paste waiting for the click that gives its place.
+    placing_paste: Option<place::PastePlacing>,
     /// What a plain click selects (the Select command's priority menu, opened with Shift + right click).
     pub select_priority: SelectPriority,
     /// Where the Select menu is open.
     select_menu: Option<egui::Pos2>,
+    /// Where the view has stood (F5 goes back, Shift + F5 forward), the one shown now, and when the
+    /// camera last changed.
+    views: ViewHistory,
+    /// Whether Alt was held when the primary button last went down.
+    alt_at_press: bool,
+    /// An Alt + drag that places a Mate constraint.
+    alt_drag: Option<altdrag::AltDrag>,
+    /// A constraint Alt + drag asks for: the component's geometry, then the one it goes to.
+    quick_constrain: Option<(gc_doc::Selection, gc_doc::Selection)>,
     /// A Grip Snap in progress.
     grip: Option<grip::Grip>,
     /// The marking menu of the graphics window and the commands it offers.
@@ -168,6 +180,52 @@ pub struct Viewport {
     measure_pick: Option<Option<(gc_session::CellItem, gc_session::Feature)>>,
 }
 
+/// The views the camera has rested in: F5 returns to the previous one, Shift + F5 goes to the next
+/// (Inventor 2026 help, shortcut table GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E).
+#[derive(Clone, Debug, Default)]
+struct ViewHistory {
+    stack: Vec<Camera>,
+    at: usize,
+    /// The camera of the last frame and when it last differed from the one before.
+    seen: Option<(Camera, f64)>,
+}
+
+impl ViewHistory {
+    /// How long the camera rests before the view counts as one to return to, seconds.
+    const REST: f64 = 0.35;
+    const MAX: usize = 50;
+
+    /// Follows the camera: a view it has rested in is remembered.
+    fn follow(&mut self, camera: &Camera, time: f64) {
+        match &mut self.seen {
+            Some((seen, since)) if seen == camera => {
+                if time - *since >= Self::REST && self.stack.get(self.at) != Some(camera) {
+                    self.stack.truncate(self.at + 1);
+                    self.stack.push(*camera);
+                    if self.stack.len() > Self::MAX {
+                        self.stack.remove(0);
+                    }
+                    self.at = self.stack.len() - 1;
+                }
+            }
+            seen => *seen = Some((*camera, time)),
+        }
+        if self.stack.is_empty() {
+            self.stack.push(*camera);
+            self.at = 0;
+        }
+    }
+
+    /// The previous (`back`) or next view, when there is one.
+    fn step(&mut self, back: bool) -> Option<Camera> {
+        let to = if back { self.at.checked_sub(1)? } else { self.at + 1 };
+        let camera = *self.stack.get(to)?;
+        self.at = to;
+        self.seen = None;
+        Some(camera)
+    }
+}
+
 /// What a plain click selects (Inventor 2026 help, About Component Selection Modes and Sets,
 /// GUID-E3E49BD5-3F55-4836-8CD1-2C1855CF9986: the Select command's priority).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -198,7 +256,12 @@ impl Viewport {
             free_tool: None,
             free_drag: None,
             placing: None,
+            placing_paste: None,
+            alt_at_press: false,
+            alt_drag: None,
+            quick_constrain: None,
             grip: None,
+            views: ViewHistory::default(),
             select_priority: SelectPriority::default(),
             select_menu: None,
             marking: gc_ui::marking::MarkingMenu::default(),
@@ -431,8 +494,24 @@ impl Viewport {
             && !self.marking.is_open()
         {
             let at = ui.input(|i| i.pointer.press_origin().or(i.pointer.interact_pos()));
-            self.marking_set = if active.is_some() {
-                radial::Set::sketch(session.sketch_is_spatial())
+            self.marking_set = if let Some((_, plane)) = active.as_ref() {
+                // On an inner fit point of a spline the menu offers Split Spline.
+                let split = at.and_then(|at| {
+                    let at = to_view(at);
+                    let (_, sketch) = session.active_sketch()?;
+                    sketch.curves.iter().find_map(|(curve, c)| {
+                        let gc_sketch::CurveGeom::Spline { points } = &c.geom else { return None };
+                        let inner = points.get(1..points.len().saturating_sub(1))?;
+                        inner.iter().find_map(|point| {
+                            let local = session.point_pos(*point)?;
+                            let screen = self.camera.project(plane.world(local), size)?;
+                            let near = gc_math::fm::hypot(screen[0] - at[0], screen[1] - at[1])
+                                <= gc_tools::tolerance::POINT_PX;
+                            near.then_some((*curve, *point))
+                        })
+                    })
+                });
+                radial::Set::sketch(session.sketch_is_spatial(), split)
             } else {
                 // What is under the cursor is selected, and decides the short menu.
                 let view = at.map(to_view);
@@ -441,7 +520,20 @@ impl Viewport {
                     if origin.is_some() { None } else { view.and_then(|p| self.pick_item(session, p, size)) };
                 self.origin_selected = origin;
                 session.select_item(item);
-                radial::Set::assembly(item, origin)
+                // The rigid or flexible subassembly the item sits in, for the Flexible command.
+                let unit = item
+                    .and_then(grip::component_of)
+                    .and_then(|any| session.pick_unit(gc_doc::Occurrence::Item(any)))
+                    .and_then(|key| match key {
+                        gc_doc::TreeKey::Subassembly(id) => session
+                            .doc()
+                            .subassemblies()
+                            .iter()
+                            .find(|s| s.id == id)
+                            .map(|s| (id, s.flexible)),
+                        gc_doc::TreeKey::Component(_) => None,
+                    });
+                radial::Set::assembly(item, origin, unit)
             };
             if let Some(at) = at {
                 self.marking.press(at, ui.input(|i| i.time));
@@ -1249,6 +1341,92 @@ impl Viewport {
         self.free_tool = None;
     }
 
+    /// The constraint the last Alt + drag asked for, once: the dragged component's geometry and the
+    /// geometry it was dropped on.
+    pub fn take_quick_constrain(&mut self) -> Option<(gc_doc::Selection, gc_doc::Selection)> {
+        self.quick_constrain.take()
+    }
+
+    /// Alt + drag: press on a face or cylinder with Alt held, drag onto another component's face or
+    /// cylinder, release to place the Mate (see [`altdrag`]). True while it runs.
+    fn alt_drag_step(
+        &mut self,
+        ui: &egui::Ui,
+        response: &egui::Response,
+        session: &mut Session,
+        size: [f64; 2],
+        to_view: &impl Fn(egui::Pos2) -> [f64; 2],
+    ) -> bool {
+        if self.alt_drag.is_none() {
+            // Alt is read when the button goes down: the drag starts a few frames later.
+            ui.input(|i| {
+                for event in &i.events {
+                    if let egui::Event::PointerButton {
+                        button: PointerButton::Primary,
+                        pressed: true,
+                        modifiers,
+                        ..
+                    } = event
+                    {
+                        self.alt_at_press = modifiers.alt || i.modifiers.alt;
+                    }
+                }
+            });
+            let alt = self.alt_at_press;
+            if alt
+                && response.drag_started_by(PointerButton::Primary)
+                && let Some(press) = ui.input(|i| i.pointer.press_origin()).map(to_view)
+                && let Some((item, feature)) = self.pick_feature(session, press, size)
+                && let Some(first) = altdrag::selection_of(item, &feature)
+            {
+                self.alt_drag = Some(altdrag::AltDrag { first, from: press, target: None });
+            }
+            return self.alt_drag.is_some();
+        }
+        let Some(mut drag) = self.alt_drag else { return false };
+        if ui.input(|i| i.key_pressed(Key::Escape)) {
+            self.alt_drag = None;
+            return true;
+        }
+        if let Some(at) = response.hover_pos().or_else(|| ui.input(|i| i.pointer.latest_pos())) {
+            let at = to_view(at);
+            drag.target = self
+                .pick_feature(session, at, size)
+                .and_then(|(item, feature)| altdrag::selection_of(item, &feature))
+                .filter(|second| altdrag::offers(session, &drag.first, second))
+                .map(|second| (second, at));
+            ui.ctx().request_repaint();
+        }
+        if response.drag_stopped_by(PointerButton::Primary) {
+            if let Some((second, _)) = drag.target {
+                self.quick_constrain = Some((drag.first, second));
+            }
+            self.alt_drag = None;
+            return true;
+        }
+        // The pull from the pressed geometry to the cursor, and the target it would be constrained to.
+        let painter = ui.painter_at(self.rect);
+        let origin = self.rect.min.to_vec2();
+        #[allow(clippy::cast_possible_truncation, reason = "screen coordinates fit f32")]
+        let pos = |p: [f64; 2]| egui::pos2(p[0] as f32, p[1] as f32) + origin;
+        let colour = if drag.target.is_some() {
+            egui::Color32::from_rgb(0x2e, 0x9e, 0x4f)
+        } else {
+            egui::Color32::from_rgb(0x88, 0x88, 0x88)
+        };
+        let stroke = egui::Stroke::new(1.6, colour);
+        let end = drag.target.map(|(_, at)| at).or_else(|| response.hover_pos().map(to_view));
+        if let Some(end) = end {
+            painter.line_segment([pos(drag.from), pos(end)], stroke);
+            painter.circle_stroke(pos(drag.from), 6.0, stroke);
+            if drag.target.is_some() {
+                painter.circle_stroke(pos(end), 9.0, stroke);
+            }
+        }
+        self.alt_drag = Some(drag);
+        true
+    }
+
     /// Starts Grip Snap: pick an edge, then two points.
     pub fn start_grip_snap(&mut self) {
         self.grip = Some(grip::Grip::new());
@@ -1316,11 +1494,7 @@ impl Viewport {
         {
             session.select_item(Some(item));
             grip.motion = grip::motions(&reference)[0];
-            let unit = match session.pick_unit(gc_doc::Occurrence::Item(any)) {
-                Some(gc_doc::TreeKey::Subassembly(id)) => Some(id),
-                _ => None,
-            };
-            grip.target = Some(grip::Target { item, any, reference, start, unit });
+            grip.target = Some(grip::Target { item, any, reference, start });
         }
         // The panel: what to pick next, move or rotate, the freedom report, and the ways to end.
         let mut end: Option<Option<bool>> = None;
@@ -1396,11 +1570,8 @@ impl Viewport {
                 if let (Some(target), Some(pose)) = (&grip.target, &grip.pose) {
                     // The preview goes first; the commit is one undo step.
                     grip::show(session, target, None);
-                    // A component of a subassembly takes the rest of it along.
-                    let moves = target
-                        .unit
-                        .and_then(|unit| session.subassembly_moved(unit, *pose * target.start.inverse()))
-                        .unwrap_or_else(|| vec![(target.any, *pose)]);
+                    // A component of a rigid subassembly takes the rest of it along.
+                    let moves = session.unit_moves(target.any, *pose);
                     session.grip_snap_commit(&moves, ground).ok();
                 }
                 self.grip = None;
@@ -1414,9 +1585,18 @@ impl Viewport {
         true
     }
 
+    /// Starts a paste (Ctrl+V): the copied components are pasted where the next click says, as one undo
+    /// step; Esc or a right click does nothing. False when nothing copied can be placed.
+    pub fn start_paste(&mut self, session: &Session) -> bool {
+        let Some(anchor) = place::clipboard_anchor(session) else { return false };
+        self.placing_paste = Some(place::PastePlacing { anchor });
+        self.free_tool = None;
+        true
+    }
+
     /// Whether a component hangs on the cursor.
     pub fn is_placing(&self) -> bool {
-        self.placing.is_some()
+        self.placing.is_some() || self.placing_paste.is_some()
     }
 
     /// Another copy of the component just set down, to hang on the cursor next. Only bodies are copied.
@@ -1453,6 +1633,9 @@ impl Viewport {
         };
         if session.hover_item(hovered) {
             ui.ctx().request_repaint();
+        }
+        if !on_handles && self.alt_drag_step(ui, response, session, size, &to_view) {
+            return;
         }
         // Free Move / Free Rotate: drag a component.
         if let Some(tool) = self.free_tool.filter(|_| !on_handles) {
@@ -1495,6 +1678,29 @@ impl Viewport {
             self.open_select_other(session, at, size, &to_view);
         }
         if self.grip_step(ui, response, session, size, &to_view, lang) {
+            return;
+        }
+        // Paste: a ring follows the cursor; a click pastes there (one undo step), Esc does nothing.
+        if let Some(paste) = self.placing_paste {
+            if ui.input(|i| i.key_pressed(egui::Key::Escape)) || response.secondary_clicked() {
+                self.placing_paste = None;
+                return;
+            }
+            if let Some(at) = response.hover_pos() {
+                let painter = ui.painter_at(self.rect);
+                painter.circle_stroke(at, 9.0, egui::Stroke::new(1.8, colors::ACCENT));
+                painter.circle_filled(at, 2.5, colors::ACCENT);
+                ui.ctx().request_repaint();
+            }
+            if response.clicked_by(PointerButton::Primary)
+                && let Some(at) = response.interact_pointer_pos()
+                && let Some(point) = place::ground_hit(&self.camera, size, to_view(at), paste.anchor)
+            {
+                let by = point - paste.anchor;
+                // A refusal is explained in the status bar.
+                drop(session.paste(gc_doc::Placement { xyz: by.to_array(), rpy: [0.0; 3] }));
+                self.placing_paste = None;
+            }
             return;
         }
         // Place Component: the component hangs on the cursor; a click sets it down and attaches a copy.
@@ -1674,6 +1880,23 @@ impl Viewport {
         if ctx.input(|i| i.key_pressed(Key::Escape)) {
             self.nav_tool = None;
             self.free_tool = None;
+        }
+        // F5 returns to the previous view, Shift + F5 goes to the next.
+        let time = ctx.input(|i| i.time);
+        self.views.follow(&self.camera, time);
+        let f5 = ctx.input(|i| {
+            i.events.iter().find_map(|event| match event {
+                egui::Event::Key { key: Key::F5, pressed: true, repeat: false, modifiers, .. } => {
+                    Some(modifiers.shift)
+                }
+                _ => None,
+            })
+        });
+        if let Some(shift) = f5
+            && let Some(camera) = self.views.step(!shift)
+        {
+            self.camera = camera;
+            ctx.request_repaint();
         }
         if ctx.input(|i| i.key_pressed(Key::F8)) {
             self.show_constraints = true;

@@ -4723,7 +4723,6 @@ fn a_rotational_joint_gets_angular_limits_from_its_dialog() {
     }
     harness.get_by_label("한계…").click();
     harness.run_steps(3);
-    harness.get_by_label("조인트 한계");
     harness.get_by_label("각도 한계").click();
     harness.run_steps(3);
     let input = egui::accesskit::Role::TextInput;
@@ -5002,4 +5001,564 @@ fn grip_snap_moves_the_whole_subassembly_of_the_picked_component() {
     let other = harness.state().session.doc().get(mate).unwrap().placement.xyz;
     assert!((other[1] - 0.5 - xyz[1]).abs() < 1e-9, "the rest of the unit went along: {other:?}");
     assert!(!harness.state().viewport().is_grip_snapping(), "Done ends the command");
+}
+
+/// F5 returns to the previous view, Shift + F5 goes to the next; S makes a sketch (Inventor 2026 help,
+/// Predefined Command Alias and Shortcut Reference, GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E).
+#[test]
+fn f5_walks_the_views_and_s_makes_a_sketch() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .with_step_dt(0.1)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.state_mut().viewport_mut().look(gc_draw::StandardView::Front);
+    harness.run_steps(8);
+    let front = harness.state().viewport().camera;
+    harness.state_mut().viewport_mut().look(gc_draw::StandardView::Right);
+    harness.run_steps(8);
+    let right = harness.state().viewport().camera;
+    assert_ne!(front, right);
+    harness.key_press(egui::Key::F5);
+    harness.run_steps(2);
+    assert_eq!(harness.state().viewport().camera, front, "back to the previous view");
+    harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::F5);
+    harness.run_steps(2);
+    assert_eq!(harness.state().viewport().camera, right, "and forward again");
+
+    assert!(harness.state().session.active_sketch().is_none());
+    harness.key_press(egui::Key::S);
+    harness.run_steps(3);
+    assert!(harness.state().session.active_sketch().is_some(), "S made a sketch on XY");
+}
+
+/// Tab demotes the selected component into a new subassembly, Shift + Tab promotes it again (Inventor 2026
+/// help, shortcut table GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E).
+#[test]
+fn tab_demotes_and_shift_tab_promotes_the_selected_component() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.05; 3] };
+    let app = harness.state_mut();
+    app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    let body = app.session.add_body(solid, gc_doc::Placement::default()).unwrap();
+    app.session.select_item(Some(gc_session::CellItem::Body(body)));
+    harness.run();
+    harness.key_press(egui::Key::Tab);
+    harness.run_steps(3);
+    harness.get_by_label("확인").click();
+    harness.run_steps(3);
+    let occurrence = gc_doc::Occurrence::Item(body.erase());
+    assert!(harness.state().session.doc().subassembly_of(occurrence).is_some(), "demoted");
+    harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Tab);
+    harness.run_steps(3);
+    assert!(harness.state().session.doc().subassembly_of(occurrence).is_none(), "promoted to the top");
+}
+
+/// Alt + drag from a face of a component onto a face of another places a Mate (Inventor 2026 help, To
+/// Place Mate or Flush Constraints in Assemblies, GUID-0F500089-4F69-41C5-AFE8-B58AC9E8E15E: "Hold down
+/// ALT, and then click the component to drag ... release the mouse to place the mate constraint").
+#[test]
+fn alt_drag_places_a_mate_between_two_faces() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.1; 3] };
+    let app = harness.state_mut();
+    app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    let free = gc_doc::Placement { xyz: [0.4, 0.0, 0.0], rpy: [0.0; 3] };
+    app.session.add_body(solid, free).unwrap();
+    app.fit_view();
+    app.viewport_mut().camera.pan([0.0, 0.0], [-250.0, 0.0], [1280.0, 700.0]);
+    harness.run();
+    let from = harness.state().viewport().screen_of(gc_math::DVec3::new(0.4, 0.0, 0.05)).unwrap();
+    let to = harness.state().viewport().screen_of(gc_math::DVec3::new(0.0, 0.0, 0.05)).unwrap();
+    let alt = egui::Modifiers::ALT;
+    harness.event(egui::Event::PointerMoved(from));
+    harness.run_steps(2);
+    harness.event(egui::Event::PointerButton {
+        pos: from,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: alt,
+    });
+    harness.run_steps(2);
+    for step in 1..=4 {
+        harness.event(egui::Event::PointerMoved(from + (to - from) * (step as f32 / 4.0)));
+        harness.run_steps(2);
+    }
+    assert_eq!(harness.state().session.relationships().len(), 0, "nothing until the release");
+    harness.event(egui::Event::PointerButton {
+        pos: to,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: alt,
+    });
+    harness.run_steps(3);
+    assert_eq!(harness.state().session.relationships().len(), 1, "the Mate was placed");
+}
+
+/// Ctrl+C then Ctrl+V pastes a copy of the selected body that hangs on the cursor; a click sets it down
+/// (shortcut table GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E).
+#[test]
+fn ctrl_c_and_ctrl_v_paste_a_copy_of_the_selected_body() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let app = harness.state_mut();
+    let body =
+        app.session.add_body(gc_doc::Solid::Box { size: [0.1; 3] }, gc_doc::Placement::default()).unwrap();
+    app.session.select_item(Some(gc_session::CellItem::Body(body)));
+    app.fit_view();
+    app.viewport_mut().camera.pan([0.0, 0.0], [-250.0, 0.0], [1280.0, 700.0]);
+    harness.run();
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::C);
+    harness.run_steps(2);
+    assert_eq!(harness.state().session.clipboard().len(), 1, "Ctrl+C remembered the component");
+    let bodies =
+        |h: &egui_kittest::Harness<'_, GraphCtrlApp>| h.state().session.doc().bodies().iter().count();
+    assert_eq!(bodies(&harness), 1);
+    // Ctrl+V makes the copy; Esc takes the paste back.
+    let over_view = egui::pos2(500.0, 400.0);
+    harness.event(egui::Event::PointerMoved(over_view));
+    harness.run_steps(2);
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::V);
+    harness.run_steps(3);
+    assert_eq!(bodies(&harness), 1, "nothing is made before the click");
+    assert!(harness.state().viewport().is_placing(), "the paste waits for its place");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(3);
+    assert_eq!(bodies(&harness), 1, "Esc pasted nothing");
+    assert!(!harness.state().viewport().is_placing());
+    // Pasted again, a click pastes where the cursor is: one undo step.
+    let depth = harness.state().session.history().undo_depth();
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::V);
+    harness.run_steps(3);
+    let target = egui::pos2(700.0, 500.0);
+    harness.event(egui::Event::PointerMoved(target));
+    harness.run_steps(3);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: target,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run_steps(3);
+    }
+    assert_eq!(bodies(&harness), 2);
+    assert!(!harness.state().viewport().is_placing(), "set down");
+    assert_eq!(harness.state().session.history().undo_depth(), depth + 1, "one undo step");
+    let moved =
+        harness.state().session.doc().bodies().iter().filter(|(_, b)| b.placement.xyz != [0.0; 3]).count();
+    assert_eq!(moved, 1, "the copy stands where it was set down");
+}
+
+/// F10 shows or hides the sketch (shortcut table GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E).
+#[test]
+fn f10_toggles_the_visibility_of_the_latest_sketch() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let sketch = harness.state_mut().session.create_sketch("XY").unwrap();
+    harness.state_mut().session.finish_sketch();
+    harness.run();
+    assert!(harness.state().session.is_visible(sketch.erase()));
+    harness.key_press(egui::Key::F10);
+    harness.run_steps(2);
+    assert!(!harness.state().session.is_visible(sketch.erase()), "hidden");
+    harness.key_press(egui::Key::F10);
+    harness.run_steps(2);
+    assert!(harness.state().session.is_visible(sketch.erase()), "shown again");
+}
+
+/// The Constrain dialog's More section: a name, Maximum / Minimum, Use Offset As Resting Position (Inventor
+/// 2026 help, GUID-0F500089-4F69-41C5-AFE8-B58AC9E8E15E).
+#[test]
+fn the_constrain_dialogs_more_section_sets_the_name_and_limits() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.05, 0.05, 0.05] };
+    let app = harness.state_mut();
+    let fixed = app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    let placement = gc_doc::Placement { xyz: [0.12, 0.0, 0.0], rpy: [0.0; 3] };
+    let moving = app.session.add_body(solid, placement).unwrap();
+    app.fit_view();
+    app.viewport_mut().camera.pan([0.0, 0.0], [-250.0, 0.0], [1280.0, 700.0]);
+    harness.run();
+
+    harness.get_by_label("조립").click();
+    harness.run();
+    harness.get_by_label("구속").click();
+    harness.run_steps(5);
+    let click = |harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, world: gc_math::DVec3| {
+        let at = harness.state().viewport().screen_of(world).unwrap();
+        harness.event(egui::Event::PointerMoved(at));
+        harness.run_steps(3);
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.run_steps(3);
+        }
+    };
+    // First the Z axis that moves, then the one that stays.
+    click(&mut harness, gc_math::DVec3::new(0.12, 0.0, 0.06));
+    harness.get_by_label_contains("첫 번째 선택: Body2:1 · 축");
+    click(&mut harness, gc_math::DVec3::new(0.0, 0.0, 0.06));
+    harness.get_by_label_contains("두 번째 선택: Body1:1 · 축");
+    harness.get_by_label("더 보기").click();
+    harness.run_steps(3);
+    let input = egui::accesskit::Role::TextInput;
+    harness.get_by_role_and_label(input, "이름").click();
+    harness.run_steps(2);
+    harness.get_by_role_and_label(input, "이름").type_text("Stop");
+    harness.get_by_role_and_label(egui::accesskit::Role::CheckBox, "최대").click();
+    harness.run_steps(2);
+    harness.get_by_role_and_label(input, "최대").click();
+    harness.run_steps(2);
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.get_by_role_and_label(input, "최대").type_text("10");
+    harness.run_steps(2);
+    harness.get_by_label("오프셋을 휴지 위치로").click();
+    harness.run_steps(2);
+    harness.get_by_label("확인").click();
+    harness.run();
+    let session = &harness.state().session;
+    let (_, relationship) = session.relationships().into_iter().next().expect("a constraint");
+    assert_eq!(relationship.name, "Stop");
+    let limits = relationship.limits.expect("limits");
+    assert!(limits.min.is_none() && limits.resting, "{limits:?}");
+    assert!((limits.max.unwrap() - 0.01).abs() < 1e-9, "{limits:?}");
+    let _ = (fixed, moving);
+}
+
+/// The Limits tab of the Joint dialog sets the limits of a joint as it is created (Inventor 2026 help,
+/// GUID-21DC3336-5C51-42C1-90FB-4299CD66E0C6).
+#[test]
+fn the_joint_dialogs_limits_tab_goes_with_a_new_rotational_joint() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.05, 0.05, 0.05] };
+    let app = harness.state_mut();
+    app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    let placement = gc_doc::Placement { xyz: [0.12, 0.0, 0.0], rpy: [0.0; 3] };
+    let moving = app.session.add_body(solid, placement).unwrap();
+    app.fit_view();
+    app.viewport_mut().camera.pan([0.0, 0.0], [-250.0, 0.0], [1280.0, 700.0]);
+    harness.run();
+
+    harness.get_by_label("조립").click();
+    harness.run();
+    harness.get_by_label("조인트").click();
+    harness.run_steps(5);
+    let click = |harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, world: gc_math::DVec3| {
+        let at = harness.state().viewport().screen_of(world).unwrap();
+        harness.event(egui::Event::PointerMoved(at));
+        harness.run_steps(3);
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.run_steps(3);
+        }
+    };
+    click(&mut harness, gc_math::DVec3::new(0.12, 0.0, 0.0));
+    harness.get_by_label_contains("첫 번째 원점: Body2:1");
+    click(&mut harness, gc_math::DVec3::new(0.0, 0.0, 0.0));
+    harness.get_by_label_contains("두 번째 원점: Body1:1");
+    harness.get_by_label("회전").click();
+    harness.run_steps(2);
+    harness.get_by_label("한계").click();
+    harness.run_steps(3);
+    harness.get_by_label("각도 한계").click();
+    harness.run_steps(2);
+    let input = egui::accesskit::Role::TextInput;
+    harness.get_by_role_and_label(input, "끝").click();
+    harness.run_steps(2);
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.get_by_role_and_label(input, "끝").type_text("90");
+    harness.run_steps(2);
+    harness.get_by_label("확인").click();
+    harness.run();
+    let session = &harness.state().session;
+    assert_eq!(session.relationships().len(), 1, "{:?}", session.last_error());
+    let (id, _) = session.relationships().into_iter().next().unwrap();
+    let (angular, linear) = session.joint_limits(id);
+    let range = angular.expect("angular limits came with the joint");
+    assert!(linear.is_none());
+    assert!((range.end - 90f64.to_radians()).abs() < 1e-9, "{range:?}");
+    let _ = moving;
+}
+
+/// A file with an unusable joint range opens; the status bar says what was dropped (Session::load_warnings).
+#[test]
+fn opening_a_file_with_a_damaged_joint_range_reports_the_warning() {
+    let mut s = gc_session::Session::new();
+    let frame = |z: f64, nz: f64| gc_doc::Geometry::Frame {
+        origin: [0.0, 0.0, z],
+        z: [0.0, 0.0, nz],
+        x: [1.0, 0.0, 0.0],
+    };
+    let sel = |id: gc_core::AnyId, geometry| gc_doc::Selection {
+        occurrence: gc_doc::Occurrence::Item(id),
+        geometry,
+    };
+    let table = s
+        .add_body(
+            gc_doc::Solid::Box { size: [2.0, 1.0, 1.0] },
+            gc_doc::Placement { xyz: [0.0, 0.0, 0.5], rpy: [0.0; 3] },
+        )
+        .unwrap();
+    let block = s
+        .add_body(
+            gc_doc::Solid::Box { size: [0.2; 3] },
+            gc_doc::Placement { xyz: [0.3, 0.2, 1.6], rpy: [0.0; 3] },
+        )
+        .unwrap();
+    let hinge = s
+        .add_relationship(gc_doc::Relationship::new(
+            "Hinge",
+            gc_doc::RelationKind::Rotational { flip: false },
+            sel(block.erase(), frame(-0.1, -1.0)),
+            sel(table.erase(), frame(0.5, 1.0)),
+        ))
+        .unwrap();
+    s.set_joint_limits(hinge, Some(gc_doc::JointRange { start: -0.123, end: 0.456, current: None }), None)
+        .unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("cell.gcp");
+    s.save_as(&path).unwrap();
+    // Start past End: the range cannot be used.
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("-0.123"), "the range is in the file");
+    std::fs::write(&path, text.replacen("-0.123", "9.0", 1)).unwrap();
+
+    let mut harness =
+        egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0).build_eframe(|cc| {
+            GraphCtrlApp::new(cc, RunOptions::default()).with_dialogs(Box::new(Scripted(path.clone())))
+        });
+    harness.run();
+    harness.get_by_label("파일").click();
+    harness.run();
+    harness.get_by_label("열기...").click();
+    harness.run_steps(5);
+    assert_eq!(harness.state().session.load_warnings().len(), 1);
+    harness.get_by_label_contains("열었지만 쓸 수 없는 데이터 1건을 버렸습니다");
+}
+
+/// Flexible (Inventor 2026 help, Create and edit flexible components,
+/// GUID-30817F08-A5C2-44B7-B237-4791ACA3F854): the browser menu of a subassembly has a Flexible check mark;
+/// a flexible subassembly's components are dragged one by one, a rigid one moves as a whole.
+#[test]
+fn flexible_subassemblies_are_dragged_component_by_component() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.1; 3] };
+    let app = harness.state_mut();
+    app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    let at = |x: f64, y: f64| gc_doc::Placement { xyz: [x, y, 0.0], rpy: [0.0; 3] };
+    let a = app.session.add_body(solid.clone(), at(0.3, 0.0)).unwrap();
+    let b = app.session.add_body(solid, at(0.3, 0.3)).unwrap();
+    let key =
+        |id: gc_core::Id<gc_doc::Body>| gc_doc::TreeKey::Component(gc_doc::Occurrence::Item(id.erase()));
+    app.session
+        .edit_subassemblies(gc_doc::SubassemblyOp::Demote {
+            members: vec![key(a), key(b)],
+            name: "Unit".into(),
+        })
+        .unwrap();
+    app.fit_view();
+    app.viewport_mut().camera.pan([0.0, 0.0], [-250.0, 0.0], [1280.0, 700.0]);
+    app.viewport_mut().free_tool = Some(gc_viewport::FreeTool::Move);
+    harness.run();
+    // The browser menu of the subassembly: the Flexible check mark.
+    let row = harness.get_by_label("Unit").rect().center();
+    harness.event(egui::Event::PointerMoved(row));
+    harness.run();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: row,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run();
+    }
+    harness.get_by_label("유연").click();
+    harness.run_steps(3);
+    let unit = harness.state().session.doc().subassemblies().first().map(|s| (s.id, s.flexible)).unwrap();
+    assert!(unit.1, "Flexible is on");
+    // Dragging one component now leaves the other where it is.
+    let xyz = |h: &egui_kittest::Harness<'_, GraphCtrlApp>, id: gc_core::Id<gc_doc::Body>| {
+        h.state().session.doc().get(id).unwrap().placement.xyz
+    };
+    let b0 = xyz(&harness, b);
+    let from = harness.state().viewport().screen_of(gc_math::DVec3::new(0.3, 0.0, 0.05)).unwrap();
+    harness.event(egui::Event::PointerMoved(from));
+    harness.run_steps(2);
+    harness.event(egui::Event::PointerButton {
+        pos: from,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run_steps(2);
+    for step in 1..=4 {
+        harness.event(egui::Event::PointerMoved(from + egui::vec2(15.0 * step as f32, 0.0)));
+        harness.run_steps(2);
+    }
+    harness.event(egui::Event::PointerButton {
+        pos: from + egui::vec2(60.0, 0.0),
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run_steps(3);
+    assert!(xyz(&harness, a)[0] > 0.31, "the dragged one moved: {:?}", xyz(&harness, a));
+    assert_eq!(xyz(&harness, b), b0, "the other stayed: a flexible subassembly is not one unit");
+}
+
+/// The browser's component menu has Enabled and Grounded check marks, a grounded component shows a pin, and
+/// Find lists only the rows that match (Inventor 2026 help, Working with the Assembly Browser,
+/// GUID-5F975252-BDB4-488C-A2C5-8B15C7D3C641; Assembly Browser Reference, GUID-CB6B1637-71AD-4753-8CC9-19559BFEE3A5).
+#[test]
+fn the_browser_menu_enables_and_grounds_components_and_find_filters_the_rows() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.05; 3] };
+    let app = harness.state_mut();
+    app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    let second =
+        app.session.add_body(solid, gc_doc::Placement { xyz: [0.2, 0.0, 0.0], rpy: [0.0; 3] }).unwrap();
+    harness.run();
+    let occurrence = gc_doc::Occurrence::Item(second.erase());
+    let flag = |h: &egui_kittest::Harness<'_, GraphCtrlApp>, f| {
+        h.state().session.doc().component_flag(occurrence, f)
+    };
+    let right_click = |h: &mut egui_kittest::Harness<'_, GraphCtrlApp>, label: &str| {
+        let at = h.get_by_label(label).rect().center();
+        h.event(egui::Event::PointerMoved(at));
+        h.run();
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Secondary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            h.run();
+        }
+    };
+    assert!(!flag(&harness, gc_doc::ComponentFlag::Grounded));
+    right_click(&mut harness, "Body2:1");
+    harness.get_by_label("접지").click();
+    harness.run_steps(3);
+    assert!(flag(&harness, gc_doc::ComponentFlag::Grounded), "grounded from the menu");
+    if gpu {
+        let image = harness.render().unwrap();
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        image.save(out.join("review-63-browser-pin.png")).unwrap();
+    }
+    right_click(&mut harness, "Body2:1");
+    harness.get_by_label("활성").click();
+    harness.run_steps(3);
+    assert!(!flag(&harness, gc_doc::ComponentFlag::Enabled), "disabled from the menu");
+
+    // Find: only the matching row stays.
+    let find = harness.get_by_role_and_label(egui::accesskit::Role::TextInput, "찾기");
+    find.click();
+    harness.run_steps(2);
+    harness.get_by_role_and_label(egui::accesskit::Role::TextInput, "찾기").type_text("body2");
+    harness.run_steps(3);
+    harness.get_by_label("Body2:1");
+    assert!(harness.query_all_by_label("Body1:1").next().is_none(), "Body1 is filtered out");
+}
+
+/// The browser menu: Display Preferences (Hide Work Features hides the Origin folders) and Edit Values in
+/// Browser (a selected constraint shows an edit box for its value), Inventor 2026 help, Working with the
+/// Assembly Browser, GUID-5F975252-BDB4-488C-A2C5-8B15C7D3C641.
+#[test]
+fn the_browser_menu_hides_work_features_and_edits_a_constraint_value_in_place() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.05; 3] };
+    let app = harness.state_mut();
+    let fixed = app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    let moving =
+        app.session.add_body(solid, gc_doc::Placement { xyz: [0.0, 0.0, 0.2], rpy: [0.0; 3] }).unwrap();
+    let plane = gc_doc::Geometry::origin(gc_doc::OriginElement::Plane(gc_doc::OriginPlane::Xy));
+    let select = |body: gc_core::Id<gc_doc::Body>| gc_doc::Selection {
+        occurrence: gc_doc::Occurrence::Item(body.erase()),
+        geometry: plane,
+    };
+    let id = app
+        .session
+        .add_relationship(gc_doc::Relationship::new(
+            "Mate:1",
+            gc_doc::RelationKind::Mate { offset: 0.01, sense: gc_doc::AxisSense::Opposed },
+            select(moving),
+            select(fixed),
+        ))
+        .unwrap();
+    harness.run();
+    let origins = |h: &egui_kittest::Harness<'_, GraphCtrlApp>| h.query_all_by_label("원점").count();
+    assert!(origins(&harness) >= 1, "the Origin folders are listed");
+    harness.get_by_label("브라우저 메뉴").click();
+    harness.run_steps(3);
+    harness.get_by_label("작업 피처 숨기기").click();
+    harness.run_steps(3);
+    assert_eq!(origins(&harness), 0, "Hide Work Features hides the Origin folders");
+    harness.get_by_label("브라우저 메뉴").click();
+    harness.run_steps(3);
+    harness.get_by_label("작업 피처 숨기기").click();
+    harness.run_steps(3);
+    assert!(origins(&harness) >= 1, "and shows them again");
+
+    // Edit Values in Browser: select the constraint, type a value, Enter.
+    harness.get_by_label("Mate:1").click();
+    harness.run_steps(3);
+    let input = egui::accesskit::Role::TextInput;
+    let field = harness.get_by_role_and_label(input, "관계 값");
+    field.click();
+    harness.run_steps(2);
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.get_by_role_and_label(input, "관계 값").type_text("25");
+    harness.key_press(egui::Key::Enter);
+    harness.run_steps(3);
+    let kind = harness.state().session.doc().get(id).unwrap().kind;
+    let gc_doc::RelationKind::Mate { offset, .. } = kind else { panic!("{kind:?}") };
+    assert!((offset - 0.025).abs() < 1e-9, "the offset was typed in the browser: {offset}");
 }

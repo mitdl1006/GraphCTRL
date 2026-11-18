@@ -266,6 +266,7 @@ messages! {
     /// Button: recover the automatic save.
     BtnRecover => ("복구", "Recover"),
     /// Notice after recovering. `{0}` is the project, or empty for a new one.
+    FileWarnings => ("열었지만 쓸 수 없는 데이터 {0}건을 버렸습니다: {1}", "Opened, but {0} unusable item(s) were dropped: {1}"),
     FileRecovered => ("복구했습니다. 저장해야 남습니다. {0}", "Recovered. Save it to keep it. {0}"),
     /// Button: do not save.
     BtnDiscard => ("저장 안 함", "Don't Save"),
@@ -573,6 +574,11 @@ messages! {
     /// Constrain dialog: Predict Offset and Orientation.
     ConstrainPredict => ("오프셋 및 방향 예측", "Predict offset and orientation"),
     /// Constrain dialog: the first selection.
+    ConstrainMore => ("더 보기", "More"),
+    ConstrainName => ("이름", "Name"),
+    ConstrainMax => ("최대", "Maximum"),
+    ConstrainMin => ("최소", "Minimum"),
+    ConstrainResting => ("오프셋을 휴지 위치로", "Use Offset As Resting Position"),
     ConstrainFirst => ("첫 번째 선택", "First selection"),
     /// Constrain dialog: the second selection.
     ConstrainSecond => ("두 번째 선택", "Second selection"),
@@ -682,6 +688,15 @@ messages! {
     CmdRename => ("이름 바꾸기", "Rename"),
     /// Browser menu: suppress an item (kept, not computed).
     CmdSuppress => ("억제", "Suppress"),
+    CmdEnabled => ("활성", "Enabled"),
+    BrowserMenu => ("브라우저 메뉴", "Browser menu"),
+    BrowserHideWork => ("작업 피처 숨기기", "Hide Work Features"),
+    BrowserHideConstrained => ("완전 구속 숨기기", "Hide Fully Constrained"),
+    BrowserShowState => ("구속 상태 표시", "Show Constraint State"),
+    BrowserEditValues => ("브라우저에서 값 편집", "Edit Values in Browser"),
+    BrowserRelationValue => ("관계 값", "Relationship value"),
+    BrowserFind => ("찾기", "Find"),
+    BrowserFindHint => ("이름으로 찾기", "Find by name"),
     /// Browser menu: bring a suppressed item back.
     CmdUnsuppress => ("억제 해제", "Unsuppress"),
     /// Status bar: the name is taken by another item of the same kind.
@@ -890,6 +905,8 @@ messages! {
     CmdMoveInto => ("서브어셈블리로 이동", "Move into subassembly"),
     /// Browser, right-click a subassembly: dissolve it; its contents go up one level.
     CmdDissolve => ("해체", "Dissolve"),
+    CmdSplitSpline => ("스플라인 분할", "Split Spline"),
+    CmdFlexible => ("유연", "Flexible"),
     /// Assemble tab, Edit group: the group's title.
     GroupEdit => ("편집", "Edit"),
     /// Assemble tab: back to the previous edit target.
@@ -901,12 +918,14 @@ messages! {
     /// Browser, right-click a joint: refuse relationships that take its freedom away.
     JointProtectItem => ("보호", "Protect"),
     JointLimitsItem => ("한계…", "Limits…"),
-    JointLimitsTitle => ("조인트 한계", "Joint Limits"),
     LimitAngular => ("각도 한계", "Angular limits"),
     LimitLinear => ("선형 한계", "Linear limits"),
     LimitStart => ("시작", "Start"),
     LimitCurrent => ("현재", "Current"),
     LimitEnd => ("끝", "End"),
+    LimitNone => ("한계를 쓸 수 있는 조인트가 아닙니다 (고정 조인트이거나 아직 원점을 고르지 않았습니다)", "No limits here (a rigid joint, or the origins are not picked yet)"),
+    JointTabPlacement => ("조인트", "Joint"),
+    JointTabLimits => ("한계", "Limits"),
     LimitNow => ("현재 위치: {0}", "Now at {0}"),
     /// Assemble tab: the Assemble command (pick geometry, the geometry decides the constraint types).
     AssembleTitle => ("어셈블", "Assemble"),
