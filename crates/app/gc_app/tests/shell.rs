@@ -5132,12 +5132,14 @@ fn ctrl_c_and_ctrl_v_paste_a_copy_of_the_selected_body() {
     harness.run_steps(2);
     harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::V);
     harness.run_steps(3);
-    assert_eq!(bodies(&harness), 2, "a copy was made");
-    assert!(harness.state().viewport().is_placing(), "it hangs on the cursor");
+    assert_eq!(bodies(&harness), 1, "nothing is made before the click");
+    assert!(harness.state().viewport().is_placing(), "the paste waits for its place");
     harness.key_press(egui::Key::Escape);
     harness.run_steps(3);
-    assert_eq!(bodies(&harness), 1, "Esc took the paste back");
-    // Pasted again, a click sets the copy down where the cursor is.
+    assert_eq!(bodies(&harness), 1, "Esc pasted nothing");
+    assert!(!harness.state().viewport().is_placing());
+    // Pasted again, a click pastes where the cursor is: one undo step.
+    let depth = harness.state().session.history().undo_depth();
     harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::V);
     harness.run_steps(3);
     let target = egui::pos2(700.0, 500.0);
@@ -5154,6 +5156,7 @@ fn ctrl_c_and_ctrl_v_paste_a_copy_of_the_selected_body() {
     }
     assert_eq!(bodies(&harness), 2);
     assert!(!harness.state().viewport().is_placing(), "set down");
+    assert_eq!(harness.state().session.history().undo_depth(), depth + 1, "one undo step");
     let moved =
         harness.state().session.doc().bodies().iter().filter(|(_, b)| b.placement.xyz != [0.0; 3]).count();
     assert_eq!(moved, 1, "the copy stands where it was set down");
