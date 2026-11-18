@@ -12,6 +12,13 @@ use gc_ui::panel::{TreeRow, tree_row};
 
 use crate::BrowserAction;
 
+/// Something the work editors ask the application to do: it needs the file dialogs or the clipboard.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WorkRequest {
+    /// Show a task as a URScript program for a robot (and offer to save it).
+    UrScript(Id<Task>, Id<gc_doc::Robot>),
+}
+
 /// What is selected in the work node.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WorkItem {
@@ -318,15 +325,22 @@ fn location_options(session: &Session, lang: Lang) -> Vec<(gc_doc::Location, Str
 
 /// The properties of what is selected in the work node: a task (location, condition, steps, effects, robots,
 /// priority), an object type (its states), an object (type, place, state) or a variable (its kind and value).
-pub fn work_properties(ui: &mut Ui, session: &mut Session, lang: Lang, state: &WorkUi) {
+pub fn work_properties(
+    ui: &mut Ui,
+    session: &mut Session,
+    lang: Lang,
+    state: &WorkUi,
+) -> Option<WorkRequest> {
+    let mut request = None;
     match state.selected {
-        Some(WorkItem::Task(id)) => task_properties(ui, session, lang, id),
+        Some(WorkItem::Task(id)) => request = task_properties(ui, session, lang, id),
         Some(WorkItem::Type(id)) => type_properties(ui, session, lang, id),
         Some(WorkItem::Object(id)) => object_properties(ui, session, lang, id),
         Some(WorkItem::Var(id)) => var_properties(ui, session, lang, id),
         Some(WorkItem::Kit(id)) => kit_properties(ui, session, lang, id),
         None => {}
     }
+    request
 }
 
 fn type_properties(ui: &mut Ui, session: &mut Session, lang: Lang, id: Id<ObjectType>) {
@@ -499,6 +513,33 @@ fn var_properties(ui: &mut Ui, session: &mut Session, lang: Lang, id: Id<StateVa
     }
 }
 
+/// The box for a number an effect gives a numeric variable: a number or an expression over the numeric variables
+/// (`count + 1`), checked as it is typed (what is wrong and where, under the box). `Some(text)` when a valid text
+/// was left.
+fn number_box(ui: &mut Ui, session: &Session, key: egui::Id, current: &str, width: f32) -> Option<String> {
+    let doc = session.doc();
+    let lookup = |name: &str| {
+        doc.state_vars().iter().find(|(_, v)| v.name == name).and_then(|(_, v)| match v.value {
+            StateValue::Int(i) =>
+            {
+                #[allow(clippy::cast_precision_loss, reason = "counts, far below 2^53")]
+                Some(i as f64)
+            }
+            StateValue::Real(x) => Some(x),
+            _ => None,
+        })
+    };
+    let (_, done) = committed_text(ui, key, current, width);
+    let typed =
+        ui.data(|d| d.get_temp::<(String, String)>(key)).map_or_else(|| current.to_owned(), |(_, t)| t);
+    if let Err(gc_doc::EditError::Expr { message, start, end }) = gc_doc::effect_number(&typed, &lookup) {
+        let shown: String = typed.get(start..end).unwrap_or("").to_owned();
+        ui.colored_label(gc_ui::colors::ERROR, format!("{message} «{shown}»"));
+        return None;
+    }
+    done
+}
+
 /// A condition box: the text, and below it what is wrong and where (a squiggle of words, not a dialog).
 /// `Some(text)` when a valid text (or none) was left.
 fn condition_box(
@@ -522,9 +563,10 @@ fn condition_box(
     done
 }
 
-fn task_properties(ui: &mut Ui, session: &mut Session, lang: Lang, id: Id<Task>) {
+fn task_properties(ui: &mut Ui, session: &mut Session, lang: Lang, id: Id<Task>) -> Option<WorkRequest> {
     use gc_doc::{Effect, EffectTarget, MoveTarget, RobotChoice, Step};
-    let Some(task) = session.doc().get(id).cloned() else { return };
+    let mut request = None;
+    let task = session.doc().get(id).cloned()?;
     gc_ui::panel::header(ui, &task.name);
     let mut next = task.clone();
     let mut changed = false;
@@ -572,7 +614,14 @@ fn task_properties(ui: &mut Ui, session: &mut Session, lang: Lang, id: Id<Task>)
     // With kinds of tool defined, signals and actions are chosen from theirs (the names are text otherwise).
     let mut out_names: Vec<(String, String)> = Vec::new();
     let mut action_names: Vec<(String, String)> = Vec::new();
+    // What a wait can be for: the tools' input signals and the signals tasks of the cell set.
+    let mut in_names: Vec<(String, String)> = Vec::new();
     for (_, kit) in session.doc().tool_kits().iter() {
+        for signal in kit.signals.iter().filter(|s| s.direction == gc_doc::IoDirection::In) {
+            if !in_names.iter().any(|(n, _)| *n == signal.name) {
+                in_names.push((signal.name.clone(), signal.name.clone()));
+            }
+        }
         for signal in kit.signals.iter().filter(|s| s.direction == gc_doc::IoDirection::Out) {
             if !out_names.iter().any(|(n, _)| *n == signal.name) {
                 out_names.push((signal.name.clone(), signal.name.clone()));
@@ -629,11 +678,36 @@ fn task_properties(ui: &mut Ui, session: &mut Session, lang: Lang, id: Id<Task>)
                 }
                 Step::WaitIo { condition, timeout } => {
                     ui.label(tr!(lang, WorkWaitIo));
-                    let key = egui::Id::unique("gc_task_wait_io").with((id, index));
-                    let current = condition.clone();
-                    if let (_, Some(text)) = committed_text(ui, key, &current, 100.0) {
-                        *condition = text;
-                        changed = true;
+                    match (in_names.is_empty(), gc_doc::signal_condition(condition)) {
+                        // Signals are known (tools define them, or tasks set them): a signal and its value.
+                        (false, parsed) => {
+                            let (mut name, mut on) = parsed.unwrap_or_else(|| (in_names[0].0.clone(), true));
+                            let mut options = in_names.clone();
+                            if !options.iter().any(|(n, _)| *n == name) {
+                                options.push((name.clone(), name.clone()));
+                            }
+                            let mut edited =
+                                choice(ui, ("gc_task_wait_signal", id, index), &mut name, &options);
+                            let values = [
+                                (true, tr!(lang, WorkSignalOn).to_owned()),
+                                (false, tr!(lang, WorkSignalOff).to_owned()),
+                            ];
+                            edited |= choice(ui, ("gc_task_wait_value", id, index), &mut on, &values);
+                            if edited {
+                                let plain = name.chars().all(|c| c.is_alphanumeric() || c == '_');
+                                let shown = if plain { name } else { format!("\"{name}\"") };
+                                *condition = format!("{shown} == {on}");
+                                changed = true;
+                            }
+                        }
+                        (true, _) => {
+                            let key = egui::Id::unique("gc_task_wait_io").with((id, index));
+                            let current = condition.clone();
+                            if let (_, Some(text)) = committed_text(ui, key, &current, 100.0) {
+                                *condition = text;
+                                changed = true;
+                            }
+                        }
                     }
                     let r = ui.add(egui::DragValue::new(timeout).speed(0.1).range(0.0..=3600.0).suffix(" s"));
                     changed |= r.drag_stopped() || (r.lost_focus() && r.changed());
@@ -733,7 +807,15 @@ fn task_properties(ui: &mut Ui, session: &mut Session, lang: Lang, id: Id<Task>)
             ui.label("=");
             let key = egui::Id::unique("gc_task_effect_value").with((id, index));
             let current = next.effects[index].value.clone();
-            if let (_, Some(text)) = committed_text(ui, key, &current, 90.0) {
+            // A numeric variable takes an expression (checked as it is typed), the rest a plain value.
+            let numeric = matches!(next.effects[index].target, EffectTarget::Var(v)
+                if matches!(session.doc().get(v).map(|var| &var.value), Some(StateValue::Int(_) | StateValue::Real(_))));
+            let done = if numeric {
+                ui.vertical(|ui| number_box(ui, session, key, &current, 90.0)).inner
+            } else {
+                committed_text(ui, key, &current, 90.0).1
+            };
+            if let Some(text) = done {
                 next.effects[index].value = text;
                 changed = true;
             }
@@ -814,34 +896,62 @@ fn task_properties(ui: &mut Ui, session: &mut Session, lang: Lang, id: Id<Task>)
     }
     // Which robot would do it and how long it takes: planned when asked (the planning is not instant, so it
     // is not done every frame).
-    let key = egui::Id::unique("gc_task_candidates").with(id);
     if ui.button(tr!(lang, WorkCandidates)).clicked() {
-        let table: Vec<(String, Result<f64, String>)> = session
-            .task_candidates(id)
-            .into_iter()
-            .map(|c| {
-                (
-                    session.doc().get(c.robot).map_or_else(String::new, |r: &gc_doc::Robot| r.name.clone()),
-                    c.time,
-                )
-            })
-            .collect();
-        ui.data_mut(|d| d.insert_temp(key, table));
+        session.request_task_candidates(id);
     }
-    if let Some(table) = ui.data(|d| d.get_temp::<Vec<(String, Result<f64, String>)>>(key)) {
-        if table.is_empty() {
+    if session.task_candidates_pending() == Some(id) {
+        ui.weak(tr!(lang, WorkCandidatesPending));
+        ui.ctx().request_repaint();
+    }
+    if let Some((candidates, current)) = session.task_candidates_result(id) {
+        if candidates.is_empty() {
             ui.weak(tr!(lang, WorkNoCandidates));
         }
+        if !current {
+            ui.colored_label(gc_ui::colors::ERROR, tr!(lang, WorkCandidatesStale));
+        }
         egui::Grid::new(("gc_task_candidates_grid", id)).num_columns(2).spacing([12.0, 3.0]).show(ui, |ui| {
-            for (robot, time) in &table {
-                ui.label(robot);
-                match time {
+            for c in candidates {
+                ui.label(
+                    session.doc().get(c.robot).map_or_else(String::new, |r: &gc_doc::Robot| r.name.clone()),
+                );
+                match &c.time {
                     Ok(seconds) => ui.label(format!("{seconds:.1} s")),
                     Err(why) => ui.colored_label(gc_ui::colors::ERROR, why),
                 };
                 ui.end_row();
             }
         });
+    }
+    // How often the task is done: once, as often as its condition comes to hold, or up to n times.
+    {
+        let repeat = session.doc().task_repeat(id);
+        let mode = match repeat {
+            None => 0,
+            Some(0) => 1,
+            Some(_) => 2,
+        };
+        let mut chosen = mode;
+        let mut times = repeat.filter(|t| *t > 0).unwrap_or(2);
+        let mut commit = false;
+        ui.horizontal(|ui| {
+            ui.label(tr!(lang, WorkRepeat));
+            ui.radio_value(&mut chosen, 0, tr!(lang, WorkRepeatOnce));
+            ui.radio_value(&mut chosen, 1, tr!(lang, WorkRepeatWhenever));
+            ui.radio_value(&mut chosen, 2, tr!(lang, WorkRepeatTimes));
+            if chosen == 2 {
+                let r = ui.add(egui::DragValue::new(&mut times).range(1..=1000).suffix("×"));
+                commit |= r.drag_stopped() || (r.lost_focus() && r.changed());
+            }
+        });
+        if chosen != mode || commit {
+            let times = match chosen {
+                0 => None,
+                1 => Some(0),
+                _ => Some(times),
+            };
+            drop(session.edit_work(WorkOp::SetTaskRepeat { task: id, times }));
+        }
     }
     ui.horizontal(|ui| {
         ui.label(tr!(lang, WorkPriority));
@@ -852,6 +962,19 @@ fn task_properties(ui: &mut Ui, session: &mut Session, lang: Lang, id: Id<Task>)
         // A refusal (a condition that does not read, a name taken) shows in the status bar.
         drop(session.edit_work(WorkOp::SetTask { id, task: next }));
     }
+    // The task as a URScript program for one of the robots that may do it.
+    gc_ui::panel::section(ui, tr!(lang, UrScriptTitle));
+    let robots = session.task_robots(id);
+    if robots.is_empty() {
+        ui.weak(tr!(lang, WorkNoCandidates));
+    }
+    for robot in robots {
+        let name = session.doc().get(robot).map_or_else(String::new, |r: &gc_doc::Robot| r.name.clone());
+        if ui.button(tr!(lang, UrScriptExportFor, name)).clicked() {
+            request = Some(WorkRequest::UrScript(id, robot));
+        }
+    }
+    request
 }
 
 /// The editor of a kind of tool: its signals (name, direction, pin), its states and its actions.
@@ -1073,6 +1196,19 @@ fn kit_properties(ui: &mut Ui, session: &mut Session, lang: Lang, id: Id<gc_doc:
 /// The tool kind fitted to a robot: a list to choose from, and the state it starts in. A refusal shows in
 /// the status bar.
 pub fn robot_tool_kit(ui: &mut Ui, session: &mut Session, lang: Lang, robot: Id<gc_doc::Robot>) {
+    // Where the robot waits to be out of the way of the others: set from where it stands now, or cleared.
+    ui.horizontal(|ui| {
+        let has_park = session.doc().robot_park(robot) != session.doc().get(robot).map(|r| r.joints.clone());
+        ui.label(if has_park { tr!(lang, WorkParkSet) } else { tr!(lang, WorkParkNone) });
+        if ui.button(tr!(lang, WorkParkHere)).clicked()
+            && let Some(joints) = session.robot_joints(robot)
+        {
+            drop(session.edit_work(WorkOp::SetRobotPark { robot, joints: Some(joints) }));
+        }
+        if ui.add_enabled(has_park, egui::Button::new(tr!(lang, WorkParkClear))).clicked() {
+            drop(session.edit_work(WorkOp::SetRobotPark { robot, joints: None }));
+        }
+    });
     let fitted = session.robot_tool_kit(robot);
     // Nothing to choose from while no kind of tool is defined.
     if fitted.is_none() && session.doc().tool_kits().iter().next().is_none() {

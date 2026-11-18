@@ -20,8 +20,8 @@ use gc_ui::panel::TreeRow;
 pub use cell::{CellUi, cell, problem_text, status_text};
 pub use pose::{PoseCalc, RotationInput, pose_calculator};
 pub use role::role_properties;
-pub use schedule::{ScheduleUi, schedule_panel};
-pub use work::{WorkItem, WorkUi, robot_tool_kit, work_browser, work_properties};
+pub use schedule::{ScheduleRequest, ScheduleUi, schedule_panel};
+pub use work::{WorkItem, WorkRequest, WorkUi, robot_tool_kit, work_browser, work_properties};
 
 /// What the user asked for in the browser.
 #[derive(Clone, Debug, PartialEq)]
@@ -57,6 +57,14 @@ pub enum BrowserAction {
     JointLimits(gc_core::Id<gc_doc::Relationship>),
     /// Edit a work feature (double-click, or its menu).
     EditWorkFeature(Id<gc_doc::WorkFeature>),
+    /// Ground and Root: move these components to the assembly origin, aligned, and ground them.
+    GroundAtOrigin(Vec<gc_core::AnyId>),
+    /// Place at Component Origin: a new component (the app asks for its file) on this component's origin.
+    PlaceAtOrigin(gc_doc::Occurrence),
+    /// Copy these rows to the clipboard (the row menu's Copy; the marked rows go together).
+    Copy(Vec<gc_doc::TreeKey>),
+    /// Paste what was copied (the app waits for the click that gives its place).
+    Paste,
     /// Edit a component or subassembly in place (double-click in the browser).
     EditComponent(gc_doc::TreeKey),
     /// Demote, move, dissolve or rename subassemblies.
@@ -123,6 +131,10 @@ pub struct ParamsUi {
     pub work: work::WorkUi,
     /// The rows marked with Ctrl+click (for moving several into a folder or subassembly at once).
     pub marked: Vec<gc_doc::TreeKey>,
+    /// The component rows in the order they were drawn last frame, and the row a Shift+click extends from.
+    pub row_order: Vec<gc_doc::TreeKey>,
+    drawn_rows: Vec<gc_doc::TreeKey>,
+    anchor: Option<gc_doc::TreeKey>,
     /// The sketch role selected in the browser.
     pub role: Option<Id<gc_doc::SketchRole>>,
     /// The relationship selected in the browser, the value typed for it and which one that was loaded for.
@@ -513,7 +525,9 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
                 });
             }
             let rows = session.component_tree();
+            state.drawn_rows.clear();
             component_rows(ui, session, lang, state, selected, &mut action, &rows, None);
+            state.row_order = std::mem::take(&mut state.drawn_rows);
         });
     egui::CollapsingHeader::new(tr!(lang, BrowserSketches)).default_open(true).show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = 1.0;
@@ -936,6 +950,24 @@ fn folder_menu(
 }
 
 #[allow(clippy::too_many_arguments, reason = "the browser's shared state")]
+/// Copy and Paste in a row's menu (Paste is offered once something was copied).
+fn copy_paste_items(
+    ui: &mut Ui,
+    session: &Session,
+    lang: Lang,
+    action: &mut Option<BrowserAction>,
+    keys: Vec<gc_doc::TreeKey>,
+) {
+    if ui.button(tr!(lang, CmdCopy)).clicked() {
+        *action = Some(BrowserAction::Copy(keys));
+        ui.close();
+    }
+    if ui.add_enabled(!session.clipboard().is_empty(), egui::Button::new(tr!(lang, CmdPaste))).clicked() {
+        *action = Some(BrowserAction::Paste);
+        ui.close();
+    }
+}
+
 fn component_rows_in(
     ui: &mut Ui,
     session: &Session,
@@ -1032,6 +1064,7 @@ fn component_rows_in(
                         *action = Some(BrowserAction::EditComponent(row.key));
                         ui.close();
                     }
+                    copy_paste_items(ui, session, lang, action, vec![row.key]);
                     // Flexible (Inventor 2026 help, Create and edit flexible components,
                     // GUID-30817F08-A5C2-44B7-B237-4791ACA3F854): the freedom inside is available in the
                     // parent; the check mark is cleared to make it rigid again.
@@ -1550,11 +1583,26 @@ fn node_row(
     if groundable {
         // Ctrl+click marks rows to move together; a drag takes the marked rows, or this one.
         let key = gc_doc::TreeKey::Component(occurrence);
-        if result.row.clicked() && ui.input(|i| i.modifiers.command || i.modifiers.ctrl) {
-            if let Some(at) = state.marked.iter().position(|k| *k == key) {
-                state.marked.remove(at);
+        state.drawn_rows.push(key);
+        if result.row.clicked() {
+            let (ctrl, shift) = ui.input(|i| (i.modifiers.command || i.modifiers.ctrl, i.modifiers.shift));
+            if shift {
+                // Shift+click marks every row from the last clicked one to this one.
+                let from = state.anchor.and_then(|a| state.row_order.iter().position(|k| *k == a));
+                let to = state.row_order.iter().position(|k| *k == key);
+                if let (Some(from), Some(to)) = (from, to) {
+                    let (low, high) = (from.min(to), from.max(to));
+                    state.marked = state.row_order[low..=high].to_vec();
+                }
+            } else if ctrl {
+                if let Some(at) = state.marked.iter().position(|k| *k == key) {
+                    state.marked.remove(at);
+                } else {
+                    state.marked.push(key);
+                }
+                state.anchor = Some(key);
             } else {
-                state.marked.push(key);
+                state.anchor = Some(key);
             }
         }
         let payload: Vec<gc_doc::TreeKey> =
@@ -1564,7 +1612,12 @@ fn node_row(
     if result.row.hovered() && matches!(node.any.kind, gc_core::Kind::Body | gc_core::Kind::RobotInstance) {
         state.hovered = Some(node.any);
     }
-    if result.row.clicked() && node.selected && !result.row.double_clicked() && !renaming {
+    // F2 renames the selected node (Keyboard Shortcut Reference, GUID-DEEB0723-DFC7-4B28-95F4-099CC1E1EBF8).
+    let f2 = node.selected
+        && !renaming
+        && name_of(session, node.any).is_some()
+        && ui.input(|i| i.key_pressed(egui::Key::F2));
+    if f2 || (result.row.clicked() && node.selected && !result.row.double_clicked() && !renaming) {
         // A second click on the selected node edits its name.
         state.rename = Some((node.any, node.name.to_owned()));
         state.rename_fresh = true;
@@ -1615,6 +1668,32 @@ fn node_row(
         if groundable && ui.button(tr!(lang, CmdIsolate)).clicked() {
             *action = Some(BrowserAction::Isolate(vec![occurrence]));
             ui.close();
+        }
+        if groundable {
+            let key = gc_doc::TreeKey::Component(occurrence);
+            let keys = if state.marked.contains(&key) { state.marked.clone() } else { vec![key] };
+            copy_paste_items(ui, session, lang, action, keys);
+        }
+        // Ground and Root, and Place at Component Origin (Inventor 2026 help, GUID-98FA88B2-AA32-4A27-946A-DCECB36A6696
+        // and GUID-E7A45820-E297-449D-AFBF-3C8D8EAE8A0E).
+        if groundable {
+            let key = gc_doc::TreeKey::Component(occurrence);
+            let keys = if state.marked.contains(&key) { state.marked.clone() } else { vec![key] };
+            let items: Vec<gc_core::AnyId> = keys
+                .iter()
+                .filter_map(|k| match k {
+                    gc_doc::TreeKey::Component(gc_doc::Occurrence::Item(any)) => Some(*any),
+                    _ => None,
+                })
+                .collect();
+            if !items.is_empty() && ui.button(tr!(lang, CmdGroundAndRoot)).clicked() {
+                *action = Some(BrowserAction::GroundAtOrigin(items));
+                ui.close();
+            }
+            if ui.button(tr!(lang, CmdPlaceAtOrigin)).clicked() {
+                *action = Some(BrowserAction::PlaceAtOrigin(occurrence));
+                ui.close();
+            }
         }
         if groundable {
             folder_menu(ui, session, lang, state, action, gc_doc::TreeKey::Component(occurrence));
@@ -1770,10 +1849,14 @@ pub fn status_bar(
     gpu: bool,
     notice: Option<&str>,
     slice: Option<&mut bool>,
+    command_prompt: Option<Msg>,
 ) {
     ui.horizontal(|ui| {
         if session.active_sketch().is_some() {
             ui.label(prompt_text(lang, session.prompt()));
+        } else if let Some(prompt) = command_prompt {
+            // A command of the assembly is waiting for a pick (the status bar tells what to pick next).
+            ui.label(prompt.text(lang));
         } else {
             ui.label(tr!(lang, StatusReady));
         }

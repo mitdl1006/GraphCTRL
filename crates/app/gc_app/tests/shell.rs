@@ -1500,6 +1500,9 @@ impl gc_app::FileDialogs for Scripted {
     fn save_csv(&mut self, _: &str) -> Option<std::path::PathBuf> {
         Some(self.0.clone())
     }
+    fn save_script(&mut self, _: &str) -> Option<std::path::PathBuf> {
+        Some(self.0.clone())
+    }
 }
 
 /// "Import Mesh" asks for a file and adds it as a body; a file that cannot be read is reported.
@@ -6739,4 +6742,366 @@ fn the_schedule_panel_plays_the_schedule_and_resets() {
     harness.get_by_label("스케줄 원위치").click();
     harness.run_steps(3);
     assert!(harness.state().session.schedule_playback().is_none(), "the robots are back where they were");
+    // The schedule as one URScript program per robot, with the note that it was not tried.
+    harness.get_by_label("로봇별 URScript 내보내기…").click();
+    harness.run_steps(3);
+    harness.get_by_label("URSim·실제 로봇으로 검증하지 않은 프로그램입니다 — 실행 전에 반드시 확인하십시오.");
+}
+
+/// The task editor's Repeat choice and a robot's park pose (plan 9.4/9.5).
+#[test]
+fn a_task_repeats_and_a_robot_gets_a_park_pose() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("로봇").click();
+    harness.run();
+    harness.get_by_label("로봇 추가").click();
+    harness.run();
+    harness.get_by_label("UR5e 로봇").click();
+    harness.run();
+    let robot = harness.state().session.doc().robots().iter().next().unwrap().0;
+    let task = gc_doc::Task {
+        name: "Loop".into(),
+        location: gc_doc::Location::None,
+        precondition: String::new(),
+        steps: vec![gc_doc::Step::Wait { seconds: 1.0 }],
+        effects: Vec::new(),
+        robots: gc_doc::RobotChoice::Any,
+        priority: 0,
+    };
+    harness.state_mut().session.edit_work(gc_doc::WorkOp::AddTask(task)).unwrap();
+    let id = harness.state().session.tasks()[0];
+    // The task selected in the work node: its editor shows Repeat.
+    let click = |h: &mut egui_kittest::Harness<'_, GraphCtrlApp>, at: egui::Pos2| {
+        h.event(egui::Event::PointerMoved(at));
+        h.run_steps(2);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+        h.run_steps(3);
+    };
+    harness.run_steps(2);
+    let at = harness.get_all_by_label("작업").find(|n| n.rect().min.x < 300.0).unwrap().rect().center();
+    click(&mut harness, at);
+    let row =
+        harness.get_all_by_label_contains("Loop").find(|n| n.rect().min.x < 300.0).unwrap().rect().center();
+    click(&mut harness, row);
+    assert_eq!(harness.state().session.doc().task_repeat(id), None);
+    harness.get_by_label("조건이 참일 때마다").click();
+    harness.run_steps(3);
+    assert_eq!(harness.state().session.doc().task_repeat(id), Some(0));
+    // The robot, selected, can have its park pose set from where it stands.
+    harness.state_mut().session.select_item(Some(gc_session::CellItem::Robot(robot)));
+    harness.run_steps(3);
+    let before = harness.state().session.history().undo_depth();
+    harness.get_by_label("현재 자세로 설정").click();
+    harness.run_steps(3);
+    assert_eq!(harness.state().session.history().undo_depth(), before + 1);
+}
+
+/// URScript export (plan 9.6): a task's editor offers the program for a robot, shown read-only with a note that
+/// it was not tried on a robot, and saved through the file dialog.
+#[test]
+fn a_task_is_shown_and_saved_as_a_urscript_program() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("task.script");
+    let mut harness =
+        egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0).build_eframe(|cc| {
+            GraphCtrlApp::new(cc, RunOptions::default()).with_dialogs(Box::new(Scripted(path.clone())))
+        });
+    harness.run();
+    harness.get_by_label("로봇").click();
+    harness.run();
+    harness.get_by_label("로봇 추가").click();
+    harness.run();
+    harness.get_by_label("UR5e 로봇").click();
+    harness.run();
+    let robot_name = {
+        let doc = harness.state().session.doc();
+        doc.robots().iter().next().unwrap().1.name.clone()
+    };
+    let task = gc_doc::Task {
+        name: "Nap".into(),
+        location: gc_doc::Location::None,
+        precondition: String::new(),
+        steps: vec![gc_doc::Step::Wait { seconds: 1.5 }],
+        effects: Vec::new(),
+        robots: gc_doc::RobotChoice::Any,
+        priority: 0,
+    };
+    harness.state_mut().session.edit_work(gc_doc::WorkOp::AddTask(task)).unwrap();
+    harness.run_steps(2);
+    let click = |h: &mut egui_kittest::Harness<'_, GraphCtrlApp>, at: egui::Pos2| {
+        h.event(egui::Event::PointerMoved(at));
+        h.run_steps(2);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+        h.run_steps(3);
+    };
+    let at = harness.get_all_by_label("작업").find(|n| n.rect().min.x < 300.0).unwrap().rect().center();
+    click(&mut harness, at);
+    let row =
+        harness.get_all_by_label_contains("Nap").find(|n| n.rect().min.x < 300.0).unwrap().rect().center();
+    click(&mut harness, row);
+    harness.get_by_label(&format!("URScript 내보내기… ({robot_name})")).click();
+    harness.run_steps(3);
+    harness.get_by_label("URSim·실제 로봇으로 검증하지 않은 프로그램입니다 — 실행 전에 반드시 확인하십시오.");
+    harness.get_by_label("이 프로그램 저장…").click();
+    harness.run_steps(3);
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("def ") && text.contains("sleep(1.5"), "{text}");
+}
+
+/// The status bar tells what a waiting assembly command wants picked (Inventor's prompt line).
+#[test]
+fn the_status_bar_prompts_for_the_pick_of_an_assembly_command() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("준비");
+    harness.key_press(egui::Key::J);
+    harness.run_steps(3);
+    harness.get_by_label("조인트: 연결할 두 요소를 차례로 선택하십시오");
+}
+
+/// `]`, `/` and `.` start the work plane, axis and point commands (Keyboard Shortcut Reference,
+/// GUID-DEEB0723-DFC7-4B28-95F4-099CC1E1EBF8).
+#[test]
+fn the_work_feature_shortcuts_open_their_commands() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    for (key, title) in [
+        (egui::Key::CloseBracket, gc_i18n::Msg::WorkPlaneTitle),
+        (egui::Key::Slash, gc_i18n::Msg::WorkAxisTitle),
+        (egui::Key::Period, gc_i18n::Msg::WorkPointTitle),
+    ] {
+        harness.key_press(key);
+        harness.run_steps(3);
+        harness.get_all_by_label(title.text(gc_i18n::Lang::Ko)).next().expect("the command window");
+    }
+}
+
+/// F2 renames the selected browser node (Keyboard Shortcut Reference, GUID-DEEB0723-DFC7-4B28-95F4-099CC1E1EBF8).
+#[test]
+fn f2_renames_the_selected_browser_node() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("파일").click();
+    harness.run();
+    harness.get_by_label("예제 열기 (UR5e 셀)").click();
+    harness.run();
+    harness.query_all_by_label("P1").next().unwrap().click();
+    harness.run();
+    harness.key_press(egui::Key::F2);
+    harness.run_steps(3);
+    harness.get_by_label("name");
+}
+
+/// The candidate robots of a task are worked out in the background when asked, and a wait for a signal is
+/// edited as a signal of the tools and a value.
+#[test]
+fn candidates_are_requested_and_a_signal_wait_is_chosen_from_the_tools_signals() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("로봇").click();
+    harness.run();
+    harness.get_by_label("로봇 추가").click();
+    harness.run();
+    harness.get_by_label("UR5e 로봇").click();
+    harness.run();
+    let kit = gc_doc::ToolKit {
+        name: "Gripper".into(),
+        signals: vec![gc_doc::IoSignal { name: "ready".into(), direction: gc_doc::IoDirection::In, pin: 0 }],
+        states: Vec::new(),
+        actions: Vec::new(),
+    };
+    harness.state_mut().session.edit_work(gc_doc::WorkOp::AddToolKit(kit)).unwrap();
+    let task = gc_doc::Task {
+        name: "Await".into(),
+        location: gc_doc::Location::None,
+        precondition: String::new(),
+        steps: vec![gc_doc::Step::WaitIo { condition: "ready == false".into(), timeout: 5.0 }],
+        effects: Vec::new(),
+        robots: gc_doc::RobotChoice::Any,
+        priority: 0,
+    };
+    harness.state_mut().session.edit_work(gc_doc::WorkOp::AddTask(task)).unwrap();
+    harness.run_steps(2);
+    let click = |h: &mut egui_kittest::Harness<'_, GraphCtrlApp>, at: egui::Pos2| {
+        h.event(egui::Event::PointerMoved(at));
+        h.run_steps(2);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+        h.run_steps(3);
+    };
+    let at = harness.get_all_by_label("작업").find(|n| n.rect().min.x < 300.0).unwrap().rect().center();
+    click(&mut harness, at);
+    let row =
+        harness.get_all_by_label_contains("Await").find(|n| n.rect().min.x < 300.0).unwrap().rect().center();
+    click(&mut harness, row);
+    // The wait shows the signal and "off", not a text box.
+    harness.get_by_label("꺼짐");
+    // The candidates: asked for, then listed.
+    let task_id = harness.state().session.doc().tasks().iter().next().unwrap().0;
+    assert!(harness.state().session.task_candidates_result(task_id).is_none());
+    harness.get_by_label("후보 로봇 계산").click();
+    harness.run_steps(4);
+    assert!(harness.state().session.task_candidates_result(task_id).is_some());
+}
+
+/// A component's row menu copies it (the Ctrl+C of the menu); Paste then waits for the click that places it.
+#[test]
+fn a_row_menu_copies_the_component() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let a = harness
+        .state_mut()
+        .session
+        .add_body(gc_doc::Solid::Box { size: [0.1; 3] }, gc_doc::Placement { xyz: [0.0; 3], rpy: [0.0; 3] })
+        .unwrap();
+    harness.run();
+    let name = harness.state().session.doc().get(a).unwrap().name.clone();
+    let at = harness
+        .get_all_by_label_contains(&name)
+        .find(|n| n.rect().min.x < 100.0)
+        .expect("the browser row")
+        .rect()
+        .center();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run_steps(2);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+    harness.run_steps(3);
+    assert!(harness.state().session.clipboard().is_empty());
+    harness.get_by_label("복사").click();
+    harness.run_steps(3);
+    assert_eq!(harness.state().session.clipboard().len(), 1);
+}
+
+/// A signal a task sets shows under the chart as a row of its own.
+#[test]
+fn the_schedule_shows_the_signals_the_cell_drives() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("로봇").click();
+    harness.run();
+    harness.get_by_label("로봇 추가").click();
+    harness.run();
+    harness.get_by_label("UR5e 로봇").click();
+    harness.run();
+    let task = gc_doc::Task {
+        name: "Signal".into(),
+        location: gc_doc::Location::None,
+        precondition: String::new(),
+        steps: vec![
+            gc_doc::Step::SetIo { name: "door_open".into(), value: true },
+            gc_doc::Step::Wait { seconds: 2.0 },
+        ],
+        effects: Vec::new(),
+        robots: gc_doc::RobotChoice::Any,
+        priority: 0,
+    };
+    harness.state_mut().session.edit_work(gc_doc::WorkOp::AddTask(task)).unwrap();
+    harness.get_by_label("도구").click();
+    harness.run();
+    harness.get_by_label("스케줄").click();
+    harness.run_steps(3);
+    harness.get_by_label("스케줄 계산").click();
+    harness.run_steps(4);
+    assert!(harness.state().session.schedule_result().is_some_and(|(s, _)| !s.signals.is_empty()));
+    harness.get_by_label("door_open");
+}
+
+/// A component's row menu has Ground and Root: the component goes to the assembly origin and is grounded
+/// (Inventor 2026 help, GUID-98FA88B2-AA32-4A27-946A-DCECB36A6696).
+#[test]
+fn a_row_menu_grounds_the_component_at_the_origin() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let a = harness
+        .state_mut()
+        .session
+        .add_body(
+            gc_doc::Solid::Box { size: [0.1; 3] },
+            gc_doc::Placement { xyz: [0.5, 0.2, 0.3], rpy: [0.0; 3] },
+        )
+        .unwrap();
+    harness.run();
+    let name = harness.state().session.doc().get(a).unwrap().name.clone();
+    let at = harness
+        .get_all_by_label_contains(&name)
+        .find(|n| n.rect().min.x < 100.0)
+        .expect("the browser row")
+        .rect()
+        .center();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run_steps(2);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+    harness.run_steps(3);
+    harness.get_by_label("원점에 고정 (Ground and Root)").click();
+    harness.run_steps(3);
+    let body = harness.state().session.doc().get(a).unwrap().clone();
+    assert!(body.placement.xyz.iter().all(|v| v.abs() < 1e-9), "{:?}", body.placement.xyz);
+    assert!(
+        harness
+            .state()
+            .session
+            .doc()
+            .component_flag(gc_doc::Occurrence::Item(a.erase()), gc_doc::ComponentFlag::Grounded)
+    );
+    harness.state_mut().session.undo();
+    assert_eq!(harness.state().session.doc().get(a).unwrap().placement.xyz, [0.5, 0.2, 0.3]);
 }

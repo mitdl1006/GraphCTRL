@@ -30,8 +30,21 @@ fn tick_step(end: f64) -> f64 {
     [1.0, 2.0, 5.0, 10.0].into_iter().map(|m| m * decade).find(|s| *s >= wanted).unwrap_or(10.0 * decade)
 }
 
+/// What the panel asks the application to do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScheduleRequest {
+    /// Show the schedule as one URScript program per robot (and offer to save them).
+    UrScript,
+}
+
 /// The panel: a button to ask for the schedule, then the chart and the blocked tasks.
-pub fn schedule_panel(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mut ScheduleUi) {
+pub fn schedule_panel(
+    ui: &mut Ui,
+    session: &mut Session,
+    lang: Lang,
+    state: &mut ScheduleUi,
+) -> Option<ScheduleRequest> {
+    let mut request = None;
     let pending = session.schedule_pending();
     ui.horizontal(|ui| {
         if ui.add_enabled(!pending, egui::Button::new(tr!(lang, ScheduleCompute))).clicked() {
@@ -53,7 +66,7 @@ pub fn schedule_panel(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mu
         if !pending {
             ui.weak(tr!(lang, ScheduleNotYet));
         }
-        return;
+        return request;
     };
     let fade = if current { 1.0 } else { 0.4 };
     // Playback: the robots are shown where the schedule has them at a moment (the document is not changed).
@@ -72,8 +85,15 @@ pub fn schedule_panel(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mu
             state.stop(session);
             now = 0.0;
         }
-        let slider =
-            ui.add(egui::Slider::new(&mut now, 0.0..=end_time.max(1e-6)).suffix(" s").fixed_decimals(1));
+        if ui.button(tr!(lang, ScheduleUrScript)).clicked() {
+            request = Some(ScheduleRequest::UrScript);
+        }
+        let slider = ui.add(
+            egui::Slider::new(&mut now, 0.0..=end_time.max(1e-6))
+                .text(tr!(lang, ScheduleTime))
+                .suffix(" s")
+                .fixed_decimals(1),
+        );
         if slider.changed() {
             session.set_schedule_playback(Some(now));
         }
@@ -144,6 +164,61 @@ pub fn schedule_panel(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mu
                 Stroke::new(1.5, colors::SELECTED),
             );
         }
+        // A robot moving out of the way: a grey bar.
+        for park in schedule.parks.iter().filter(|p| p.robot == *robot) {
+            #[allow(clippy::cast_possible_truncation, reason = "screen coordinates fit f32")]
+            let (x0, x1) = (
+                track.left() + (park.start / end) as f32 * track.width(),
+                track.left() + (park.end / end) as f32 * track.width(),
+            );
+            let bar =
+                Rect::from_min_max(pos2(x0, track.top() + 4.0), pos2(x1.max(x0 + 2.0), track.bottom() - 4.0));
+            painter.rect_filled(bar, 2.0, colors::muted().gamma_multiply(0.55 * fade));
+            let response = ui.interact(
+                bar,
+                egui::Id::unique("gc_schedule_park").with(park.robot).with(park.start.to_bits()),
+                Sense::hover(),
+            );
+            response.on_hover_text(format!(
+                "{}: {:.1} – {:.1} s",
+                tr!(lang, SchedulePark),
+                park.start,
+                park.end
+            ));
+        }
+        // Waiting for a robot in the way: hatching before the task's bar.
+        for wait in schedule.waits.iter().filter(|w| w.robot == *robot) {
+            if let Some(a) =
+                schedule.assignments.iter().find(|a| a.task == wait.task && a.robot == wait.robot)
+            {
+                #[allow(clippy::cast_possible_truncation, reason = "screen coordinates fit f32")]
+                let (x0, x1) = (
+                    track.left() + ((a.start - wait.seconds) / end) as f32 * track.width(),
+                    track.left() + (a.start / end) as f32 * track.width(),
+                );
+                let hatch = Rect::from_min_max(pos2(x0, track.top()), pos2(x1.max(x0 + 1.0), track.bottom()));
+                let stroke = Stroke::new(1.0, colors::ERROR.gamma_multiply(0.8 * fade));
+                let mut x = hatch.left() - hatch.height();
+                while x < hatch.right() {
+                    // A slanted line, cut to the hatch box.
+                    let (ax, ay, bx, by) = (x, hatch.bottom(), x + hatch.height(), hatch.top());
+                    let (ax2, ay2) = if ax < hatch.left() {
+                        (hatch.left(), hatch.bottom() - (hatch.left() - ax))
+                    } else {
+                        (ax, ay)
+                    };
+                    let (bx2, by2) = if bx > hatch.right() {
+                        (hatch.right(), hatch.top() + (bx - hatch.right()))
+                    } else {
+                        (bx, by)
+                    };
+                    if bx2 >= ax2 {
+                        painter.line_segment([pos2(ax2, ay2), pos2(bx2, by2)], stroke);
+                    }
+                    x += 5.0;
+                }
+            }
+        }
         for assignment in schedule.assignments.iter().filter(|a| a.robot == *robot) {
             #[allow(clippy::cast_possible_truncation, reason = "screen coordinates fit f32")]
             let (x0, x1) = (
@@ -170,8 +245,83 @@ pub fn schedule_panel(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mu
             // The times, on the bar when the pointer is over it.
             let response =
                 ui.interact(bar, egui::Id::unique("gc_schedule_bar").with(assignment.task), Sense::hover());
-            response.on_hover_text(format!("{task_name}: {:.1} – {:.1} s", assignment.start, assignment.end));
+            // The ends of the task's steps: ticks in the bar and lines in the hover text.
+            let steps: Vec<f64> = schedule
+                .assignments
+                .iter()
+                .position(|a| std::ptr::eq(a, assignment))
+                .and_then(|at| schedule.plans.get(at))
+                .map(|plan| plan.step_ends.iter().map(|e| assignment.start + e).collect())
+                .unwrap_or_default();
+            let mut text = format!("{task_name}: {:.1} – {:.1} s", assignment.start, assignment.end);
+            for (number, at) in steps.iter().enumerate() {
+                text.push('\n');
+                text.push_str(&tr!(lang, ScheduleStepEnd, number + 1, format!("{at:.1}")));
+                if number + 1 < steps.len() {
+                    #[allow(clippy::cast_possible_truncation, reason = "screen coordinates fit f32")]
+                    let x = track.left() + (*at / end) as f32 * track.width();
+                    painter.line_segment(
+                        [pos2(x, bar.bottom() - 5.0), pos2(x, bar.bottom())],
+                        Stroke::new(1.0, egui::Color32::WHITE.gamma_multiply(0.8 * fade)),
+                    );
+                }
+            }
+            response.on_hover_text(text);
         }
+    }
+    // The signals the cell drives: one row each, filled while the signal is on.
+    {
+        let mut names: Vec<&str> = schedule.signals.iter().map(|(_, n, _)| n.as_str()).collect();
+        names.sort_unstable();
+        names.dedup();
+        for name in names {
+            let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 16.0), Sense::hover());
+            let painter = ui.painter_at(rect);
+            painter.text(
+                pos2(rect.left() + 2.0, rect.center().y),
+                Align2::LEFT_CENTER,
+                name,
+                FontId::proportional(11.0),
+                colors::muted(),
+            );
+            ui.interact(rect, egui::Id::unique("gc_schedule_signal").with(name), Sense::hover())
+                .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, name));
+            let track = Rect::from_min_size(
+                pos2(rect.left() + label_width, rect.top() + 3.0),
+                vec2(width, rect.height() - 6.0),
+            );
+            painter.rect_filled(track, 2.0, colors::muted().gamma_multiply(0.10));
+            let mut on_since: Option<f64> = None;
+            let mut spans: Vec<(f64, f64)> = Vec::new();
+            let mut changes: Vec<&(f64, String, bool)> =
+                schedule.signals.iter().filter(|(_, n, _)| n == name).collect();
+            changes.sort_by(|a, b| a.0.total_cmp(&b.0));
+            for (at, _, value) in changes {
+                match (on_since, *value) {
+                    (None, true) => on_since = Some(*at),
+                    (Some(from), false) => {
+                        spans.push((from, *at));
+                        on_since = None;
+                    }
+                    _ => {}
+                }
+            }
+            if let Some(from) = on_since {
+                spans.push((from, end));
+            }
+            for (from, to) in spans {
+                #[allow(clippy::cast_possible_truncation, reason = "screen coordinates fit f32")]
+                let (x0, x1) = (
+                    track.left() + (from / end) as f32 * track.width(),
+                    track.left() + (to / end) as f32 * track.width(),
+                );
+                let bar = Rect::from_min_max(pos2(x0, track.top()), pos2(x1.max(x0 + 2.0), track.bottom()));
+                painter.rect_filled(bar, 2.0, colors::SELECTED.gamma_multiply(0.8 * fade));
+            }
+        }
+    }
+    if schedule.cut_short {
+        ui.colored_label(colors::ERROR, tr!(lang, ScheduleCutShort));
     }
     if !schedule.blocked.is_empty() {
         ui.separator();
@@ -184,4 +334,5 @@ pub fn schedule_panel(ui: &mut Ui, session: &mut Session, lang: Lang, state: &mu
             });
         }
     }
+    request
 }

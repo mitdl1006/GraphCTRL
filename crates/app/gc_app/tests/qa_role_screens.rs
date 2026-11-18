@@ -149,7 +149,6 @@ fn the_sketch_menu_offers_roles_only_where_they_apply() {
 /// `Sketch::curve_run`, which has no run for a closed curve (it is `curve_loop`'s), so "경로로 지정" is never
 /// offered for one: a closed path can only be made through the session API.
 #[test]
-#[ignore = "BUG: the sketch menu never offers Make Path for a closed curve (owner: frontend, gc_viewport lib.rs uses curve_run)"]
 fn a_closed_curve_is_offered_as_a_path_by_the_sketch_menu() {
     let mut h = scene();
     let at = screen(&h, mm(0.0, -40.0));
