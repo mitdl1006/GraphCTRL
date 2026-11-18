@@ -20,7 +20,7 @@
 | 8 | ~~Automatic Dimensions and Constraints~~ **완료** | 126 (P2) | — | 아래 작업 기록 |
 | 9 | ~~치수 방향 뒤집기(Flip)~~ **완료** | 124 (P3) | 선-호·호-호 거리 치수 종류는 없음 | 아래 작업 기록 |
 | 10 | 타원·스플라인(+ Smooth G2) | 60, 61, 108 (P3) | `CurveGeom`에 없음 | 새 곡선 종류 — 영향 큼 |
-| 11 | 어셈블리: ~~서브어셈블리 계층·활성화~~(**완료**, 단위 드래그는 남음), ~~조인트 Lock/Protect~~(**완료**), ~~3D 그립 스냅~~(**계산 완료**, 드래그 UI는 FE), ~~어셈블리 스케치 소유자~~(**완료**), 작업 축(선·모서리 위, 원 중심, 회전 면, 두 평면 교선) | 어셈블리 43, 90, 61, 98, 157 | 작업 축은 두 점·평면 법선만 | 행마다 원문 확인 후 범위 결정 |
+| 11 | 어셈블리: ~~서브어셈블리 계층·활성화~~(**완료**, 단위 이동 포함), ~~조인트 Lock/Protect~~(**완료**), ~~3D 그립 스냅~~(**계산 완료**, 드래그 UI는 FE), ~~어셈블리 스케치 소유자~~(**완료**), 작업 축(선·모서리 위, 원 중심, 회전 면, 두 평면 교선) | 어셈블리 43, 90, 61, 98, 157 | 작업 축은 두 점·평면 법선만 | 행마다 원문 확인 후 범위 결정 |
 
 ## 현황 — 완료
 
@@ -53,6 +53,19 @@
 | 모션(오래된 남은 일) | 맨 아래 "남은 일(백엔드)" 절 그대로 |
 
 # 작업 기록(최신 순)
+
+## 2026-11-18 — 서브어셈블리 통째 이동(리드 ③)
+
+근거: Create Subassemblies in Place(GUID-FCEE3F0E-AAE2-4619-8645-2588FEECD353)의 "treated as a single unit in the parent assembly".
+Grip Snap도 서브어셈블리를 움직일 수 있다(Move and Rotate Assembly Components, GUID-BB632466-C77C-4BFB-9C81-67653D1C2ED3).
+- `Document::subassembly_components(id)`: 그 서브어셈블리 아래(깊이 상관없이) 셀에 놓인 컴포넌트들, 모델 순서.
+- 세션 `subassembly_moved(id, delta: DPose3) -> Option<Vec<(AnyId, DPose3)>>`: 단위 드래그 미리 보기.
+  각 컴포넌트를 `delta * 지금 자세`로 옮긴다. 없거나 비었거나 고정된 멤버가 있으면 `None`.
+- 세션 `move_subassembly(id, delta)`: 커밋한다(`MoveComponents`, 실행 취소 한 단계). 묶인 다른 컴포넌트는 따라온다.
+- 그립 스냅으로 서브어셈블리를 움직일 때는 `grip_snap_pose_on`으로 한 멤버의 새 자세를 구한다.
+  `delta = 새 자세 × 지금 자세⁻¹`를 `move_subassembly`에 넘기면 된다.
+- 남은 것: 서브어셈블리 안 관계로 멤버끼리 움직이는 "유연(flexible)" 서브어셈블리는 없다(모두 강체 단위).
+- 테스트: `gc_session/tests/subassembly.rs::a_subassembly_moves_as_one_unit`.
 
 ## 2026-11-18 — 그립 스냅 점·면 기준(리드 ②)
 
