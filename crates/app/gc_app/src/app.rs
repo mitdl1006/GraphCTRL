@@ -979,7 +979,9 @@ impl GraphCtrlApp {
                         drop(self.session.copy_to_clipboard(&[gc_doc::TreeKey::Component(occurrence)]));
                     }
                 }
-                egui::Key::V if command && !sketching => {
+                egui::Key::V
+                    if command && !sketching && self.session.representations().active_position.is_none() =>
+                {
                     // The paste waits for the click that gives its place: one undo step.
                     self.viewport.start_paste(&self.session);
                 }

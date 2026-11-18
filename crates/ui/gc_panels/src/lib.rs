@@ -498,7 +498,7 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
                             text: &text,
                             selected: false,
                             visible: None,
-                            delete: Some(&delete),
+                            delete: (!primary_blocked(session)).then_some(&delete),
                             edit: None,
                             focus: false,
                             dim: false,
@@ -506,7 +506,7 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
                         let result = gc_ui::panel::tree_row(ui, row);
                         let remove = gc_doc::CellOp::DeletePattern { index, keep_copies: false };
                         result.row.context_menu(|ui| {
-                            if ui.button(delete.as_str()).clicked() {
+                            if guarded_button(ui, lang, primary_blocked(session), delete.as_str()).clicked() {
                                 action = Some(BrowserAction::Edit(Box::new(gc_doc::Command::Cell(
                                     remove.clone(),
                                 ))));
@@ -724,7 +724,7 @@ fn work_features(ui: &mut Ui, session: &Session, lang: Lang, action: &mut Option
                 text: &feature.name,
                 selected: false,
                 visible: Some((&mut visible, show.as_str())),
-                delete: Some(&delete),
+                delete: (!primary_blocked(session)).then_some(&delete),
                 edit: None,
                 focus: false,
                 dim: false,
@@ -750,7 +750,7 @@ fn work_features(ui: &mut Ui, session: &Session, lang: Lang, action: &mut Option
                     }))));
                     ui.close();
                 }
-                if ui.button(delete.as_str()).clicked() {
+                if guarded_button(ui, lang, primary_blocked(session), delete.as_str()).clicked() {
                     *action =
                         Some(BrowserAction::Edit(Box::new(Command::Cell(CellOp::DeleteWorkFeature(id)))));
                     ui.close();
@@ -990,6 +990,18 @@ fn folder_menu(
 }
 
 #[allow(clippy::too_many_arguments, reason = "the browser's shared state")]
+/// Whether a positional representation other than [Primary] is active: the commands that add, remove or
+/// reorganize components are refused then (`EditError::PrimaryOnly`) and are shown disabled.
+fn primary_blocked(session: &Session) -> bool {
+    session.representations().active_position.is_some()
+}
+
+/// A menu button that is disabled, with the reason as its tooltip, while `blocked`.
+fn guarded_button(ui: &mut Ui, lang: Lang, blocked: bool, text: &str) -> egui::Response {
+    let response = ui.add_enabled(!blocked, egui::Button::new(text));
+    if blocked { response.on_disabled_hover_text(tr!(lang, ErrPrimaryOnly)) } else { response }
+}
+
 /// Copy and Paste in a row's menu (Paste is offered once something was copied).
 fn copy_paste_items(
     ui: &mut Ui,
@@ -1002,7 +1014,13 @@ fn copy_paste_items(
         *action = Some(BrowserAction::Copy(keys));
         ui.close();
     }
-    if ui.add_enabled(!session.clipboard().is_empty(), egui::Button::new(tr!(lang, CmdPaste))).clicked() {
+    if ui
+        .add_enabled(
+            !session.clipboard().is_empty() && !primary_blocked(session),
+            egui::Button::new(tr!(lang, CmdPaste)),
+        )
+        .clicked()
+    {
         *action = Some(BrowserAction::Paste);
         ui.close();
     }
@@ -1089,7 +1107,7 @@ fn component_rows_in(
                 if let Some(dropped) = header.dnd_release_payload::<Vec<gc_doc::TreeKey>>() {
                     let members: Vec<gc_doc::TreeKey> =
                         dropped.iter().copied().filter(|k| *k != row.key).collect();
-                    if !members.is_empty() {
+                    if !members.is_empty() && !primary_blocked(session) {
                         *action =
                             Some(BrowserAction::Subassembly(SubassemblyOp::Move { members, into: Some(id) }));
                     }
@@ -1121,18 +1139,21 @@ fn component_rows_in(
                         ui.close();
                     }
                     // Folders nest without dragging: demote this one into a new subassembly.
-                    if ui.button(tr!(lang, CmdDemote)).clicked() {
+                    let blocked = primary_blocked(session);
+                    if guarded_button(ui, lang, blocked, tr!(lang, CmdDemote)).clicked() {
                         state.group_name = Some(GroupName::Demote(vec![row.key], String::new()));
                         ui.close();
                     }
-                    if row.parent.is_some() && ui.button(tr!(lang, CmdMoveToTop)).clicked() {
+                    if row.parent.is_some()
+                        && guarded_button(ui, lang, blocked, tr!(lang, CmdMoveToTop)).clicked()
+                    {
                         *action = Some(BrowserAction::Subassembly(SubassemblyOp::Move {
                             members: vec![row.key],
                             into: None,
                         }));
                         ui.close();
                     }
-                    if ui.button(tr!(lang, CmdDissolve)).clicked() {
+                    if guarded_button(ui, lang, blocked, tr!(lang, CmdDissolve)).clicked() {
                         *action = Some(BrowserAction::Subassembly(SubassemblyOp::Dissolve(id)));
                         ui.close();
                     }
@@ -1270,7 +1291,8 @@ fn browser_section(
                         *action = Some(BrowserAction::EditComponent(key));
                         ui.close();
                     }
-                    if ui.button(tr!(lang, CmdDemote)).clicked() {
+                    let blocked = primary_blocked(session);
+                    if guarded_button(ui, lang, blocked, tr!(lang, CmdDemote)).clicked() {
                         ask = Some(GroupName::Demote(vec![key], String::new()));
                         ui.close();
                     }
@@ -1282,7 +1304,9 @@ fn browser_section(
                             into,
                         }))
                     };
-                    if current.is_some() && ui.button(tr!(lang, CmdMoveToTop)).clicked() {
+                    if current.is_some()
+                        && guarded_button(ui, lang, blocked, tr!(lang, CmdMoveToTop)).clicked()
+                    {
                         *action = move_to(None);
                         ui.close();
                     }

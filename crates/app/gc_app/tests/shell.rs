@@ -7544,3 +7544,25 @@ fn a_position_representation_disables_removing_components_and_the_joint_dialog_o
     harness.run_steps(3);
     harness.get_by_label("평면 (Planar)");
 }
+
+/// The Analyze Interference dialog offers "Treat subassemblies as components" (Inventor 2026 help,
+/// GUID-80DED0A6).
+#[test]
+fn the_interference_dialog_has_the_subassembly_option() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness
+        .state_mut()
+        .session
+        .add_body(gc_doc::Solid::Box { size: [0.05; 3] }, gc_doc::Placement::default())
+        .unwrap();
+    harness.run();
+    harness.get_by_label("검사").click();
+    harness.run();
+    harness.get_by_label("간섭 분석").click();
+    harness.run_steps(3);
+    harness.get_by_label("서브어셈블리를 컴포넌트로 취급");
+}

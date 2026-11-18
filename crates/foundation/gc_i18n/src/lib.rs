@@ -1315,6 +1315,7 @@ messages! {
     InterferenceSet1 => ("세트 #1 정의", "Define Set #1"),
     InterferenceSet2 => ("세트 #2 정의", "Define Set #2"),
     /// Interference: put every robot and body in set 1 (Inventor's tip: a crossing window over all).
+    InterferenceSubassemblies => ("서브어셈블리를 컴포넌트로 취급", "Treat subassemblies as components"),
     InterferenceAll => ("모든 컴포넌트를 세트 #1에", "All components in Set #1"),
     /// Interference: what to do while defining a set.
     InterferenceHint => ("세트 버튼을 누른 뒤 뷰포트나 브라우저에서 컴포넌트를 선택하십시오. 다시 선택하면 빠집니다. 세트 #2가 비어 있으면 세트 #1 안에서 서로 검사합니다.", "Press a set button, then select components in the view or the browser; selecting one again removes it. With Set #2 empty, Set #1 is checked among itself."),

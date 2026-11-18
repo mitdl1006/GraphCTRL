@@ -604,6 +604,12 @@
 - 바로잡음: 브라우저 값 칸이 각도 구속을 mm로 평가하던 것을(단위 이름을 "°"로 비교하던 실수) 구속 종류로 판단하게 고쳤다.
 - 테스트: `motion_takes_a_ratio_or_a_distance_and_a_direction`(식·단위 거부 추가).
 
+## 간섭 분석 옵션·남은 PrimaryOnly 비활성 (백엔드 e0b77f5)
+
+- 간섭 분석 대화상자에 "서브어셈블리를 컴포넌트로 취급"(`interference_with(.., InterferenceOptions{subassemblies_as_components})`; 근거 GUID-80DED0A6, 백엔드 doc 기준).
+- 위치 표현이 [Primary]가 아닐 때 비활성(툴팁 "Primary 위치 표현이 활성일 때만…")을 브라우저의 서브어셈블리·컴포넌트 메뉴(Demote·Move to top·Dissolve), 패턴·작업 피처 삭제 단추·메뉴, 붙여넣기 항목·Ctrl+V, 서브어셈블리 머리글에 끌어 놓기로 넓혔다. 아직: "다른 서브어셈블리로 이동" 목록, 폴더로 끌기(폴더는 트리 이동이 아니라 영향 없을 수 있음), 서브어셈블리 만들기 이름 입력 확인.
+- 테스트: `the_interference_dialog_has_the_subassembly_option`.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

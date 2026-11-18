@@ -33,6 +33,9 @@ pub(crate) struct Interference {
     seen: Option<CellItem>,
     /// The results once analysed; `None` while defining the sets.
     results: Option<Vec<InterferenceRow>>,
+    /// Treat subassemblies as components: what interferes within a subassembly is not listed (Inventor 2026 help,
+    /// Analyze Interference, GUID-80DED0A6).
+    subassemblies_as_components: bool,
     ignored: BTreeSet<usize>,
     show_ignored: bool,
     highlighted: Option<usize>,
@@ -145,10 +148,17 @@ impl Interference {
                         self.second.clear();
                     }
                     ui.separator();
+                    ui.checkbox(&mut self.subassemblies_as_components, tr!(lang, InterferenceSubassemblies));
                     ui.horizontal(|ui| {
                         if ui.add_enabled(!self.first.is_empty(), egui::Button::new(tr!(lang, Ok))).clicked()
                         {
-                            self.results = Some(session.interference(&self.first, &self.second));
+                            self.results = Some(session.interference_with(
+                                &self.first,
+                                &self.second,
+                                gc_session::InterferenceOptions {
+                                    subassemblies_as_components: self.subassemblies_as_components,
+                                },
+                            ));
                             self.ignored.clear();
                             self.highlighted = None;
                             self.defining = None;
