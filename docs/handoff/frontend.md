@@ -365,6 +365,21 @@
 - 굽힘 상자는 뷰 왼쪽 아래로 옮겼다(위쪽 중앙은 고를 선을 가렸다). 반지름 칸은 선 두 개를 고를 때마다 다시 키보드를 받는다.
 - 테스트: `the_bend_command_keeps_the_first_radius_with_equal_on`(선 세 개 계단, 두 번 굽힘, 두 호의 반지름이 같음, 명령 유지). 테스트의 선은 속성 패널(오른쪽)에 가리지 않는 위치에 둔다.
 
+### 스케치 역할 UI(웨이포인트·경로 지정, 브라우저 역할, 속성, 경로 생성, 경로 패널 follow)
+
+- 인벤터 원문이 없는 GraphCTRL 고유 기능(백엔드 handoff "스케치 요소의 웨이포인트·경로 역할", 계획 9.1·9.4). 근거는 그 문서의 API 표.
+- ① 스케치 우클릭(눌렀다 떼면 나오는 목록): 점 위 "웨이포인트로 지정"(`assign_roles(sketch,&[점],&[])`), 곡선 위 "경로로 지정"(`chain_at`으로 이어진 사슬 전체를 `assign_roles`로 한 경로). 이미 역할이 있는 점·곡선에는 나오지 않는다. 사슬 미리 강조는 아직 없다.
+- ② 브라우저: 스케치 노드 아래에 역할 행(웨이포인트=웨이포인트 아이콘, 경로=경로 아이콘). 이름 바꾸기·삭제(`CellOp::DeleteRole`)·억제는 다른 항목과 같은 메뉴. 선택하면(`BrowserAction::SelectRole`) 뷰가 표시: 웨이포인트=마름모+툴 방향선, 경로=선+진행 화살표, 선택된 것은 굵게(`role_pose`·`role_polyline`). 숨겨진 스케치·억제된 역할은 그리지 않는다. 역할은 `CellItem`에 넣지 않고 `Viewport.role_selected`/`ParamsUi.role`로 연결.
+- ③ 속성 패널(`gc_panels::role_properties`): 이동 방식(곡선 추종·직선·관절), TCP 속도(mm/s, 비우면 제한 없음), 경로 방향 뒤집기, 툴 자세(스케치 평면/작업 좌표계 기준, 롤·피치·요 — 끌기 한 번이 되돌리기 한 단계).
+- ④ 경로 생성: 로봇 탭 "스케치 경로" 스택의 세 번째 줄. 로봇 → 스케치 점 1 → 점 2 → `route_between`(첫 계획기, "두 번째 이동을 직선으로" 체크), 만들어진 경로가 패널의 현재 경로가 된다(Esc·우클릭으로 끝). 점은 보이는 모든 스케치에서 가장 가까운 것.
+- ⑤ 경로 패널: 경로가 `follow`를 가지면 웨이포인트 단계 대신 역할 목록(이름 — 이동 방식·속도·방향)을 보이고 위/아래/제거(`set_path_follow`).
+- 알려진 차이: 사슬 미리 강조 없음, 뷰에서 역할을 직접 클릭해 선택하는 기능 없음(브라우저만), 속도·자세는 입력할 때마다 되돌리기 한 단계, 닫힌 곡선 경로·구간별 속도는 백엔드에 없음.
+- 테스트: `the_sketch_menu_makes_waypoints_and_paths`, `the_browser_lists_sketch_roles_and_selects_them`, `the_properties_panel_edits_a_path_role`(sketch_shape_tools), `create_path_makes_a_planned_path_between_two_clicked_sketch_points`와 기존 `the_ur5e_follows_a_sketched_polyline`에 follow 목록 단언(shell).
+
+### iProperties Physical 탭: 열린 메시 경고
+
+- `PhysicalProperties.open`이 true이면(면이 정확히 둘이 아닌 모서리가 있는 메시) 계산값 위에 호박색 경고 "닫히지 않은 메시가 있어 부피·질량이 정확하지 않을 수 있습니다."를 보인다(면적은 맞다). 열린 메시를 불러오는 UI 테스트는 못 만들었다(메시 읽기가 작업 스레드) — 코드로만 확인.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

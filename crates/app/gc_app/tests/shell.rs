@@ -6294,3 +6294,57 @@ fn the_bend_command_keeps_the_first_radius_with_equal_on() {
         .collect();
     assert!(radii.len() == 2 && (radii[0] - radii[1]).abs() < 1e-9, "{radii:?}");
 }
+
+/// Create Path (Robot tab; sketch roles, plan 9.1): click two sketch points and the robot gets a planned path
+/// between them (a waypoint of the robot at each point).
+#[test]
+fn create_path_makes_a_planned_path_between_two_clicked_sketch_points() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("로봇").click();
+    harness.run();
+    harness.get_by_label("로봇 추가").click();
+    harness.run();
+    harness.get_by_label("UR5e 로봇").click();
+    harness.run();
+    let app = harness.state_mut();
+    let robot = app.session.doc().robots().iter().next().unwrap().0;
+    app.session.jog(robot, &[0.0, -1.57, 1.57, -1.57, -1.57, 0.0]);
+    app.session.end_jog();
+    // Two points in the air, 250 mm above the floor, as the ends of one line.
+    app.session.create_sketch_3d().unwrap();
+    app.session.set_tool(ToolKind::Line);
+    app.session.spatial_click([0.45, -0.15, 0.25], None, None);
+    app.session.spatial_click([0.45, 0.15, 0.25], None, Some(1));
+    app.session.tool_event(ToolEvent::Key(gc_tools::Key::Escape));
+    app.session.finish_sketch();
+    harness.run();
+    assert!(harness.state().session.doc().paths().is_empty());
+    harness.get_by_label("경로 생성").click();
+    harness.run_steps(2);
+    assert!(harness.state().viewport().is_routing());
+    let click_at = |h: &mut egui_kittest::Harness<'_, GraphCtrlApp>, world: gc_math::DVec3| {
+        let at = h.state().viewport().screen_of(world).unwrap();
+        h.event(egui::Event::PointerMoved(at));
+        h.run_steps(2);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            h.run_steps(2);
+        }
+        h.run_steps(40);
+    };
+    click_at(&mut harness, gc_math::DVec3::new(0.45, -0.15, 0.25));
+    click_at(&mut harness, gc_math::DVec3::new(0.45, 0.15, 0.25));
+    let session = &harness.state().session;
+    assert_eq!(session.doc().paths().len(), 1, "a path between the two points");
+    assert!(!harness.state().viewport().is_routing());
+    assert_eq!(session.doc().waypoints().len(), 2, "a waypoint at each point");
+}

@@ -157,6 +157,10 @@ pub struct Viewport {
     /// The ground plane (the floor grid) is shown; a sketch's own grid stays (View tab, Appearance panel;
     /// on and off are session-based).
     pub show_ground: bool,
+    /// "Create Path" (sketch roles, plan 9.1): the robot, the first point and the straight-line choice.
+    route: Option<RouteState>,
+    /// The path the last "Create Path" made; the application takes it.
+    route_made: Option<Id<gc_doc::MotionPath>>,
     /// The sketch role selected in the browser: marked strongly in the view.
     pub role_selected: Option<Id<gc_doc::SketchRole>>,
     /// The browser row the pointer is over: its component's bounding box is drawn.
@@ -332,6 +336,15 @@ impl ObjectVisibility {
     }
 }
 
+/// Create Path: two sketch points are clicked and a path of the robot between them is made and planned.
+#[derive(Clone, Debug)]
+struct RouteState {
+    robot: Id<gc_doc::Robot>,
+    first: Option<(Id<gc_doc::Sketch>, Id<gc_sketch::SkPoint>)>,
+    /// The second move in a straight line of the tool tip.
+    linear: bool,
+}
+
 /// The Bend command of a 3D sketch (Inventor 2026 help, To Create Lines, Arcs, and Bends,
 /// GUID-4F861674-F74C-474E-869A-4C190ED6EC4B): two lines are clicked, then the radius is typed.
 #[derive(Clone, Debug)]
@@ -458,6 +471,8 @@ impl Viewport {
             show_constraints: true,
             style: VisualStyle::default(),
             show_ground: true,
+            route: None,
+            route_made: None,
             role_selected: None,
             browser_hover: None,
             show_view_cube: true,
@@ -2026,6 +2041,96 @@ impl Viewport {
         self.bend = Some(bend);
     }
 
+    /// Starts Create Path for a robot: click a point of any visible sketch, then a second one (Esc ends).
+    pub fn start_route(&mut self, robot: Id<gc_doc::Robot>) {
+        self.route = Some(RouteState { robot, first: None, linear: false });
+    }
+
+    /// Whether Create Path is running.
+    pub fn is_routing(&self) -> bool {
+        self.route.is_some()
+    }
+
+    /// The path Create Path made since the last call.
+    pub fn take_route_made(&mut self) -> Option<Id<gc_doc::MotionPath>> {
+        self.route_made.take()
+    }
+
+    /// Create Path outside sketches: the prompt, the straight-line check box, and the two clicks.
+    fn route_step(
+        &mut self,
+        ui: &egui::Ui,
+        response: &egui::Response,
+        session: &mut Session,
+        size: [f64; 2],
+        to_view: &impl Fn(egui::Pos2) -> [f64; 2],
+        rect: egui::Rect,
+        lang: Lang,
+    ) -> bool {
+        let Some(mut route) = self.route.take() else { return false };
+        if ui.input(|i| i.key_pressed(Key::Escape)) || response.secondary_clicked() {
+            return true;
+        }
+        let prompt =
+            if route.first.is_none() { tr!(lang, RoutePickFirst) } else { tr!(lang, RoutePickSecond) };
+        egui::Area::new(egui::Id::unique("gc_route"))
+            .fixed_pos(rect.left_bottom() + egui::vec2(14.0, -14.0))
+            .pivot(egui::Align2::LEFT_BOTTOM)
+            .order(egui::Order::Foreground)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.strong(tr!(lang, CmdRouteBetween));
+                    ui.label(prompt);
+                    ui.checkbox(&mut route.linear, tr!(lang, RouteLinear));
+                });
+            });
+        if response.clicked_by(PointerButton::Primary)
+            && let Some(at) = response.interact_pointer_pos()
+        {
+            let screen = to_view(at);
+            // The nearest point of the sketches that are shown.
+            let mut best: Option<(f64, Id<gc_doc::Sketch>, Id<gc_sketch::SkPoint>)> = None;
+            for (sketch_id, sketch) in session.doc().sketches().iter() {
+                if !session.doc().is_visible(sketch_id.erase()) {
+                    continue;
+                }
+                let plane = plane_of(session, sketch);
+                for point in sketch.points.keys() {
+                    let Some(pos) = sketch.pos(*point) else { continue };
+                    let Some(p) = self.camera.project(plane.world(pos), size) else { continue };
+                    let d = gc_math::fm::hypot(p[0] - screen[0], p[1] - screen[1]);
+                    if d <= gc_tools::tolerance::POINT_PX * 1.5 && best.is_none_or(|(b, ..)| d < b) {
+                        best = Some((d, sketch_id, *point));
+                    }
+                }
+            }
+            if let Some((_, sketch, point)) = best {
+                match route.first {
+                    None => route.first = Some((sketch, point)),
+                    Some(from) if from != (sketch, point) => {
+                        let planner = session.planner_choices().first().map(|(id, ..)| id.clone());
+                        // A refusal is explained in the status bar; the command stays for another try.
+                        if let Some(planner) = planner
+                            && let Ok(path) = session.route_between(
+                                route.robot,
+                                from,
+                                (sketch, point),
+                                &planner,
+                                route.linear,
+                            )
+                        {
+                            self.route_made = Some(path);
+                            return true;
+                        }
+                    }
+                    Some(_) => {}
+                }
+            }
+        }
+        self.route = Some(route);
+        true
+    }
+
     /// Starts Helical Curve in the 3D sketch being edited: the dialog first.
     pub fn start_helix(&mut self) {
         self.helix = Some(HelixState::new());
@@ -2359,6 +2464,9 @@ impl Viewport {
             self.open_select_other(session, at, size, &to_view);
         }
         if self.grip_step(ui, response, session, size, &to_view, lang) {
+            return;
+        }
+        if self.route.is_some() && self.route_step(ui, response, session, size, &to_view, rect, lang) {
             return;
         }
         // Paste: a see-through ghost of the copy follows the cursor (nothing is made yet); a click pastes
