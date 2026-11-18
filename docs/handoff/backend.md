@@ -54,6 +54,23 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 스플라인 교점·Trim·Split(리드 다음 ③ 2차)
+
+근거: To Split, Trim, or Extend Curves, GUID-DD00037F-6BBA-4B95-AA90-4F99DCEB667D(Trim·Split은 가장 가까운 교차 곡선까지/에서).
+
+- 스플라인이 교점 계산에 들어간다. 그린 폴리라인(맞춤점 사이 32단계)으로 다른 곡선(선·원·호·타원·스플라인)과 만나는 곳을 구한다.
+  - `Sketch::curve_crossings`가 스플라인을 받고, 교점 스냅(`gc_tools` pick)도 스플라인 교점을 잡는다.
+  - 다른 곡선의 Trim·Split·Extend는 스플라인을 경계로 쓴다(선이 스플라인까지 잘리고 늘어남).
+- 스플라인 자체의 Trim과 `SketchOp::Split`:
+  - 끝 쪽 Trim: 교점 너머의 맞춤점을 지우고 교점에 새 끝 맞춤점을 둔다.
+  - 가운데 Trim: 두 스플라인이 된다.
+  - Split: 교점에서 둘로 나누고 두 조각이 교점 맞춤점을 공유한다.
+  - 새 끝점은 자른 곡선에 묶인다(`attach`: 점 일치 또는 점-곡선 위). 아무것도 안 걸치면 Trim은 통째 삭제, Split은 거부.
+- `Piece::Polyline(Vec<[f64; 2]>)` 추가(스플라인 Trim 미리보기). 그래서 `Piece`는 더 이상 `Copy`가 아니다. `gc_tools` 미리보기는 폴리라인으로 그린다.
+- 차이: 자른 조각은 남은 맞춤점으로 다시 맞춰서 원래 곡선과 모양이 조금 다를 수 있다(원문은 모양 유지).
+  스플라인 위 점 구속은 솔버에 없어서, 스플라인이 경계일 때 새 끝점은 묶이지 않을 수 있다(구속 추가가 거부되면 조용히 생략). 스플라인 Extend는 없음.
+- 테스트: `gc_session/tests/ellipse_spline_edit.rs`(`splines_cut_and_are_cut_where_they_cross`, `spline_against_spline_and_lone_splines`).
+
 ## 2026-11-18 — 타원·스플라인 Offset, Split Spline(리드 다음 ③ 1차)
 
 근거: To Create 2D Shape Geometry, GUID-D489CE6D-7299-4211-A43A-F3580A4BA357 — "When you Offset an ellipse, the result is either a
