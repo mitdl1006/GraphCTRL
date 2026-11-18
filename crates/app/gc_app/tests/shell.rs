@@ -3539,3 +3539,38 @@ fn copy_and_replace_work_from_the_assemble_tab() {
     let bodies = harness.state().session.doc().bodies().iter().count();
     assert_eq!(bodies, 2);
 }
+
+/// The Representations folder of the browser creates, activates and deletes view and positional
+/// representations.
+#[test]
+fn the_representations_folder_creates_activates_and_deletes() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("표현").click();
+    harness.run();
+    assert!(harness.state().session.representation_folder().views.is_empty());
+    harness.get_by_label("새 뷰 표현").click();
+    harness.run();
+    let folder = harness.state().session.representation_folder();
+    assert_eq!(folder.views.len(), 1);
+    harness.get_by_label("새 위치 표현").click();
+    harness.run();
+    let folder = harness.state().session.representation_folder();
+    assert_eq!(folder.positions.len(), 2, "[Primary] and the new one");
+    assert!(folder.positions[0].active, "[Primary] stays active until another is chosen");
+
+    // A click on the new position activates it.
+    harness.get_by_label("Position:1").click();
+    harness.run();
+    let folder = harness.state().session.representation_folder();
+    assert!(folder.positions[1].active && !folder.positions[0].active);
+    if gpu {
+        let image = harness.render().unwrap();
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        image.save(out.join("review-45-representations.png")).unwrap();
+    }
+}
