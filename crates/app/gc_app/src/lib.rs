@@ -18,6 +18,7 @@ mod joint_limits;
 mod measure;
 mod parameters;
 mod pattern;
+mod productivity;
 mod replicate;
 mod ribbon;
 mod sketch_dialogs;

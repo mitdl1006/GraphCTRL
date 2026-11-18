@@ -502,6 +502,16 @@
 - 리본 탭 전환: 스케치 진입 시 스케치 탭 활성화·종료 시 이전 탭 복귀는 이미 있다(`tab_before_sketch`). 그 밖의 문맥 전환은 원문 근거를 찾지 못했다.
 - 백엔드의 구속 값 매개변수·식, Planar 조인트, Gap/정렬, Free Move/Rotate, 표현 재정의·Lock은 API가 오면 연결한다.
 
+## 어셈블 탭 Productivity: Ground and Root 대화상자·Place at Component Origin
+
+근거(원문): Ground and Root GUID-98FA88B2-AA32-4A27-946A-DCECB36A6696, Place at Component Origin GUID-E7A45820-E297-449D-AFBF-3C8D8EAE8A0E.
+
+- 리본 조립 탭 "생산성 (Productivity)" 그룹(작은 단추 두 줄; 큰 단추 두 개는 1280px 너비 테스트를 넘겨 쌓았다).
+- Ground and Root 대화상자(`productivity.rs`): 컴포넌트 체크 목록(브라우저에서 표시한 행이 미리 선택), 옵션 3개 — "Ground at origin"(켜짐, `ground_at_origin`), "Create origin flush constraints"·"Reposition to the top of the browser"(백엔드에 없어 비활성 + "아직 지원하지 않습니다" 툴팁). 거부되면 상태 줄 알림.
+- Place at Component Origin: 단추 → 뷰에서 대상 컴포넌트 선택(상태 줄 프롬프트, Esc 취소) → 파일 대화상자 → `place_at_component_origin`. 원문 흐름과 같다(여러 파일 선택은 대화상자 한계로 한 개).
+- 우클릭 항목(앞선 커밋)은 그대로 둔다. 한국어 표기는 한국어 도움말을 못 읽어 한국어 + 영어 원문 병기.
+- 남은 지시: ② 마킹 메뉴 원문 조사·구현, ③ 리본 탭 배치를 Ribbon reference와 대조.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

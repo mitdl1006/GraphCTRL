@@ -110,6 +110,10 @@ pub(crate) enum RibbonAction {
     StartPattern,
     /// Open the mirror, copy or replace dialog in a mode.
     StartReplicate(crate::replicate::Mode),
+    /// Open the Ground and Root dialog.
+    StartGroundRoot,
+    /// Place at Component Origin: pick the component, then the file.
+    StartPlaceAtOrigin,
     /// Open the parameters dialog.
     StartParameters,
     /// Open the Bill of Materials dialog.
@@ -877,6 +881,29 @@ fn assemble_tab(
         match gc_ui::ribbon_stack(ui, &rows) {
             Some(0) => action = Some(RibbonAction::StartReplicate(crate::replicate::Mode::Mirror)),
             Some(1) => action = Some(RibbonAction::StartReplicate(crate::replicate::Mode::Copy)),
+            _ => {}
+        }
+    });
+    // Productivity: Ground and Root, Place at Component Origin (Inventor 2026 help, GUID-98FA88B2-AA32-4A27-946A-DCECB36A6696,
+    // GUID-E7A45820-E297-449D-AFBF-3C8D8EAE8A0E).
+    ribbon_group(ui, tr!(lang, GroupProductivity), |ui| {
+        let rows = [
+            gc_ui::StackRow {
+                icon: Icon::Frame,
+                label: tr!(lang, GroundRootShort),
+                selected: false,
+                enabled: has_components,
+            },
+            gc_ui::StackRow {
+                icon: Icon::Point,
+                label: tr!(lang, PlaceAtOriginShort),
+                selected: false,
+                enabled: has_components,
+            },
+        ];
+        match gc_ui::ribbon_stack(ui, &rows) {
+            Some(0) => action = Some(RibbonAction::StartGroundRoot),
+            Some(1) => action = Some(RibbonAction::StartPlaceAtOrigin),
             _ => {}
         }
     });

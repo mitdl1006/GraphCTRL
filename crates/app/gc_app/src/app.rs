@@ -341,6 +341,9 @@ pub struct GraphCtrlApp {
     right_open: bool,
     /// The status bar is shown (View tab, Windows panel, User Interface).
     show_status: bool,
+    ground_root: crate::productivity::GroundRoot,
+    /// Place at Component Origin: the view is waiting for the component to place on.
+    place_origin_picking: bool,
     /// Place at Component Origin asked for in the browser: handled after the panels (it opens a file dialog).
     place_origin_request: Option<gc_doc::Occurrence>,
     /// Clean Screen is on: the ribbon and the browser are away; the browser's state before it.
@@ -455,6 +458,8 @@ impl GraphCtrlApp {
             left_open: !saved.browser_closed,
             right_open: !saved.properties_closed,
             show_status: !saved.hide_status_bar,
+            ground_root: crate::productivity::GroundRoot::default(),
+            place_origin_picking: false,
             place_origin_request: None,
             clean_screen: None,
             about: false,
@@ -1510,6 +1515,19 @@ impl eframe::App for GraphCtrlApp {
             Some(ribbon::RibbonAction::StartJoint) => self.joint.start(),
             Some(ribbon::RibbonAction::StartPattern) => self.pattern.start(Vec::new()),
             Some(ribbon::RibbonAction::StartReplicate(mode)) => self.replicate.start(mode),
+            Some(ribbon::RibbonAction::StartGroundRoot) => {
+                let marked = self
+                    .params
+                    .marked
+                    .iter()
+                    .filter_map(|k| match k {
+                        gc_doc::TreeKey::Component(gc_doc::Occurrence::Item(any)) => Some(*any),
+                        _ => None,
+                    })
+                    .collect();
+                self.ground_root.start(marked);
+            }
+            Some(ribbon::RibbonAction::StartPlaceAtOrigin) => self.place_origin_picking = true,
             Some(ribbon::RibbonAction::StartParameters) => self.parameters.open = true,
             Some(ribbon::RibbonAction::StartBom) => self.bom.open = true,
             Some(ribbon::RibbonAction::StartAutoDimension) => {
@@ -1609,7 +1627,9 @@ impl eframe::App for GraphCtrlApp {
                     self.notice.as_deref(),
                     (self.session.active_sketch().is_some() && !self.session.sketch_is_spatial())
                         .then_some(&mut self.viewport.slice),
-                    if self.assemble.picking() {
+                    if self.place_origin_picking {
+                        Some(gc_i18n::Msg::StatusPickPlaceOrigin)
+                    } else if self.assemble.picking() {
                         Some(gc_i18n::Msg::StatusPickAssemble)
                     } else if self.constrain.picking() {
                         Some(gc_i18n::Msg::StatusPickConstrain)
@@ -1940,7 +1960,8 @@ impl eframe::App for GraphCtrlApp {
             || self.joint.open
             || self.pattern.open
             || self.replicate.picking()
-            || self.assemble.picking();
+            || self.assemble.picking()
+            || self.place_origin_picking;
         if let Some((first, second)) = self.viewport.take_quick_constrain() {
             crate::assemble::quick_mate(&mut self.session, first, second, &mut self.assemble.conflict);
         }
@@ -1954,8 +1975,14 @@ impl eframe::App for GraphCtrlApp {
                 self.constrain.pick_selection(&self.session, selection);
             }
         }
+        if self.place_origin_picking && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.place_origin_picking = false;
+        }
         if let Some((occurrence, element)) = self.viewport.take_constrain_pick() {
-            if self.assemble.picking() {
+            if self.place_origin_picking {
+                self.place_origin_picking = false;
+                self.place_origin_request = Some(occurrence);
+            } else if self.assemble.picking() {
                 self.assemble.pick(&self.session, occurrence, element);
             } else if self.replicate.picking() {
                 self.replicate.pick(occurrence, element);
@@ -1975,6 +2002,11 @@ impl eframe::App for GraphCtrlApp {
         }
         if self.replicate.open {
             self.replicate.window(&ctx, &mut self.session, lang);
+        }
+        if self.ground_root.open
+            && let Some(error) = self.ground_root.window(&ctx, &mut self.session, lang)
+        {
+            self.notice = Some(tr!(lang, FileError, error));
         }
         if self.assemble.open {
             self.assemble.window(&ctx, &mut self.session, lang);

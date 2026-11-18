@@ -7105,3 +7105,38 @@ fn a_row_menu_grounds_the_component_at_the_origin() {
     harness.state_mut().session.undo();
     assert_eq!(harness.state().session.doc().get(a).unwrap().placement.xyz, [0.5, 0.2, 0.3]);
 }
+
+/// The Assemble tab's Productivity panel opens the Ground and Root dialog: the chosen component goes to the
+/// origin and is grounded; the options the backend lacks are listed, disabled (GUID-98FA88B2-AA32-4A27-946A-DCECB36A6696).
+#[test]
+fn the_productivity_panel_grounds_components_in_its_dialog() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let a = harness
+        .state_mut()
+        .session
+        .add_body(
+            gc_doc::Solid::Box { size: [0.1; 3] },
+            gc_doc::Placement { xyz: [0.5, 0.2, 0.3], rpy: [0.0; 3] },
+        )
+        .unwrap();
+    harness.run();
+    harness.get_by_label("조립").click();
+    harness.run_steps(3);
+    harness.get_by_label("Ground and Root").click();
+    harness.run_steps(3);
+    harness.get_by_label("원점 Flush 구속 만들기 (Create origin flush constraints)");
+    let name = harness.state().session.doc().get(a).unwrap().name.clone();
+    harness.get_all_by_label(&name).last().unwrap().click();
+    harness.run_steps(2);
+    harness.get_by_label("확인").click();
+    harness.run_steps(3);
+    assert!(harness.state().session.doc().get(a).unwrap().placement.xyz.iter().all(|v| v.abs() < 1e-9));
+    // Place at Component Origin asks for the component in the view first.
+    harness.get_by_label("원점에 배치").click();
+    harness.run_steps(3);
+    harness.get_by_label("원점에 맞출 기존 컴포넌트를 선택하십시오");
+}
