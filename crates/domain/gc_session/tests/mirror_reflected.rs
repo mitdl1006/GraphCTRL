@@ -49,6 +49,9 @@ fn a_mirrored_mesh_body_is_a_true_mirror_image() {
     std::fs::write(&source, gc_mesh::stl::to_binary(&wedge())).unwrap();
 
     let mut session = Session::new();
+    // Not saved yet: mirror images go to the cache folder, not next to the source.
+    let cache = dir.join("cache");
+    session.set_asset_cache(Some(cache.clone()));
     let floor = session
         .add_body(Solid::Box { size: [4.0, 4.0, 0.1] }, Placement { xyz: [0.0, 0.0, -0.05], rpy: [0.0; 3] })
         .unwrap();
@@ -74,6 +77,8 @@ fn a_mirrored_mesh_body_is_a_true_mirror_image() {
     let Solid::Mesh { file, scale } = session.doc().get(copy).unwrap().solid.clone() else { panic!() };
     assert_eq!(scale, 0.1);
     assert!(file.contains("wedge.mirror-") && file.ends_with(".stl"), "{file}");
+    assert!(std::path::Path::new(&file).starts_with(&cache), "{file}");
+    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 2, "the source and the cache folder");
     // The file is the reflected mesh: its triangles still face outward.
     let reflected = gc_mesh::stl::parse(&std::fs::read(&file).unwrap()).unwrap();
     assert!(volume(&wedge()) > 0.0 && volume(&reflected) > 0.0);
@@ -96,12 +101,75 @@ fn a_mirrored_mesh_body_is_a_true_mirror_image() {
     // Asking again writes no second file.
     assert!(session.undo());
     session.mirror_components_reflected(&[part.erase()], plane, false, false).unwrap();
-    let files = std::fs::read_dir(&dir).unwrap().count();
-    assert_eq!(files, 2, "the source and one mirror image");
+    assert_eq!(std::fs::read_dir(&cache).unwrap().count(), 1, "one mirror image");
 
     // A body whose file is gone is placed like the plain mirror and reported.
     let lost = Solid::Mesh { file: dir.join("gone.stl").to_str().unwrap().to_owned(), scale: 1.0 };
     let ghost = session.add_body(lost, Placement { xyz: [1.0, 1.0, 0.0], rpy: [0.0; 3] }).unwrap();
     let outcome = session.mirror_components_reflected(&[ghost.erase()], plane, false, false).unwrap();
     assert_eq!(outcome.not_reflected, [ghost.erase()]);
+    // (Taken back: a project with a missing mesh file cannot be saved.)
+    assert!(session.undo() && session.undo());
+
+    // Saving takes the mirror image into the project's files folder and writes its path relative to
+    // the project; the project opens again with it.
+    let project = dir.join("project");
+    std::fs::create_dir_all(&project).unwrap();
+    let path = project.join("cell.gctrl");
+    session.save_as(&path).unwrap();
+    let stored = std::fs::read_to_string(&path).unwrap();
+    assert!(stored.contains("cell_files/wedge.mirror-"), "relative path in the file");
+    assert!(!stored.contains(cache.to_str().unwrap()), "no cache path in the file");
+    let mut opened = Session::new();
+    opened.open(&path).unwrap();
+    let reopened: Vec<String> = opened
+        .doc()
+        .bodies()
+        .iter()
+        .filter_map(|(_, b)| match &b.solid {
+            Solid::Mesh { file, .. } if file.contains(".mirror-") => Some(file.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(reopened.len(), 1);
+    assert!(std::path::Path::new(&reopened[0]).starts_with(project.join("cell_files")), "{reopened:?}");
+    assert!(gc_mesh::stl::parse(&std::fs::read(&reopened[0]).unwrap()).is_ok());
+
+    // In a saved project a new mirror image goes straight into its files folder. Mirror and Reuse
+    // mixed in one command are one undo step.
+    let source_in_project = opened
+        .doc()
+        .bodies()
+        .iter()
+        .find(|(_, b)| matches!(&b.solid, Solid::Mesh { file, .. } if file.ends_with("wedge.stl")))
+        .map(|(id, _)| id)
+        .unwrap();
+    let floor_in_project = opened
+        .doc()
+        .bodies()
+        .iter()
+        .find(|(_, b)| matches!(b.solid, Solid::Box { .. }))
+        .map(|(id, _)| id)
+        .unwrap();
+    let other_plane = Selection {
+        occurrence: Occurrence::Item(floor_in_project.erase()),
+        geometry: Geometry::Plane { point: [0.0; 3], normal: [0.0, 1.0, 0.0] },
+    };
+    let depth = opened.history().undo_depth();
+    let count = opened.doc().bodies().iter().count();
+    let states = [
+        (source_in_project.erase(), gc_session::MirrorState::Mirror),
+        (floor_in_project.erase(), gc_session::MirrorState::Reuse),
+    ];
+    let outcome = opened.mirror_components_mixed(&states, other_plane, false, false).unwrap();
+    assert!(outcome.not_reflected.is_empty());
+    assert_eq!(opened.history().undo_depth(), depth + 1);
+    assert_eq!(opened.doc().bodies().iter().count(), count + 2);
+    let in_project = opened.doc().bodies().iter().any(|(_, b)| {
+        matches!(&b.solid, Solid::Mesh { file, .. }
+            if file.contains(".mirror-y-") && std::path::Path::new(file).starts_with(project.join("cell_files")))
+    });
+    assert!(in_project);
+    assert!(opened.undo());
+    assert_eq!(opened.doc().bodies().iter().count(), count);
 }

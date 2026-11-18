@@ -680,16 +680,17 @@ pub(crate) fn tool_shapes(
 }
 
 /// The file holding the mirror image of the mesh in `file` across its own coordinate plane square to
-/// `axis`: written next to `file` when it is not there yet, named after the content of the reflected
-/// mesh so that the same mirror image is one file however often it is asked for.
-pub(crate) fn mirrored_mesh_file(file: &str, axis: usize) -> Result<String, String> {
+/// `axis`: written into `dir` when it is not there yet, named after the content of the reflected mesh so
+/// that the same mirror image is one file however often it is asked for.
+pub(crate) fn mirrored_mesh_file(file: &str, axis: usize, dir: &std::path::Path) -> Result<String, String> {
     let reflected = read_mesh_file(file)?.mirrored(axis);
     let source = std::path::Path::new(file);
     let stem = source.file_stem().and_then(|s| s.to_str()).unwrap_or("mesh");
     let letter = ["x", "y", "z"].get(axis).copied().unwrap_or("n");
     let name = format!("{stem}.mirror-{letter}-{:016x}.stl", reflected.content_hash());
-    let path = source.with_file_name(name);
+    let path = dir.join(name);
     if !path.exists() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
         std::fs::write(&path, gc_mesh::stl::to_binary(&reflected))
             .map_err(|e| format!("{}: {e}", path.display()))?;
     }

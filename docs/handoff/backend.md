@@ -124,6 +124,14 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 거울상 메시: 쓰는 위치와 컴포넌트별 상태(리드 수정 요청)
+
+- **쓰는 위치**(원본 옆에는 쓰지 않는다): 문서에 파일이 있으면 프로젝트의 파일 폴더 `<이름>_files/`에 바로, 아직 저장 전이면 앱 캐시(`gc_persist::places::cache_dir()/mirrored` — Windows `%LOCALAPPDATA%\GraphCTRL\cache`, 그 밖 `$XDG_CACHE_HOME/graphctrl` 또는 `~/.cache/graphctrl`; `session.set_asset_cache(Some(dir))`로 바꿀 수 있다)에 쓴다. 저장(Save As 포함)하면 기존 프로젝트 묶기(`packed_for`)가 프로젝트 밖 메시 파일을 `<이름>_files/`로 복사하고 상대 경로로 적으므로 거울상 파일도 같이 들어간다.
+  - 리드가 말한 `<문서이름>.assets/` 대신 **기존 규칙 `<이름>_files/`**를 썼다(메시·로봇 파일이 이미 그 폴더에 들어가고 열 때도 그 규칙으로 푼다 — 폴더를 둘로 나누지 않으려고). 이름을 바꾸길 원하면 `project::files_dir` 한 곳이다.
+  - 저장 뒤에도 메모리의 문서는 캐시 경로를 가리킨다(저장 파일에는 상대 경로). 다시 열면 프로젝트 폴더의 것을 쓴다. 캐시 파일은 지우지 않는다.
+- **컴포넌트별 상태, 실행 취소 1단계**: `session.mirror_components_mixed(&[(item, MirrorState::{Mirror, Reuse})], plane, relationships, ground) -> MirrorOutcome`. Exclude는 목록에서 빼면 된다. `mirror_components_reflected`는 전부 Mirror인 경우의 줄임이다.
+- 테스트: `gc_session/tests/mirror_reflected.rs`(캐시에 쓰기 → 저장 → 파일에 상대 경로 → 다시 열기 → 저장된 프로젝트에서는 `_files`에 바로 쓰기, 섞인 상태 1단계 실행 취소).
+
 ## 2026-11-18 — 원뿔 선택 기하(Tangent·축), 메시의 원뿔면 인식
 
 근거: Place Tangent constraints in assemblies(`GUID-FF270566-CA9E-420A-A00A-F52DD0FDFD8E`) — "A Tangent constraint positions faces, planes, cylinders, spheres, cones, and ruled splines tangent to one another."
