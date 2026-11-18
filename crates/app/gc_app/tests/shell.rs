@@ -7707,3 +7707,50 @@ fn the_bom_dialog_has_settings_and_static_quantities() {
     let rows = harness.state().session.bill_of_materials(gc_session::BomView::Structured);
     assert!(!rows[0].static_quantity && rows[0].quantity == 1);
 }
+
+/// The iProperties Status and Custom tabs, and the Physical tab's QTY option and inertia (Inventor 2026 help,
+/// GUID-8ABF17C5-B9EB-47B5-92CF-9FBD335334E3, GUID-877564AC-78CE-4216-9913-003A2DE8D698): a custom property is
+/// kept with its name and value; a nameless one is refused.
+#[test]
+fn the_iproperties_dialog_has_custom_properties_a_status_and_inertia() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness
+        .state_mut()
+        .session
+        .add_body(gc_doc::Solid::Box { size: [0.1; 3] }, gc_doc::Placement::default())
+        .unwrap();
+    harness.run();
+    harness.get_by_label("도구").click();
+    harness.run();
+    harness.get_by_label("iProperties…").click();
+    harness.run_steps(3);
+    // Physical: the QTY option and the inertial properties.
+    harness.get_by_label("물리적").click();
+    harness.run_steps(2);
+    harness.get_by_label("수량 재정의 포함 (Include QTY Overrides)");
+    harness.get_by_label("관성 특성");
+    // Custom: add a property without a name: refused; with one: kept.
+    harness.get_by_label("사용자 정의").click();
+    harness.run_steps(2);
+    harness.get_by_label("속성 추가").click();
+    harness.run_steps(2);
+    harness.get_by_label("확인").click();
+    harness.run_steps(2);
+    assert!(harness.state().session.properties(None).custom.is_empty(), "a nameless property is refused");
+    harness.get_by_label("이름 1").click();
+    harness.run_steps(2);
+    harness.get_by_label("이름 1").type_text("Batch");
+    harness.get_by_label("값 1").click();
+    harness.run_steps(2);
+    harness.get_by_label("값 1").type_text("7");
+    harness.run_steps(2);
+    harness.get_by_label("확인").click();
+    harness.run_steps(3);
+    let custom = harness.state().session.properties(None).custom;
+    assert_eq!(custom.len(), 1);
+    assert_eq!((custom[0].name.as_str(), custom[0].value.as_str()), ("Batch", "7"));
+}
