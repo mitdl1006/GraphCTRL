@@ -71,6 +71,61 @@ To Work with Sketch Dimensions GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185.
 | Flip Direction 대상의 "line to an arc (the arc itself)"·"between 2 arcs" 거리 | 없음 | 선-호·호-호 거리 치수 |
 | 구동 치수 토글 | 있음(`SketchOp::SetDriving`) | — |
 
+## 2026-11-18 — 3D Bend와 3D 끝 접선(리드 ③ 1번)
+
+근거: To Create Lines, Arcs, and Bends, GUID-4F861674-F74C-474E-869A-4C190ED6EC4B — "The Bend tool lets you place tangent corner bends on lines in a 3D sketch.
+… specify a Radius. … click any line".
+
+- `SketchOp::Bend { lines: [l1, l2], radius: "20 mm" }`: 3D 스케치에서 모서리(같은 점, 또는 같은 자리의 끝점)로 만나는 두 선을 반지름만큼 잘라 그 평면의 접하는 3D 호로 잇는다.
+  - 반지름 치수가 붙는다. 한 번의 실행 취소.
+  - 두 선이 한 점을 공유하면 두 번째 선에 끝점을 따로 준다.
+  - 거부: 짧아서 안 들어감, 만나지 않음, 일직선, 2D 스케치.
+- 3D `Tangent`(이전에는 `WrongSpace`): 끝이 이어진 선-호(일치 구속 또는 같은 점)만 받는다. 솔버 `EndTangent3` = 이음점의 반지름에 직각(`Dot3`) + 선의 먼 끝이 호의 평면 위(새 행 `Coplanar`, 기울기 검사 포함).
+- 없음(원문에 있음): Bend 대화상자의 Equal(같은 반지름 연속 구속), 선을 클릭할 때마다 연속 적용하는 도구 흐름. FE가 `ToolKind`를 만들면 두 선 클릭 → `SketchOp::Bend`.
+- 테스트: `gc_session/tests/sketch_bend.rs`.
+- QA 브랜치 영향: 없음(새 `SketchOp`·솔버 변형 추가뿐).
+
+## 2026-11-18 — 3D 스케치 원문 대조(리드 ③, 시작 전)
+
+원문:
+- To Draw 3D Curves, GUID-37BA1DCE-6BC4-41CD-A36D-577F31B304FC: Helical Curve, Curve on Face, Silhouette, Intersection, 복합체 와이어.
+- To Create Lines, Arcs, and Bends, GUID-4F861674-F74C-474E-869A-4C190ED6EC4B: 3D Line(Auto-Bend), 3D Arc, "Bend … tangent corner bends on lines in a 3D sketch", 반지름, Equal 옵션.
+- To Create … Splines, GUID-DB15C479-66F2-456A-9E54-40A60F83DC92: "Interpolation splines can be created in both 2D and 3D sketches".
+
+| 원문 3D 도구 | 지금 | 할 일(순서) |
+|---|---|---|
+| Line(+ Auto-Bend) | 선 있음, Auto-Bend 없음 | 3. Bend가 되면 선 도구 옵션으로 |
+| Arc(3점·중심) | 있음(반원 미만) | — |
+| Bend(반지름, Equal) | 없음 | **1. 두 선의 모서리에 접하는 3D 호**(3D 끝 접선 구속 포함) |
+| Interpolation Spline | 2D만(3D는 `WrongSpace`) | 2. 3D 맞춤점 스플라인 |
+| Helical Curve(피치·회전·높이·나선, 테이퍼, 좌·우) | 없음 | 4. 나선(맞춤점 스플라인 근사 또는 전용 곡선) |
+| Point, 구속(평행·직각·동일·동일선상·점-선·중점·X/Y/Z 평행·평면 평행), 치수 | 있음 | — |
+| Tangent(3D) | `WrongSpace` | 1번과 함께(선-호 끝 접선) |
+| Curve on Face, Project to Surface, Intersection, Silhouette, Equation Curve | 없음 | 해당 없음/보류: 솔리드 면 데이터 없음. Equation Curve는 요청 시 |
+
+## 2026-11-18 — Look At·Slice Graphics의 세션 쪽(리드 ②)
+
+원문 대조:
+- Navigation Bar, GUID-3B926737-92BA-46CF-B722-97F68651772B — Look At "zooms and rotates the model to display the selected element planar to the screen or
+  a selected edge or line horizontal to the screen".
+- To Work with Sketches, GUID-F5A5790A-F748-49F0-A81F-BCA56C7C1E89 — Slice Graphics: F7 또는 상태바. 복원은 "Click a feature command. Click the Finish Sketch …
+  Click Slice Graphics … Press F7".
+
+지금:
+- 뷰포트에 Look At 버튼(선택한 원점 평면 또는 활성 스케치 평면만)과 F7 Slice(활성 2D 스케치 평면, 시점 쪽 절단, 스케치 종료 시 해제)가 이미 있다.
+- Slice는 렌더·FE 몫이라 세션 쪽에 할 일이 없다. 피처 명령 클릭 시 해제는 FE에서 확인할 것.
+
+새 세션 API:
+- `Session::look_target(LookItem, forward) -> Option<LookTarget { toward_eye, up, centre, reach }>`.
+- `LookItem::{WorkFeature, Sketch, SketchCurve, ComponentPlane, Face(Selection)}`.
+  - 평면(작업 평면, 스케치, 컴포넌트 원점 평면, 평면 면, 원형 모서리의 평면): 눈이 있는 쪽에서 정면. 평면 프레임의 Y가 위, 면은 월드 Z(안 되면 Y)에 가깝게.
+  - 선(작업 축, 직선 모서리, 원통 축, 3D 스케치 선): 지금 시선에 가장 가까운, 선에 직각인 방향에서 수평으로.
+  - 2D 스케치 선: 스케치 위에서, 선이 수평.
+  - 점·구는 `None`.
+  - `reach`는 줌 맞춤용 크기(스케치는 그린 점들의 반대각선, 선은 반 길이, 원통은 반지름).
+- FE: Look At 버튼이 선택(작업 피처·스케치·곡선·면)을 `look_target`으로 넘기고 카메라를 `toward_eye`·`up`·`centre`(`reach`가 있으면 줌)로 맞추면 된다.
+- 테스트: `gc_session/tests/look_at.rs`.
+
 ## 2026-11-18 — 선과 타원의 Tangent(① 5번)
 
 근거: GUID-A85A7A30-7D81-4C75-8769-CAD034EEA930(Tangent: "click the first curve … Click the second curve").

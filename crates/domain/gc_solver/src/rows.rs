@@ -68,6 +68,9 @@ pub(crate) enum RowKind {
     PointLine3 { k: usize },
     /// `[px, py, pz, cx, cy, cz, r]`: `|p - c| - r` (a point of a 3D arc).
     PointSphere,
+    /// `[p.., c.., s.., e..]` (3D points): the signed distance of `p` from the plane through `c`, `s` and
+    /// `e` (a point in a 3D arc's plane).
+    Coplanar,
 }
 
 /// Lengths below this (relative to the sketch size) have no usable direction.
@@ -126,6 +129,7 @@ impl RowKind {
             | Self::MidOnLine { .. } => 8,
             Self::PointLine3 { .. } => 9,
             Self::PointSphere => 7,
+            Self::Coplanar => 12,
             Self::Cross3 { .. } | Self::Dot3 { .. } | Self::EqualLen3 | Self::Angle3 { .. } => 12,
         }
     }
@@ -279,6 +283,15 @@ impl RowKind {
                 (S::atan2(across, along) - c(target)) * c(scale)
             }
             Self::PointSphere => length(&sub3(v, 0, 3), size, degenerate) - v[6],
+            Self::Coplanar => {
+                let normal = cross3(sub3(v, 6, 3), sub3(v, 9, 3));
+                let n = length(&normal, size * size, degenerate);
+                if n.value() == 0.0 {
+                    return c(0.0);
+                }
+                let p = sub3(v, 0, 3);
+                (p[0] * normal[0] + p[1] * normal[1] + p[2] * normal[2]) / n
+            }
             Self::PointLine3 { k } => {
                 let (d, p) = (sub3(v, 6, 3), sub3(v, 0, 3));
                 let len = length(&d, size, degenerate);
@@ -356,6 +369,7 @@ mod tests {
             RowKind::Angle3 { target: 0.7, scale: 1.5, rev1: false, rev2: true },
             RowKind::PointLine3 { k: 1 },
             RowKind::PointSphere,
+            RowKind::Coplanar,
         ];
         for kind in &spatial {
             check_gradient(kind, &twelve[..kind.arity()]);
