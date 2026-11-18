@@ -811,7 +811,21 @@ pub(crate) fn set_timeline(
             t.components.joint_conditions.keys().copied().filter(|id| txn.doc().get(*id).is_none()).collect()
         })
         .unwrap_or_default();
+    // Owners of sketches that are gone, and owners that are gone (their sketches go to the top level).
+    let orphaned: Vec<Id<Sketch>> = txn
+        .doc()
+        .timeline()
+        .map(|(_, t)| {
+            t.components
+                .sketch_owners
+                .iter()
+                .filter(|(s, o)| txn.doc().get(*s).is_none() || !txn.doc().has_tree_row(*o))
+                .map(|(s, _)| *s)
+                .collect()
+        })
+        .unwrap_or_default();
     let edit = |t: &mut crate::design::Timeline| {
+        t.components.sketch_owners.retain(|(s, _)| !orphaned.contains(s));
         if !gone.is_empty() {
             let c = &mut t.components;
             for list in [&mut c.grounded, &mut c.disabled, &mut c.hidden, &mut c.suppressed] {

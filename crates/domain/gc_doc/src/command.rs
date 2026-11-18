@@ -627,6 +627,15 @@ pub enum SketchOp {
 /// An edit of the document.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Command {
+    /// Runs a command that creates sketches and gives them an owner (Inventor 2026 help, Sketches in
+    /// assemblies, GUID-2C180C3A-2064-4671-B1C2-F74B383B5D39): `None` is the top-level assembly, a
+    /// component is a sketch made while editing that component in place. One undo step.
+    Owned {
+        /// The owner.
+        owner: Option<crate::subassembly::TreeKey>,
+        /// The command (CreateSketch, CreateSketchOn).
+        command: Box<Command>,
+    },
     /// Renames a model-tree item (sketch, body, robot, waypoint, path, work frame, work feature,
     /// feature, assembly). Refused when the name is empty or another item of the same kind has it.
     Rename {
@@ -2761,6 +2770,27 @@ fn sketch_op(
 
 pub(crate) fn run(txn: &mut Txn<'_>, command: &Command) -> Result<(Vec<Created>, &'static str), EditError> {
     match command {
+        Command::Owned { owner, command } => {
+            if owner.is_some_and(|o| !txn.doc().has_tree_row(o)) {
+                return Err(EditError::BadValue);
+            }
+            let (created, label) = run(txn, command)?;
+            let sketches: Vec<Id<Sketch>> = created
+                .iter()
+                .filter_map(|c| if let Created::Sketch(id) = c { Some(*id) } else { None })
+                .collect();
+            if let Some(owner) = *owner
+                && !sketches.is_empty()
+            {
+                crate::cell::set_timeline(txn, |t| {
+                    for sketch in &sketches {
+                        t.components.sketch_owners.retain(|(s, _)| s != sketch);
+                        t.components.sketch_owners.push((*sketch, owner));
+                    }
+                })?;
+            }
+            Ok((created, label))
+        }
         Command::AddParam { name, source, angle } => {
             let taken = !name_free(txn.doc(), name, None);
             if taken || !gc_expr::is_valid_param_name(name) {

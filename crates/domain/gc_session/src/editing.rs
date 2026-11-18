@@ -33,6 +33,31 @@ impl Session {
         self.execute(&gc_doc::Command::Cell(gc_doc::CellOp::Subassembly(op)))
     }
 
+    /// Runs a command that creates sketches; while a component or subassembly is edited in place the new
+    /// sketches belong to it (Sketches in assemblies, GUID-2C180C3A-2064-4671-B1C2-F74B383B5D39).
+    pub(crate) fn execute_owned(
+        &mut self,
+        command: gc_doc::Command,
+    ) -> Result<Vec<gc_doc::Created>, EditError> {
+        match self.edit_target() {
+            Some(owner) => {
+                self.execute(&gc_doc::Command::Owned { owner: Some(owner), command: Box::new(command) })
+            }
+            None => self.execute(&command),
+        }
+    }
+
+    /// The owner of a sketch: the component or subassembly it was made in, `None` for the top-level
+    /// assembly (whose sketches Inventor lists under the top-level Origin folder).
+    pub fn sketch_owner(&self, sketch: gc_core::Id<gc_doc::Sketch>) -> Option<TreeKey> {
+        self.doc().sketch_owner(sketch)
+    }
+
+    /// The sketches an owner holds (`None`: the top-level assembly's).
+    pub fn sketches_of(&self, owner: Option<TreeKey>) -> Vec<gc_core::Id<gc_doc::Sketch>> {
+        self.doc().sketches_of(owner)
+    }
+
     /// The component or subassembly being edited in place; `None` at the top level.
     pub fn edit_target(&self) -> Option<TreeKey> {
         self.editing.target.filter(|t| self.doc().has_tree_row(*t))
