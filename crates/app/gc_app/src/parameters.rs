@@ -67,6 +67,8 @@ impl Parameters {
                     | DimKind::HDistance { .. }
                     | DimKind::VDistance { .. }
                     | DimKind::PointLine { .. }
+                    | DimKind::LineArc { .. }
+                    | DimKind::ArcArc { .. }
                     | DimKind::PlaneDistance { .. } => tr!(lang, ParamKindLength),
                 };
                 let (unit, value) = unit_and_value(&dimension.kind, dimension.value);

@@ -336,6 +336,21 @@ impl Binding {
             DimKind::PointLine { p, line, side } => {
                 Constraint::PointLineDistance { p: self.p2(p)?, line: self.line(sketch, line)?, side, value }
             }
+            DimKind::LineArc { .. } | DimKind::ArcArc { .. } if sketch.is_spatial() => {
+                return Err(SketchError::WrongSpace);
+            }
+            DimKind::LineArc { line, arc, side } => Constraint::LineCircleDistance {
+                line: self.line(sketch, line)?,
+                round: self.round(sketch, arc)?,
+                side,
+                value,
+            },
+            DimKind::ArcArc { a, b, external } => Constraint::CircleCircleDistance {
+                a: self.round(sketch, a)?,
+                b: self.round(sketch, b)?,
+                external,
+                value,
+            },
             // In space the angle has no sense of turning: it is between 0 and 180°.
             DimKind::Angle { l1, rev1, l2, rev2 } if sketch.is_spatial() => {
                 if value >= std::f64::consts::PI {
@@ -537,6 +552,23 @@ impl Sketch {
                     return None;
                 }
                 side * (dx * (p[1] - a[1]) - dy * (p[0] - a[0])) / length
+            }
+            DimKind::LineArc { line, arc, side } => {
+                let (a, b) = self.line(line)?;
+                let (centre, r) = self.round(arc)?;
+                let (a, b, c) = (pos(a)?, pos(b)?, pos(centre)?);
+                let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+                let length = (dx * dx + dy * dy).sqrt();
+                if length == 0.0 {
+                    return None;
+                }
+                side * (dx * (c[1] - a[1]) - dy * (c[0] - a[0])) / length - r
+            }
+            DimKind::ArcArc { a, b, external } => {
+                let ((ca, ra), (cb, rb)) = (self.round(a)?, self.round(b)?);
+                let (ca, cb) = (pos(ca)?, pos(cb)?);
+                let apart = ((cb[0] - ca[0]).powi(2) + (cb[1] - ca[1]).powi(2)).sqrt();
+                if external { apart - ra - rb } else { (ra - rb).abs() - apart }
             }
             DimKind::Angle { l1, rev1, l2, rev2 } if self.is_spatial() => {
                 let dir3 = |line: Id<Curve>, reversed: bool| -> Option<[f64; 3]> {

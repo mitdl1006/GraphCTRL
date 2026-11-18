@@ -496,6 +496,34 @@ fn dimension_for(sketch: &Sketch, picks: &[Item]) -> Option<DimKind> {
         [Item::Point(p), Item::Curve(line)] | [Item::Curve(line), Item::Point(p)] => {
             Some(DimKind::PointLine { p, line, side: side_of(p, line)? })
         }
+        // A line and a circle or arc: the distance to the circle itself, when the line passes clear of it
+        // (To Work with Sketch Dimensions, GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185).
+        [Item::Curve(l), Item::Curve(c)] | [Item::Curve(c), Item::Curve(l)]
+            if sketch.line(l).is_some() && sketch.round(c).is_some() =>
+        {
+            let ((a, b), (centre, r)) = (sketch.line(l)?, sketch.round(c)?);
+            let (a, b, centre) = (xy(sketch, a)?, xy(sketch, b)?, xy(sketch, centre)?);
+            let length = distance(a, b);
+            if length <= 0.0 {
+                return None;
+            }
+            let signed = ((b[0] - a[0]) * (centre[1] - a[1]) - (b[1] - a[1]) * (centre[0] - a[0])) / length;
+            (signed.abs() > r).then(|| DimKind::LineArc { line: l, arc: c, side: signed.signum() })
+        }
+        // Two circles or arcs: the distance between them, apart or one inside the other (not crossing).
+        [Item::Curve(a), Item::Curve(b)]
+            if a != b && sketch.round(a).is_some() && sketch.round(b).is_some() =>
+        {
+            let ((ca, ra), (cb, rb)) = (sketch.round(a)?, sketch.round(b)?);
+            let apart = distance(xy(sketch, ca)?, xy(sketch, cb)?);
+            if apart > ra + rb {
+                Some(DimKind::ArcArc { a, b, external: true })
+            } else if apart < (ra - rb).abs() {
+                Some(DimKind::ArcArc { a, b, external: false })
+            } else {
+                None
+            }
+        }
         [Item::Curve(l1), Item::Curve(l2)] if l1 != l2 => {
             let ((a1, b1), (a2, b2)) = (sketch.line(l1)?, sketch.line(l2)?);
             let dir =

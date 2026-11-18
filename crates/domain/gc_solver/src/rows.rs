@@ -32,10 +32,12 @@ pub(crate) enum RowKind {
     Cross { scale: f64 },
     /// Same inputs: `dot(b - a, d - c) / scale`.
     Dot { scale: f64 },
-    /// `[ax, ay, bx, by, cx, cy, r]`: signed distance of `c` from the line minus `side * r`.
-    LineCircleTangent { side: f64 },
-    /// `[c1x, c1y, r1, c2x, c2y, r2]`: `|c2 - c1| - (r1 + r2)` (external) or `- sign * (r1 - r2)`.
-    CircleCircle { external: bool, sign: f64 },
+    /// `[ax, ay, bx, by, cx, cy, r]`: signed distance of `c` from the line minus `side * (r + gap)` (zero gap:
+    /// tangent; else the line keeps `gap` from the circle itself).
+    LineCircleTangent { side: f64, gap: f64 },
+    /// `[c1x, c1y, r1, c2x, c2y, r2]`: `|c2 - c1| - (r1 + r2) - gap` (external) or
+    /// `|c2 - c1| - sign * (r1 - r2) + gap` (one inside the other, `gap` between the circles themselves).
+    CircleCircle { external: bool, sign: f64, gap: f64 },
     /// `[ax, ay, bx, by, cx, cy, dx, dy]`: `|b - a| - |d - c|`.
     EqualLen,
     /// Same inputs: `scale * wrap(angle from (b - a) to (d - c) - target)`, each direction optionally reversed.
@@ -160,16 +162,20 @@ impl RowKind {
                 ((v[2] - v[0]) * (v[7] - v[5]) - (v[3] - v[1]) * (v[6] - v[4])) / c(scale)
             }
             Self::Dot { scale } => ((v[2] - v[0]) * (v[6] - v[4]) + (v[3] - v[1]) * (v[7] - v[5])) / c(scale),
-            Self::LineCircleTangent { side } => {
+            Self::LineCircleTangent { side, gap } => {
                 let (dx, dy) = (v[2] - v[0], v[3] - v[1]);
                 let cross = dx * (v[5] - v[1]) - dy * (v[4] - v[0]);
                 let len = length(&[dx, dy], size, degenerate);
                 let distance = if len.value() == 0.0 { cross } else { cross / len };
-                distance - c(side) * v[6]
+                distance - c(side) * (v[6] + c(gap))
             }
-            Self::CircleCircle { external, sign } => {
-                let gap = length(&[v[3] - v[0], v[4] - v[1]], size, degenerate);
-                if external { gap - (v[2] + v[5]) } else { gap - c(sign) * (v[2] - v[5]) }
+            Self::CircleCircle { external, sign, gap } => {
+                let apart = length(&[v[3] - v[0], v[4] - v[1]], size, degenerate);
+                if external {
+                    apart - (v[2] + v[5]) - c(gap)
+                } else {
+                    apart - c(sign) * (v[2] - v[5]) + c(gap)
+                }
             }
             Self::EqualLen => {
                 length(&[v[2] - v[0], v[3] - v[1]], size, degenerate)
@@ -280,9 +286,12 @@ mod tests {
             RowKind::Mid,
             RowKind::Cross { scale: 2.0 },
             RowKind::Dot { scale: 2.0 },
-            RowKind::LineCircleTangent { side: -1.0 },
-            RowKind::CircleCircle { external: true, sign: 1.0 },
-            RowKind::CircleCircle { external: false, sign: -1.0 },
+            RowKind::LineCircleTangent { side: -1.0, gap: 0.0 },
+            RowKind::LineCircleTangent { side: 1.0, gap: 0.3 },
+            RowKind::CircleCircle { external: true, sign: 1.0, gap: 0.0 },
+            RowKind::CircleCircle { external: false, sign: -1.0, gap: 0.0 },
+            RowKind::CircleCircle { external: true, sign: 1.0, gap: 0.2 },
+            RowKind::CircleCircle { external: false, sign: 1.0, gap: 0.1 },
             RowKind::EqualLen,
             RowKind::Angle { target: 0.7, scale: 1.5, rev1: false, rev2: true },
             RowKind::MidOnLine { frozen: 3.0 },
