@@ -286,11 +286,13 @@ fn choice<T: Clone + PartialEq>(
 ) -> bool {
     let before = current.clone();
     let shown = options.iter().find(|(v, _)| *v == *current).map_or_else(String::new, |(_, n)| n.clone());
-    egui::ComboBox::from_id_salt(salt).selected_text(shown).show_ui(ui, |ui| {
+    let name = shown.clone();
+    let popup = egui::ComboBox::from_id_salt(salt).selected_text(shown).show_ui(ui, |ui| {
         for (value, name) in options {
             ui.selectable_value(current, value.clone(), name);
         }
     });
+    popup.response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ComboBox, true, name.as_str()));
     *current != before
 }
 
@@ -1066,6 +1068,10 @@ fn kit_properties(ui: &mut Ui, session: &mut Session, lang: Lang, id: Id<gc_doc:
 /// the status bar.
 pub fn robot_tool_kit(ui: &mut Ui, session: &mut Session, lang: Lang, robot: Id<gc_doc::Robot>) {
     let fitted = session.robot_tool_kit(robot);
+    // Nothing to choose from while no kind of tool is defined.
+    if fitted.is_none() && session.doc().tool_kits().iter().next().is_none() {
+        return;
+    }
     let kits: Vec<(Option<Id<gc_doc::ToolKit>>, String)> =
         std::iter::once((None, tr!(lang, WorkNoKit).to_owned()))
             .chain(session.doc().tool_kits().iter().map(|(k, kit)| (Some(k), kit.name.clone())))
