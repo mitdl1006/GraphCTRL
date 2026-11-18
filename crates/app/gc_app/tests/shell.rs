@@ -5660,3 +5660,48 @@ fn the_3d_draw_panel_has_a_bend_button_that_esc_ends() {
     harness.run();
     assert!(!harness.state().viewport().is_bending());
 }
+
+#[test]
+fn a_3d_spline_is_placed_with_fit_points_and_finished_with_enter() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    pick_variant(&mut harness, "스케치", "3D 스케치");
+    harness.run();
+    pick_variant(&mut harness, "선", "스플라인(보간)");
+    harness.run();
+    assert_eq!(harness.state().session.tool(), ToolKind::Spline);
+    let count = |h: &egui_kittest::Harness<'_, GraphCtrlApp>| {
+        h.state()
+            .session
+            .active_sketch()
+            .unwrap()
+            .1
+            .curves
+            .values()
+            .filter(|c| matches!(c.geom, gc_sketch::CurveGeom::Spline { .. }))
+            .count()
+    };
+    for at in [egui::pos2(480.0, 520.0), egui::pos2(560.0, 470.0), egui::pos2(640.0, 540.0)] {
+        harness.event(egui::Event::PointerMoved(at));
+        harness.run();
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.run();
+        }
+    }
+    harness.event(egui::Event::PointerMoved(egui::pos2(700.0, 500.0)));
+    harness.run();
+    assert!(harness.state().session.spatial_spline_preview().is_some());
+    assert_eq!(count(&harness), 0);
+    harness.key_press(egui::Key::Enter);
+    harness.run();
+    assert_eq!(count(&harness), 1);
+}
