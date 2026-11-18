@@ -314,12 +314,18 @@ fn curve_path(
                 view.polyline(ring(c, radius.unwrap_or(r), 0.0, tau), stroke);
             }
         }
-        CurveGeom::Ellipse { c, major, minor } => {
+        CurveGeom::Ellipse { c, major, minor, arc } => {
+            let flat = |p: [f64; 3]| [p[0], p[1]];
+            let ends = match arc {
+                Some((s, e)) => pos(s).zip(pos(e)).map(|(s, e)| (flat(s), flat(e))),
+                None => None,
+            };
             if let (Some(c), Some(m)) = (pos(c), pos(major))
-                && let Some(points) = gc_sketch::ellipse_points([c[0], c[1]], [m[0], m[1]], minor, 96)
+                && (arc.is_none() || ends.is_some())
+                && let Some((points, closed)) = gc_sketch::ellipse_points(flat(c), flat(m), minor, ends, 96)
             {
-                let closed = points.iter().chain(points.first()).map(|p| plane.world([p[0], p[1], 0.0]));
-                view.polyline(closed, stroke);
+                let back = if closed { points.first() } else { None };
+                view.polyline(points.iter().chain(back).map(|p| plane.world([p[0], p[1], 0.0])), stroke);
             }
         }
         // In a 3D sketch an arc lies in the plane of its three points (`gc_sketch::Arc3`).

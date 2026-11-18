@@ -110,13 +110,9 @@ fn draw_new(preview: &mut Preview, before: &Sketch, op: &SketchOp) {
                     preview.lines.push((a, b));
                 }
             }
-            CurveGeom::Ellipse { c, major, minor } => {
-                if let (Some(c), Some(m)) = (at(c), at(major))
-                    && let Some(points) = gc_sketch::ellipse_points(c, m, minor, 64)
-                {
-                    for (k, p) in points.iter().enumerate() {
-                        preview.lines.push((*p, points[(k + 1) % points.len()]));
-                    }
+            CurveGeom::Ellipse { .. } => {
+                if let Some((points, closed)) = after.ellipse_geom_outline(&curve.geom, 64) {
+                    push_polyline(preview, &points, closed);
                 }
             }
             CurveGeom::Circle { c, r } => {
@@ -681,5 +677,13 @@ impl Tool {
             }
             _ => return None,
         })
+    }
+}
+
+/// A polyline as preview segments (closed: back to the first point).
+pub fn push_polyline(preview: &mut crate::Preview, points: &[[f64; 2]], closed: bool) {
+    preview.lines.extend(points.windows(2).map(|w| (w[0], w[1])));
+    if closed && let (Some(first), Some(last)) = (points.first(), points.last()) {
+        preview.lines.push((*last, *first));
     }
 }

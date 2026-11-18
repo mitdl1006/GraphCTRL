@@ -310,14 +310,17 @@ impl Session {
                             preview.circles.push((c, r));
                         }
                     }
-                    Some(gc_sketch::CurveGeom::Ellipse { c, major, minor }) => {
+                    Some(gc_sketch::CurveGeom::Ellipse { c, major, minor, arc }) => {
+                        let ends = match arc {
+                            Some((s, e)) => at(s).zip(at(e)),
+                            None => None,
+                        };
                         if let (Some(c), Some(m)) = (at(c), at(major))
-                            && let Some(points) =
-                                gc_sketch::ellipse_points(c, m, minor * motion.radius_factor(), 64)
+                            && (arc.is_none() || ends.is_some())
+                            && let Some((points, closed)) =
+                                gc_sketch::ellipse_points(c, m, minor * motion.radius_factor(), ends, 64)
                         {
-                            for (k, p) in points.iter().enumerate() {
-                                preview.lines.push((*p, points[(k + 1) % points.len()]));
-                            }
+                            gc_tools::push_polyline(&mut preview, &points, closed);
                         }
                     }
                     Some(gc_sketch::CurveGeom::Arc { c, s, e }) => {

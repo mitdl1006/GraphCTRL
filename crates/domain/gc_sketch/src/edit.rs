@@ -205,7 +205,10 @@ impl Sketch {
         let c = self.add_point(alloc, centre);
         let major = self.add_point(alloc, major);
         let id = alloc.alloc();
-        self.curves.insert(id, Curve { geom: CurveGeom::Ellipse { c, major, minor }, construction: false });
+        self.curves.insert(
+            id,
+            Curve { geom: CurveGeom::Ellipse { c, major, minor, arc: None }, construction: false },
+        );
         Ok(id)
     }
 

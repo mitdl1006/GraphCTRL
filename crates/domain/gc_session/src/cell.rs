@@ -1427,7 +1427,7 @@ impl Session {
         Ok(())
     }
 
-    fn show_relation_drive(&mut self, moves: Vec<(gc_core::AnyId, DPose3)>) {
+    pub(crate) fn show_relation_drive(&mut self, moves: Vec<(gc_core::AnyId, DPose3)>) {
         self.cell.relation_drive = moves
             .into_iter()
             .map(|(item, pose)| {
