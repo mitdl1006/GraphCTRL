@@ -4402,6 +4402,11 @@ fn a_parameter_is_made_from_the_dimension_box() {
     assert_eq!(names(&harness), vec![("HGHT".to_owned(), "5 mm".to_owned())]);
     let session = &harness.state().session;
     assert_eq!(session.active_sketch().unwrap().1.dimensions[&width].source, "HGHT");
+    // One undo step takes back both the parameter and the dimension's use of it.
+    harness.state_mut().session.undo();
+    assert!(names(&harness).is_empty(), "the parameter went with one undo");
+    assert_ne!(harness.state().session.active_sketch().unwrap().1.dimensions[&width].source, "HGHT");
+    harness.state_mut().session.redo();
     // Reusing the name changes the parameter.
     harness.state_mut().edit_dimension(width);
     harness.run();

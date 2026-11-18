@@ -1743,14 +1743,16 @@ fn apply_dimension_text(session: &mut Session, id: Id<gc_sketch::Dimension>, tex
         let identifier = name.chars().next().is_some_and(|c| c.is_alphabetic() || c == '_')
             && name.chars().all(|c| c.is_alphanumeric() || c == '_');
         if identifier && !value.is_empty() {
-            let angle = ["deg", "rad", "°"].iter().any(|unit| value.contains(unit));
             let existing = session.doc().params().iter().find(|(_, p)| p.name == name).map(|(id, _)| id);
-            let command = match existing {
-                Some(param) => gc_doc::Command::SetParam { id: param, source: value.to_owned() },
-                None => gc_doc::Command::AddParam { name: name.to_owned(), source: value.to_owned(), angle },
+            // A new name is added and used in one undo step; a name that is not allowed (a digit first, a
+            // reserved word) is refused whole.
+            return match existing {
+                None => session.edit_dimension_with_param(id, name, value).is_ok(),
+                Some(param) => {
+                    let command = gc_doc::Command::SetParam { id: param, source: value.to_owned() };
+                    session.execute(&command).is_ok() && session.edit_dimension(id, name).is_ok()
+                }
             };
-            // A name that is not allowed (a digit first, a reserved word) is refused here.
-            return session.execute(&command).is_ok() && session.edit_dimension(id, name).is_ok();
         }
     }
     session.edit_dimension(id, text).is_ok()
