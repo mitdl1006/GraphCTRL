@@ -464,3 +464,94 @@ fn copy_and_paste_places_new_instances_and_keeps_subassembly_structure() {
     assert_eq!(s.paste(Placement::default()), Err(EditError::BadValue));
     assert!(s.doc().same_content(&before));
 }
+
+fn raised(s: &mut Session, x: f64, z: f64) -> Id<Body> {
+    s.add_body(Solid::Box { size: [0.1; 3] }, Placement { xyz: [x, 0.0, z], rpy: [0.0; 3] }).unwrap()
+}
+
+fn mate_down(s: &mut Session, top: Id<Body>, base: Id<Body>) -> Result<(), EditError> {
+    use gc_doc::{AxisSense, Geometry, RelationKind, Relationship, Selection};
+    let plane = |b: Id<Body>, z: f64, nz: f64| Selection {
+        occurrence: occ(b),
+        geometry: Geometry::Plane { point: [0.0, 0.0, z], normal: [0.0, 0.0, nz] },
+    };
+    s.add_relationship(Relationship::new(
+        "Mate",
+        RelationKind::Mate { offset: 0.0, sense: AxisSense::Opposed },
+        plane(top, -0.05, -1.0),
+        plane(base, 0.05, 1.0),
+    ))
+    .map(|_| ())
+}
+
+/// Rigid (the default) and flexible subassemblies (Inventor 2026 help: Create and edit flexible
+/// components, GUID-30817F08-A5C2-44B7-B237-4791ACA3F854 — "The freedom of movement allowed in the
+/// subassembly is available in the parent assembly"). Rigid: a relationship on one member moves the
+/// whole unit, which shares one set of degrees of freedom and takes the pick. Flexible: each member moves
+/// on its own, has its own degrees of freedom and is picked directly. Switching is one undo step, and
+/// the state is saved.
+#[test]
+fn rigid_subassemblies_move_as_one_and_flexible_ones_let_members_move() {
+    let origin = |s: &Session, x: Id<Body>| s.doc().component_origin(occ(x)).unwrap().pose.translation;
+    let build = |flexible: bool| {
+        let mut s = Session::new();
+        let base = body(&mut s, 0.0); // the first body is grounded
+        let (a, b) = (raised(&mut s, 0.0, 1.0), raised(&mut s, 0.5, 1.3));
+        let sub = demote(&mut s, vec![key(a), key(b)], "Arm");
+        if flexible {
+            let steps = s.history().undo_depth();
+            s.set_flexible(sub, true).unwrap();
+            assert_eq!(s.history().undo_depth(), steps + 1);
+        }
+        (s, base, a, b, sub)
+    };
+
+    // Rigid: A is mated down onto the base and B comes along by the same move.
+    let (mut s, base, a, b, sub) = build(false);
+    assert_eq!(s.doc().rigid_unit(a.erase()), Some(sub));
+    assert_eq!(s.doc().rigid_unit_members(b.erase()).len(), 2);
+    assert_eq!(s.pick_unit(occ(a)), Some(TreeKey::Subassembly(sub)));
+    let (pa, pb) = (origin(&s, a), origin(&s, b));
+    mate_down(&mut s, a, base).unwrap();
+    let (na, nb) = (origin(&s, a), origin(&s, b));
+    assert!((na.z - 0.1).abs() < 1e-6, "A sits on the base: {na:?}");
+    assert!(((nb - na) - (pb - pa)).length() < 1e-6, "B keeps its place relative to A");
+    let (da, db) = (s.component_dof(a.erase()).unwrap(), s.component_dof(b.erase()).unwrap());
+    assert_eq!(da, db, "one unit, one set of degrees of freedom");
+    assert_eq!(da.total, 3);
+    // A drag of one member brings the whole unit.
+    let lifted = gc_math::DPose3::from_parts(na + gc_math::DVec3::Z, gc_math::DQuat::IDENTITY);
+    let moves = s.unit_moves(a.erase(), lifted);
+    assert_eq!(moves.len(), 2);
+    let moved_b = moves.iter().find(|(m, _)| *m == b.erase()).unwrap().1.translation;
+    assert!((moved_b - (nb + gc_math::DVec3::Z)).length() < 1e-9);
+
+    // Switching to flexible frees B; the mate on A stays satisfied. Undo makes it rigid again.
+    s.set_flexible(sub, true).unwrap();
+    assert_eq!(s.doc().rigid_unit(a.erase()), None);
+    assert_eq!(s.pick_unit(occ(b)), Some(key(b)));
+    assert_eq!(s.component_dof(b.erase()).unwrap().total, 6);
+    assert_eq!(s.unit_moves(a.erase(), lifted).len(), 1);
+    s.undo();
+    assert_eq!(s.doc().rigid_unit(a.erase()), Some(sub));
+
+    // Flexible from the start: the mate moves A alone.
+    let (mut s, base, a, b, sub) = build(true);
+    let pb = origin(&s, b);
+    mate_down(&mut s, a, base).unwrap();
+    assert!((origin(&s, a).z - 0.1).abs() < 1e-6);
+    assert!((origin(&s, b) - pb).length() < 1e-9, "B did not move");
+    assert_eq!(s.component_dof(a.erase()).unwrap().total, 3);
+    assert_eq!(s.component_dof(b.erase()).unwrap().total, 6);
+    assert_eq!(s.pick_unit(occ(a)), Some(key(a)));
+
+    // Saved and loaded.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("flex.gcp");
+    s.save_as(&path).unwrap();
+    let mut t = Session::new();
+    t.open(&path).unwrap();
+    assert!(t.doc().subassemblies().iter().any(|g| g.id == sub && g.flexible));
+    // A missing subassembly is refused.
+    assert!(t.set_flexible(SubassemblyId(99), true).is_err());
+}
