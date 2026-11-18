@@ -1108,13 +1108,23 @@ impl Session {
 
     /// The selected item of the cell.
     pub fn selected_item(&self) -> Option<CellItem> {
-        self.cell.selected.filter(|item| self.item_exists(*item))
+        self.cell.selected.filter(|item| self.item_exists(*item) && self.item_in_edit_scope(*item))
+    }
+
+    /// Bodies and robots outside the component being edited in place cannot be selected (or grounded,
+    /// deleted, ... through the selection); other items are not components.
+    fn item_in_edit_scope(&self, item: CellItem) -> bool {
+        match item {
+            CellItem::Body(id) => self.in_edit_scope(gc_doc::Occurrence::Item(id.erase())),
+            CellItem::Robot(id) => self.in_edit_scope(gc_doc::Occurrence::Item(id.erase())),
+            CellItem::Waypoint(_) | CellItem::Path(_) | CellItem::Frame(_) => true,
+        }
     }
 
     /// Selects an item of the cell, or nothing. A body or robot is also the selected occurrence; other
     /// items (waypoints, frames, paths) leave no occurrence selected.
     pub fn select_item(&mut self, item: Option<CellItem>) {
-        self.cell.selected = item.filter(|item| self.item_exists(*item));
+        self.cell.selected = item.filter(|item| self.item_exists(*item) && self.item_in_edit_scope(*item));
         self.cell.occurrence = match self.cell.selected {
             Some(CellItem::Body(id)) => Some(gc_doc::Occurrence::Item(id.erase())),
             Some(CellItem::Robot(id)) => Some(gc_doc::Occurrence::Item(id.erase())),
@@ -1124,15 +1134,16 @@ impl Session {
 
     /// The selected component occurrence, if it still exists.
     pub fn selected_occurrence(&self) -> Option<gc_doc::Occurrence> {
-        self.cell.occurrence.filter(|o| self.doc.has_occurrence(*o))
+        self.cell.occurrence.filter(|o| self.doc.has_occurrence(*o) && self.in_edit_scope(*o))
     }
 
     /// Selects a component occurrence (from the browser or by picking a part, link or tool), or nothing.
     /// The cell item selection follows: a body or robot is selected as itself; a robot's link or tool
     /// selects its robot (whose panels apply); an imported assembly or one of its parts selects no cell
-    /// item. Refused (nothing changes) for an occurrence that does not exist.
+    /// item. Refused (nothing changes) for an occurrence that does not exist or lies outside the component
+    /// being edited in place.
     pub fn select_occurrence(&mut self, occurrence: Option<gc_doc::Occurrence>) -> bool {
-        if occurrence.is_some_and(|o| !self.doc.has_occurrence(o)) {
+        if occurrence.is_some_and(|o| !self.doc.has_occurrence(o) || !self.in_edit_scope(o)) {
             return false;
         }
         self.cell.occurrence = occurrence;

@@ -508,6 +508,13 @@ pub struct Components {
     /// Which subassembly each component placed in the cell belongs to (absent: the top level).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub placed_in: Vec<(Occurrence, crate::subassembly::SubassemblyId)>,
+    /// The next subassembly id: ids only grow, so one of a dissolved subassembly is never reused.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub next_subassembly: u32,
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
 }
 
 /// Interactive Contact (Document Settings, Modeling tab): the contact solver off, on for the contact set
