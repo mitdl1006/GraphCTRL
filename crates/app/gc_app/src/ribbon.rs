@@ -152,82 +152,95 @@ pub(crate) fn show(
             Tab::Sketch => {
                 let current = session.tool();
                 ribbon_group(ui, tr!(lang, GroupCreate), |ui| {
-                    let tools = [
-                        (ToolKind::Select, Icon::Select, Msg::ToolSelect),
-                        (ToolKind::Line, Icon::Line, Msg::ToolLine),
-                        (ToolKind::Circle, Icon::Circle, Msg::ToolCircle),
-                        (ToolKind::Arc, Icon::Arc, Msg::ToolArc),
-                        (ToolKind::Rectangle, Icon::Rectangle, Msg::ToolRectangle),
-                    ];
-                    // A 3D sketch has lines and arcs: Center Point Arc and Three Point Arc (Inventor 2026 help,
-                    // To Create Lines, Arcs, and Bends, GUID-4F861674-F74C-474E-869A-4C190ED6EC4B).
-                    let tools: Vec<(ToolKind, Icon, Msg)> = if spatial {
-                        vec![tools[0], tools[1], tools[3], (ToolKind::Arc3, Icon::Arc, Msg::ToolArc3)]
-                    } else {
-                        tools.to_vec()
-                    };
-                    for (kind, icon, label) in tools {
-                        if ribbon_button(ui, icon, label.text(lang), current == kind, sketching).clicked() {
-                            session.set_tool(kind);
-                        }
-                    }
-                    // Project Cut Edges: a 2D sketch only.
+                    // Select is a plain button; the drawing tools are split buttons whose body runs the
+                    // variant used last (Inventor's Create panel; Inventor 2026 help, To Create Lines, Arcs,
+                    // and Bends, GUID-4F861674-F74C-474E-869A-4C190ED6EC4B; To Create 2D Shape Geometry,
+                    // GUID-D489CE6D-7299-4211-A43A-F3580A4BA357).
                     if ribbon_button(
                         ui,
-                        Icon::CutEdges,
-                        tr!(lang, ToolCutEdges),
-                        false,
-                        sketching && !spatial,
+                        Icon::Select,
+                        Msg::ToolSelect.text(lang),
+                        current == ToolKind::Select,
+                        sketching,
                     )
                     .clicked()
                     {
-                        action = Some(RibbonAction::ProjectCutEdges);
+                        session.set_tool(ToolKind::Select);
                     }
-                    // Point, Polygon and Slot (Inventor 2026 help, To Work with Points,
-                    // GUID-D4A4288F-32F1-4E23-A382-930EBA152E87; To Create 2D Shape Geometry,
-                    // GUID-D489CE6D-7299-4211-A43A-F3580A4BA357): 2D sketches.
-                    if !spatial {
-                        // Midpoint Line, Tangent Circle and the center rectangles as small icons, two rows
-                        // (To Create Lines, Arcs, and Bends, GUID-4F861674-F74C-474E-869A-4C190ED6EC4B; To Create
-                        // 2D Shape Geometry, GUID-D489CE6D-7299-4211-A43A-F3580A4BA357).
-                        ui.vertical(|ui| {
-                            // Point and Polygon too, small, so that the sketch tab fits 1280 px.
-                            let more = [
-                                [
-                                    (ToolKind::Point, Icon::Point, Msg::ToolPoint),
-                                    (ToolKind::MidpointLine, Icon::Text("-+-"), Msg::ToolMidpointLine),
-                                    (ToolKind::TangentCircle, Icon::Text("(/)"), Msg::ToolTangentCircle),
-                                ],
-                                [
-                                    (ToolKind::Polygon, Icon::Polygon, Msg::ToolPolygon),
-                                    (ToolKind::CenterRectangle, Icon::Text("[+]"), Msg::ToolCenterRectangle),
-                                    (
-                                        ToolKind::CenterRectangle3,
-                                        Icon::Text("<+>"),
-                                        Msg::ToolCenterRectangle3,
-                                    ),
-                                ],
-                            ];
-                            for row in more {
-                                ui.horizontal(|ui| {
-                                    for (kind, icon, label) in row {
-                                        let button = gc_ui::ribbon_small_button(
-                                            ui,
-                                            icon,
-                                            label.text(lang),
-                                            current == kind,
-                                            sketching,
-                                        );
-                                        if button.clicked() {
-                                            session.set_tool(kind);
-                                        }
-                                    }
-                                });
-                            }
-                        });
-                        ui.vertical(|ui| {
-                            // The slots as small icons: two rows, the Center Point toggle (Format panel) last.
-                            let slots = [
+                    let mut split = |ui: &mut egui::Ui,
+                                     salt: &str,
+                                     group: Msg,
+                                     variants: &[(ToolKind, Icon, Msg)]| {
+                        let items: Vec<gc_ui::SplitItem<'_>> = variants
+                            .iter()
+                            .map(|(kind, icon, label)| gc_ui::SplitItem {
+                                icon: *icon,
+                                label: label.text(lang),
+                                active: current == *kind,
+                            })
+                            .collect();
+                        let more = tr!(lang, SplitMore, group.text(lang));
+                        if let Some(index) = gc_ui::ribbon_split_button(ui, salt, &more, &items, sketching) {
+                            session.set_tool(variants[index].0);
+                        }
+                    };
+                    if spatial {
+                        // A 3D sketch has lines and arcs (Center Point Arc and Three Point Arc).
+                        split(ui, "line", Msg::ToolLine, &[(ToolKind::Line, Icon::Line, Msg::ToolLine)]);
+                        split(
+                            ui,
+                            "arc",
+                            Msg::SplitArc,
+                            &[
+                                (ToolKind::Arc3, Icon::Arc, Msg::ToolArc3),
+                                (ToolKind::Arc, Icon::Arc, Msg::ToolArc),
+                            ],
+                        );
+                    } else {
+                        split(
+                            ui,
+                            "line",
+                            Msg::ToolLine,
+                            &[
+                                (ToolKind::Line, Icon::Line, Msg::ToolLine),
+                                (ToolKind::MidpointLine, Icon::Text("-+-"), Msg::ToolMidpointLine),
+                            ],
+                        );
+                        split(
+                            ui,
+                            "circle",
+                            Msg::ToolCircle,
+                            &[
+                                (ToolKind::Circle, Icon::Circle, Msg::ToolCircle),
+                                (ToolKind::TangentCircle, Icon::Text("(/)"), Msg::ToolTangentCircle),
+                            ],
+                        );
+                        split(
+                            ui,
+                            "arc",
+                            Msg::SplitArc,
+                            &[
+                                (ToolKind::Arc3, Icon::Arc, Msg::ToolArc3),
+                                (ToolKind::ArcTangent, Icon::Arc, Msg::ToolArcTangent),
+                                (ToolKind::Arc, Icon::Arc, Msg::ToolArc),
+                            ],
+                        );
+                        split(
+                            ui,
+                            "rectangle",
+                            Msg::SplitRectangle,
+                            &[
+                                (ToolKind::Rectangle, Icon::Rectangle, Msg::ToolRectangle),
+                                (ToolKind::Rectangle3, Icon::Rectangle, Msg::ToolRectangle3),
+                                (ToolKind::CenterRectangle, Icon::Text("[+]"), Msg::ToolCenterRectangle),
+                                (ToolKind::CenterRectangle3, Icon::Text("<+>"), Msg::ToolCenterRectangle3),
+                            ],
+                        );
+                        split(
+                            ui,
+                            "slot",
+                            Msg::ToolSlot,
+                            &[
                                 (ToolKind::Slot(SlotKind::CenterToCenter), Icon::Slot, Msg::ToolSlot),
                                 (ToolKind::Slot(SlotKind::Overall), Icon::Text("(=)"), Msg::ToolSlotOverall),
                                 (
@@ -245,37 +258,54 @@ pub(crate) fn show(
                                     Icon::Text("(c)"),
                                     Msg::ToolSlotCenterPointArc,
                                 ),
-                            ];
-                            for (row, slots) in slots.chunks(3).enumerate() {
-                                ui.horizontal(|ui| {
-                                    for (kind, icon, label) in slots.iter().copied() {
-                                        let button = gc_ui::ribbon_small_button(
-                                            ui,
-                                            icon,
-                                            label.text(lang),
-                                            current == kind,
-                                            sketching,
-                                        );
-                                        if button.clicked() {
-                                            session.set_tool(kind);
-                                        }
-                                    }
-                                    if row == 1 {
-                                        // The Format panel's Center Point toggle.
-                                        let on = session.center_point();
-                                        let toggle = gc_ui::ribbon_small_button(
-                                            ui,
-                                            Icon::Text("+"),
-                                            tr!(lang, ToolCenterPoint),
-                                            on,
-                                            sketching,
-                                        );
-                                        if toggle.clicked() {
-                                            // A refusal (a selected end point) shows in the status bar.
-                                            drop(session.set_center_point(!on));
-                                        }
-                                    }
-                                });
+                            ],
+                        );
+                    }
+                    // Project Cut Edges: a 2D sketch only.
+                    if ribbon_button(
+                        ui,
+                        Icon::CutEdges,
+                        tr!(lang, ToolCutEdges),
+                        false,
+                        sketching && !spatial,
+                    )
+                    .clicked()
+                    {
+                        action = Some(RibbonAction::ProjectCutEdges);
+                    }
+                    // Point and Polygon (Inventor 2026 help, To Work with Points,
+                    // GUID-D4A4288F-32F1-4E23-A382-930EBA152E87), small, with the Format panel's Center
+                    // Point toggle: 2D sketches.
+                    if !spatial {
+                        ui.vertical(|ui| {
+                            for (kind, icon, label) in [
+                                (ToolKind::Point, Icon::Point, Msg::ToolPoint),
+                                (ToolKind::Polygon, Icon::Polygon, Msg::ToolPolygon),
+                            ] {
+                                let button = gc_ui::ribbon_small_button(
+                                    ui,
+                                    icon,
+                                    label.text(lang),
+                                    current == kind,
+                                    sketching,
+                                );
+                                if button.clicked() {
+                                    session.set_tool(kind);
+                                }
+                            }
+                        });
+                        ui.vertical(|ui| {
+                            let on = session.center_point();
+                            let toggle = gc_ui::ribbon_small_button(
+                                ui,
+                                Icon::Text("+"),
+                                tr!(lang, ToolCenterPoint),
+                                on,
+                                sketching,
+                            );
+                            if toggle.clicked() {
+                                // A refusal (a selected end point) shows in the status bar.
+                                drop(session.set_center_point(!on));
                             }
                         });
                     }

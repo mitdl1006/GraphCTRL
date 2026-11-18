@@ -106,7 +106,7 @@ impl Cmd {
         let label = match self {
             Self::Tool(ToolKind::Line) => tr!(lang, ToolLine).to_owned(),
             Self::Tool(ToolKind::Circle) => tr!(lang, ToolCircle).to_owned(),
-            Self::Tool(ToolKind::Rectangle) => tr!(lang, ToolRectangle).to_owned(),
+            Self::Tool(ToolKind::Rectangle) => tr!(lang, SplitRectangle).to_owned(),
             Self::Tool(_) => String::new(),
             Self::Done => tr!(lang, CmdDone).to_owned(),
             Self::FinishSketch => tr!(lang, CmdFinishSketch).to_owned(),

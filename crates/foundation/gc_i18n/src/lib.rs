@@ -136,9 +136,9 @@ messages! {
     /// Tool: circle.
     ToolCircle => ("원", "Circle"),
     /// Tool: arc.
-    ToolArc => ("호", "Arc"),
+    ToolArc => ("중심점 호", "Center Point Arc"),
     /// Tool: rectangle.
-    ToolRectangle => ("사각형", "Rectangle"),
+    ToolRectangle => ("2점 직사각형", "Two Point Rectangle"),
     /// Tool: dimension.
     ToolDimension => ("치수", "Dimension"),
     /// Constraint: coincident.
@@ -798,6 +798,16 @@ messages! {
     RepPositions => ("위치 표현", "Positional representation"),
     /// Browser, Representations folder: creates one. `{0}` is the kind.
     RepNew => ("새 {0}", "New {0}"),
+    /// Sketch ribbon, split buttons: the accessible name of the arrow. `{0}` is the group.
+    SplitMore => ("{0} 더 보기", "More {0}"),
+    /// Sketch ribbon, split buttons: the arc group.
+    SplitArc => ("호", "Arc"),
+    /// Sketch ribbon, split buttons: the rectangle group.
+    SplitRectangle => ("직사각형", "Rectangle"),
+    /// Sketch ribbon: the tangent arc tool.
+    ToolArcTangent => ("접선 호", "Tangent Arc"),
+    /// Sketch ribbon: the Three Point Rectangle tool.
+    ToolRectangle3 => ("3점 직사각형", "Three Point Rectangle"),
     /// Browser menu: makes a representation the active one.
     CmdActivate => ("활성화", "Activate"),
     /// Plan card: what the checks guarantee. `{0}` padding mm, `{1}` step mm, `{2}` step degrees, `{3}` clearance mm.

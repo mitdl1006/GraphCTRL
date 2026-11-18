@@ -2982,7 +2982,7 @@ fn the_marking_menu_picks_by_mark_and_by_menu() {
         });
     }
     harness.run_steps(3);
-    for name in ["선", "원", "사각형"] {
+    for name in ["선", "원", "직사각형"] {
         assert!(harness.query_all_by_label(name).next().is_some(), "{name}");
     }
 }
@@ -3629,4 +3629,53 @@ fn the_3d_sketch_ribbon_keeps_finish_sketch_on_screen() {
     }
     harness.get_by_label("스케치 마무리").click();
     harness.run_steps(3);
+}
+
+/// The sketch ribbon's drawing tools are split buttons: the body runs the variant used last, the arrow opens
+/// the list, a chosen variant becomes the body; and at 1280 px "스케치 마무리" stays inside the window in
+/// 2D and 3D sketches.
+#[test]
+fn the_sketch_ribbon_has_split_buttons_and_fits_1280_px() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("XY 스케치").click();
+    harness.run_steps(3);
+    for name in ["스케치 마무리", "스케치 취소"] {
+        let rect = harness.get_by_label(name).rect();
+        assert!(rect.right() <= SIZE.x, "{name} {rect:?} outside the window");
+    }
+
+    // The line tool is current after starting a sketch; the arrow lists the other variants.
+    assert_eq!(harness.state().session.tool(), gc_tools::ToolKind::Line);
+    mouse_click_label(&mut harness, "직사각형 더 보기");
+    harness.run_steps(3);
+    if gpu {
+        let image = harness.render().unwrap();
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        image.save(out.join("review-47-split-button.png")).unwrap();
+    }
+    harness.get_by_label("3점 중심 직사각형").click();
+    harness.run_steps(3);
+    assert_eq!(harness.state().session.tool(), gc_tools::ToolKind::CenterRectangle3);
+    // It is the body now: another tool, then the body runs it again.
+    harness.get_by_label("선택").click();
+    harness.run_steps(3);
+    assert_eq!(harness.state().session.tool(), gc_tools::ToolKind::Select);
+    harness.get_by_label("3점 중심 직사각형").click();
+    harness.run_steps(3);
+    assert_eq!(harness.state().session.tool(), gc_tools::ToolKind::CenterRectangle3);
+
+    // A 3D sketch fits as well.
+    harness.get_by_label("스케치 마무리").click();
+    harness.run_steps(3);
+    harness.get_by_label("3D 모델").click();
+    harness.run_steps(3);
+    harness.get_by_label("3D 스케치").click();
+    harness.run_steps(3);
+    let finish = harness.get_by_label("스케치 마무리").rect();
+    assert!(finish.right() <= SIZE.x, "{finish:?} outside the window in a 3D sketch");
 }
