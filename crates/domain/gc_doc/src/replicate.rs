@@ -366,6 +366,15 @@ fn check_items(doc: &Document, items: &[AnyId]) -> Result<(), EditError> {
 }
 
 /// Mirrors components across a plane (a planar face, work plane or origin plane on any component).
+impl Document {
+    /// Where a component at `pose` stands mirrored across a plane (as Mirror Components places a reused
+    /// component); `None` when the plane no longer resolves.
+    pub(crate) fn mirrored_pose(&self, plane: &Selection, pose: &DPose3) -> Option<DPose3> {
+        let (point, normal) = self.selection_axis(plane)?;
+        (point.is_finite() && normal.is_finite()).then(|| mirrored(pose, &Mirror { point, normal }).0)
+    }
+}
+
 pub(crate) fn mirror(
     txn: &mut Txn<'_>,
     items: &[AnyId],
