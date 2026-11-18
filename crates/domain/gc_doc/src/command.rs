@@ -525,6 +525,17 @@ pub enum SketchOp {
         /// The inner fit point to split at.
         point: Id<SkPoint>,
     },
+    /// Symmetric on two lines, circles or arcs about a line (GUID-A85A7A30-7D81-4C75-8769-CAD034EEA930): "click
+    /// the first line or curve. Click the second line or curve. Click the line of symmetry." Their points are
+    /// made symmetric in pairs (`Sketch::symmetric_pairs`); pairs already symmetric are left as they are.
+    SymmetricCurves {
+        /// The first line or curve.
+        first: Id<Curve>,
+        /// The second.
+        second: Id<Curve>,
+        /// The line of symmetry.
+        axis: Id<Curve>,
+    },
     /// Close Curve (GUID-DB15C479-66F2-456A-9E54-40A60F83DC92: "To close a curve, right-click the starting
     /// point and choose Close Curve"): an open spline of three or more fit points closes smoothly.
     CloseSpline {
@@ -2781,6 +2792,20 @@ fn sketch_op(
         SketchOp::Split { curve, at } => {
             push_cut(&mut created, &sketch.split_at(ids, *curve, *at)?);
             "Split"
+        }
+        SketchOp::SymmetricCurves { first, second, axis } => {
+            let pairs = sketch.symmetric_pairs(*first, *second, *axis).ok_or(SketchError::InvalidValue)?;
+            for constraint in pairs {
+                match sketch.try_add_constraint(ids, constraint)? {
+                    AddResult::Added { id, .. } => created.push(Created::Constraint(id)),
+                    AddResult::Redundant(_) => {}
+                    AddResult::Conflicting(with) => return Err(EditError::Conflicting(with)),
+                }
+            }
+            if created.is_empty() {
+                return Err(SketchError::InvalidValue.into());
+            }
+            "Symmetric"
         }
         SketchOp::CloseSpline { curve } => {
             sketch.close_spline(*curve)?;

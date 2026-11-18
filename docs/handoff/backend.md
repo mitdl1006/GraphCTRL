@@ -71,6 +71,22 @@ To Work with Sketch Dimensions GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185.
 | Flip Direction 대상의 "line to an arc (the arc itself)"·"between 2 arcs" 거리 | 없음 | 선-호·호-호 거리 치수 |
 | 구동 치수 토글 | 있음(`SketchOp::SetDriving`) | — |
 
+## 2026-11-18 — 선·곡선 쌍 Symmetric(① 3번)
+
+근거: GUID-A85A7A30-7D81-4C75-8769-CAD034EEA930 — "click the first line or curve. Click the second line or curve. Click the line of symmetry." /
+"Selected lines and arcs are constrained about a line to create a symmetrical shape."
+
+- `SketchOp::SymmetricCurves { first, second, axis }`: 점 쌍 `Symmetric` 구속으로 푼다(`Sketch::symmetric_pairs`). 한 번의 실행 취소.
+  - 두 선: 끝점끼리, 대칭선에 비춰 가까운 쪽과 짝짓는다.
+  - 두 원: 중심 대칭 + 같은 반지름.
+  - 두 호: 중심 대칭, 한쪽 시작 ↔ 다른 쪽 끝(거울은 방향을 뒤집음).
+  - 이미 대칭인 쌍은 건너뛰고, 충돌하면 거부되며 흔적이 남지 않는다.
+- 대칭 구속 도구가 곡선 3개(곡선, 곡선, 대칭선) 클릭을 받는다. 점 2개 + 선은 그대로.
+- 대칭선을 지우면 그 구속들도 지워진다(점 쌍 Symmetric이 대칭선을 참조하므로 기존 규칙).
+- 없음: 타원·스플라인 쌍(원문 문구는 "lines and arcs").
+- 테스트: `gc_session/tests/sketch_symmetric_curves.rs`.
+- QA 브랜치 영향: 없음(새 `SketchOp` 변형만, QA 테스트에 `SketchOp` 빠짐없는 match 없음).
+
 ## 2026-11-18 — 타원 축을 선 구속에(① 2번)
 
 근거: GUID-A85A7A30-7D81-4C75-8769-CAD034EEA930 — Collinear "an ellipse axis", Parallel/Perpendicular "lines, curves, or ellipse axes",
