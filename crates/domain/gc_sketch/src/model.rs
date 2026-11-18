@@ -204,6 +204,11 @@ pub enum GeoConstraint {
     },
     /// A point stays where it is.
     Fix(Id<SkPoint>),
+    /// A curve stays where it is (To Apply Geometric Constraints, GUID-A85A7A30-7D81-4C75-8769-CAD034EEA930):
+    /// "Lines are fixed in position and angle but endpoints can move to shorten or lengthen the line.
+    /// Circles and arcs have fixed center point and radius. Arc and line endpoints are free to move …
+    /// Position, size, and orientation of a circle or ellipse are fixed." A spline's fit points stay put.
+    FixCurve(Id<Curve>),
     /// 3D: the segment between two points is parallel to an axis of the frame (0 = X, 1 = Y, 2 = Z).
     AlongAxis {
         /// First point.
@@ -477,6 +482,7 @@ impl Sketch {
             | GeoConstraint::Equal(a, b)
             | GeoConstraint::Concentric(a, b) => vec![a, b],
             GeoConstraint::Symmetric { axis, .. } => vec![axis],
+            GeoConstraint::FixCurve(curve) => vec![curve],
             _ => Vec::new(),
         }
     }

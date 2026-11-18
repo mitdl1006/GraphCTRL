@@ -562,6 +562,7 @@ fn constraint_for(sketch: &Sketch, kind: ConstraintKind, picks: &[Item]) -> Opti
             line(*c).map(|_| GeoConstraint::Midpoint(*p, *c))
         }
         (K::Fix, [Item::Point(p)]) => Some(GeoConstraint::Fix(*p)),
+        (K::Fix, [Item::Curve(c)]) => Some(GeoConstraint::FixCurve(*c)),
         (K::AlongX | K::AlongY | K::AlongZ, [Item::Point(p), Item::Point(q)]) if p != q => {
             Some(GeoConstraint::AlongAxis { p: *p, q: *q, axis: axis_of(kind) })
         }

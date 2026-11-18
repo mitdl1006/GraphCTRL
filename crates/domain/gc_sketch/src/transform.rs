@@ -127,7 +127,7 @@ impl Sketch {
             .filter(|c| {
                 Self::constraint_points(c).iter().all(|p| points.contains(p))
                     && Self::constraint_curves(c).iter().all(|c| selected.contains(c))
-                    && !matches!(c, GeoConstraint::Fix(_))
+                    && !matches!(c, GeoConstraint::Fix(_) | GeoConstraint::FixCurve(_))
             })
             .copied()
             .collect();
@@ -192,7 +192,13 @@ impl Sketch {
         if !rules.break_ties {
             let fixed = |p: &Id<SkPoint>| {
                 self.points.get(p).is_some_and(|q| matches!(q.kind, PointKind::External(_)))
-                    || self.constraints.values().any(|c| *c == GeoConstraint::Fix(*p))
+                    || self.constraints.values().any(|c| match *c {
+                        GeoConstraint::Fix(q) => q == *p,
+                        GeoConstraint::FixCurve(curve) => {
+                            self.curves.get(&curve).is_some_and(|k| k.points().contains(p))
+                        }
+                        _ => false,
+                    })
             };
             if moving.iter().any(fixed) {
                 return Err(SketchError::Unsolved(Status::Inconsistent));
@@ -206,7 +212,14 @@ impl Sketch {
             {
                 return Err(SketchError::Unsolved(Status::Inconsistent));
             }
-            self.constraints.retain(|_, c| !matches!(c, GeoConstraint::Fix(p) if moving.contains(p)));
+            let curves = &self.curves;
+            self.constraints.retain(|_, c| match *c {
+                GeoConstraint::Fix(p) => !moving.contains(&p),
+                GeoConstraint::FixCurve(curve) => {
+                    !curves.get(&curve).is_some_and(|k| k.points().iter().any(|p| moving.contains(p)))
+                }
+                _ => true,
+            });
         }
         let dimension_touches = |pts: &[Id<SkPoint>], cvs: &[Id<Curve>]| {
             let inside = pts.iter().any(|p| moving.contains(p)) || cvs.iter().any(|c| selected.contains(c));
