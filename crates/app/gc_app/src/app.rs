@@ -743,6 +743,11 @@ impl GraphCtrlApp {
                 egui::Key::F6 => self.viewport.look(StandardView::Iso),
                 // J starts the Joint command, as in Inventor (outside sketches, where J is free).
                 egui::Key::J if !command && !sketching => self.joint.start(),
+                // In an assembly C adds a constraint and P places a component (Inventor 2026 help,
+                // Predefined Command Alias and Shortcut Reference, GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E);
+                // in a sketch C is the circle.
+                egui::Key::C if !command && !sketching => self.constrain.start(),
+                egui::Key::P if !command && !sketching => self.place_component(self.lang),
                 egui::Key::L | egui::Key::C | egui::Key::A | egui::Key::R | egui::Key::D if !command => {
                     let (tool, name) = match key {
                         egui::Key::L => (ToolKind::Line, "L"),

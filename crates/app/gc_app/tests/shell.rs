@@ -4291,3 +4291,120 @@ fn every_ribbon_tab_fits_1280_px() {
         }
     }
 }
+
+/// The sketch tab has Trim, Extend and Fillet buttons that start their tools (Inventor 2026 help, Trim,
+/// GUID-DD00037F-6BBA-4B95-AA90-4F99DCEB667D); outside a sketch C opens the Constrain command and a
+/// sketch's C stays the circle (Predefined Command Alias and Shortcut Reference,
+/// GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E).
+#[test]
+fn trim_extend_and_fillet_have_ribbon_buttons_and_c_means_constrain_outside_sketches() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    // C outside a sketch opens the Constrain command (its window title is "구속").
+    harness.key_press(egui::Key::C);
+    harness.run_steps(3);
+    assert!(harness.query_all_by_label("구속").count() >= 1);
+
+    harness.get_by_label("XY 스케치").click();
+    harness.run_steps(3);
+    for (label, kind) in
+        [("자르기", ToolKind::Trim), ("연장", ToolKind::Extend), ("모깎기", ToolKind::Fillet)]
+    {
+        harness.get_by_label(label).click();
+        harness.run_steps(2);
+        assert_eq!(harness.state().session.tool(), kind, "{label}");
+    }
+    // In a sketch C is the circle.
+    harness.key_press(egui::Key::C);
+    harness.run_steps(2);
+    assert_eq!(harness.state().session.tool(), ToolKind::Circle);
+    // The sketch ribbon still fits.
+    let finish = harness.get_by_label("스케치 마무리").rect();
+    // With 40 px to spare for the commands still to come (ellipse, spline).
+    assert!(finish.right() <= SIZE.x - 40.0, "{finish:?}");
+}
+
+/// The dimension box has a Driven check box: a driving dimension becomes a reference (driven) one and, when
+/// that would not over-constrain, goes back (Inventor 2026 help, To Add Dimensions,
+/// GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185).
+#[test]
+fn the_dimension_box_toggles_driven_and_driving() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("XY 스케치").click();
+    harness.run();
+    draw_sample(harness.state_mut());
+    let app = harness.state_mut();
+    app.session.set_tool(ToolKind::Select);
+    let (_, sketch) = app.session.active_sketch().unwrap();
+    let width = *sketch.dimensions.iter().find(|(_, d)| d.source == "60 mm").unwrap().0;
+    app.edit_dimension(width);
+    harness.run();
+
+    let driving = |harness: &egui_kittest::Harness<'_, GraphCtrlApp>| {
+        harness.state().session.active_sketch().unwrap().1.dimensions[&width].driving
+    };
+    assert!(driving(&harness));
+    harness.get_by_label("종속 치수").click();
+    harness.run_steps(3);
+    assert!(!driving(&harness), "now a reference dimension");
+    // The box is closed; open it again on the driven dimension: only the check box is there.
+    harness.state_mut().edit_dimension(width);
+    harness.run_steps(3);
+    assert!(harness.query_all_by_label("dimension expression").next().is_none());
+    harness.get_by_label("종속 치수").click();
+    harness.run_steps(3);
+    assert!(driving(&harness), "driving again");
+}
+
+/// `HGHT = 5 mm` typed in the dimension box makes the parameter and the dimension refers to it (Inventor 2026
+/// help, To Add Dimensions, GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185); a bad name is refused.
+#[test]
+fn a_parameter_is_made_from_the_dimension_box() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("XY 스케치").click();
+    harness.run();
+    draw_sample(harness.state_mut());
+    let app = harness.state_mut();
+    app.session.set_tool(ToolKind::Select);
+    let (_, sketch) = app.session.active_sketch().unwrap();
+    let width = *sketch.dimensions.iter().find(|(_, d)| d.source == "60 mm").unwrap().0;
+    app.edit_dimension(width);
+    harness.run();
+    let retype = |harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>, text: &str| {
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        harness.run();
+        harness.get_by_label("dimension expression").type_text(text);
+        harness.run();
+        harness.key_press(egui::Key::Enter);
+        harness.run();
+    };
+    let names = |harness: &egui_kittest::Harness<'_, GraphCtrlApp>| -> Vec<(String, String)> {
+        let params = harness.state().session.doc().params();
+        params.iter().map(|(_, p)| (p.name.clone(), p.source.clone())).collect()
+    };
+    // A name that starts with a digit is refused: no parameter, the box stays.
+    retype(&mut harness, "1a = 5 mm");
+    assert!(names(&harness).is_empty());
+    harness.get_by_label("dimension expression");
+    // A good name makes the parameter and the dimension refers to it.
+    retype(&mut harness, "HGHT = 5 mm");
+    assert_eq!(names(&harness), vec![("HGHT".to_owned(), "5 mm".to_owned())]);
+    let session = &harness.state().session;
+    assert_eq!(session.active_sketch().unwrap().1.dimensions[&width].source, "HGHT");
+    // Reusing the name changes the parameter.
+    harness.state_mut().edit_dimension(width);
+    harness.run();
+    retype(&mut harness, "HGHT = 8 mm");
+    assert_eq!(names(&harness), vec![("HGHT".to_owned(), "8 mm".to_owned())]);
+}
