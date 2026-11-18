@@ -1671,6 +1671,21 @@ impl Document {
         Some(self.dof_in(gathered.as_ref(), item))
     }
 
+    /// True when the relationships let the component move at the rate `twist` (its origin's velocity, then
+    /// its rotation vector) to first order, the other components held still.
+    pub(crate) fn motion_allowed(&self, item: AnyId, twist: [f64; 6]) -> bool {
+        let norm = twist.iter().map(|v| v * v).sum::<f64>().sqrt();
+        if !(norm > 1e-12 && norm.is_finite()) {
+            return false;
+        }
+        let gathered = self.gather().ok();
+        let Some((jac, m)) = dof_jacobian(gathered.as_ref(), item) else { return true };
+        (0..m).all(|row| {
+            let rate: f64 = (0..6).map(|c| jac[row * 6 + c] * twist[c] / norm).sum();
+            rate.abs() <= 1e-6
+        })
+    }
+
     /// [`Document::component_dof`] from relationships gathered once.
     fn dof_in(&self, gathered: Option<&(Vec<Owner>, Vec<Term>)>, item: AnyId) -> Dof {
         if self.component_flag(Occurrence::Item(item), ComponentFlag::Grounded) {

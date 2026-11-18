@@ -539,6 +539,9 @@ pub enum CellOp {
     },
     /// Moves several components at once (a drag that pushed others through contact): one undo step.
     MoveComponents(Vec<(AnyId, Placement)>),
+    /// Grip Snap's Commit and Ground: moves the components and grounds them, in one undo step (Inventor
+    /// 2026 help, Grip Snap move or rotate, GUID-E1CA109A-D5A1-4131-AC3A-AE217716DD8C).
+    MoveAndGround(Vec<(AnyId, Placement)>),
     /// Shows or hides the degrees-of-freedom symbol of components (iProperties, Occurrence tab).
     SetDofShown {
         /// The components.
@@ -1308,6 +1311,26 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
             let held: Vec<AnyId> = moves.iter().map(|(i, _)| *i).collect();
             settle_holding(txn, &held)?;
             Ok((Vec::new(), "Move components"))
+        }
+        CellOp::MoveAndGround(moves) => {
+            if moves.is_empty() {
+                return Err(EditError::BadValue);
+            }
+            for (item, placement) in moves {
+                placed(placement)?;
+                set_owner_pose(txn, *item, gc_math::pose_from_xyz_rpy(placement.xyz, placement.rpy))?;
+            }
+            let held: Vec<AnyId> = moves.iter().map(|(i, _)| *i).collect();
+            settle_holding(txn, &held)?;
+            set_timeline(txn, |t| {
+                for item in &held {
+                    let o = crate::design::Occurrence::Item(*item);
+                    if !t.components.grounded.contains(&o) {
+                        t.components.grounded.push(o);
+                    }
+                }
+            })?;
+            Ok((Vec::new(), "Commit and ground"))
         }
         CellOp::SetDofShown { items, on } => {
             use crate::design::Occurrence;
