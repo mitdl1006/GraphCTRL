@@ -280,3 +280,90 @@ fn escaping_or_right_clicking_during_place_leaves_nothing_behind() {
         assert_eq!(bodies(&harness), 2, "{how}: second Esc");
     }
 }
+
+// ---- Assemble command: conflicts open the constraint error dialog ----
+
+/// Applies a Mate of the two bodies' XY planes, then a second Mate of the same planes at another offset (they
+/// cannot both hold): the second is refused, the constraint error dialog names the first, the document is
+/// untouched by the refusal; Cancel leaves everything as it was; Delete on the culprit lets the second in.
+#[test]
+fn an_unsatisfiable_assemble_opens_the_constraint_error_dialog_and_deleting_the_culprit_fixes_it() {
+    let mut harness = harness();
+    let solid = gc_doc::Solid::Box { size: [0.05; 3] };
+    let fixed = harness.state_mut().session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    let moving = harness
+        .state_mut()
+        .session
+        .add_body(solid, gc_doc::Placement { xyz: [0.6, 0.0, 0.0], rpy: [0.0; 3] })
+        .unwrap();
+    let plane = gc_doc::OriginElement::Plane(gc_doc::OriginPlane::Xy);
+    for body in [fixed, moving] {
+        harness
+            .state_mut()
+            .session
+            .set_origin_visible(gc_doc::Occurrence::Item(body.erase()), &[plane], true)
+            .unwrap();
+    }
+    harness.state_mut().fit_view();
+    harness.run();
+    harness.get_by_label("조립").click();
+    harness.run();
+    harness.get_by_label("어셈블").click();
+    harness.run_steps(3);
+
+    let spot = |harness: &egui_kittest::Harness<'_, GraphCtrlApp>, x: f64| {
+        harness.state().viewport().screen_of(gc_math::DVec3::new(x, 0.02, 0.0)).unwrap()
+    };
+    let relationships = |h: &egui_kittest::Harness<'_, GraphCtrlApp>| h.state().session.relationships().len();
+
+    // First application: moving body's plane (first pick) to the fixed body's plane (second pick).
+    let at = spot(&harness, 0.62);
+    click_at(&mut harness, at);
+    let at = spot(&harness, 0.02);
+    click_at(&mut harness, at);
+    harness.get_by_label("적용").click();
+    harness.run_steps(3);
+    assert_eq!(relationships(&harness), 1, "the first Mate went in");
+
+    // Second application of the same planes at 100 mm: cannot hold with the first.
+    let at = spot(&harness, 0.62);
+    click_at(&mut harness, at);
+    let at = spot(&harness, 0.02);
+    click_at(&mut harness, at);
+    harness.get_by_label("오프셋").click();
+    harness.get_by_label("오프셋").type_text("100");
+    harness.run_steps(2);
+    let before = harness.state().session.doc().clone();
+    let depth = harness.state().session.history().undo_depth();
+    harness.get_by_label("적용").click();
+    harness.run_steps(3);
+    assert!(harness.query_by_label("구속 오류").is_some(), "the constraint error dialog did not open");
+    assert_eq!(relationships(&harness), 1, "the refused relationship must not be in");
+    assert!(harness.state().session.doc().same_content(&before), "the refusal changed the document");
+    assert_eq!(harness.state().session.history().undo_depth(), depth);
+
+    // Cancel (the dialog's, the last one on screen): nothing changes and the dialog goes.
+    harness.query_all_by_label("취소").last().unwrap().click();
+    harness.run_steps(2);
+    assert!(harness.query_by_label("구속 오류").is_none(), "Cancel left the dialog open");
+    assert_eq!(relationships(&harness), 1);
+    assert!(harness.state().session.doc().same_content(&before), "Cancel changed the document");
+
+    // Apply again: the dialog is back; Delete on the culprit places the new relationship.
+    harness.get_by_label("적용").click();
+    harness.run_steps(3);
+    assert!(harness.query_by_label("구속 오류").is_some(), "the dialog did not reopen");
+    harness.query_all_by_label("삭제").last().unwrap().click();
+    harness.run_steps(3);
+    assert!(harness.query_by_label("구속 오류").is_none(), "the dialog stayed after the fix");
+    let all = harness.state().session.relationships();
+    assert_eq!(all.len(), 1, "the culprit was deleted and the new one placed");
+    assert!(
+        matches!(all[0].1.kind, gc_doc::RelationKind::Mate { offset, .. } if (offset - 0.1).abs() < 1e-9),
+        "{:?}",
+        all[0].1.kind
+    );
+    // One Ctrl+Z-sized step each: undo brings the culprit back.
+    assert!(harness.state_mut().session.undo());
+    assert!(harness.state_mut().session.undo());
+}
