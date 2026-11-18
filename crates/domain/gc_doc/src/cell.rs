@@ -584,6 +584,18 @@ pub enum CellOp {
     },
     /// Subassemblies made in the cell: Demote, move between levels, dissolve, rename.
     Subassembly(crate::subassembly::SubassemblyOp),
+    /// A joint's Limits (Inventor 2026 help, To Define and Manage Joint Relationships,
+    /// GUID-21DC3336-5C51-42C1-90FB-4299CD66E0C6): angular for Rotational and Cylindrical, linear for
+    /// Slider and Cylindrical; `None` clears one. Refused for other kinds, bad ranges, or when the
+    /// assembly cannot then be satisfied.
+    SetJointLimits {
+        /// The joint.
+        id: Id<crate::relate::Relationship>,
+        /// The turn about its Z axis, radians.
+        angular: Option<crate::relate::JointRange>,
+        /// The slide along its Z axis, metres.
+        linear: Option<crate::relate::JointRange>,
+    },
     /// Ground and Root, "Ground at origin": moves the components (bodies, robots, assemblies) to the
     /// assembly's origin, aligned with it, and grounds them. Refused when constraints then cannot be met.
     GroundAtOrigin(Vec<AnyId>),
@@ -1397,6 +1409,27 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
             Ok((Vec::new(), "Interactive contact"))
         }
         CellOp::Subassembly(op) => crate::subassembly::run(txn, op),
+        CellOp::SetJointLimits { id, angular, linear } => {
+            let kind = txn.doc().get(*id).ok_or(EditError::BadValue)?.kind;
+            let fits = |range: &Option<crate::relate::JointRange>, angular: bool| {
+                range.is_none_or(|r| r.is_valid() && crate::relate::takes_limits(&kind, angular))
+            };
+            if !fits(angular, true) || !fits(linear, false) {
+                return Err(EditError::BadValue);
+            }
+            let mut condition = txn.doc().joint_condition(*id).unwrap_or_default();
+            condition.angular = *angular;
+            condition.linear = *linear;
+            set_timeline(txn, |t| {
+                if condition == crate::relate::JointCondition::default() {
+                    t.components.joint_conditions.remove(id);
+                } else {
+                    t.components.joint_conditions.insert(*id, condition);
+                }
+            })?;
+            settle(txn)?;
+            Ok((Vec::new(), "Joint limits"))
+        }
         CellOp::SetJointCondition { id, lock, protect } => {
             let relationship = txn.doc().get(*id).ok_or(EditError::BadValue)?.clone();
             if !crate::relate::is_joint_kind(&relationship.kind) {
@@ -1408,7 +1441,13 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
                 (true, Some(kept)) => Some(kept),
                 (true, None) => Some(txn.doc().lock_pose(&relationship).ok_or(EditError::BadValue)?),
             };
-            let condition = crate::relate::JointCondition { locked, protected: *protect };
+            let ranges = txn.doc().joint_condition(*id).unwrap_or_default();
+            let condition = crate::relate::JointCondition {
+                locked,
+                protected: *protect,
+                angular: ranges.angular,
+                linear: ranges.linear,
+            };
             set_timeline(txn, |t| {
                 if condition == crate::relate::JointCondition::default() {
                     t.components.joint_conditions.remove(id);
