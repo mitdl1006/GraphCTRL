@@ -4097,3 +4097,50 @@ fn a_work_axis_is_made_listed_hidden_and_deleted() {
     harness.run();
     assert!(harness.state().session.doc().work_features().iter().next().is_none());
 }
+
+/// A subassembly folder is demoted into another subassembly from its own menu: folders nest without
+/// dragging.
+#[test]
+fn a_subassembly_folder_is_nested_from_its_menu() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.05, 0.05, 0.05] };
+    let app = harness.state_mut();
+    app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    let second = app.session.add_body(solid, gc_doc::Placement::default()).unwrap();
+    let key = gc_doc::TreeKey::Component(gc_doc::Occurrence::Item(second.erase()));
+    app.session
+        .edit_subassemblies(gc_doc::SubassemblyOp::Demote { members: vec![key], name: "Inner".to_owned() })
+        .unwrap();
+    harness.run();
+
+    let at = harness.get_by_label("Inner").rect().center();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run();
+    }
+    harness.get_by_label("서브어셈블리로 묶기 (강등)").click();
+    harness.run_steps(3);
+    let name = egui::accesskit::Role::TextInput;
+    harness.get_by_role_and_label(name, "서브어셈블리로 묶기 (강등)").click();
+    harness.run();
+    harness.get_by_role_and_label(name, "서브어셈블리로 묶기 (강등)").type_text("Outer");
+    harness.run();
+    harness.get_by_label("확인").click();
+    harness.run_steps(3);
+    let groups = harness.state().session.doc().subassemblies();
+    assert_eq!(groups.len(), 2);
+    let inner = groups.iter().find(|g| g.name == "Inner").unwrap();
+    let outer = groups.iter().find(|g| g.name == "Outer").unwrap();
+    assert_eq!(inner.parent, Some(outer.id), "Inner now sits in Outer");
+}
