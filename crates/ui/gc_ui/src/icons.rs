@@ -55,6 +55,24 @@ pub enum Icon {
     LookAt,
     /// A box in perspective, its far face smaller.
     Perspective,
+    /// A sketch point: a dot in a small cross.
+    Point,
+    /// A hexagon.
+    Polygon,
+    /// A slot: two half circles joined by straight sides.
+    Slot,
+    /// A grid of small squares: rectangular pattern.
+    RectPattern,
+    /// Dots on a circle around a centre: circular pattern.
+    CircPattern,
+    /// A dashed axis between a shape and its mirror image.
+    Mirror,
+    /// Two nested outlines: offset.
+    Offset,
+    /// A box cut by a plane: Project Cut Edges.
+    CutEdges,
+    /// A ground symbol: a stem over three shrinking lines.
+    Ground,
     /// A short text, for constraint symbols.
     Text(&'static str),
 }
@@ -81,6 +99,106 @@ impl Icon {
                 for i in 0..outline.len() {
                     line(outline[i], outline[(i + 1) % outline.len()]);
                 }
+            }
+            Self::Point => {
+                line(at(0.5, 0.25), at(0.5, 0.4));
+                line(at(0.5, 0.6), at(0.5, 0.75));
+                line(at(0.25, 0.5), at(0.4, 0.5));
+                line(at(0.6, 0.5), at(0.75, 0.5));
+                painter.circle_filled(at(0.5, 0.5), 3.0, color);
+            }
+            Self::Polygon => {
+                let corners: Vec<Pos2> = (0..6)
+                    .map(|i| {
+                        let angle = std::f32::consts::TAU * i as f32 / 6.0;
+                        at(0.5 + 0.38 * angle.cos(), 0.5 + 0.38 * angle.sin())
+                    })
+                    .collect();
+                for i in 0..corners.len() {
+                    line(corners[i], corners[(i + 1) % corners.len()]);
+                }
+                dot(at(0.5, 0.5));
+            }
+            Self::Slot => {
+                let radius = rect.height() * 0.2;
+                let (left, right) = (at(0.32, 0.5), at(0.68, 0.5));
+                line(left + egui::vec2(0.0, -radius), right + egui::vec2(0.0, -radius));
+                line(left + egui::vec2(0.0, radius), right + egui::vec2(0.0, radius));
+                for (centre, sign) in [(left, -1.0_f32), (right, 1.0)] {
+                    let points: Vec<Pos2> = (0..=12)
+                        .map(|i| {
+                            let angle = -std::f32::consts::FRAC_PI_2 + std::f32::consts::PI * i as f32 / 12.0;
+                            centre + egui::vec2(sign * radius * angle.cos(), radius * angle.sin())
+                        })
+                        .collect();
+                    painter.add(egui::Shape::line(points, stroke));
+                }
+                dot(left);
+                dot(right);
+            }
+            Self::RectPattern => {
+                for (x, y) in [(0.15, 0.15), (0.55, 0.15), (0.15, 0.55), (0.55, 0.55)] {
+                    painter.rect_stroke(
+                        Rect::from_min_max(at(x, y), at(x + 0.3, y + 0.3)),
+                        1.0,
+                        stroke,
+                        egui::StrokeKind::Inside,
+                    );
+                }
+            }
+            Self::CircPattern => {
+                painter.circle_stroke(at(0.5, 0.5), rect.width() * 0.32, Stroke::new(1.0, color));
+                for i in 0..6 {
+                    let angle = std::f32::consts::TAU * i as f32 / 6.0;
+                    painter.circle_filled(at(0.5 + 0.32 * angle.cos(), 0.5 + 0.32 * angle.sin()), 2.6, color);
+                }
+                dot(at(0.5, 0.5));
+            }
+            Self::Mirror => {
+                for i in 0..5 {
+                    let y = 0.1 + 0.17 * i as f32;
+                    line(at(0.5, y), at(0.5, y + 0.09));
+                }
+                for (a, b, c) in
+                    [((0.4, 0.25), (0.4, 0.75), (0.12, 0.6)), ((0.6, 0.25), (0.6, 0.75), (0.88, 0.6))]
+                {
+                    line(at(a.0, a.1), at(b.0, b.1));
+                    line(at(b.0, b.1), at(c.0, c.1));
+                    line(at(c.0, c.1), at(a.0, a.1));
+                }
+            }
+            Self::Offset => {
+                painter.rect_stroke(
+                    Rect::from_min_max(at(0.32, 0.32), at(0.68, 0.68)),
+                    2.0,
+                    stroke,
+                    egui::StrokeKind::Inside,
+                );
+                painter.rect_stroke(
+                    Rect::from_min_max(at(0.12, 0.12), at(0.88, 0.88)),
+                    5.0,
+                    Stroke::new(1.0, color),
+                    egui::StrokeKind::Inside,
+                );
+            }
+            Self::CutEdges => {
+                // A box, and a plane through it drawn as a slanted band edge.
+                painter.rect_stroke(
+                    Rect::from_min_max(at(0.25, 0.3), at(0.75, 0.85)),
+                    1.0,
+                    Stroke::new(1.0, color),
+                    egui::StrokeKind::Inside,
+                );
+                line(at(0.08, 0.6), at(0.92, 0.6));
+                line(at(0.25, 0.6), at(0.75, 0.6));
+                dot(at(0.25, 0.6));
+                dot(at(0.75, 0.6));
+            }
+            Self::Ground => {
+                line(at(0.5, 0.15), at(0.5, 0.5));
+                line(at(0.2, 0.5), at(0.8, 0.5));
+                line(at(0.3, 0.65), at(0.7, 0.65));
+                line(at(0.4, 0.8), at(0.6, 0.8));
             }
             Self::Line => {
                 line(at(0.15, 0.85), at(0.85, 0.15));
