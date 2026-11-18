@@ -59,6 +59,8 @@ pub enum BrowserAction {
     ContactSet(gc_core::AnyId, bool),
     /// Suppress a relationship (or bring it back) and solve again.
     SuppressRelationship(gc_core::Id<gc_doc::Relationship>, bool),
+    /// Select a sketch role (a waypoint or a path of a sketch), or none; the view marks it.
+    SelectRole(Option<Id<gc_doc::SketchRole>>),
     /// Open the iProperties dialog of a component.
     Properties(gc_doc::Occurrence),
     /// Zoom the graphics window to a component (Find in Window).
@@ -98,6 +100,8 @@ pub struct ParamsUi {
     /// The component row the pointer is over this frame: the view shows its bounding box (Inventor 2026
     /// help, assembly parity notes: hovering a browser node shows its bounding box in the graphics).
     pub hovered: Option<gc_core::AnyId>,
+    /// The sketch role selected in the browser.
+    pub role: Option<Id<gc_doc::SketchRole>>,
     /// The relationship selected in the browser, the value typed for it and which one that was loaded for.
     pub relationship: Option<gc_core::Id<gc_doc::Relationship>>,
     /// The text of the browser edit box.
@@ -706,6 +710,43 @@ fn sketch_row(
     if result.double_clicked() {
         *action = Some(BrowserAction::EditSketch(id));
     }
+    // The roles of the sketch's elements (waypoints and paths of the robot work) hang below it.
+    for role_id in session.sketch_roles(id) {
+        role_row(ui, session, lang, state, action, role_id);
+    }
+}
+
+/// A role of a sketch element: a waypoint (a point) or a path (a chain of curves). It is renamed, suppressed and
+/// deleted like any other item; selecting it marks it in the view.
+fn role_row(
+    ui: &mut Ui,
+    session: &Session,
+    lang: Lang,
+    state: &mut ParamsUi,
+    action: &mut Option<BrowserAction>,
+    id: Id<gc_doc::SketchRole>,
+) {
+    let Some(role) = session.doc().get(id) else { return };
+    if !found(&state.find, &role.name) {
+        return;
+    }
+    let waypoint = matches!(role.kind, gc_doc::RoleKind::Waypoint { .. });
+    let node = Node {
+        icon: if waypoint { Icon::Waypoint } else { Icon::Path },
+        name: &role.name,
+        text: &role.name,
+        any: id.erase(),
+        selected: state.role == Some(id),
+        delete: gc_doc::Command::Cell(gc_doc::CellOp::DeleteRole(id)),
+        suppressible: true,
+    };
+    ui.indent(("gc_role", id), |ui| {
+        let result = node_row(ui, session, lang, state, &node, action, |_, _| {});
+        if result.clicked() {
+            state.role = Some(id);
+            *action = Some(BrowserAction::SelectRole(Some(id)));
+        }
+    });
 }
 
 /// The components of the browser as the assembly tree: subassemblies are folders (the one being edited in
@@ -1187,6 +1228,7 @@ fn name_of(session: &Session, item: gc_core::AnyId) -> Option<String> {
         Kind::Waypoint => doc.get(item.downcast()?).map(|w: &gc_doc::Waypoint| w.name.clone()),
         Kind::Path => doc.get(item.downcast()?).map(|p: &gc_doc::MotionPath| p.name.clone()),
         Kind::WorkFrame => doc.get(item.downcast()?).map(|f: &gc_doc::WorkFrame| f.name.clone()),
+        Kind::SketchRole => doc.get(item.downcast()?).map(|r: &gc_doc::SketchRole| r.name.clone()),
         _ => None,
     }
 }

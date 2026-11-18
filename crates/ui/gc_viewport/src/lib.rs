@@ -157,6 +157,8 @@ pub struct Viewport {
     /// The ground plane (the floor grid) is shown; a sketch's own grid stays (View tab, Appearance panel;
     /// on and off are session-based).
     pub show_ground: bool,
+    /// The sketch role selected in the browser: marked strongly in the view.
+    pub role_selected: Option<Id<gc_doc::SketchRole>>,
     /// The browser row the pointer is over: its component's bounding box is drawn.
     pub browser_hover: Option<gc_core::AnyId>,
     /// The ViewCube is shown (View tab, Windows panel, User Interface); the navigation bar keeps its own.
@@ -456,6 +458,7 @@ impl Viewport {
             show_constraints: true,
             style: VisualStyle::default(),
             show_ground: true,
+            role_selected: None,
             browser_hover: None,
             show_view_cube: true,
             show_nav_bar: true,
@@ -917,6 +920,68 @@ impl Viewport {
                 camera.distance * 0.6,
                 self.work_selected,
             );
+        }
+        // Sketch roles: a waypoint is a diamond with the tool's pointing axis, a path a line with an arrow
+        // head; the one selected in the browser is drawn thick.
+        {
+            let painter = ui.painter_at(rect);
+            let screen = |world: [f64; 3]| {
+                self.camera.project(DVec3::from_array(world), size).map(|q| {
+                    #[allow(clippy::cast_possible_truncation, reason = "screen coordinates fit f32")]
+                    egui::pos2(rect.left() + q[0] as f32, rect.top() + q[1] as f32)
+                })
+            };
+            for (id, role) in session.doc().roles().iter() {
+                if !session.doc().is_visible(role.sketch.erase()) || session.doc().is_inactive(id.erase()) {
+                    continue;
+                }
+                let chosen = self.role_selected == Some(id);
+                let color = if chosen { colors::SELECTED } else { colors::ACCENT.gamma_multiply(0.8) };
+                match role.kind {
+                    gc_doc::RoleKind::Waypoint { .. } => {
+                        if let Some(pose) = session.role_pose(id)
+                            && let Some(at) = screen(pose.translation.to_array())
+                        {
+                            let r = if chosen { 7.0 } else { 5.0 };
+                            painter.add(egui::Shape::convex_polygon(
+                                vec![
+                                    at + egui::vec2(0.0, -r),
+                                    at + egui::vec2(r, 0.0),
+                                    at + egui::vec2(0.0, r),
+                                    at + egui::vec2(-r, 0.0),
+                                ],
+                                color.gamma_multiply(0.35),
+                                egui::Stroke::new(if chosen { 2.0 } else { 1.2 }, color),
+                            ));
+                            // The tool's pointing direction (its Z).
+                            let tip =
+                                pose.translation + pose.rotation * DVec3::Z * (self.camera.distance * 0.06);
+                            if let Some(end) = screen(tip.to_array()) {
+                                painter.line_segment([at, end], egui::Stroke::new(1.2, color));
+                            }
+                        }
+                    }
+                    gc_doc::RoleKind::Path { .. } => {
+                        if let Some(line) = session.role_polyline(id) {
+                            let points: Vec<egui::Pos2> = line.iter().filter_map(|p| screen(*p)).collect();
+                            let stroke = egui::Stroke::new(if chosen { 3.5 } else { 2.0 }, color);
+                            for w in points.windows(2) {
+                                painter.line_segment([w[0], w[1]], stroke);
+                            }
+                            // An arrow head at the far end shows the direction.
+                            if let [.., a, b] = points[..] {
+                                let d = (b - a).normalized();
+                                let n = egui::vec2(-d.y, d.x);
+                                painter.add(egui::Shape::convex_polygon(
+                                    vec![b, b - d * 11.0 + n * 5.0, b - d * 11.0 - n * 5.0],
+                                    color,
+                                    egui::Stroke::NONE,
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
         }
         // Hovering a browser row shows the component's bounding box in the graphics.
         if let Some(item) = self.browser_hover.and_then(cell_item) {

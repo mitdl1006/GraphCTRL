@@ -919,3 +919,35 @@ fn the_sketch_menu_makes_waypoints_and_paths() {
     right_click(&mut harness, at);
     assert!(harness.query_by_label("경로로 지정").is_none());
 }
+
+/// The browser lists a sketch's roles below it; clicking one selects it, and the view marks it.
+#[test]
+fn the_browser_lists_sketch_roles_and_selects_them() {
+    let mut harness = sketching();
+    let sketch = harness.state().session.active_sketch().unwrap().0;
+    harness.state_mut().session.set_tool(ToolKind::Point);
+    click(harness.state_mut(), mm(10.0, 10.0), false);
+    harness.state_mut().session.set_tool(ToolKind::Select);
+    let point = *harness
+        .state()
+        .session
+        .active_sketch()
+        .unwrap()
+        .1
+        .points
+        .keys()
+        .find(|p| {
+            harness
+                .state()
+                .session
+                .point_pos(**p)
+                .is_some_and(|pos| (pos[0] - 0.01).abs() < 1e-9 && (pos[1] - 0.01).abs() < 1e-9)
+        })
+        .unwrap();
+    let role = harness.state_mut().session.add_waypoint_role(sketch, point).unwrap();
+    harness.run_steps(3);
+    let name = harness.state().session.doc().get(role).unwrap().name.clone();
+    harness.get_by_label(&name).click();
+    harness.run_steps(3);
+    assert_eq!(harness.state().viewport().role_selected, Some(role));
+}

@@ -1531,6 +1531,7 @@ impl eframe::App for GraphCtrlApp {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     self.params.origin_selected = self.viewport.origin_selected;
                     match gc_panels::browser(ui, &self.session, lang, &mut self.params) {
+                        Some(BrowserAction::SelectRole(role)) => self.viewport.role_selected = role,
                         Some(BrowserAction::FindInWindow(any)) => {
                             self.viewport.find_in_window(&self.session, any);
                         }
