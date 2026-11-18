@@ -261,7 +261,7 @@ pub struct GraphCtrlApp {
     /// The Constrain dialog.
     constrain: crate::constrain::Constrain,
     assemble: crate::assemble::Assemble,
-    work_axis: crate::work_axis::WorkAxis,
+    work_feature: crate::work_feature::WorkFeatureDialog,
     conflict: crate::conflict::ConstraintError,
     /// The Joint dialog.
     joint: crate::constrain::Joint,
@@ -370,7 +370,7 @@ impl GraphCtrlApp {
             drive: crate::drive::Drive::default(),
             constrain: crate::constrain::Constrain::default(),
             assemble: crate::assemble::Assemble::default(),
-            work_axis: crate::work_axis::WorkAxis::default(),
+            work_feature: crate::work_feature::WorkFeatureDialog::default(),
             conflict: crate::conflict::ConstraintError::default(),
             joint: crate::constrain::Joint::default(),
             pattern: crate::pattern::Pattern::default(),
@@ -743,6 +743,11 @@ impl GraphCtrlApp {
                 egui::Key::F6 => self.viewport.look(StandardView::Iso),
                 // J starts the Joint command, as in Inventor (outside sketches, where J is free).
                 egui::Key::J if !command && !sketching => self.joint.start(),
+                // In an assembly C adds a constraint and P places a component (Inventor 2026 help,
+                // Predefined Command Alias and Shortcut Reference, GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E);
+                // in a sketch C is the circle.
+                egui::Key::C if !command && !sketching => self.constrain.start(),
+                egui::Key::P if !command && !sketching => self.place_component(self.lang),
                 egui::Key::L | egui::Key::C | egui::Key::A | egui::Key::R | egui::Key::D if !command => {
                     let (tool, name) = match key {
                         egui::Key::L => (ToolKind::Line, "L"),
@@ -1101,7 +1106,7 @@ impl eframe::App for GraphCtrlApp {
             }
             Some(ribbon::RibbonAction::StartConstrain) => self.constrain.start(),
             Some(ribbon::RibbonAction::StartAssemble) => self.assemble.start(),
-            Some(ribbon::RibbonAction::StartWorkAxis) => self.work_axis.start(),
+            Some(ribbon::RibbonAction::StartWorkFeature(category)) => self.work_feature.start(category),
             Some(ribbon::RibbonAction::StartJoint) => self.joint.start(),
             Some(ribbon::RibbonAction::StartPattern) => self.pattern.start(Vec::new()),
             Some(ribbon::RibbonAction::StartReplicate(mode)) => self.replicate.start(mode),
@@ -1316,6 +1321,7 @@ impl eframe::App for GraphCtrlApp {
                         Some(BrowserAction::JointProtect(id, on)) => {
                             drop(self.session.set_joint_protect(id, on));
                         }
+                        Some(BrowserAction::EditWorkFeature(id)) => self.work_feature.edit(&self.session, id),
                         Some(BrowserAction::EditComponent(key)) => {
                             drop(self.session.edit_component(key));
                         }
@@ -1393,6 +1399,9 @@ impl eframe::App for GraphCtrlApp {
         match self.viewport.take_request() {
             Some(gc_viewport::ViewportRequest::Constrain) => self.constrain.start(),
             Some(gc_viewport::ViewportRequest::PlaceComponent) => self.place_component(lang),
+            Some(gc_viewport::ViewportRequest::EditWorkFeature(id)) => {
+                self.work_feature.edit(&self.session, id)
+            }
             Some(gc_viewport::ViewportRequest::EditUnit(occurrence)) => {
                 if let Some(key) = self.session.pick_unit(occurrence) {
                     drop(self.session.edit_component(key));
@@ -1431,8 +1440,8 @@ impl eframe::App for GraphCtrlApp {
         if self.assemble.open {
             self.assemble.window(&ctx, &mut self.session, lang);
         }
-        if self.work_axis.open {
-            self.work_axis.window(&ctx, &mut self.session, lang);
+        if self.work_feature.open {
+            self.work_feature.window(&ctx, &mut self.session, lang);
         }
         if let Some(conflict) = self
             .joint

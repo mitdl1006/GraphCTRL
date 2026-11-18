@@ -165,10 +165,11 @@ pub fn ribbon_split_button(
         if arrow.hovered() && enabled {
             painter.rect_filled(arrow_rect, 4.0, visuals.widgets.hovered.bg_fill);
         }
-        let icon_rect = egui::Rect::from_center_size(rect.center_top() + vec2(0.0, 18.0), vec2(24.0, 24.0));
+        // The icon over the name over the arrow strip: 58 px high in all.
+        let icon_rect = egui::Rect::from_center_size(rect.center_top() + vec2(0.0, 15.0), vec2(22.0, 22.0));
         item.icon.paint(painter, icon_rect, color);
         painter.text(
-            egui::pos2(rect.center().x, rect.bottom() - 17.0),
+            egui::pos2(rect.center().x, rect.bottom() - 16.0),
             egui::Align2::CENTER_BOTTOM,
             item.label,
             font,

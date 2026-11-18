@@ -100,6 +100,8 @@ pub struct Viewport {
     nav_tool: Option<NavTool>,
     /// The origin element (plane, axis, point) of a component that is selected in the view or the browser.
     pub origin_selected: Option<(gc_doc::Occurrence, gc_doc::OriginElement)>,
+    /// The work feature selected in the view (drawn heavier; Delete removes it, a double click edits it).
+    pub work_selected: Option<Id<gc_doc::WorkFeature>>,
     /// The heads-up display of the drawing tools.
     hud: hud::Hud,
     /// Whether the heads-up display (dynamic input) is on.
@@ -166,6 +168,7 @@ impl Viewport {
             constrain_pick: None,
             nav_tool: None,
             origin_selected: None,
+            work_selected: None,
             hud: hud::Hud::default(),
             hud_on: true,
             free_tool: None,
@@ -347,7 +350,6 @@ impl Viewport {
                     let hit = sketch
                         .dimensions
                         .iter()
-                        .filter(|(_, dimension)| dimension.driving)
                         .map(|(id, d)| {
                             let (dx, dy) = (d.text_pos[0] - pos[0], d.text_pos[1] - pos[1]);
                             (dx * dx + dy * dy, *id)
@@ -446,7 +448,13 @@ impl Viewport {
             };
             origin::paint(&ui.painter_at(rect), &screen, session, self.origin_selected, self.constrain_mode);
             dof::paint(&ui.painter_at(rect), &screen, session, camera.distance * 0.12);
-            workfeat::paint(&ui.painter_at(rect), &screen, session, camera.distance * 0.6);
+            workfeat::paint(
+                &ui.painter_at(rect),
+                &screen,
+                session,
+                camera.distance * 0.6,
+                self.work_selected,
+            );
         }
         if let Some(section) = &self.section {
             let camera = self.camera;
@@ -474,7 +482,7 @@ impl Viewport {
             self.perf(ui, rect, lang);
         }
         self.value_box(ui, rect, session, size);
-        self.dimension_box(ui, rect, session, size);
+        self.dimension_box(ui, rect, session, size, lang);
     }
 
     /// Frame time, draw calls and triangles in the bottom-left corner. Keeps the viewport repainting, so the
@@ -1168,6 +1176,17 @@ impl Viewport {
             }
             return;
         }
+        // A double click on a work feature edits it.
+        if response.double_clicked_by(PointerButton::Primary)
+            && !self.constrain_mode
+            && let Some(at) = response.interact_pointer_pos().map(to_view)
+        {
+            let screen = |p: gc_math::DVec3| self.camera.project(p, size);
+            if let Some(id) = workfeat::pick(session, &screen, at, self.camera.distance * 0.6) {
+                self.request = Some(ViewportRequest::EditWorkFeature(id));
+                return;
+            }
+        }
         // A double click on a component edits it in place; a subassembly is edited as one unit.
         if response.double_clicked_by(PointerButton::Primary)
             && !self.constrain_mode
@@ -1191,8 +1210,16 @@ impl Viewport {
         } else if !on_handles && response.clicked_by(PointerButton::Primary) {
             // Origin planes, axes and points that are shown come before the solids behind them.
             let at = response.interact_pointer_pos().map(to_view);
-            self.origin_selected = at.and_then(|at| origin::pick(&self.camera, size, session, at, false));
-            let picked = if self.origin_selected.is_some() {
+            // Work features that are shown come first, as the origin geometry does.
+            let screen = |p: gc_math::DVec3| self.camera.project(p, size);
+            self.work_selected =
+                at.and_then(|at| workfeat::pick(session, &screen, at, self.camera.distance * 0.6));
+            self.origin_selected = if self.work_selected.is_some() {
+                None
+            } else {
+                at.and_then(|at| origin::pick(&self.camera, size, session, at, false))
+            };
+            let picked = if self.origin_selected.is_some() || self.work_selected.is_some() {
                 None
             } else {
                 response.interact_pointer_pos().and_then(|p| self.pick_item(session, to_view(p), size))
@@ -1201,12 +1228,12 @@ impl Viewport {
         }
     }
 
-    /// Opens the in-place editor of a driving dimension of the sketch being edited.
+    /// Opens the in-place editor of a dimension of the sketch being edited: the expression of a driving
+    /// dimension, and the Driven check box of any.
     pub fn edit_dimension(&mut self, session: &Session, id: Id<gc_sketch::Dimension>) {
         let source = session
             .active_sketch()
             .and_then(|(_, sketch)| sketch.dimensions.get(&id))
-            .filter(|dimension| dimension.driving)
             .map(|dimension| dimension.source.clone());
         if let Some(source) = source {
             self.dimension_edit = Some((id, source, true));
@@ -1215,7 +1242,14 @@ impl Viewport {
 
     /// The box in which the expression of an existing dimension is edited. Enter applies it; a refused
     /// expression keeps the box open (the status bar says why); Escape closes it.
-    fn dimension_box(&mut self, ui: &mut egui::Ui, rect: egui::Rect, session: &mut Session, size: [f64; 2]) {
+    fn dimension_box(
+        &mut self,
+        ui: &mut egui::Ui,
+        rect: egui::Rect,
+        session: &mut Session,
+        size: [f64; 2],
+        lang: Lang,
+    ) {
         let Some((id, mut text, fresh)) = self.dimension_edit.take() else { return };
         let Some((_, sketch)) = session.active_sketch() else { return };
         let Some(dimension) = sketch.dimensions.get(&id) else { return };
@@ -1224,29 +1258,49 @@ impl Viewport {
             .camera
             .project(plane.world([dimension.text_pos[0], dimension.text_pos[1], 0.0]), size)
             .map_or(rect.center(), |p| egui::pos2(rect.left() + p[0] as f32, rect.top() + p[1] as f32));
+        let driving = dimension.driving;
         let (mut submit, mut close) = (false, false);
+        let mut set_driving = None;
         egui::Area::new(egui::Id::unique("gc_dimension_edit"))
             .fixed_pos(at)
             .order(egui::Order::Foreground)
             .show(ui.ctx(), |ui| {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    let response = ui.add(egui::TextEdit::singleline(&mut text).desired_width(130.0));
-                    response.widget_info(|| {
-                        egui::WidgetInfo::labeled(egui::Role::TextInput, true, "dimension expression")
-                    });
-                    if fresh {
-                        response.request_focus();
-                    } else if response.lost_focus() {
-                        if ui.input(|i| i.key_pressed(Key::Enter)) {
+                    if driving {
+                        let response = ui.add(egui::TextEdit::singleline(&mut text).desired_width(130.0));
+                        response.widget_info(|| {
+                            egui::WidgetInfo::labeled(egui::Role::TextInput, true, "dimension expression")
+                        });
+                        if fresh {
+                            response.request_focus();
+                        } else if response.lost_focus() && !ui.ui_contains_pointer() {
+                            if ui.input(|i| i.key_pressed(Key::Enter)) {
+                                submit = true;
+                            } else {
+                                close = true;
+                            }
+                        } else if response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
                             submit = true;
-                        } else {
-                            close = true;
                         }
+                    } else if ui.input(|i| i.key_pressed(Key::Escape)) {
+                        close = true;
+                    }
+                    // Driven Dimension (a reference dimension): measures without constraining (Inventor 2026
+                    // help, To Add Dimensions, GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185).
+                    let mut driven = !driving;
+                    if ui.checkbox(&mut driven, tr!(lang, DimDriven)).changed() {
+                        set_driving = Some(!driven);
                     }
                 });
             });
+        if let Some(driving) = set_driving {
+            // Going back to driving is refused when it would over-constrain; the status bar says why.
+            if session.edit_active_sketch(gc_doc::SketchOp::SetDriving { id, driving }).is_ok() {
+                return;
+            }
+        }
         // A refused expression keeps the box and gives it the keyboard back for another try.
-        let refused = submit && session.edit_dimension(id, &text).is_err();
+        let refused = submit && !apply_dimension_text(session, id, &text);
         if !(close || submit && !refused) {
             self.dimension_edit = Some((id, text, refused));
         }
@@ -1280,8 +1334,11 @@ impl Viewport {
             if escape {
                 session.select_item(None);
                 self.origin_selected = None;
+                self.work_selected = None;
             }
-            if delete && let Some(item) = session.selected_item() {
+            if delete && let Some(id) = self.work_selected.take() {
+                drop(session.execute(&gc_doc::Command::Cell(gc_doc::CellOp::DeleteWorkFeature(id))));
+            } else if delete && let Some(item) = session.selected_item() {
                 // A refusal (still in use) is explained in the status bar.
                 drop(session.delete_item(item));
             }
@@ -1415,4 +1472,29 @@ fn segment_crosses_box(p: [f64; 3], q: [f64; 3], lo: [f64; 2], hi: [f64; 2]) -> 
         }
     }
     true
+}
+
+/// Applies the text of the dimension box. `NAME = value` makes (or, when the name exists, changes) the
+/// parameter and lets the dimension refer to it (Inventor 2026 help, To Add Dimensions,
+/// GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185); anything else is an expression for the dimension itself.
+/// Returns whether it was accepted; a refusal is explained in the status bar.
+fn apply_dimension_text(session: &mut Session, id: Id<gc_sketch::Dimension>, text: &str) -> bool {
+    if let Some((name, value)) = text.split_once('=')
+        && !value.starts_with('=')
+    {
+        let (name, value) = (name.trim(), value.trim());
+        let identifier = name.chars().next().is_some_and(|c| c.is_alphabetic() || c == '_')
+            && name.chars().all(|c| c.is_alphanumeric() || c == '_');
+        if identifier && !value.is_empty() {
+            let angle = ["deg", "rad", "°"].iter().any(|unit| value.contains(unit));
+            let existing = session.doc().params().iter().find(|(_, p)| p.name == name).map(|(id, _)| id);
+            let command = match existing {
+                Some(param) => gc_doc::Command::SetParam { id: param, source: value.to_owned() },
+                None => gc_doc::Command::AddParam { name: name.to_owned(), source: value.to_owned(), angle },
+            };
+            // A name that is not allowed (a digit first, a reserved word) is refused here.
+            return session.execute(&command).is_ok() && session.edit_dimension(id, name).is_ok();
+        }
+    }
+    session.edit_dimension(id, text).is_ok()
 }
