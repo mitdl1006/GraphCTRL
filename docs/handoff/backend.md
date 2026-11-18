@@ -124,6 +124,16 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — QA 관찰 2건: 구속 걸린 컴포넌트 삭제, Accept 표시 즉시 재평가
+
+- **동작 변화**: `DeleteBody`·`DeleteRobot`·`DeleteAssembly`가 그 컴포넌트를 쓰는 관계(셋째 선택 — 대칭면·각도 기준 포함)를 같이 지운다. 전에는 거부(참조 무결성 오류)였다. 한 실행 취소 단계로 컴포넌트·관계·구속 매개변수가 함께 돌아온다. 그 구속 이름을 쓰던 식에는 값이 대신 들어간다(기존 규칙).
+  - 근거: 리드의 인벤터 관찰. 2026 도움말에서 "컴포넌트를 지우면 관계도 지워진다"는 문장은 찾지 못했다(어셈블리 관계·컴포넌트 관련 68쪽 검색; Delete assembly relationships `GUID-0E2BD426…`에는 관계 삭제 절차만 있다) → **원문 미확인**으로 표시.
+  - 로봇은 웨이포인트·경로가 쓰고 있으면 여전히 `InUse`. 작업 피처(`DeleteWorkFeature`)는 관계가 쓰면 여전히 `InUse`.
+  - 고친 테스트(리드 승인): `gc_doc/tests/relate.rs`의 두 곳("Deleting a constrained component …", "The plane's component …").
+- `DeleteRelationship`(과 컴포넌트 삭제) 직후 Accept된 구속을 바로 다시 시도한다 — 풀리면 그 명령 안에서 표시가 사라지고 같이 풀린다. 억제(`SetSuppressed`)는 원래 즉시였다. 오류 구속이 없으면 삭제는 전처럼 아무것도 다시 풀지 않는다.
+- 지워진 관계의 `motion_refs` 찌꺼기도 정리한다.
+- `(3 + 4) mm`: 스케치 치수와 같은 파서를 쓰므로 그대로 둔다(리드 확인).
+
 ## 2026-11-18 — 접촉 솔버: 관계에 묶였지만 자유도가 남은 컴포넌트는 그 자유도로 밀린다
 
 근거: About the Contact Solver and Component Collision(`GUID-0BBD4ACE-7BD1-40BF-A011-74416B229035`) — "One part moves and comes into contact with another and the second part, which has open degrees of freedom, moves in response", 예: "a trip sensor … wheel … on the end of the sensor arm … when a cam surface comes in contact".
