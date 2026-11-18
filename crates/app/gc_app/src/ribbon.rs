@@ -78,6 +78,8 @@ pub(crate) enum RibbonAction {
     StartDrive,
     /// Open the Assemble command.
     StartAssemble,
+    /// Open the Work Axis command.
+    StartWorkAxis,
     /// Open the Constrain dialog.
     StartConstrain,
     /// Open the Joint dialog.
@@ -152,6 +154,13 @@ pub(crate) fn show(
                             session.set_tool(ToolKind::Line);
                         }
                         *tab = Tab::Sketch;
+                    }
+                });
+                // Work features: the axis types of an assembly (Inventor 2026 help, To Create Work Features,
+                // GUID-38A9748E-FA2D-44D3-928C-DFE1326A9385).
+                ribbon_group(ui, tr!(lang, GroupWorkFeatures), |ui| {
+                    if ribbon_button(ui, Icon::Pan, tr!(lang, CmdWorkAxis), false, !sketching).clicked() {
+                        action = Some(RibbonAction::StartWorkAxis);
                     }
                 });
             }

@@ -4024,3 +4024,123 @@ fn subassemblies_are_made_edited_in_place_and_dissolved_from_the_browser() {
     harness.run_steps(3);
     assert!(harness.state().session.doc().subassemblies().is_empty());
 }
+
+/// A sketch made on a component's plane hangs below that component's row in the browser, not in the
+/// top-level sketch folder.
+#[test]
+fn a_component_sketch_hangs_below_its_component_in_the_browser() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.05, 0.05, 0.05] };
+    let body = harness.state_mut().session.add_body(solid, gc_doc::Placement::default()).unwrap();
+    let occurrence = gc_doc::Occurrence::Item(body.erase());
+    // A sketch made while the component is edited in place belongs to it.
+    harness.state_mut().session.edit_component(gc_doc::TreeKey::Component(occurrence)).unwrap();
+    harness.state_mut().session.create_sketch_on_component(occurrence, gc_doc::OriginPlane::Xy).unwrap();
+    harness.run();
+    let sketches = harness.state().session.doc().sketches().iter().map(|(id, _)| id).collect::<Vec<_>>();
+    assert_eq!(sketches.len(), 1);
+    let session = &harness.state().session;
+    assert_eq!(session.sketch_owner(sketches[0]), Some(gc_doc::TreeKey::Component(occurrence)));
+    assert!(session.sketches_of(None).is_empty(), "it is not a top-level sketch");
+    // Its row is under the component: below "Body1:1" on the screen.
+    let body_row = harness.get_by_label("Body1:1").rect().top();
+    let sketch_row = harness.get_by_label("Sketch1").rect().top();
+    assert!(sketch_row > body_row, "{sketch_row} below {body_row}");
+}
+
+/// 3D Model tab > Work Axis opens the dialog; a work axis (intersection of two planes) is listed in the
+/// browser's Work Features folder, drawn in the view, hidden by its check box and deleted by its button
+/// (Inventor 2026 help, To Create Work Features, GUID-38A9748E-FA2D-44D3-928C-DFE1326A9385).
+#[test]
+fn a_work_axis_is_made_listed_hidden_and_deleted() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("작업 축").click();
+    harness.run_steps(3);
+    assert!(harness.query_all_by_label("작업 축").count() >= 2, "the dialog is up");
+    harness.get_by_label("두 평면의 교선").click();
+    harness.run();
+    // The same plane twice is refused (nothing is made); two different planes make the axis.
+    let session = &mut harness.state_mut().session;
+    let geometry = gc_doc::WorkGeometry::AxisPlanesIntersection {
+        planes: [
+            gc_doc::PlaneRef::Origin(gc_doc::OriginPlane::Xy),
+            gc_doc::PlaneRef::Origin(gc_doc::OriginPlane::Yz),
+        ],
+    };
+    let op = gc_doc::CellOp::AddWorkFeature(gc_doc::WorkFeature {
+        name: "Axis1".to_owned(),
+        geometry,
+        visible: true,
+    });
+    session.execute(&gc_doc::Command::Cell(op)).unwrap();
+    harness.run_steps(3);
+    harness.get_by_label("Axis1");
+    if gpu {
+        let image = harness.render().unwrap();
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        image.save(out.join("review-52-work-axis.png")).unwrap();
+    }
+    let id = harness.state().session.doc().work_features().iter().next().unwrap().0;
+    harness.get_by_label("Axis1 보이기").click();
+    harness.run();
+    assert!(!harness.state().session.doc().work_features().get(id).unwrap().visible);
+    harness.get_by_label("Axis1 삭제").click();
+    harness.run();
+    assert!(harness.state().session.doc().work_features().iter().next().is_none());
+}
+
+/// A subassembly folder is demoted into another subassembly from its own menu: folders nest without
+/// dragging.
+#[test]
+fn a_subassembly_folder_is_nested_from_its_menu() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let solid = gc_doc::Solid::Box { size: [0.05, 0.05, 0.05] };
+    let app = harness.state_mut();
+    app.session.add_body(solid.clone(), gc_doc::Placement::default()).unwrap();
+    let second = app.session.add_body(solid, gc_doc::Placement::default()).unwrap();
+    let key = gc_doc::TreeKey::Component(gc_doc::Occurrence::Item(second.erase()));
+    app.session
+        .edit_subassemblies(gc_doc::SubassemblyOp::Demote { members: vec![key], name: "Inner".to_owned() })
+        .unwrap();
+    harness.run();
+
+    let at = harness.get_by_label("Inner").rect().center();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run();
+    }
+    harness.get_by_label("서브어셈블리로 묶기 (강등)").click();
+    harness.run_steps(3);
+    let name = egui::accesskit::Role::TextInput;
+    harness.get_by_role_and_label(name, "서브어셈블리로 묶기 (강등)").click();
+    harness.run();
+    harness.get_by_role_and_label(name, "서브어셈블리로 묶기 (강등)").type_text("Outer");
+    harness.run();
+    harness.get_by_label("확인").click();
+    harness.run_steps(3);
+    let groups = harness.state().session.doc().subassemblies();
+    assert_eq!(groups.len(), 2);
+    let inner = groups.iter().find(|g| g.name == "Inner").unwrap();
+    let outer = groups.iter().find(|g| g.name == "Outer").unwrap();
+    assert_eq!(inner.parent, Some(outer.id), "Inner now sits in Outer");
+}

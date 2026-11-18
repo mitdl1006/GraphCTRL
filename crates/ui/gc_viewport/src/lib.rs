@@ -15,6 +15,7 @@ mod radial;
 mod repr;
 mod section;
 mod target;
+mod workfeat;
 
 use egui::{Key, PointerButton, Sense, vec2};
 use gc_core::Id;
@@ -445,6 +446,7 @@ impl Viewport {
             };
             origin::paint(&ui.painter_at(rect), &screen, session, self.origin_selected, self.constrain_mode);
             dof::paint(&ui.painter_at(rect), &screen, session, camera.distance * 0.12);
+            workfeat::paint(&ui.painter_at(rect), &screen, session, camera.distance * 0.6);
         }
         if let Some(section) = &self.section {
             let camera = self.camera;

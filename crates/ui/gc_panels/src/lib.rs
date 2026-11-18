@@ -305,29 +305,13 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
             component_rows(ui, session, lang, state, selected, &mut action, &rows, None);
         });
     egui::CollapsingHeader::new(tr!(lang, BrowserSketches)).default_open(true).show(ui, |ui| {
-        let active = session.active_sketch().map(|(id, _)| id);
         ui.spacing_mut().item_spacing.y = 1.0;
-        for (id, sketch) in session.doc().sketches().iter() {
-            let node = Node {
-                icon: Icon::Sketch,
-                name: &sketch.name,
-                text: &sketch.name,
-                any: id.erase(),
-                selected: active == Some(id),
-                delete: gc_doc::Command::DeleteSketch { id },
-                suppressible: true,
-            };
-            let result = node_row(ui, session, lang, state, &node, &mut action, |ui, action| {
-                if ui.button(tr!(lang, CmdEditSketch)).clicked() {
-                    *action = Some(BrowserAction::EditSketch(id));
-                    ui.close();
-                }
-            });
-            if result.double_clicked() {
-                action = Some(BrowserAction::EditSketch(id));
-            }
+        // The sketches of the top level; those of a component or subassembly hang below its row.
+        for id in session.sketches_of(None) {
+            sketch_row(ui, session, lang, state, &mut action, id);
         }
     });
+    work_features(ui, session, lang, &mut action);
     if let Some(command) = params(ui, session, lang, state) {
         action = Some(BrowserAction::Edit(Box::new(command)));
     }
@@ -452,6 +436,76 @@ fn representations(ui: &mut Ui, session: &Session, lang: Lang, action: &mut Opti
     });
 }
 
+/// The work features of the browser: each with a visibility check box and a delete button.
+fn work_features(ui: &mut Ui, session: &Session, lang: Lang, action: &mut Option<BrowserAction>) {
+    use gc_doc::{CellOp, Command};
+    let doc = session.doc();
+    if doc.work_features().iter().next().is_none() {
+        return;
+    }
+    egui::CollapsingHeader::new(tr!(lang, BrowserWorkFeatures)).default_open(true).show(ui, |ui| {
+        ui.spacing_mut().item_spacing.y = 1.0;
+        for (id, feature) in doc.work_features().iter() {
+            let mut visible = feature.visible;
+            let delete = tr!(lang, CmdDeleteItem, feature.name);
+            let show = tr!(lang, ShowItem, feature.name);
+            let row = TreeRow {
+                icon: Icon::Frame,
+                text: &feature.name,
+                selected: false,
+                visible: Some((&mut visible, show.as_str())),
+                delete: Some(&delete),
+                edit: None,
+                focus: false,
+                dim: false,
+            };
+            let result = gc_ui::panel::tree_row(ui, row);
+            if result.toggled {
+                let mut changed = feature.clone();
+                changed.visible = visible;
+                *action = Some(BrowserAction::Edit(Box::new(Command::Cell(CellOp::SetWorkFeature {
+                    id,
+                    feature: changed,
+                }))));
+            }
+            if result.deleted {
+                *action = Some(BrowserAction::Edit(Box::new(Command::Cell(CellOp::DeleteWorkFeature(id)))));
+            }
+        }
+    });
+}
+
+/// One sketch of the browser: select by clicking, double-click to edit.
+fn sketch_row(
+    ui: &mut Ui,
+    session: &Session,
+    lang: Lang,
+    state: &mut ParamsUi,
+    action: &mut Option<BrowserAction>,
+    id: Id<Sketch>,
+) {
+    let Some(sketch) = session.doc().get(id) else { return };
+    let active = session.active_sketch().map(|(active, _)| active);
+    let node = Node {
+        icon: Icon::Sketch,
+        name: &sketch.name,
+        text: &sketch.name,
+        any: id.erase(),
+        selected: active == Some(id),
+        delete: gc_doc::Command::DeleteSketch { id },
+        suppressible: true,
+    };
+    let result = node_row(ui, session, lang, state, &node, action, |ui, action| {
+        if ui.button(tr!(lang, CmdEditSketch)).clicked() {
+            *action = Some(BrowserAction::EditSketch(id));
+            ui.close();
+        }
+    });
+    if result.double_clicked() {
+        *action = Some(BrowserAction::EditSketch(id));
+    }
+}
+
 /// The components of the browser as the assembly tree: subassemblies are folders (the one being edited in
 /// place is marked), the components below them are rows of their own. Double-click edits in place; the menus
 /// demote, move, dissolve and rename. Inventor 2026 help: Create Subassemblies in Place
@@ -481,6 +535,9 @@ fn component_rows(
                     .default_open(true)
                     .show(ui, |ui| {
                         component_rows(ui, session, lang, state, selected, action, rows, Some(row.key));
+                        for sketch in session.sketches_of(Some(row.key)) {
+                            sketch_row(ui, session, lang, state, action, sketch);
+                        }
                     });
                 let header = folder.header_response;
                 if header.double_clicked() {
@@ -493,6 +550,11 @@ fn component_rows(
                     }
                     if ui.button(tr!(lang, CmdRename)).clicked() {
                         state.group_name = Some(GroupName::Rename(id, row.name.clone()));
+                        ui.close();
+                    }
+                    // Folders nest without dragging: demote this one into a new subassembly.
+                    if ui.button(tr!(lang, CmdDemote)).clicked() {
+                        state.group_name = Some(GroupName::Demote(vec![row.key], String::new()));
                         ui.close();
                     }
                     if row.parent.is_some() && ui.button(tr!(lang, CmdMoveToTop)).clicked() {
@@ -526,6 +588,12 @@ fn component_rows(
                         None,
                         vec![(row.name.clone(), shown, item)],
                     );
+                    // The sketches made in this component's context hang below it.
+                    ui.indent(("gc_owned_sketches", row.key), |ui| {
+                        for sketch in session.sketches_of(Some(row.key)) {
+                            sketch_row(ui, session, lang, state, action, sketch);
+                        }
+                    });
                 }
             }
             // Parts, links and tools hang below their components, which draw them.
