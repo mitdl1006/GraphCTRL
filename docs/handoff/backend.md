@@ -124,6 +124,22 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — URScript 프로그램 생성 (PLAN 9.6, 오프라인 텍스트만)
+
+근거: `docs/research/robotics-domain.md`의 URScript 절(SI 단위, `movej` 기본 a = 1.4 rad/s²·v = 1.05 rad/s, `movel` 기본 a = 1.2 m/s²·v = 0.25 m/s, 자세 `p[x, y, z, rx, ry, rz]` 회전벡터), `m2-references.md`. **URSim·실제 로봇으로 실행해 본 적 없다**(이 환경에 URSim 없음). 전송·RTDE·Dashboard는 없다.
+
+- `session.task_urscript(task, robot) -> Result<String, String>`: 그 로봇으로 작업을 계획해 `def <작업 이름>(): … end` 텍스트로. 문서 불변.
+- `session.schedule_urscript(&Schedule) -> Vec<(Id<Robot>, String)>`: 할 일이 있는 로봇마다 프로그램 하나(`def <로봇 이름>()`). 작업·비키기 이동을 시작 순서로 잇고 사이의 쉬는 시간은 `sleep`. 로봇 간 동기화는 시간뿐이다.
+- 변환 규칙(`gc_session/src/urscript.rs`):
+  - 머리: `set_tcp(p[…])`(로봇 TCP), 이어서 계획 시작 관절값으로 `movej`.
+  - 자유 이동(MoveJ, 경로 역할 접근, 비키기): 계획이 찾은 관절 경유점 그대로 `movej([q…], a=1.4, v=1.05, r=…)` — 시뮬레이션과 같은 팔 자세·우회로. 중간 경유점 `r=0.01`, 마지막 `r=0`.
+  - 직선·곡선(MoveL, Linear/Follow 역할): `movel(p[…], a=1.2, v=<역할 속도 또는 0.25>, r=…)`, 자세는 **로봇 베이스 좌표계**(`robot_base_frame`의 역변환 적용). 곡선 표본은 `r=0.001`, 마지막 `r=0`.
+  - `Wait` → `sleep(s)`. `SetIo` → `set_digital_out(pin, True/False)`(핀은 로봇 툴 종류의 출력 신호; 없으면 주석). `ToolAction` → 주석 + 신호 set + 확인 입력을 `timeout`까지 기다리는 `while`(확인이 없으면 `sleep(duration)`). `WaitIo` → `# TODO wait for: …` 주석(신호 모델 없음).
+  - 이름의 식별자 밖 글자는 `_`.
+- `TaskPlan.program: Vec<ProgramStep>`(새 필드): 계획된 작업을 명령 순서로 본 것 — `Joints`, `Linear { poses, speed }`, `Pause`, `Output`, `Action`, `WaitFor`. 다른 내보내기(다른 제조사, 온라인 실행)가 여기서 출발할 수 있다.
+- 한계: 블렌드 반지름은 고정값(계획의 블렌드와 같지 않다 → 실제 경로가 시뮬레이션과 조금 다르고, 충돌 보증은 시뮬레이션 궤적에만 해당), 툴 플랜지 IO(`set_tool_digital_out`)·아날로그 미구분, 속도·가속도는 URScript 기본값(로봇별 한계·문서의 가속 프로파일 미반영), `movep`/`movec` 미사용.
+- 테스트: `gc_session/tests/urscript.rs`(명령 순서, 숫자, 베이스 좌표계, 핀).
+
 ## 2026-11-18 — 교착 해소: 막는 로봇을 대기 자세로
 
 - 대기 자세: `WorkOp::SetRobotPark { robot, joints: Option<Vec<f64>> }`(관절 수가 다르면 `BadValue`), `doc().robot_park(robot)` — 지정이 없으면 문서의 관절 자세(시작 자세). `Robot` 구조체는 그대로이고 `Components.parks`에 저장.
