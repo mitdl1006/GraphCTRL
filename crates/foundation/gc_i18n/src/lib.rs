@@ -103,6 +103,11 @@ messages! {
     CmdDelete => ("삭제", "Delete"),
     /// Status bar while idle.
     StatusReady => ("준비", "Ready"),
+    StatusPickAssemble => ("조립: 붙일 면·모서리·원점 요소를 선택하십시오", "Assemble: select the faces, edges or origin elements to join"),
+    StatusPickConstrain => ("구속: 구속할 두 요소를 차례로 선택하십시오", "Constrain: select the two elements to constrain"),
+    StatusPickJoint => ("조인트: 연결할 두 요소를 차례로 선택하십시오", "Joint: select the two elements to connect"),
+    StatusPickPattern => ("패턴: 반복할 컴포넌트와 방향 요소를 선택하십시오", "Pattern: select the component and the direction"),
+    StatusPickReplicate => ("복제: 복제할 요소를 선택하십시오", "Replicate: select the elements to copy"),
     /// Status bar: how many dimensions a sketch still needs. `{0}` is the count.
     StatusDimensionsNeeded => ("{0}개 치수 필요", "{0} dimensions needed"),
     /// Status bar: the sketch is fully constrained.
@@ -481,6 +486,16 @@ messages! {
     WorkParkNone => ("대기 자세: 문서의 자세", "Park pose: where it is saved"),
     WorkParkHere => ("현재 자세로 설정", "Set to the current pose"),
     WorkParkClear => ("지우기", "Clear"),
+    UrScriptTitle => ("URScript", "URScript"),
+    UrScriptExportFor => ("URScript 내보내기… ({0})", "Export URScript… ({0})"),
+    ScheduleUrScript => ("로봇별 URScript 내보내기…", "Export URScript per robot…"),
+    UrScriptWindow => ("URScript", "URScript"),
+    UrScriptNotice => ("URSim·실제 로봇으로 검증하지 않은 프로그램입니다 — 실행 전에 반드시 확인하십시오.", "This program has not been tried on URSim or a real robot — check it before running it."),
+    UrScriptCopy => ("복사", "Copy"),
+    UrScriptSave => ("이 프로그램 저장…", "Save this program…"),
+    UrScriptSaveAll => ("모두 폴더에 저장…", "Save all to a folder…"),
+    UrScriptSaved => ("{0}에 저장했습니다", "Saved to {0}"),
+    UrScriptNothing => ("보낼 프로그램이 없습니다: {0}", "Nothing to export: {0}"),
     WorkTitle => ("작업", "Work"),
     WorkObjectTypes => ("객체 유형", "Object Types"),
     WorkObjects => ("작업 객체", "Work Objects"),
