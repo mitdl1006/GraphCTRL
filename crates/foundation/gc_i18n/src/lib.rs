@@ -812,6 +812,10 @@ messages! {
     CmdActivate => ("활성화", "Activate"),
     /// Browser, right-click a joint: lock it where it stands.
     JointLockItem => ("잠금", "Lock"),
+    /// File menu: the Application Options window.
+    MenuOptions => ("응용 프로그램 옵션", "Application Options"),
+    /// Application Options, Sketch tab: project the edges of the selected face when a sketch is created.
+    OptAutoproject => ("스케치 작성·편집 시 모서리 자동 투영", "Autoproject edges for sketch creation and edit"),
     /// Browser, right-click a joint: refuse relationships that take its freedom away.
     JointProtectItem => ("보호", "Protect"),
     /// Assemble tab: the Assemble command (pick geometry, the geometry decides the constraint types).

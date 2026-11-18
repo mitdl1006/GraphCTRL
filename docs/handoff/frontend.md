@@ -75,6 +75,8 @@
 
 - 조인트 Lock·Protect(리드 큐 ①): 브라우저 관계 폴더 행 우클릭 메뉴에 조인트(`gc_doc::is_joint_kind`)만 "잠금"·"보호" 체크 항목(`BrowserAction::JointLock/JointProtect` → `set_joint_lock/set_joint_protect`, 체크 해제 = 해제), 잠긴 조인트는 행 아이콘이 자물쇠(`gc_ui::Icon::Lock`, 새 벡터 아이콘). 구속에는 항목 없음. 근거: Inventor 2026 To Define and Manage Joint Relationships(GUID-21DC3336-5C51-42C1-90FB-4299CD66E0C6) 원문 확인 — "브라우저에서 관계를 우클릭 > Lock 또는 Protect, 체크 해제로 조건 제거, 구속에는 없음"과 같음. 원문과 다른 점·미구현: 보호된 조인트 때문에 거부된 관계의 경고 문구는 상태바의 일반 오류 문구뿐, 보호 표시 아이콘 없음(잠금만), 조인트 글리프 더블클릭 편집. 스크린샷 `docs/evidence/img/review-50-joint-lock.png`, 테스트 `lock_and_protect_are_set_on_a_joint_from_the_browser`.
 
+- 응용 프로그램 옵션 · 스케치 탭 모서리 자동 투영(리드 큐 ②): 파일 메뉴 "응용 프로그램 옵션"(Inventor: File > Options) 창, 탭 줄에 "스케치" 하나, 체크박스 "스케치 작성·편집 시 모서리 자동 투영"(`session.autoproject_face_edges` / `set_autoproject_face_edges`, 기본 켜짐). 근거: Inventor 2026 Sketch Tab Reference(Application Options, GUID-1898C432-CFD2-46F1-8BAE-631392DFBF1D) 원문의 "Autoproject edges for sketch creation and edit" 항목 확인. 설정 파일 저장: 리드가 `gc_persist::places::Settings`에 `autoproject_edges_off`(기본 false = 켜짐)를 넣어 줘서, 시작 때 읽어 세션에 적용하고 체크가 바뀌면 `save_settings`로 저장(테스트가 설정 폴더를 임시 폴더로 줘서 확인). 원문의 나머지 항목(Autoproject edges during curve creation, 스플라인 맞춤 방식, 구속 설정 등)은 미구현. 테스트 `the_application_options_switch_autoproject_of_face_edges`.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

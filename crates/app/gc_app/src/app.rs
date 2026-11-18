@@ -282,6 +282,8 @@ pub struct GraphCtrlApp {
     notices: bool,
     /// Whether the log window is open.
     log_open: bool,
+    /// The Application Options window.
+    options_open: bool,
     /// Whether the side panels let the 3D scene show through.
     translucent: bool,
     /// Whether the dark colour scheme is in use.
@@ -345,6 +347,10 @@ impl GraphCtrlApp {
             let notifier = std::sync::Arc::new(Repaint(cc.egui_ctx.clone()));
             session.set_executor(gc_jobs::Executor::thread().with_notifier(notifier));
         }
+        // The Application Options that outlive a run.
+        if let Some(settings) = options.settings_dir.as_deref().map(gc_persist::places::load_settings) {
+            session.set_autoproject_face_edges(!settings.autoproject_edges_off);
+        }
         Self {
             options,
             frames: 0,
@@ -376,6 +382,7 @@ impl GraphCtrlApp {
             ime: ImeTest { dimension: "25 mm".to_owned(), ..ImeTest::default() },
             notices: false,
             log_open: false,
+            options_open: false,
             translucent,
             dark,
             tab_before_sketch: Tab::Model,
@@ -788,6 +795,10 @@ impl GraphCtrlApp {
                     });
                 });
                 ui.separator();
+                if ui.button(tr!(lang, MenuOptions)).clicked() {
+                    self.options_open = true;
+                }
+                ui.separator();
                 if ui.button(tr!(lang, CmdQuit)).clicked() {
                     self.request(Pending::Quit, &ctx);
                 }
@@ -875,6 +886,7 @@ impl GraphCtrlApp {
             agent_token: self.agent.token.clone(),
             opaque_panels: !self.translucent,
             light_theme: !self.dark,
+            autoproject_edges_off: !self.session.autoproject_face_edges(),
             ..Default::default()
         };
         if let Err(error) = gc_persist::places::save_settings(dir, &settings) {
@@ -906,6 +918,31 @@ impl GraphCtrlApp {
     /// The licences of what ships with the application: its own, the bundled font's and the UR robot
     /// descriptions'.
     /// Help > Log: the last lines of the log, newest at the bottom.
+    /// Application Options (Inventor: File > Options). Only the Sketch tab so far. Reference: Inventor 2026
+    /// help, Sketch Tab Reference (Application Options), GUID-1898C432-CFD2-46F1-8BAE-631392DFBF1D.
+    /// The choice is saved to the settings file at once.
+    fn options_window(&mut self, ctx: &egui::Context) {
+        let lang = self.lang;
+        let mut open = self.options_open;
+        let mut changed = false;
+        egui::Window::new(tr!(lang, MenuOptions)).open(&mut open).default_width(420.0).show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                // The tabs of the dialog; the sketch tab is the only one.
+                drop(ui.selectable_label(true, tr!(lang, TabSketch)));
+            });
+            ui.separator();
+            let mut on = self.session.autoproject_face_edges();
+            if ui.checkbox(&mut on, tr!(lang, OptAutoproject)).changed() {
+                self.session.set_autoproject_face_edges(on);
+                changed = true;
+            }
+        });
+        if changed {
+            self.save_settings();
+        }
+        self.options_open = open;
+    }
+
     fn log_window(&mut self, ctx: &egui::Context) {
         let mut open = self.log_open;
         egui::Window::new(tr!(self.lang, MenuLog)).open(&mut open).default_size([640.0, 360.0]).show(
@@ -1400,6 +1437,9 @@ impl eframe::App for GraphCtrlApp {
         }
         if self.notices {
             self.notices_window(&ctx);
+        }
+        if self.options_open {
+            self.options_window(&ctx);
         }
         if self.log_open {
             self.log_window(&ctx);
