@@ -10,11 +10,13 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(test, allow(clippy::float_cmp, reason = "tests compare exactly representable values"))]
 
+mod cond;
 mod eval;
 mod order;
 mod parse;
 mod units;
 
+pub use cond::{Compare, CondError, CondScope, CondValue, Condition, is_valid_state_name, quoted};
 pub use eval::{EvalError, EvalErrorKind, NoParams, Scope};
 pub use order::eval_order;
 pub use parse::{BinaryOp, Expr, Func, ParseError, ParseErrorKind, Span, is_valid_param_name, parse};

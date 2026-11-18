@@ -913,6 +913,14 @@ pub enum Created {
     Relationship(Id<crate::relate::Relationship>),
     /// A waypoint or path role of sketch elements.
     Role(Id<crate::role::SketchRole>),
+    /// An object type of the work model.
+    ObjectType(Id<crate::work::ObjectType>),
+    /// An object of the work model.
+    WorkObject(Id<crate::work::WorkObject>),
+    /// A state variable of the work model.
+    StateVar(Id<crate::work::StateVar>),
+    /// A task.
+    Task(Id<crate::work::Task>),
     /// A subassembly made in the cell.
     Subassembly(crate::subassembly::SubassemblyId),
 }

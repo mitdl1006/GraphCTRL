@@ -124,6 +124,73 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 작업 모델 첫 데이터층 (PLAN 9.4, GraphCTRL 고유, 원문 없음)
+
+데이터와 검증만이다. 스케줄러·실행·시뮬레이션, Tool/ToolAction 정의, IO 모델, 이벤트, 목표식, 복구는 없다.
+
+### 모델 (`gc_doc::work`, 엔티티 4종: `Kind::{ObjectType, WorkObject, StateVar, Task}`)
+
+- `ObjectType { name, states: Vec<String> }` — 열거 상태(1개 이상, 중복 없음).
+- `WorkObject { name, ty, location, state }` — `state`는 타입의 상태 중 하나(초기 상태).
+- `StateVar { name, value: StateValue::{Bool, Int, Real, Enum { choices, value }} }` — 전역 상태(초기값이 종류를 정함).
+- `Task { name, location, precondition, steps, effects, robots, priority }`
+  - `Location::{None, Component(Occurrence), Frame(작업 좌표계), Sketch, Robot}`
+  - `Step::{MoveJ(MoveTarget), MoveL(MoveTarget), FollowPath(Id<SketchRole>), SetIo { name, value }, WaitIo { condition, timeout }, ToolAction { action, target: Option<Id<WorkObject>> }, Wait { seconds }}`
+  - `MoveTarget::{Role(Id<SketchRole>), Waypoint(Id<Waypoint>)}` — `Role`은 웨이포인트 역할만, `FollowPath`는 경로 역할만. `Waypoint`(로봇 소유)는 `Location::Robot(그 로봇)`인 작업에서만.
+  - `Effect { target: EffectTarget::{Object, Var}, value: String }` — 객체는 타입의 상태 이름, 변수는 종류에 맞는 값(`true`, `3`, `0.5`, 선택지 이름).
+  - `RobotChoice::{Any, Only(Vec<Id<Robot>>), When(조건식)}`, `priority: i32`(클수록 먼저).
+  - `WaitIo.condition`과 `ToolAction.action`, `SetIo.name`은 지금은 글자 그대로 저장만 한다(IO·툴 동작 모델이 생기면 검사).
+- 이름(타입·객체·변수·상태): 비어 있지 않고 `"`·제어 문자가 없고 앞뒤 공백 없음. 한글·공백 가능. 타입끼리, 객체끼리, 변수끼리 유일.
+
+### 조건식 (`gc_expr::Condition`, 새 모듈 — 기존 수치 식은 그대로)
+
+- `== != < <= > >=`, `and or not`(`&& || !`도), 괄호, 숫자, `true`/`false`, 이름. 우선순위: 비교 > not > and > or.
+- 참조: `변수이름`, `객체이름.state`. 공백 등이 든 이름은 큰따옴표: `"홀 A".state == "체결 완료" and count < 3`.
+- 낱말은 그 이름의 상태 변수가 있으면 변수, 없으면 이름(상태·선택지). `==`·`!=`는 같은 종류끼리, 대소 비교는 숫자만.
+- 문서에는 원문 문자열로 저장. 쓸 때 검사: 읽히는지, 객체·필드·낱말을 아는지(낱말은 변수이거나 어떤 타입의 상태이거나 어떤 열거의 선택지), 초기 상태로 참/거짓이 나오는지. 틀리면 `EditError::Expr { message, start, end }`(바이트 범위).
+- 빈 전제조건 = 항상.
+
+### 명령 `CellOp::Work(WorkOp)` — 각 Undo 1단계
+
+`Add*/Set*/Delete*` × {ObjectType, Object, StateVar, Task}. 모든 변경 뒤 전체 작업을 다시 검사해, 깨지는 것이 있으면 `InUse`로 거부한다.
+
+- 이름 바꾸기(`Set*`로 이름이 바뀌거나 `Command::Rename`): 객체·변수 이름을 쓰는 조건식이 같은 단계에서 바뀐다(필요하면 따옴표를 붙여 씀).
+- `SetObjectType`: 상태 개수가 같으면 자리별로 이름이 달라진 상태를 "이름 바꾸기"로 보고 그 타입 객체의 초기 상태, 효과, 조건식(그 타입 객체의 `.state`와 비교된 낱말)을 고친다. 상태를 빼면(개수 감소) 쓰이는 곳이 있을 때 `InUse`.
+- 삭제: 타입은 객체가 있으면, 객체는 조건식·효과·단계가 참조하면, 변수는 조건식·효과가 참조하면 `InUse`.
+- `SketchRole`: 작업 단계가 쓰면 `DeleteRole` = `InUse`, 종류를 바꾸는 `SetRole`도 `InUse`, 스케치 요소가 지워져도 역할은 남는다(→ `task_problems`). 로봇·작업 좌표계·로봇 웨이포인트·스케치는 참조되면 삭제가 거부된다(`Dangling`).
+- 열거 변수의 선택지 이름 바꾸기는 조건식을 따라 고치지 않는다(쓰이면 `InUse`로 거부됨).
+
+### 세션 API (프론트엔드용, `gc_session/src/work.rs`)
+
+| 무엇 | 호출 |
+|---|---|
+| 목록 | `doc().object_types()`, `doc().objects()`, `doc().state_vars()`, `doc().tasks()`(모두 만든 순서), `session.tasks() -> Vec<Id<Task>>` |
+| 추가·편집·삭제 | `session.edit_work(WorkOp) -> Result<Option<AnyId>, EditError>`(추가면 새 id) |
+| 이름 바꾸기(브라우저 F2) | `Command::Rename { item, name }` — 4종 모두 |
+| 억제 | 작업은 `set_suppressed`(기존) 가능 |
+| 조건식 입력 검증 | `session.check_condition(text)` → `Err(EditError::Expr { message, start, end })` |
+| 준비 여부(초기 상태 기준) | `session.task_ready(task) -> Result<bool, EditError>` |
+| 끊긴 참조 안내 | `session.task_problems(task) -> Vec<String>` |
+| 위치 표시 | `session.location_pose(&Location) -> Option<DPose3>` |
+| 단계에 넣을 역할 | `sketch_roles(sketch)`, `doc().roles()`(웨이포인트/경로는 `SketchRole::is_path`) |
+
+### 설계 메모 — 작업 대상이 로봇 자신(`Location::Robot`)
+
+- 그 작업은 그 로봇만 할 수 있다(`robots`는 보지 않는다). 스케줄러는 입찰 없이 그 로봇에 바로 준다.
+- 단계는 그 로봇의 `Waypoint`(`Joints`·`InBase`·`InWorld`·`InFrame`·`SketchPoint`)를 직접 가리킬 수 있다(`MoveTarget::Waypoint`) → 기존 이동 제어(툴 TCP, 기준 좌표계 = 베이스/월드/작업 좌표계)가 그대로 해석한다.
+- 계획은 새 플래너를 만들지 않고 `gc_session/src/cell.rs`의 `path_steps`가 만드는 단계 목록(`Step { goal, travel, tcp_speed, contacts }`)으로 변환한다: `MoveJ` → `Travel::Free`, `MoveL` → `Travel::Linear`, `FollowPath(role)` → 지금 `follow` 경로와 같은 "시작점까지 자유 이동 + 역할 추종". 즉 `Task` + 로봇 → 임시 단계 목록 → 기존 `plan_path` 본체. 스케줄러의 입찰(계획한 동작 시간)도 같은 함수를 쓴다.
+- 구조에 붙은 작업(`Role`만 쓰는 작업)은 어느 로봇에나 같은 변환이 적용된다: 역할의 월드 자세가 로봇과 무관하기 때문이다.
+
+### 다른 브랜치 영향
+
+추가뿐이다: `Kind` 4개, `Created` 4개, `CellOp::Work`, `Contents` 필드 4개, `gc_expr`의 새 공개 항목. 기존 시그니처는 그대로. `Document::role_followed`가 이제 "작업 단계가 쓰는 역할"에도 참이다.
+
+## 2026-11-18 — BOM CSV·부품 번호 (QA)
+
+- `bom_csv`: 탭(`\t`)·CR(`\r`)로 시작하는 칸도 수식 시작으로 보고 앞에 `'`를 붙인다(OWASP CSV 인젝션 문자 집합: `=` `+` `-` `@` 탭 CR).
+- 부품 번호: 끝 공백을 떼고 묶는다(`"BOLT "` = `"BOLT"`). 대소문자는 구분한다. About the BOM Structure(GUID-A0A95805-CBF6-4524-8314-4AC8B53C19CF)에는 대소문자·공백 규칙이 없다(원문 근거 없음, 리드 지시대로).
+- QA 브랜치의 `qa_bom_bend_equal.rs::csv_also_guards_cells_that_start_with_a_tab_or_a_carriage_return`는 이 브랜치에 없어 `#[ignore]`를 여기서 못 뗐다. 같은 단언을 `gc_session/tests/bom.rs`에 넣었다.
+
 ## 2026-11-18 — 경로 역할: 닫힌 곡선, 접선 방향 툴 자세 (GraphCTRL 고유, 원문 없음)
 
 - `SketchRole.travel: PathTravel { tangent: bool, start: Option<Id<SkPoint>> }` 추가(`#[serde(default)]`, 옛 파일은 기본값). `RoleKind`·`ToolAim`은 그대로(다른 브랜치의 패턴·리터럴을 깨지 않으려고 새 필드를 `SketchRole`에 뒀다).

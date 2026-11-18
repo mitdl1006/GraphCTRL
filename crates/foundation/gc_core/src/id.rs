@@ -49,6 +49,14 @@ pub enum Kind {
     Relationship,
     /// What a sketch element is for a robot: a waypoint (a point) or a path (a chain of curves).
     SketchRole,
+    /// A type of work object with its states (work model).
+    ObjectType,
+    /// An object work is done on, with a state (work model).
+    WorkObject,
+    /// A state variable that belongs to no object (work model).
+    StateVar,
+    /// A task: work defined on the structure, for whichever robot is given it.
+    Task,
 }
 
 /// A value stored in a document under an [`Id`].

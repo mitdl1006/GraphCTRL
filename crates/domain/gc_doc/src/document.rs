@@ -226,6 +226,10 @@ tables! {
     timelines: crate::design::Timeline,
     relationships: crate::relate::Relationship,
     roles: crate::role::SketchRole,
+    object_types: crate::work::ObjectType,
+    objects: crate::work::WorkObject,
+    state_vars: crate::work::StateVar,
+    tasks: crate::work::Task,
 }
 
 /// Everything a stored document consists of, as [`Document::restore`] takes it.
@@ -261,6 +265,14 @@ pub struct Contents {
     pub relationships: BTreeMap<Id<crate::relate::Relationship>, crate::relate::Relationship>,
     /// Waypoint and path roles of sketch elements.
     pub roles: BTreeMap<Id<crate::role::SketchRole>, crate::role::SketchRole>,
+    /// Object types of the work model.
+    pub object_types: BTreeMap<Id<crate::work::ObjectType>, crate::work::ObjectType>,
+    /// Objects of the work model.
+    pub objects: BTreeMap<Id<crate::work::WorkObject>, crate::work::WorkObject>,
+    /// State variables of the work model.
+    pub state_vars: BTreeMap<Id<crate::work::StateVar>, crate::work::StateVar>,
+    /// Tasks.
+    pub tasks: BTreeMap<Id<crate::work::Task>, crate::work::Task>,
 }
 
 impl Default for Document {
@@ -290,6 +302,10 @@ impl Document {
             timelines: Store::default(),
             relationships: Store::default(),
             roles: Store::default(),
+            object_types: Store::default(),
+            objects: Store::default(),
+            state_vars: Store::default(),
+            tasks: Store::default(),
             ids: IdAlloc::new(),
             revision: Revision::default(),
         };
@@ -335,6 +351,10 @@ impl Document {
             timelines: Store { items: contents.timelines },
             relationships: Store { items: contents.relationships },
             roles: Store { items: contents.roles },
+            object_types: Store { items: contents.object_types },
+            objects: Store { items: contents.objects },
+            state_vars: Store { items: contents.state_vars },
+            tasks: Store { items: contents.tasks },
             ids: IdAlloc::new(),
             revision: Revision::default(),
         };
@@ -354,6 +374,10 @@ impl Document {
         doc.timelines.items.keys().for_each(|id| raise(id.raw()));
         doc.relationships.items.keys().for_each(|id| raise(id.raw()));
         doc.roles.items.keys().for_each(|id| raise(id.raw()));
+        doc.object_types.items.keys().for_each(|id| raise(id.raw()));
+        doc.objects.items.keys().for_each(|id| raise(id.raw()));
+        doc.state_vars.items.keys().for_each(|id| raise(id.raw()));
+        doc.tasks.items.keys().for_each(|id| raise(id.raw()));
         for (id, sketch) in &doc.sketches.items {
             raise(id.raw());
             sketch.points.keys().for_each(|p| raise(p.raw()));
@@ -446,6 +470,26 @@ impl Document {
     /// Waypoint and path roles of sketch elements.
     pub fn roles(&self) -> &Store<crate::role::SketchRole> {
         &self.roles
+    }
+
+    /// Object types of the work model.
+    pub fn object_types(&self) -> &Store<crate::work::ObjectType> {
+        &self.object_types
+    }
+
+    /// Objects of the work model.
+    pub fn objects(&self) -> &Store<crate::work::WorkObject> {
+        &self.objects
+    }
+
+    /// State variables of the work model.
+    pub fn state_vars(&self) -> &Store<crate::work::StateVar> {
+        &self.state_vars
+    }
+
+    /// Tasks.
+    pub fn tasks(&self) -> &Store<crate::work::Task> {
+        &self.tasks
     }
 
     /// The stored model-tree order, if any was set (see [`Document::model_order`]).
