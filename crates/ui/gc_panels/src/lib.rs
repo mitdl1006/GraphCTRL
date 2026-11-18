@@ -233,6 +233,8 @@ fn relation_value_text(kind: &gc_doc::RelationKind) -> Option<String> {
         | RelationKind::Insert { offset, .. }
         | RelationKind::Tangent { offset, .. } => Some(show(offset * 1000.0)),
         RelationKind::Angle { angle, .. } => Some(show(angle.to_degrees())),
+        RelationKind::Rotation { ratio, .. } => Some(show(*ratio)),
+        RelationKind::RotationTranslation { distance, .. } => Some(show(distance * 1000.0)),
         _ => None,
     }
 }
@@ -246,6 +248,8 @@ fn relation_unit_name(kind: &gc_doc::RelationKind) -> Option<&'static str> {
         | RelationKind::Insert { .. }
         | RelationKind::Tangent { .. } => Some("mm"),
         RelationKind::Angle { .. } => Some("°"),
+        RelationKind::RotationTranslation { .. } => Some("mm"),
+        RelationKind::Rotation { .. } => Some("×"),
         _ => None,
     }
 }

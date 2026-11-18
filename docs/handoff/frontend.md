@@ -598,6 +598,12 @@
 - 새 뷰 표현이 만들자마자 활성: 표현 UI 테스트 영향 없음(전체 통과).
 - 테스트: `a_position_representation_disables_removing_components_and_the_joint_dialog_offers_planar`.
 
+## Motion 비·거리 매개변수 (백엔드 e0b77f5)
+
+- Constrain 모션 탭의 비율(단위 없음)·거리(mm) 칸이 식 입력이 된다: 비율은 `Unit::Scalar`로 평가(길이를 넣으면 거부, 0 거부), 만든 뒤 `SetRelationValue`로 식을 그대로 저장. 브라우저 값 칸과 매개변수 표도 Rotation/RotationTranslation 행을 다룬다(표의 단위는 `param.dim`: Length=mm, Angle=deg, Ratio=빈 칸).
+- 바로잡음: 브라우저 값 칸이 각도 구속을 mm로 평가하던 것을(단위 이름을 "°"로 비교하던 실수) 구속 종류로 판단하게 고쳤다.
+- 테스트: `motion_takes_a_ratio_or_a_distance_and_a_direction`(식·단위 거부 추가).
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹
