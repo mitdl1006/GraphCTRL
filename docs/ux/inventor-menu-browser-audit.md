@@ -51,19 +51,19 @@ Suppress, Visibility, Grounded, iProperties)을 기준으로 했고, 완전한 �
 | 원문 항목 | 우리 앱 | 상태 |
 |---|---|---|
 | 빠른 검색(Find)으로 파일·피처·관계·iProperties 검색, 공백으로 키워드 구분 | 찾기 상자(이름 부분 일치) | △ iProperties·인스턴스 속성 일치 아이콘 없음 |
-| 필터: 미해결 파일만 / 오래된 파일 제외 / 필터 지우기 | 없음 | ✗ (조건 검색: 문제 있는 관계·억제된 것 등은 백엔드 상태가 있어 가능) |
+| 필터: 미해결 파일만 / 오래된 파일 제외 / 필터 지우기 | "완전 구속 숨기기"(문제 있는 것만), "억제된 항목만"; 미해결·오래된 파일은 해당 없음 | △ |
 | 브라우저 메뉴 > Find | 있음 | ✓ |
 | Edit Values in Browser 켜기/끄기 | "…" 메뉴 | ✓ |
 | Display Preferences: Hide UCS | — | ⛔ UCS 없음 |
 | Hide Work Features(원점 폴더 포함) | "…" 메뉴 | ✓ |
-| Show Children Only | 없음 | ✗ (서브어셈블리 편집 중 부모 숨김) |
+| Show Children Only | "…" 메뉴 "자식만 표시" (제자리 편집 중 편집 대상·그 안·그 위 행만) | ✓ |
 | Hide Fully Constrained | "…" 메뉴 | ✓ |
 | Hide Notes / Hide Documents | — | ⛔ |
 | Hide Warnings | "…" 메뉴 "경고 숨기기" (관계의 sick 표시를 숨김, 실패는 유지) | ✓ |
 | Show Extended Names | 없음 | ✗ |
 | Show Constraint State(●/○/—) | "…" 메뉴, 관계 상태 점 | ✓ |
 | 폴더: Model States / Relationships / Representations | 관계·표현 폴더 있음, Model States 없음 | △ |
-| 사용자 정의 폴더(User-defined Folder) | 없음 (서브어셈블리 "묶기"만) | ✗ |
+| 사용자 정의 폴더(User-defined Folder) | 컴포넌트·서브어셈블리 행 우클릭 "새 폴더(이 항목으로)"·"폴더로 이동"·"폴더에서 빼기", 폴더 우클릭 이름 바꾸기·삭제 | △ 끌어 놓기 없음, 한 번에 한 행, 폴더 안 폴더·관계/스케치 넣기 없음(백엔드 범위) |
 | 노드 이름 바꾸기: 선택 후 한 번 더 클릭(더블클릭 아님) | 있음 | ✓ |
 | 더블클릭 = 편집 상태 진입 | 스케치·작업 피처·컴포넌트 | ✓ |
 | 패널 도킹·끌어 옮기기·+ 로 패널 추가 | 좌/우 패널 접기만 | △ |
@@ -80,7 +80,7 @@ Suppress, Visibility, Grounded, iProperties)을 기준으로 했고, 완전한 �
 | Open (별도 세션) | ⛔ | ⛔ | ⛔ | — | — | — | — | ⛔ |
 | Edit (제자리 편집) | — | ✓ 제자리 편집 | ✓ | — | ✗ 관계 편집(구속 대화상자 열기) | ✓ 스케치 편집 | ✓ | △ |
 | Find in Window | ✗ | ✓ 이번에 추가(바디·로봇) | ✗ | — | — | ✗ | ✗ | ✓ 로봇 |
-| Isolate / Undo Isolate | ✗ | ✗ | ✗ | — | — | — | — | ✗ |
+| Isolate / Undo Isolate | — | ✓ | ✓ (구성원 전체) | — | — | — | — | ✓ |
 | Visibility | — | ✓ 보이기/숨기기 | ✓ | ✓ 원점 표시/숨기기 | — | ✓ | ✓ | ✓ |
 | Enabled | — | ✓ | ✗ | — | — | — | — | ✓ |
 | Grounded | — | ✓ | ✗ | — | — | — | ✓(작업 점은 항목 없음) | ✓ |
@@ -103,8 +103,8 @@ Suppress, Visibility, Grounded, iProperties)을 기준으로 했고, 완전한 �
 | 원문 | 우리 앱 | 상태 |
 |---|---|---|
 | 위치 표현 끌어 이동·재정렬, Ctrl/Shift 선택 | 표현 재정렬 없음 | ✗ |
-| 컴포넌트를 끌어 다른 폴더(서브어셈블리)로 옮기기 | 우클릭 "이동"(MoveInto) | △ 끌어 놓기 없음 |
-| 여러 컴포넌트 선택 후 우클릭 (Open 등) | 다중 선택 Ctrl/Shift 일부 | △ 확인 필요 |
+| 컴포넌트를 끌어 다른 폴더(서브어셈블리)로 옮기기 | 행을 끌어 폴더·서브어셈블리 머리글에 놓기 + 우클릭 "이동" | ✓ |
+| 여러 컴포넌트 선택 후 우클릭 (Open 등) | Ctrl+클릭으로 표시한 행을 한꺼번에 끌기·"새 폴더"·"폴더로 이동" | △ 다른 명령(Open·삭제 등)은 한 행씩 |
 
 ## 4. 마킹 메뉴(뷰 우클릭)
 
@@ -116,9 +116,7 @@ Suppress, Visibility, Grounded, iProperties)을 기준으로 했고, 완전한 �
 채움(이번 커밋): Find in Window(바디·로봇), 빠른 실행 도구 모음(New·Open·Save·Undo·Redo·Return).
 
 다음(원문 근거가 있는 것부터):
-1. Isolate / Undo Isolate (브라우저·뷰 우클릭; 원문: "Select All Visible … to restore an Isolate Components operation")
-2. 브라우저 Display Preferences: Show Children Only, Show Extended Names (Hide Warnings는 채움)
-3. 브라우저 필터(문제 있는 관계·억제된 것) · 사용자 정의 폴더
+2. 브라우저 Display Preferences: Show Extended Names(부품 피처 전용이라 해당 없음)
 5. 서브어셈블리의 Enabled·Grounded·Suppress, 컴포넌트 끌어 놓기로 폴더 이동
 
 리드에게 요청(백엔드 데이터 필요): 사용자 정의 폴더 저장, Isolate 상태(실행 취소 가능한 가시성 묶음), 브라우저 필터용 상태 질의,

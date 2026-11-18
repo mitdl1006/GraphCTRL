@@ -6348,3 +6348,395 @@ fn create_path_makes_a_planned_path_between_two_clicked_sketch_points() {
     assert!(!harness.state().viewport().is_routing());
     assert_eq!(session.doc().waypoints().len(), 2, "a waypoint at each point");
 }
+
+/// Isolate and Undo Isolate (browser right-click; Inventor 2026 help, Frame Generator browser,
+/// GUID-36AE9264-912D-4D3C-BB24-7EC16FA8777E): the chosen component stays, the others are hidden, and the browser
+/// menu brings them back.
+#[test]
+fn isolate_hides_the_others_and_undo_isolate_shows_them_again() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let app = harness.state_mut();
+    let place = |xyz: [f64; 3]| gc_doc::Placement { xyz, rpy: [0.0; 3] };
+    let a = app.session.add_body(gc_doc::Solid::Box { size: [0.1; 3] }, place([0.0; 3])).unwrap();
+    let b = app.session.add_body(gc_doc::Solid::Box { size: [0.1; 3] }, place([0.5, 0.0, 0.0])).unwrap();
+    let visible = |h: &egui_kittest::Harness<'_, GraphCtrlApp>, id: gc_core::Id<gc_doc::Body>| {
+        h.state()
+            .session
+            .doc()
+            .component_flag(gc_doc::Occurrence::Item(id.erase()), gc_doc::ComponentFlag::Visible)
+    };
+    harness.run();
+    assert!(visible(&harness, a) && visible(&harness, b));
+    let name = harness.state().session.doc().get(a).unwrap().name.clone();
+    let row = harness
+        .get_all_by_label_contains(&name)
+        .find(|n| n.rect().min.x < 100.0)
+        .expect("the browser row of the first body");
+    let at = row.rect().center();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run_steps(2);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+    harness.run_steps(3);
+    harness.get_by_label("격리").click();
+    harness.run_steps(3);
+    assert!(visible(&harness, a) && !visible(&harness, b), "only the first body is left");
+    assert!(harness.state().session.is_isolated());
+    // The browser menu offers Undo Isolate while something is isolated.
+    harness.get_by_label("브라우저 메뉴").click();
+    harness.run_steps(3);
+    harness.get_by_label("격리 취소").click();
+    harness.run_steps(3);
+    assert!(visible(&harness, a) && visible(&harness, b));
+    assert!(!harness.state().session.is_isolated());
+}
+
+/// User-defined folders of the browser (Inventor 2026 help, Assembly Browser Reference,
+/// GUID-CB6B1637-71AD-4753-8CC9-19559BFEE3A5): a row's menu makes a folder with it, moves other rows in, and the
+/// folder lists them below its name.
+#[test]
+fn the_browser_makes_folders_and_moves_rows_into_them() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let app = harness.state_mut();
+    let place = |xyz: [f64; 3]| gc_doc::Placement { xyz, rpy: [0.0; 3] };
+    let a = app.session.add_body(gc_doc::Solid::Box { size: [0.1; 3] }, place([0.0; 3])).unwrap();
+    let b = app.session.add_body(gc_doc::Solid::Box { size: [0.1; 3] }, place([0.5, 0.0, 0.0])).unwrap();
+    harness.run();
+    let right_click_row = |h: &mut egui_kittest::Harness<'_, GraphCtrlApp>, id: gc_core::Id<gc_doc::Body>| {
+        let name = h.state().session.doc().get(id).unwrap().name.clone();
+        let at = h
+            .get_all_by_label_contains(&name)
+            .find(|n| n.rect().min.x < 100.0)
+            .expect("the browser row")
+            .rect()
+            .center();
+        h.event(egui::Event::PointerMoved(at));
+        h.run_steps(2);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Secondary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+        h.run_steps(3);
+    };
+    // A new folder with the first body, named in the row that comes up.
+    right_click_row(&mut harness, a);
+    harness.get_by_label("새 폴더(이 항목으로)").click();
+    harness.run_steps(3);
+    let field = harness.get_all_by_label("새 폴더(이 항목으로)").last().unwrap();
+    field.click();
+    harness.run_steps(2);
+    harness.get_all_by_label("새 폴더(이 항목으로)").last().unwrap().type_text("Group");
+    harness.run_steps(2);
+    harness.get_by_label("확인").click();
+    harness.run_steps(3);
+    let folders = harness.state().session.folders();
+    assert_eq!(folders.len(), 1);
+    assert_eq!(folders[0].name, "Group");
+    assert_eq!(folders[0].members.len(), 1);
+    harness.get_by_label("Group (1)");
+    // The second body moves in through its menu.
+    right_click_row(&mut harness, b);
+    harness.get_by_label("폴더로 이동").click();
+    harness.run_steps(3);
+    harness.get_by_label("Group").click();
+    harness.run_steps(3);
+    assert_eq!(harness.state().session.folders()[0].members.len(), 2);
+    harness.get_by_label("Group (2)");
+}
+
+/// Dragging a browser row onto a folder moves it in (the row's drag payload is dropped on the folder's header).
+#[test]
+fn dragging_a_browser_row_onto_a_folder_moves_it_in() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let app = harness.state_mut();
+    let place = |xyz: [f64; 3]| gc_doc::Placement { xyz, rpy: [0.0; 3] };
+    let a = app.session.add_body(gc_doc::Solid::Box { size: [0.1; 3] }, place([0.0; 3])).unwrap();
+    let b = app.session.add_body(gc_doc::Solid::Box { size: [0.1; 3] }, place([0.5, 0.0, 0.0])).unwrap();
+    let key =
+        |id: gc_core::Id<gc_doc::Body>| gc_doc::TreeKey::Component(gc_doc::Occurrence::Item(id.erase()));
+    app.session.edit_folders(gc_doc::FolderOp::Add { name: "Group".into(), members: vec![key(a)] }).unwrap();
+    harness.run_steps(3);
+    let header = harness.get_by_label("Group (1)").rect().center();
+    let name = harness.state().session.doc().get(b).unwrap().name.clone();
+    let from = harness
+        .get_all_by_label_contains(&name)
+        .find(|n| n.rect().min.x < 100.0)
+        .expect("the second body's row")
+        .rect()
+        .center();
+    harness.event(egui::Event::PointerMoved(from));
+    harness.run_steps(2);
+    harness.event(egui::Event::PointerButton {
+        pos: from,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run_steps(2);
+    // The pointer travels to the folder's header in steps, then lets go there.
+    for step in 1..=6 {
+        let t = step as f32 / 6.0;
+        harness.event(egui::Event::PointerMoved(from + (header - from) * t));
+        harness.run_steps(2);
+    }
+    harness.event(egui::Event::PointerButton {
+        pos: header,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run_steps(4);
+    assert_eq!(harness.state().session.folders()[0].members.len(), 2, "the dragged row is in the folder");
+}
+
+/// The work node of the browser (plan 9.4): groups for object types, objects, variables and tasks; a group's
+/// menu makes a new item, a row renames and deletes it.
+#[test]
+fn the_browser_work_node_makes_and_deletes_tasks() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let left = |h: &egui_kittest::Harness<'_, GraphCtrlApp>, label: &str| {
+        h.get_all_by_label(label)
+            .find(|n| n.rect().min.x < 300.0)
+            .unwrap_or_else(|| panic!("no {label}"))
+            .rect()
+            .center()
+    };
+    // The work node opens.
+    let at = left(&harness, "작업");
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run_steps(2);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+    harness.run_steps(3);
+    // A new task through the task group's menu.
+    let at = left(&harness, "작업 목록");
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run_steps(2);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+    harness.run_steps(3);
+    harness.get_by_label("새로 만들기").click();
+    harness.run_steps(3);
+    assert_eq!(harness.state().session.doc().tasks().len(), 1);
+    let name = harness.state().session.doc().tasks().iter().next().unwrap().1.name.clone();
+    // (The row and its delete button carry the name.)
+    assert!(harness.get_all_by_label_contains(&name).count() >= 1);
+    // Deleted again.
+    let id = harness.state().session.tasks()[0];
+    harness.state_mut().session.edit_work(gc_doc::WorkOp::DeleteTask(id)).unwrap();
+    harness.run_steps(2);
+    assert!(harness.state().session.doc().tasks().is_empty());
+}
+
+/// Selecting a task in the work node shows its editor in the properties panel (condition, steps, effects,
+/// robots, priority).
+#[test]
+fn selecting_a_task_shows_its_editor() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let task = gc_doc::Task {
+        name: "Fasten".into(),
+        location: gc_doc::Location::None,
+        precondition: String::new(),
+        steps: Vec::new(),
+        effects: Vec::new(),
+        robots: gc_doc::RobotChoice::Any,
+        priority: 0,
+    };
+    harness.state_mut().session.edit_work(gc_doc::WorkOp::AddTask(task)).unwrap();
+    harness.run_steps(3);
+    // Open the work node, then the row.
+    let left = |h: &egui_kittest::Harness<'_, GraphCtrlApp>, label: &str| {
+        h.get_all_by_label_contains(label)
+            .find(|n| n.rect().min.x < 300.0)
+            .unwrap_or_else(|| panic!("no {label}"))
+            .rect()
+            .center()
+    };
+    let click = |h: &mut egui_kittest::Harness<'_, GraphCtrlApp>, at: egui::Pos2| {
+        h.event(egui::Event::PointerMoved(at));
+        h.run_steps(2);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+        h.run_steps(3);
+    };
+    let at = harness.get_all_by_label("작업").find(|n| n.rect().min.x < 300.0).unwrap().rect().center();
+    click(&mut harness, at);
+    let row = left(&harness, "Fasten");
+    click(&mut harness, row);
+    harness.get_by_label("시작 조건");
+    harness.get_by_label("우선순위");
+}
+
+/// Kinds of tool (plan 9.4): the work node lists them, their editor offers signals, states and actions, and a
+/// selected robot offers to fit one.
+#[test]
+fn a_tool_kind_is_edited_and_fitted_to_a_robot() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("로봇").click();
+    harness.run();
+    harness.get_by_label("로봇 추가").click();
+    harness.run();
+    harness.get_by_label("UR5e 로봇").click();
+    harness.run();
+    let robot = harness.state().session.doc().robots().iter().next().unwrap().0;
+    let kit = gc_doc::ToolKit {
+        name: "Gripper".into(),
+        signals: vec![gc_doc::IoSignal { name: "close".into(), direction: gc_doc::IoDirection::Out, pin: 0 }],
+        states: vec!["open".into(), "closed".into()],
+        actions: Vec::new(),
+    };
+    let id = harness.state_mut().session.edit_work(gc_doc::WorkOp::AddToolKit(kit)).unwrap().unwrap();
+    harness.run_steps(3);
+    // The robot, selected, offers the kind.
+    harness.state_mut().session.select_item(Some(gc_session::CellItem::Robot(robot)));
+    harness.run_steps(3);
+    harness.get_by_label("툴 종류 장착");
+    // Fitted through the session; the robot's state follows (the first state).
+    harness
+        .state_mut()
+        .session
+        .edit_work(gc_doc::WorkOp::SetRobotTool {
+            robot,
+            kit: Some(gc_core::Id::from_raw(id.raw)),
+            state: None,
+        })
+        .unwrap();
+    harness.run_steps(3);
+    assert!(harness.state().session.robot_tool_kit(robot).is_some());
+    harness.get_by_label("툴 상태");
+}
+
+/// The schedule panel (Tools > Schedule): worked out when asked; a task no robot can do is listed as blocked.
+#[test]
+fn the_schedule_panel_works_out_the_schedule_and_lists_blocked_tasks() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let task = gc_doc::Task {
+        name: "Orphan".into(),
+        location: gc_doc::Location::None,
+        precondition: String::new(),
+        steps: vec![gc_doc::Step::Wait { seconds: 1.0 }],
+        effects: Vec::new(),
+        robots: gc_doc::RobotChoice::Any,
+        priority: 0,
+    };
+    harness.state_mut().session.edit_work(gc_doc::WorkOp::AddTask(task)).unwrap();
+    harness.get_by_label("도구").click();
+    harness.run();
+    harness.get_by_label("스케줄").click();
+    harness.run_steps(3);
+    harness.get_by_label("스케줄을 아직 계산하지 않았습니다.");
+    harness.get_by_label("스케줄 계산").click();
+    harness.run_steps(3);
+    // No robot in the cell: the task cannot be given to any.
+    harness.get_by_label("하지 못하는 작업");
+    harness.get_by_label("Orphan");
+    // The document changes: the result stays on screen, marked as out of date.
+    let second = gc_doc::Task {
+        name: "Second".into(),
+        location: gc_doc::Location::None,
+        precondition: String::new(),
+        steps: vec![gc_doc::Step::Wait { seconds: 1.0 }],
+        effects: Vec::new(),
+        robots: gc_doc::RobotChoice::Any,
+        priority: 0,
+    };
+    harness.state_mut().session.edit_work(gc_doc::WorkOp::AddTask(second)).unwrap();
+    harness.run_steps(3);
+    harness.get_by_label("문서가 바뀌었습니다 — 다시 계산하십시오");
+}
+
+/// Schedule playback: Play shows the cell at a moment of the schedule and moves on, Reset puts the robots back.
+#[test]
+fn the_schedule_panel_plays_the_schedule_and_resets() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("로봇").click();
+    harness.run();
+    harness.get_by_label("로봇 추가").click();
+    harness.run();
+    harness.get_by_label("UR5e 로봇").click();
+    harness.run();
+    let task = gc_doc::Task {
+        name: "Pause".into(),
+        location: gc_doc::Location::None,
+        precondition: String::new(),
+        steps: vec![gc_doc::Step::Wait { seconds: 2.0 }],
+        effects: Vec::new(),
+        robots: gc_doc::RobotChoice::Any,
+        priority: 0,
+    };
+    harness.state_mut().session.edit_work(gc_doc::WorkOp::AddTask(task)).unwrap();
+    harness.get_by_label("도구").click();
+    harness.run();
+    harness.get_by_label("스케줄").click();
+    harness.run_steps(3);
+    harness.get_by_label("스케줄 계산").click();
+    harness.run_steps(4);
+    assert!(harness.state().session.schedule_result().is_some_and(|(s, _)| s.makespan() >= 2.0));
+    assert!(harness.state().session.schedule_playback().is_none());
+    harness.get_by_label("스케줄 재생").click();
+    harness.run_steps(4);
+    assert!(harness.state().session.schedule_playback().is_some(), "the cell shows a moment of the schedule");
+    harness.get_by_label("스케줄 원위치").click();
+    harness.run_steps(3);
+    assert!(harness.state().session.schedule_playback().is_none(), "the robots are back where they were");
+}

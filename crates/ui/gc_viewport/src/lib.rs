@@ -251,6 +251,35 @@ impl ViewHistory {
     }
 }
 
+/// Points along a curve for picking it, closed ones too (a circle, a whole ellipse, a closed spline): the
+/// run of an open curve ([`Sketch::curve_run`]) or the outline of a closed one, in sketch coordinates.
+fn curve_outline(sketch: &Sketch, curve: Id<gc_sketch::Curve>) -> Option<Vec<[f64; 3]>> {
+    if let Some(run) = sketch.curve_run(curve) {
+        return Some(run);
+    }
+    let geom = &sketch.curves.get(&curve)?.geom;
+    match geom {
+        CurveGeom::Circle { .. } => {
+            let (centre, radius) = sketch.round(curve)?;
+            let c = sketch.pos(centre)?;
+            Some(
+                (0..=72)
+                    .map(|k| {
+                        let a = f64::from(k) / 72.0 * std::f64::consts::TAU;
+                        let (sin, cos) = gc_math::fm::sin_cos(a);
+                        [c[0] + radius * cos, c[1] + radius * sin, c[2]]
+                    })
+                    .collect(),
+            )
+        }
+        CurveGeom::Ellipse { .. } => sketch
+            .ellipse_geom_outline(geom, 96)
+            .map(|(points, _)| points.into_iter().map(|p| [p[0], p[1], 0.0]).collect()),
+        CurveGeom::Spline { .. } => sketch.spline_outline3(geom, 16),
+        _ => None,
+    }
+}
+
 /// The body or robot an id stands for.
 fn cell_item(any: gc_core::AnyId) -> Option<gc_session::CellItem> {
     match any.kind {
@@ -776,7 +805,7 @@ impl Viewport {
                                 if session.path_role(sketch_id, *curve).is_some() {
                                     continue;
                                 }
-                                let Some(run) = sketch.curve_run(*curve) else { continue };
+                                let Some(run) = curve_outline(sketch, *curve) else { continue };
                                 let on_screen: Vec<[f64; 2]> = run
                                     .iter()
                                     .filter_map(|p| self.camera.project(plane.world(*p), size))
@@ -845,10 +874,34 @@ impl Viewport {
                             .map(|s| (id, s.flexible)),
                         gc_doc::TreeKey::Component(_) => None,
                     });
-                radial::Set::assembly(item, origin, unit)
+                radial::Set::assembly(item, origin, unit, session.is_isolated())
             };
             if let Some(at) = at {
                 self.marking.press(at, ui.input(|i| i.time));
+            }
+        }
+        // While the menu offers "Make Path", the chain it would take is drawn thick, so that the user sees what
+        // becomes the path before choosing.
+        if self.marking.is_open()
+            && let Some(radial::Cmd::AssignPath(sketch_id, curve)) =
+                self.marking_set.overflow.iter().copied().find(|c| matches!(c, radial::Cmd::AssignPath(..)))
+            && let Some(sketch) = session.doc().get(sketch_id)
+        {
+            let plane = plane_of(session, sketch);
+            let painter = ui.painter_at(rect);
+            for member in session.chain_at(sketch_id, curve) {
+                let Some(run) = curve_outline(sketch, member) else { continue };
+                let points: Vec<egui::Pos2> = run
+                    .iter()
+                    .filter_map(|p| self.camera.project(plane.world(*p), size))
+                    .map(|q| {
+                        #[allow(clippy::cast_possible_truncation, reason = "screen coordinates fit f32")]
+                        egui::pos2(rect.left() + q[0] as f32, rect.top() + q[1] as f32)
+                    })
+                    .collect();
+                for w in points.windows(2) {
+                    painter.line_segment([w[0], w[1]], egui::Stroke::new(4.0, colors::SELECTED));
+                }
             }
         }
         if self.marking.is_open() {
@@ -2580,8 +2633,48 @@ impl Viewport {
             } else {
                 response.interact_pointer_pos().and_then(|p| self.pick_item(session, to_view(p), size))
             };
+            // A click on a role's mark (a waypoint's diamond, a path's line) selects the role when nothing else is
+            // there; any other click lets go of it.
+            let role = if picked.is_none() && self.origin_selected.is_none() && self.work_selected.is_none() {
+                response.interact_pointer_pos().and_then(|p| self.pick_role(session, to_view(p), size))
+            } else {
+                None
+            };
+            self.role_selected = role;
             session.select_item(picked);
         }
+    }
+
+    /// The role whose mark is under a screen position: a waypoint's diamond or a path's line.
+    fn pick_role(&self, session: &Session, at: [f64; 2], size: [f64; 2]) -> Option<Id<gc_doc::SketchRole>> {
+        let screen = |world: [f64; 3]| self.camera.project(DVec3::from_array(world), size);
+        let mut best: Option<(f64, Id<gc_doc::SketchRole>)> = None;
+        for (id, role) in session.doc().roles().iter() {
+            if !session.doc().is_visible(role.sketch.erase()) || session.doc().is_inactive(id.erase()) {
+                continue;
+            }
+            let distance = match role.kind {
+                gc_doc::RoleKind::Waypoint { .. } => session
+                    .role_pose(id)
+                    .and_then(|pose| screen(pose.translation.to_array()))
+                    .map(|p| gc_math::fm::hypot(p[0] - at[0], p[1] - at[1]))
+                    .filter(|d| *d <= 9.0),
+                gc_doc::RoleKind::Path { .. } => session.role_polyline(id).and_then(|line| {
+                    let points: Vec<[f64; 2]> = line.iter().filter_map(|p| screen(*p)).collect();
+                    points
+                        .windows(2)
+                        .map(|w| segment_distance(at, w[0], w[1]))
+                        .fold(None, |best: Option<f64>, d| Some(best.map_or(d, |b| b.min(d))))
+                        .filter(|d| *d <= 6.0)
+                }),
+            };
+            if let Some(d) = distance
+                && best.is_none_or(|(b, _)| d < b)
+            {
+                best = Some((d, id));
+            }
+        }
+        best.map(|(_, id)| id)
     }
 
     /// Opens the in-place editor of a dimension of the sketch being edited: the expression of a driving

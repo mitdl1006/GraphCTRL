@@ -3,6 +3,8 @@
 mod cell;
 mod pose;
 mod role;
+mod schedule;
+mod work;
 
 use egui::{RichText, Ui};
 use gc_core::Id;
@@ -18,6 +20,8 @@ use gc_ui::panel::TreeRow;
 pub use cell::{CellUi, cell, problem_text, status_text};
 pub use pose::{PoseCalc, RotationInput, pose_calculator};
 pub use role::role_properties;
+pub use schedule::{ScheduleUi, schedule_panel};
+pub use work::{WorkItem, WorkUi, robot_tool_kit, work_browser, work_properties};
 
 /// What the user asked for in the browser.
 #[derive(Clone, Debug, PartialEq)]
@@ -63,6 +67,14 @@ pub enum BrowserAction {
     SuppressRelationship(gc_core::Id<gc_doc::Relationship>, bool),
     /// Select a sketch role (a waypoint or a path of a sketch), or none; the view marks it.
     SelectRole(Option<Id<gc_doc::SketchRole>>),
+    /// Change the work model (object types, objects, state variables, tasks).
+    Work(gc_doc::WorkOp),
+    /// Change the browser's user-defined folders.
+    Folder(gc_doc::FolderOp),
+    /// Isolate these components (Inventor: Isolate; a subassembly is given as its members).
+    Isolate(Vec<gc_doc::Occurrence>),
+    /// Undo Isolate: show again what Isolate hid.
+    UndoIsolate,
     /// Open the iProperties dialog of a component.
     Properties(gc_doc::Occurrence),
     /// Zoom the graphics window to a component (Find in Window).
@@ -95,6 +107,11 @@ pub struct ParamsUi {
     pub hide_fully_constrained: bool,
     /// Show Constraint State is on unless this is set (so that the default state is the usual one).
     pub hide_constraint_state: bool,
+    /// Show Children Only (Display Preferences): while a component is edited in place, only it, what is
+    /// inside it and the rows it hangs under are listed.
+    pub show_children_only: bool,
+    /// Filter: only suppressed components and relationships (Find: "suppressed components or features").
+    pub only_suppressed: bool,
     /// Hide Warnings: warnings attached to relationships (the sick marker) are not shown; failures are.
     pub hide_warnings: bool,
     /// Edit Values in Browser is on unless this is set.
@@ -102,6 +119,10 @@ pub struct ParamsUi {
     /// The component row the pointer is over this frame: the view shows its bounding box (Inventor 2026
     /// help, assembly parity notes: hovering a browser node shows its bounding box in the graphics).
     pub hovered: Option<gc_core::AnyId>,
+    /// What the work node of the browser shows selected, and its rename.
+    pub work: work::WorkUi,
+    /// The rows marked with Ctrl+click (for moving several into a folder or subassembly at once).
+    pub marked: Vec<gc_doc::TreeKey>,
     /// The sketch role selected in the browser.
     pub role: Option<Id<gc_doc::SketchRole>>,
     /// The relationship selected in the browser, the value typed for it and which one that was loaded for.
@@ -117,6 +138,10 @@ pub enum GroupName {
     Demote(Vec<gc_doc::TreeKey>, String),
     /// Rename a subassembly.
     Rename(gc_doc::SubassemblyId, String),
+    /// Add to New Folder: a user-defined folder of the browser holding these rows.
+    NewFolder(Vec<gc_doc::TreeKey>, String),
+    /// Rename a user-defined folder.
+    RenameFolder(u32, String),
 }
 
 /// The named parameters: a list, and one editor that adds a parameter or, when the name exists, changes
@@ -260,6 +285,12 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
             let mut edit = !state.no_edit_values;
             ui.checkbox(&mut state.hide_work_features, tr!(lang, BrowserHideWork));
             ui.checkbox(&mut state.hide_fully_constrained, tr!(lang, BrowserHideConstrained));
+            if session.is_isolated() && ui.button(tr!(lang, CmdUndoIsolate)).clicked() {
+                action = Some(BrowserAction::UndoIsolate);
+                ui.close();
+            }
+            ui.checkbox(&mut state.show_children_only, tr!(lang, BrowserChildrenOnly));
+            ui.checkbox(&mut state.only_suppressed, tr!(lang, BrowserOnlySuppressed));
             ui.checkbox(&mut state.hide_warnings, tr!(lang, BrowserHideWarnings));
             ui.checkbox(&mut show, tr!(lang, BrowserShowState));
             ui.checkbox(&mut edit, tr!(lang, BrowserEditValues));
@@ -309,6 +340,9 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
                         continue;
                     }
                     let suppressed = session.doc().is_inactive(id.erase());
+                    if state.only_suppressed && !suppressed {
+                        continue;
+                    }
                     let is_joint = gc_doc::is_joint_kind(&relationship.kind);
                     let condition = session.joint_condition(id);
                     let locked = condition.locked.is_some();
@@ -493,6 +527,9 @@ pub fn browser(ui: &mut Ui, session: &Session, lang: Lang, state: &mut ParamsUi)
     }
     if let Some(command) = params(ui, session, lang, state) {
         action = Some(BrowserAction::Edit(Box::new(command)));
+    }
+    if let Some(work) = work::work_browser(ui, session, lang, &mut state.work) {
+        action = Some(work);
     }
     let row = |name: &str, item| (name.to_owned(), name.to_owned(), item);
     browser_section(
@@ -743,12 +780,48 @@ fn role_row(
         suppressible: true,
     };
     ui.indent(("gc_role", id), |ui| {
-        let result = node_row(ui, session, lang, state, &node, action, |_, _| {});
+        let result = node_row(ui, session, lang, state, &node, action, |ui, action| {
+            // A task that moves to this waypoint or follows this path.
+            if ui.button(tr!(lang, WorkTaskFromRole)).clicked() {
+                let step = match role.kind {
+                    gc_doc::RoleKind::Waypoint { .. } => gc_doc::Step::MoveJ(gc_doc::MoveTarget::Role(id)),
+                    gc_doc::RoleKind::Path { .. } => gc_doc::Step::FollowPath(id),
+                };
+                let taken: Vec<String> = session.doc().tasks().iter().map(|(_, t)| t.name.clone()).collect();
+                let name = (taken.len() + 1..)
+                    .map(|n| format!("{}{n}", tr!(lang, WorkTaskBase)))
+                    .find(|n| !taken.contains(n))
+                    .unwrap_or_default();
+                *action = Some(BrowserAction::Work(gc_doc::WorkOp::AddTask(gc_doc::Task {
+                    name,
+                    location: gc_doc::Location::Sketch(role.sketch),
+                    precondition: String::new(),
+                    steps: vec![step],
+                    effects: Vec::new(),
+                    robots: gc_doc::RobotChoice::Any,
+                    priority: 0,
+                })));
+                ui.close();
+            }
+        });
         if result.clicked() {
             state.role = Some(id);
             *action = Some(BrowserAction::SelectRole(Some(id)));
         }
     });
+}
+
+/// The components inside a tree row, at any depth (the row itself when it is a component).
+fn members_of(rows: &[gc_doc::TreeRow], key: gc_doc::TreeKey) -> Vec<gc_doc::Occurrence> {
+    let mut found = Vec::new();
+    let mut stack = vec![key];
+    while let Some(next) = stack.pop() {
+        if let gc_doc::TreeKey::Component(occurrence) = next {
+            found.push(occurrence);
+        }
+        stack.extend(rows.iter().filter(|r| r.parent == Some(next)).map(|r| r.key));
+    }
+    found
 }
 
 /// The components of the browser as the assembly tree: subassemblies are folders (the one being edited in
@@ -767,10 +840,122 @@ fn component_rows(
     rows: &[gc_doc::TreeRow],
     parent: Option<gc_doc::TreeKey>,
 ) {
+    // User-defined folders of this level (Inventor 2026 help, Assembly Browser Reference,
+    // GUID-CB6B1637-71AD-4753-8CC9-19559BFEE3A5: "User-defined Folder groups assembly nodes for better browser
+    // organization"): each lists its rows below its name; the rows in no folder follow.
+    let folders: Vec<gc_doc::BrowserFolder> = session
+        .folders()
+        .into_iter()
+        .filter(|f| f.members.first().is_some_and(|m| session.doc().tree_parent(*m) == parent))
+        .collect();
+    let mut inside: Vec<gc_doc::TreeKey> = Vec::new();
+    for folder in &folders {
+        inside.extend(folder.members.iter().copied());
+        let title = format!("{} ({})", folder.name, folder.members.len());
+        let opened = egui::CollapsingHeader::new(title)
+            .id_salt(("gc_folder", folder.id))
+            .default_open(true)
+            .show(ui, |ui| {
+                component_rows_in(
+                    ui,
+                    session,
+                    lang,
+                    state,
+                    selected,
+                    action,
+                    rows,
+                    parent,
+                    Scope::Only(&folder.members),
+                );
+            });
+        // Rows dragged onto the folder move into it.
+        if let Some(dropped) = opened.header_response.dnd_release_payload::<Vec<gc_doc::TreeKey>>() {
+            *action = Some(BrowserAction::Folder(gc_doc::FolderOp::Move {
+                members: (*dropped).clone(),
+                into: Some(folder.id),
+            }));
+        }
+        opened.header_response.context_menu(|ui| {
+            if ui.button(tr!(lang, CmdRename)).clicked() {
+                state.group_name = Some(GroupName::RenameFolder(folder.id, folder.name.clone()));
+                ui.close();
+            }
+            if ui.button(tr!(lang, CmdDeleteFolder)).clicked() {
+                *action = Some(BrowserAction::Folder(gc_doc::FolderOp::Delete(folder.id)));
+                ui.close();
+            }
+        });
+    }
+    component_rows_in(ui, session, lang, state, selected, action, rows, parent, Scope::Except(&inside));
+}
+
+/// Which rows of a level a call lists.
+#[derive(Clone, Copy)]
+enum Scope<'a> {
+    /// Only these (a user-defined folder's rows).
+    Only(&'a [gc_doc::TreeKey]),
+    /// All but these (the rows no folder holds).
+    Except(&'a [gc_doc::TreeKey]),
+}
+
+/// The New Folder and Move to Folder entries of a row's menu: "새 폴더(이 항목으로)", a list of the folders to
+/// move it to, and "폴더에서 빼기" when it is in one.
+fn folder_menu(
+    ui: &mut Ui,
+    session: &Session,
+    lang: Lang,
+    state: &mut ParamsUi,
+    action: &mut Option<BrowserAction>,
+    key: gc_doc::TreeKey,
+) {
+    // The marked rows go together when this row is one of them.
+    let targets: Vec<gc_doc::TreeKey> =
+        if state.marked.contains(&key) { state.marked.clone() } else { vec![key] };
+    if ui.button(tr!(lang, CmdNewFolder)).clicked() {
+        state.group_name = Some(GroupName::NewFolder(targets.clone(), String::new()));
+        ui.close();
+    }
+    let folders = session.folders();
+    if !folders.is_empty() {
+        ui.menu_button(tr!(lang, CmdMoveToFolder), |ui| {
+            for folder in &folders {
+                if ui.button(&folder.name).clicked() {
+                    *action = Some(BrowserAction::Folder(gc_doc::FolderOp::Move {
+                        members: targets.clone(),
+                        into: Some(folder.id),
+                    }));
+                    ui.close();
+                }
+            }
+        });
+    }
+    if session.folder_of(key).is_some() && ui.button(tr!(lang, CmdOutOfFolder)).clicked() {
+        *action = Some(BrowserAction::Folder(gc_doc::FolderOp::Move { members: vec![key], into: None }));
+        ui.close();
+    }
+}
+
+#[allow(clippy::too_many_arguments, reason = "the browser's shared state")]
+fn component_rows_in(
+    ui: &mut Ui,
+    session: &Session,
+    lang: Lang,
+    state: &mut ParamsUi,
+    selected: Option<gc_session::CellItem>,
+    action: &mut Option<BrowserAction>,
+    rows: &[gc_doc::TreeRow],
+    parent: Option<gc_doc::TreeKey>,
+    scope: Scope<'_>,
+) {
     use gc_doc::{Occurrence, SubassemblyOp, TreeKey};
     use gc_session::CellItem;
     let editing = session.edit_target();
     for row in rows.iter().filter(|row| row.parent == parent) {
+        match scope {
+            Scope::Only(keys) if !keys.contains(&row.key) => continue,
+            Scope::Except(keys) if keys.contains(&row.key) => continue,
+            _ => {}
+        }
         if !row_found(rows, row, &state.find) {
             continue;
         }
@@ -778,6 +963,22 @@ fn component_rows(
         if state.hide_fully_constrained
             && let TreeKey::Component(Occurrence::Item(any)) = row.key
             && state.statuses.get(&any) == Some(&gc_doc::ComponentStatus::Full)
+        {
+            continue;
+        }
+        // Show Children Only: with a component edited in place, what is neither inside it nor above it is left out.
+        if state.show_children_only
+            && let Some(target) = editing
+            && target != row.key
+            && !session.doc().is_under(row.key, target)
+            && !session.doc().is_under(target, row.key)
+        {
+            continue;
+        }
+        // The suppressed-only filter keeps folders (they may hold some) and suppressed components.
+        if state.only_suppressed
+            && let TreeKey::Component(Occurrence::Item(any)) = row.key
+            && !session.doc().is_inactive(any)
         {
             continue;
         }
@@ -812,7 +1013,21 @@ fn component_rows(
                 if header.double_clicked() {
                     *action = Some(BrowserAction::EditComponent(row.key));
                 }
+                // Rows dragged onto a subassembly move into it.
+                if let Some(dropped) = header.dnd_release_payload::<Vec<gc_doc::TreeKey>>() {
+                    let members: Vec<gc_doc::TreeKey> =
+                        dropped.iter().copied().filter(|k| *k != row.key).collect();
+                    if !members.is_empty() {
+                        *action =
+                            Some(BrowserAction::Subassembly(SubassemblyOp::Move { members, into: Some(id) }));
+                    }
+                }
                 header.context_menu(|ui| {
+                    // Isolate: the members of the subassembly stay, everything else is hidden.
+                    if ui.button(tr!(lang, CmdIsolate)).clicked() {
+                        *action = Some(BrowserAction::Isolate(members_of(rows, row.key)));
+                        ui.close();
+                    }
                     if ui.button(tr!(lang, CmdEditInPlace)).clicked() {
                         *action = Some(BrowserAction::EditComponent(row.key));
                         ui.close();
@@ -848,6 +1063,7 @@ fn component_rows(
                         *action = Some(BrowserAction::Subassembly(SubassemblyOp::Dissolve(id)));
                         ui.close();
                     }
+                    folder_menu(ui, session, lang, state, action, row.key);
                 });
             }
             TreeKey::Component(Occurrence::Item(any)) => {
@@ -889,6 +1105,8 @@ fn group_name_row(ui: &mut Ui, lang: Lang, state: &mut ParamsUi, action: &mut Op
     let (label, text) = match entry {
         GroupName::Demote(_, text) => (tr!(lang, CmdDemote), text),
         GroupName::Rename(_, text) => (tr!(lang, CmdRename), text),
+        GroupName::NewFolder(_, text) => (tr!(lang, CmdNewFolder), text),
+        GroupName::RenameFolder(_, text) => (tr!(lang, CmdRename), text),
     };
     let (mut confirmed, mut cancelled) = (false, false);
     ui.horizontal(|ui| {
@@ -906,13 +1124,22 @@ fn group_name_row(ui: &mut Ui, lang: Lang, state: &mut ParamsUi, action: &mut Op
         }
     });
     if confirmed {
-        let op = match entry {
-            GroupName::Demote(members, name) => {
-                SubassemblyOp::Demote { members: members.clone(), name: name.trim().to_owned() }
+        *action = Some(match entry {
+            GroupName::Demote(members, name) => BrowserAction::Subassembly(SubassemblyOp::Demote {
+                members: members.clone(),
+                name: name.trim().to_owned(),
+            }),
+            GroupName::Rename(id, name) => {
+                BrowserAction::Subassembly(SubassemblyOp::Rename { id: *id, name: name.trim().to_owned() })
             }
-            GroupName::Rename(id, name) => SubassemblyOp::Rename { id: *id, name: name.trim().to_owned() },
-        };
-        *action = Some(BrowserAction::Subassembly(op));
+            GroupName::NewFolder(members, name) => BrowserAction::Folder(gc_doc::FolderOp::Add {
+                name: name.trim().to_owned(),
+                members: members.clone(),
+            }),
+            GroupName::RenameFolder(id, name) => {
+                BrowserAction::Folder(gc_doc::FolderOp::Rename { id: *id, name: name.trim().to_owned() })
+            }
+        });
     }
     if confirmed || cancelled {
         state.group_name = None;
@@ -1092,7 +1319,7 @@ fn robot_links(
 
 /// A small dot at the right of a row: filled (fully constrained), hollow (can still move) or a dash
 /// (not satisfied), as Inventor marks components and constraints.
-fn status_dot(ui: &Ui, row: egui::Rect, full: Option<bool>, sick: bool) {
+pub(crate) fn status_dot(ui: &Ui, row: egui::Rect, full: Option<bool>, sick: bool) {
     let at = egui::pos2(row.right() - 34.0, row.center().y);
     let painter = ui.painter();
     if sick {
@@ -1283,7 +1510,8 @@ fn node_row(
     let row = TreeRow {
         icon: node.icon,
         text: node.text,
-        selected: node.selected,
+        selected: node.selected
+            || (groundable && state.marked.contains(&gc_doc::TreeKey::Component(occurrence))),
         visible: Some((&mut visible, show_label.as_str())),
         delete: Some(&delete_label),
         edit: state.rename.as_mut().filter(|_| renaming).map(|(_, text)| text),
@@ -1318,6 +1546,20 @@ fn node_row(
     if result.toggled {
         let command = gc_doc::Command::SetVisible { item: node.any, visible };
         *action = Some(BrowserAction::Edit(Box::new(command)));
+    }
+    if groundable {
+        // Ctrl+click marks rows to move together; a drag takes the marked rows, or this one.
+        let key = gc_doc::TreeKey::Component(occurrence);
+        if result.row.clicked() && ui.input(|i| i.modifiers.command || i.modifiers.ctrl) {
+            if let Some(at) = state.marked.iter().position(|k| *k == key) {
+                state.marked.remove(at);
+            } else {
+                state.marked.push(key);
+            }
+        }
+        let payload: Vec<gc_doc::TreeKey> =
+            if state.marked.contains(&key) { state.marked.clone() } else { vec![key] };
+        result.row.dnd_set_drag_payload(payload);
     }
     if result.row.hovered() && matches!(node.any.kind, gc_core::Kind::Body | gc_core::Kind::RobotInstance) {
         state.hovered = Some(node.any);
@@ -1369,6 +1611,13 @@ fn node_row(
         {
             *action = Some(BrowserAction::FindInWindow(node.any));
             ui.close();
+        }
+        if groundable && ui.button(tr!(lang, CmdIsolate)).clicked() {
+            *action = Some(BrowserAction::Isolate(vec![occurrence]));
+            ui.close();
+        }
+        if groundable {
+            folder_menu(ui, session, lang, state, action, gc_doc::TreeKey::Component(occurrence));
         }
         if groundable && ui.button(tr!(lang, CmdIProperties)).clicked() {
             *action = Some(BrowserAction::Properties(occurrence));

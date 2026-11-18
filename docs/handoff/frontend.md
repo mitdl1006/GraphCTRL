@@ -380,6 +380,66 @@
 
 - `PhysicalProperties.open`이 true이면(면이 정확히 둘이 아닌 모서리가 있는 메시) 계산값 위에 호박색 경고 "닫히지 않은 메시가 있어 부피·질량이 정확하지 않을 수 있습니다."를 보인다(면적은 맞다). 열린 메시를 불러오는 UI 테스트는 못 만들었다(메시 읽기가 작업 스레드) — 코드로만 확인.
 
+### 스케치 역할 남은 차이, 브라우저 메뉴 보강
+
+- "경로로 지정" 메뉴가 열려 있는 동안 그 명령이 가져갈 사슬(`chain_at`)을 굵은 선택색으로 미리 그린다.
+- 뷰에서 역할의 표시(웨이포인트 마름모 9 px, 경로 선 6 px 안)를 클릭하면 그 역할이 선택된다(브라우저 따라감). 다른 항목이 잡히면 그쪽이 우선, 빈 곳 클릭은 선택 해제. 테스트 `clicking_a_roles_mark_in_the_view_selects_it`.
+- 브라우저 "…" 메뉴: "자식만 표시"(Show Children Only, GUID-5F975252: 제자리 편집 중 편집 대상·그 안·그 위 행만), "억제된 항목만"(Find 설명의 "suppressed components"; 억제된 컴포넌트·관계만, 폴더는 유지). Show Extended Names는 부품 피처 전용이라 해당 없음(감사표). `qa_frontend_screens`의 메뉴 옵션 테스트에 두 항목 추가.
+
+### Isolate / Undo Isolate
+
+- 근거: Inventor 2026 도움말 Frame Generator browser, GUID-36AE9264-912D-4D3C-BB24-7EC16FA8777E ("Isolate turns off visibility of components … Undo Isolate restores visibility of components to the pre-isolation state"; Assembly browser 문서의 "Select All Visible … to restore an Isolate Components operation").
+- 브라우저 컴포넌트 행·서브어셈블리 폴더 우클릭 "격리"(`Session::isolate`; 서브어셈블리는 안의 컴포넌트 전체로 펼쳐 넘김), 뷰 마킹 메뉴 오버플로의 선택된 컴포넌트 "격리". 격리 중에는 브라우저 "…" 메뉴와 뷰 메뉴에 "격리 취소"(`undo_isolate`).
+- 테스트: `isolate_hides_the_others_and_undo_isolate_shows_them_again`.
+
+### 브라우저 사용자 정의 폴더
+
+- 근거: Inventor 2026 도움말 Assembly Browser Reference, GUID-CB6B1637-71AD-4753-8CC9-19559BFEE3A5 ("User-defined Folder groups assembly nodes for better browser organization").
+- 같은 수준(부모가 같은) 행들 중 폴더에 든 것은 폴더 노드("이름 (개수)") 아래에, 나머지는 그 뒤에 그린다(`component_rows`가 `folders()`를 읽음). 폴더는 브라우저 배치일 뿐 트리 수준·부모는 그대로.
+- 컴포넌트 행·서브어셈블리 폴더 우클릭: "새 폴더(이 항목으로)"(이름 입력 줄이 나와 `FolderOp::Add`), "폴더로 이동"(폴더 목록 → `FolderOp::Move`), 폴더에 든 행은 "폴더에서 빼기". 폴더 노드 우클릭: 이름 바꾸기(`Rename`)·폴더 삭제(`Delete`). 모두 되돌리기 한 단계, 거절(수준이 다른 행, 이름 중복)은 상태 줄.
+- 알려진 차이: 끌어 넣기 없음(행이 클릭만 감지), 한 번에 한 행(다중 선택 없음), 폴더 안 폴더·관계·스케치는 백엔드 범위 밖.
+- 테스트: `the_browser_makes_folders_and_moves_rows_into_them`.
+
+### 브라우저 끌어 놓기·여러 행
+
+- 근거: 기존 감사표(Assembly Browser 문서의 "Use drag and drop to move and rearrange", 위치 표현 문단은 표현 노드 한정 — 컴포넌트의 끌기 동작은 원문에서 확인하지 못함).
+- 트리 행이 끌기 원천(`Sense::click_and_drag`, 짧은 클릭은 그대로). 컴포넌트 행을 끌어 폴더 머리글에 놓으면 `FolderOp::Move`, 서브어셈블리 머리글에 놓으면 `SubassemblyOp::Move`. Ctrl+클릭으로 행을 여러 개 표시(선택 색)하고 그중 하나를 끌거나 "새 폴더(이 항목으로)"·"폴더로 이동"을 고르면 표시한 행이 한꺼번에 간다. 동작 후 표시는 지워진다.
+- 테스트: `dragging_a_browser_row_onto_a_folder_moves_it_in`. Ctrl+클릭 표시는 kittest가 수정 키를 못 넘겨 자동 테스트가 없다(코드로만).
+
+### 닫힌 경로: 접선 방향·시작점, 닫힌 곡선 "경로로 지정"
+
+- 우클릭 메뉴가 닫힌 곡선(원·전체 타원·닫힌 스플라인)도 `curve_outline`으로 집는다. 백엔드 `chain_at`이 [그 곡선]을 돌려주므로 "경로로 지정"이 뜬다.
+- 경로 역할 속성: "접선 방향" 체크(`set_role_tangent`: 툴 X축이 진행 방향), 닫힌 경로(`role_closed`)면 "시작점" 선택(`set_role_start`, 스케치의 점 목록과 "곡선의 시작"). 점은 좌표(mm)로 표시한다.
+- 테스트: `a_closed_curve_becomes_a_path_with_tangent_and_start_choices`. QA 브랜치의 `a_closed_curve_is_offered`는 병합되면 `#[ignore]`를 푼다.
+
+### 작업 모델 UI (계획 9.4, GraphCTRL 고유, 인벤터 원문 없음)
+
+- 브라우저 "작업" 최상위 노드(처음엔 접힘): 객체 유형 / 작업 객체 / 변수 / 작업 목록 네 그룹. 그룹 우클릭 "새로 만들기"(기본 값으로 만들고 이름은 `유형1`·`객체1`·`변수1`·`작업1`처럼 비는 번호), 행 클릭=선택(속성 패널에 편집기), 선택된 행을 한 번 더 클릭하거나 우클릭 이름 바꾸기=`Command::Rename`, 삭제=`WorkOp::Delete*`. 작업 행에는 준비 상태 점(●=시작 조건이 처음 상태에서 참, ○=거짓, 빨간 줄=끊긴 참조·조건 오류, `task_ready`/`task_problems`). 거절(InUse·NameTaken·Expr)은 상태 줄.
+- 속성 패널 편집기(`gc_panels::work_properties`): 작업=위치(없음·컴포넌트·작업 좌표계·스케치·로봇), 시작 조건(입력 칸 아래에 `check_condition`의 메시지와 틀린 부분을 «» 안에 바로 표시, 올바르거나 비었을 때만 칸을 떠날 때 저장), 단계 목록(↑↓✕, 관절 이동·직선 이동은 웨이포인트 역할(위치가 로봇이면 그 로봇의 웨이포인트도) 선택, 경로 추종은 경로 역할, 출력 설정·입력 대기·툴 동작·대기), 단계 추가, 효과 목록(대상 객체/변수 + 값), 로봇(아무 로봇·고른 로봇만·조건에 맞는 로봇), 우선순위. 객체 유형=상태 목록(추가·이름·삭제), 작업 객체=유형·위치·처음 상태, 변수=종류(참/거짓·정수·실수·열거)·처음 값·선택지.
+- 스케치 역할 우클릭: "이 역할로 작업 만들기"(웨이포인트=관절 이동 단계, 경로=경로 추종 단계, 위치=그 스케치).
+- 알려진 차이: 작업의 뷰 표시(위치 표시)·실행 상태·스케줄러 UI는 없음. 단계의 입출력 이름·툴 동작은 글자 그대로(백엔드도 검사 안 함). 텍스트 편집 도중 Esc로 되돌리기 없음.
+- 테스트: `the_browser_work_node_makes_and_deletes_tasks`, `selecting_a_task_shows_its_editor`(shell), `a_role_makes_a_task_from_its_browser_menu`(sketch_shape_tools).
+
+### 툴 종류·후보 로봇·스케줄 UI (계획 9.4·9.5, GraphCTRL 고유)
+
+- 브라우저 "작업" 아래 "툴 종류" 그룹(새로 만들기·이름 바꾸기·삭제), 편집기(`kit_properties`): 신호(이름·입력/출력·핀 번호, 추가·삭제), 툴 상태 목록, 동작 카드(이름, 설정 신호와 값, 확인 신호와 값, 툴 상태, 대상 객체 유형과 결과 상태, 조건식(`tool.state`·`target.state` 사용, 오류 인라인), 걸리는 시간·확인 대기). 거절(이름 중복·같은 핀·쓰는 동작 삭제)은 상태 줄.
+- 로봇을 선택하면 속성 패널에 "툴 종류 장착"(없음 포함 목록)과 툴 상태 선택(`WorkOp::SetRobotTool`).
+- 작업 편집기: 툴 종류가 하나라도 있으면 SetIo의 신호와 ToolAction의 동작을 그 목록에서 고른다(없으면 글자 입력 그대로). "후보 로봇 계산" 버튼 → `task_candidates` 결과 표(로봇, 예상 시간 또는 이유). 계획이 즉시 끝나지 않으므로 단추를 누를 때만 계산하고 다음 계산까지 표를 보인다(작업 id별로 임시 저장).
+- 스케줄 패널(도구 > 스케줄, 아래쪽에 상태 표시줄 위): "스케줄 계산" → `Session::schedule`; 로봇마다 한 줄의 간트(작업 막대, 호버하면 시작·끝), 전체 시간(makespan), "하지 못하는 작업"과 이유. 결과는 다음 계산까지 보인다. 백엔드가 `request_schedule`/`schedule_result`(작업 스레드)를 내면 그걸로 바꾼다.
+- 알려진 차이: 간트는 시간 눈금 없음, 작업 스레드 계산 아님(동기, 큰 셀에서는 눌렀을 때 멈출 수 있음), 신호·동작을 실제 로봇에 보내는 UI 없음.
+- 테스트: `a_tool_kind_is_edited_and_fitted_to_a_robot`, `the_schedule_panel_works_out_the_schedule_and_lists_blocked_tasks`(shell).
+
+### 스케줄 패널: 작업 스레드, 시간 눈금; 효과 추가 기본값 수정
+
+- 스케줄 패널이 `request_schedule`/`schedule_result`/`schedule_pending`을 쓴다(결과는 세션이 들고 있음): 계산 중에는 단추를 끄고 스피너와 "계산 중…", 문서가 바뀐 뒤의 결과는 흐리게 그리고 "문서가 바뀌었습니다 — 다시 계산하십시오". 간트 위에 초 눈금(1-2-5 간격).
+- QA 버그: 작업 편집기 "효과 추가"가 변수에 항상 `true`를 넣었다 → 변수 종류별 기본값(참/거짓=true, 정수=0, 실수=0.0, 열거=첫 선택지). QA `add_effect_works_for_an_integer_variable`의 `#[ignore]`를 풀었다.
+- 테스트: shell `the_schedule_panel_…`에 "오래된 결과" 단언 추가, qa_work_screens 7개 통과.
+
+### 스케줄 재생
+
+- 스케줄 패널에 "스케줄 재생/일시정지", "스케줄 원위치", 시각 슬라이더(0..=makespan, s), 간트 위 현재 시각 세로선. 재생 중에만 repaint(`unstable_dt`로 시각을 진행, 끝에서 멈춤). 슬라이더·재생은 `set_schedule_playback(Some(t))`, 원위치·패널 닫기는 `None`(로봇이 원래 자리로, 문서는 바뀌지 않음). 버튼 이름은 셀 패널의 "재생"과 겹치지 않게 "스케줄 …"로 했다.
+- 테스트: `the_schedule_panel_plays_the_schedule_and_resets`.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹
