@@ -18,7 +18,7 @@
 | 6 | ~~Move·Copy·Rotate~~ **완료** / Scale·Stretch | 76–78 (P2) / 83–84 (P3) | Scale·Stretch 남음 | 아래 작업 기록 |
 | 7 | Auto-project — **면 스케치의 면 윤곽 자동 투영 완료** / 그리기 중 문질러 투영 남음 | 68 (P2) | 문질러 투영(rubbing)은 뷰포트 스냅 작업 | 아래 작업 기록 |
 | 8 | ~~Automatic Dimensions and Constraints~~ **완료** | 126 (P2) | — | 아래 작업 기록 |
-| 9 | 치수 방향 뒤집기(Flip) | 124 (P3) | 확인 필요 | |
+| 9 | ~~치수 방향 뒤집기(Flip)~~ **완료** | 124 (P3) | 선-호·호-호 거리 치수 종류는 없음 | 아래 작업 기록 |
 | 10 | 타원·스플라인(+ Smooth G2) | 60, 61, 108 (P3) | `CurveGeom`에 없음 | 새 곡선 종류 — 영향 큼 |
 | 11 | 어셈블리: 서브어셈블리 계층·활성화, 조인트 Lock/Protect, 3D 그립 스냅, 어셈블리 스케치 소유자, 원기둥 축 작업 축 | 어셈블리 43, 90, 61, 98, 157 | 없음 또는 일부(확인 필요) | 행마다 원문 확인 후 범위 결정 |
 
@@ -53,6 +53,21 @@
 | 모션(오래된 남은 일) | 맨 아래 "남은 일(백엔드)" 절 그대로 |
 
 # 작업 기록(최신 순)
+
+## 2026-11-18 — 치수 방향 뒤집기(우선순위 표 9)
+
+- **원문**: To Work with Sketch Dimensions `GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185.htm`. 치수 우클릭 Flip Direction(여러 개 가능)으로 형상이 반대쪽으로 간다.
+  - 대상: 평행선 거리, 점-선 거리, 두 점의 수평·수직 거리, 선-호, 호-호, 각도.
+  - 선택에 대상이 아닌 것이 있으면 메뉴가 안 나온다.
+- **gc_doc**:
+  - `SketchOp::FlipDimensions(ids)`: `PointLine.side`, `HDistance/VDistance.sign`의 부호를 바꾸고, 각도는 두 선을 맞바꿔 반대로 잰다. 그다음 풀이한다.
+  - 대상이 아닌 종류가 섞이면 거부한다. `gc_doc::flipped(kind)`.
+- **세션**: `selected_dimensions()`, `can_flip_selected()`, `flip_selected_dimensions()`.
+- **리본**: 구속 패널 끝 작은 버튼 '방향 뒤집기'. 뒤집을 수 있는 치수가 선택됐을 때만 켜진다(우클릭 메뉴 대신).
+- **원문과 다른 점**:
+  - 선-호·호-호 거리 치수는 이 앱에 그런 종류가 없다.
+  - 풀이가 반대쪽 해로 못 가면 거부한다.
+- **테스트**: `gc_doc/tests/sketch_shapes.rs` flip_direction…(점-선 거리), 앱 kittest flip_direction_on_the_ribbon(수직 거리).
 
 ## 2026-11-18 — 자동 치수 및 구속(우선순위 표 8)
 

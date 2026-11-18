@@ -1029,3 +1029,29 @@ fn automatic_dimensions_and_constraints_fully_constrain_the_sketch() {
     assert!(dimensions(&created).is_empty());
     assert_eq!(bench.dof(), 3);
 }
+
+/// Flip Direction (To Work with Sketch Dimensions, GUID-026FE8D3-AFBB-4834-BC18-73D9CFF78185).
+#[test]
+fn flip_direction_puts_the_geometry_on_the_other_side() {
+    let mut bench = Bench::new();
+    let base = add_line(&mut bench, [0.0, 0.0], [0.1, 0.0]);
+    let (a, b) = bench.sketch().line(base).unwrap();
+    bench.op(SketchOp::AddConstraint(GeoConstraint::Fix(a))).unwrap();
+    bench.op(SketchOp::AddConstraint(GeoConstraint::Fix(b))).unwrap();
+    let p =
+        Bench::points(&bench.op(SketchOp::PlacePoint { pos: [0.05, 0.02, 0.0], center: false }).unwrap())[0];
+    let created = bench
+        .op(SketchOp::AddDimension {
+            kind: gc_sketch::DimKind::PointLine { p, line: base, side: 1.0 },
+            source: "20".into(),
+            text_pos: [0.0; 2],
+        })
+        .unwrap();
+    let dim = dimensions(&created)[0];
+    bench.op(SketchOp::FlipDimensions(vec![dim])).unwrap();
+    let y = bench.sketch().pos(p).unwrap()[1];
+    assert!((y + 0.02).abs() < 1e-9, "below the line now: {y}");
+    // A length has no direction.
+    assert!(gc_doc::flipped(&gc_sketch::DimKind::Distance { p: a, q: b }).is_none());
+    assert!(bench.op(SketchOp::FlipDimensions(Vec::new())).is_err());
+}
