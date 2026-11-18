@@ -6918,3 +6918,64 @@ fn f2_renames_the_selected_browser_node() {
     harness.run_steps(3);
     harness.get_by_label("name");
 }
+
+/// The candidate robots of a task are worked out in the background when asked, and a wait for a signal is
+/// edited as a signal of the tools and a value.
+#[test]
+fn candidates_are_requested_and_a_signal_wait_is_chosen_from_the_tools_signals() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("로봇").click();
+    harness.run();
+    harness.get_by_label("로봇 추가").click();
+    harness.run();
+    harness.get_by_label("UR5e 로봇").click();
+    harness.run();
+    let kit = gc_doc::ToolKit {
+        name: "Gripper".into(),
+        signals: vec![gc_doc::IoSignal { name: "ready".into(), direction: gc_doc::IoDirection::In, pin: 0 }],
+        states: Vec::new(),
+        actions: Vec::new(),
+    };
+    harness.state_mut().session.edit_work(gc_doc::WorkOp::AddToolKit(kit)).unwrap();
+    let task = gc_doc::Task {
+        name: "Await".into(),
+        location: gc_doc::Location::None,
+        precondition: String::new(),
+        steps: vec![gc_doc::Step::WaitIo { condition: "ready == false".into(), timeout: 5.0 }],
+        effects: Vec::new(),
+        robots: gc_doc::RobotChoice::Any,
+        priority: 0,
+    };
+    harness.state_mut().session.edit_work(gc_doc::WorkOp::AddTask(task)).unwrap();
+    harness.run_steps(2);
+    let click = |h: &mut egui_kittest::Harness<'_, GraphCtrlApp>, at: egui::Pos2| {
+        h.event(egui::Event::PointerMoved(at));
+        h.run_steps(2);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+        h.run_steps(3);
+    };
+    let at = harness.get_all_by_label("작업").find(|n| n.rect().min.x < 300.0).unwrap().rect().center();
+    click(&mut harness, at);
+    let row =
+        harness.get_all_by_label_contains("Await").find(|n| n.rect().min.x < 300.0).unwrap().rect().center();
+    click(&mut harness, row);
+    // The wait shows the signal and "off", not a text box.
+    harness.get_by_label("꺼짐");
+    // The candidates: asked for, then listed.
+    let task_id = harness.state().session.doc().tasks().iter().next().unwrap().0;
+    assert!(harness.state().session.task_candidates_result(task_id).is_none());
+    harness.get_by_label("후보 로봇 계산").click();
+    harness.run_steps(4);
+    assert!(harness.state().session.task_candidates_result(task_id).is_some());
+}
