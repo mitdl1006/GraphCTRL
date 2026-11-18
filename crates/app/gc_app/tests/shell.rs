@@ -3890,3 +3890,25 @@ fn lock_and_protect_are_set_on_a_joint_from_the_browser() {
     harness.run();
     assert!(harness.state().session.joint_condition(id).locked.is_none());
 }
+
+/// File > Application Options > Sketch tab: the autoproject checkbox switches the session setting
+/// (Inventor 2026 help, Sketch Tab Reference, GUID-1898C432-CFD2-46F1-8BAE-631392DFBF1D).
+#[test]
+fn the_application_options_switch_autoproject_of_face_edges() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    assert!(harness.state().session.autoproject_face_edges(), "on by default, as in Inventor");
+    harness.get_by_label("파일").click();
+    harness.run();
+    harness.get_by_label("응용 프로그램 옵션").click();
+    harness.run_steps(3);
+    harness.get_by_label("스케치 작성·편집 시 모서리 자동 투영").click();
+    harness.run();
+    assert!(!harness.state().session.autoproject_face_edges());
+    harness.get_by_label("스케치 작성·편집 시 모서리 자동 투영").click();
+    harness.run();
+    assert!(harness.state().session.autoproject_face_edges());
+}
