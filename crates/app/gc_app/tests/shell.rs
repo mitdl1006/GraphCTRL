@@ -7054,3 +7054,54 @@ fn the_schedule_shows_the_signals_the_cell_drives() {
     assert!(harness.state().session.schedule_result().is_some_and(|(s, _)| !s.signals.is_empty()));
     harness.get_by_label("door_open");
 }
+
+/// A component's row menu has Ground and Root: the component goes to the assembly origin and is grounded
+/// (Inventor 2026 help, GUID-98FA88B2-AA32-4A27-946A-DCECB36A6696).
+#[test]
+fn a_row_menu_grounds_the_component_at_the_origin() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let a = harness
+        .state_mut()
+        .session
+        .add_body(
+            gc_doc::Solid::Box { size: [0.1; 3] },
+            gc_doc::Placement { xyz: [0.5, 0.2, 0.3], rpy: [0.0; 3] },
+        )
+        .unwrap();
+    harness.run();
+    let name = harness.state().session.doc().get(a).unwrap().name.clone();
+    let at = harness
+        .get_all_by_label_contains(&name)
+        .find(|n| n.rect().min.x < 100.0)
+        .expect("the browser row")
+        .rect()
+        .center();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run_steps(2);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+    harness.run_steps(3);
+    harness.get_by_label("원점에 고정 (Ground and Root)").click();
+    harness.run_steps(3);
+    let body = harness.state().session.doc().get(a).unwrap().clone();
+    assert!(body.placement.xyz.iter().all(|v| v.abs() < 1e-9), "{:?}", body.placement.xyz);
+    assert!(
+        harness
+            .state()
+            .session
+            .doc()
+            .component_flag(gc_doc::Occurrence::Item(a.erase()), gc_doc::ComponentFlag::Grounded)
+    );
+    harness.state_mut().session.undo();
+    assert_eq!(harness.state().session.doc().get(a).unwrap().placement.xyz, [0.5, 0.2, 0.3]);
+}
