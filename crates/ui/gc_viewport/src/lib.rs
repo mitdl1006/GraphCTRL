@@ -251,6 +251,35 @@ impl ViewHistory {
     }
 }
 
+/// Points along a curve for picking it, closed ones too (a circle, a whole ellipse, a closed spline): the
+/// run of an open curve ([`Sketch::curve_run`]) or the outline of a closed one, in sketch coordinates.
+fn curve_outline(sketch: &Sketch, curve: Id<gc_sketch::Curve>) -> Option<Vec<[f64; 3]>> {
+    if let Some(run) = sketch.curve_run(curve) {
+        return Some(run);
+    }
+    let geom = &sketch.curves.get(&curve)?.geom;
+    match geom {
+        CurveGeom::Circle { .. } => {
+            let (centre, radius) = sketch.round(curve)?;
+            let c = sketch.pos(centre)?;
+            Some(
+                (0..=72)
+                    .map(|k| {
+                        let a = f64::from(k) / 72.0 * std::f64::consts::TAU;
+                        let (sin, cos) = gc_math::fm::sin_cos(a);
+                        [c[0] + radius * cos, c[1] + radius * sin, c[2]]
+                    })
+                    .collect(),
+            )
+        }
+        CurveGeom::Ellipse { .. } => sketch
+            .ellipse_geom_outline(geom, 96)
+            .map(|(points, _)| points.into_iter().map(|p| [p[0], p[1], 0.0]).collect()),
+        CurveGeom::Spline { .. } => sketch.spline_outline3(geom, 16),
+        _ => None,
+    }
+}
+
 /// The body or robot an id stands for.
 fn cell_item(any: gc_core::AnyId) -> Option<gc_session::CellItem> {
     match any.kind {
@@ -776,7 +805,7 @@ impl Viewport {
                                 if session.path_role(sketch_id, *curve).is_some() {
                                     continue;
                                 }
-                                let Some(run) = sketch.curve_run(*curve) else { continue };
+                                let Some(run) = curve_outline(sketch, *curve) else { continue };
                                 let on_screen: Vec<[f64; 2]> = run
                                     .iter()
                                     .filter_map(|p| self.camera.project(plane.world(*p), size))
@@ -861,7 +890,7 @@ impl Viewport {
             let plane = plane_of(session, sketch);
             let painter = ui.painter_at(rect);
             for member in session.chain_at(sketch_id, curve) {
-                let Some(run) = sketch.curve_run(member) else { continue };
+                let Some(run) = curve_outline(sketch, member) else { continue };
                 let points: Vec<egui::Pos2> = run
                     .iter()
                     .filter_map(|p| self.camera.project(plane.world(*p), size))
