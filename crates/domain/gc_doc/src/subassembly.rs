@@ -77,6 +77,19 @@ pub enum SubassemblyOp {
     },
     /// Removes a subassembly; what it held goes up to its parent.
     Dissolve(SubassemblyId),
+    /// Paste (Ctrl+V): new instances of components and of whole subassemblies (their structure kept, new
+    /// subassemblies with free names), in the same orientation, moved by `offset`, without relationships
+    /// (Inventor 2026 help, About Placing Components, GUID-249C50F9-5A8C-48BD-8341-D1BDB7A16B19: "Use Copy
+    /// and Paste to place new instances using the same orientation"). They go into `into` (`None`: the top
+    /// level). Rows that no longer exist are skipped; nothing left to paste is refused.
+    Paste {
+        /// What was copied: components placed in the cell and subassemblies.
+        keys: Vec<TreeKey>,
+        /// How far the new instances are moved.
+        offset: crate::cell::Placement,
+        /// Where they go.
+        into: Option<SubassemblyId>,
+    },
     /// Renames a subassembly.
     Rename {
         /// Which.
@@ -386,6 +399,7 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &SubassemblyOp) -> Outcome {
             })?;
             Ok((Vec::new(), "Dissolve subassembly"))
         }
+        SubassemblyOp::Paste { keys, offset, into } => paste(txn, keys, offset, *into),
         SubassemblyOp::Rename { id, name } => {
             let name = name.trim().to_owned();
             if name.is_empty() || !all.iter().any(|s| s.id == *id) {
@@ -404,6 +418,91 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &SubassemblyOp) -> Outcome {
             Ok((Vec::new(), "Rename"))
         }
     }
+}
+
+fn paste(
+    txn: &mut Txn<'_>,
+    keys: &[TreeKey],
+    offset: &crate::cell::Placement,
+    into: Option<SubassemblyId>,
+) -> Outcome {
+    let doc = txn.doc();
+    let all = doc.subassemblies();
+    if into.is_some_and(|i| !all.iter().any(|s| s.id == i)) {
+        return Err(EditError::BadValue);
+    }
+    // What is pasted: the components, and each copied subassembly with everything below it.
+    let mut items: Vec<gc_core::AnyId> = Vec::new();
+    let mut groups: Vec<Subassembly> = Vec::new();
+    for key in keys {
+        match *key {
+            TreeKey::Component(Occurrence::Item(item)) if doc.level_of(*key).is_some() => {
+                if !items.contains(&item) {
+                    items.push(item);
+                }
+            }
+            TreeKey::Subassembly(id) if all.iter().any(|s| s.id == id) => {
+                for s in
+                    all.iter().filter(|s| doc.is_under(TreeKey::Subassembly(s.id), TreeKey::Subassembly(id)))
+                {
+                    if !groups.iter().any(|g| g.id == s.id) {
+                        groups.push(s.clone());
+                    }
+                }
+                for item in doc.subassembly_components(id) {
+                    if !items.contains(&item) {
+                        items.push(item);
+                    }
+                }
+            }
+            TreeKey::Component(_) | TreeKey::Subassembly(_) => {}
+        }
+    }
+    if items.is_empty() && groups.is_empty() {
+        return Err(EditError::BadValue);
+    }
+    // Where each original sat, to rebuild the structure.
+    let level: Vec<(gc_core::AnyId, Option<SubassemblyId>)> =
+        items.iter().map(|i| (*i, doc.subassembly_of(Occurrence::Item(*i)))).collect();
+    let (mut created, pairs) = crate::replicate::copy_mapped(txn, &items, offset)?;
+    // New ids and free names for the copied subassemblies.
+    let mut next = txn.doc().timeline().map_or(0, |(_, t)| t.components.next_subassembly);
+    let mut taken: Vec<String> = all.iter().map(|s| s.name.clone()).collect();
+    let mut renumbered: Vec<(SubassemblyId, SubassemblyId)> = Vec::new();
+    let mut made: Vec<Subassembly> = Vec::new();
+    for g in &groups {
+        let id =
+            SubassemblyId(all.iter().chain(&made).map(|s| s.id.0 + 1).max().unwrap_or(1).max(next).max(1));
+        next = id.0 + 1;
+        let stem = g.name.rsplit_once(':').map_or(g.name.as_str(), |(stem, n)| {
+            if n.parse::<u32>().is_ok() { stem } else { g.name.as_str() }
+        });
+        let name = (1..).map(|n| format!("{stem}:{n}")).find(|n| !taken.contains(n)).unwrap_or_default();
+        taken.push(name.clone());
+        renumbered.push((g.id, id));
+        made.push(Subassembly { id, name, parent: g.parent });
+    }
+    let new_id = |old: Option<SubassemblyId>| {
+        old.and_then(|o| renumbered.iter().find(|(a, _)| *a == o).map(|(_, b)| *b))
+    };
+    for s in &mut made {
+        // A copied subassembly under another copied one stays under that copy; the topmost go into `into`.
+        s.parent = new_id(s.parent).or(into);
+    }
+    let placed: Vec<(Occurrence, SubassemblyId)> = pairs
+        .iter()
+        .filter_map(|(source, copy)| {
+            let was = level.iter().find(|(i, _)| i == source).and_then(|(_, l)| *l);
+            new_id(was).or(into).map(|s| (Occurrence::Item(*copy), s))
+        })
+        .collect();
+    crate::cell::set_timeline(txn, |t| {
+        t.components.next_subassembly = next;
+        t.components.subassemblies.extend(made.iter().cloned());
+        t.components.placed_in.extend(placed.iter().copied());
+    })?;
+    created.extend(made.iter().map(|s| Created::Subassembly(s.id)));
+    Ok((created, "Paste"))
 }
 
 /// Puts members at a level (`None`: the top level).
