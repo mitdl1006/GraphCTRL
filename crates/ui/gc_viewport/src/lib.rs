@@ -1314,7 +1314,11 @@ impl Viewport {
         {
             session.select_item(Some(item));
             grip.motion = grip::motions(&reference)[0];
-            grip.target = Some(grip::Target { item, any, reference, start });
+            let unit = match session.pick_unit(gc_doc::Occurrence::Item(any)) {
+                Some(gc_doc::TreeKey::Subassembly(id)) => Some(id),
+                _ => None,
+            };
+            grip.target = Some(grip::Target { item, any, reference, start, unit });
         }
         // The panel: what to pick next, move or rotate, the freedom report, and the ways to end.
         let mut end: Option<Option<bool>> = None;
@@ -1390,7 +1394,12 @@ impl Viewport {
                 if let (Some(target), Some(pose)) = (&grip.target, &grip.pose) {
                     // The preview goes first; the commit is one undo step.
                     grip::show(session, target, None);
-                    session.grip_snap_commit(&[(target.any, *pose)], ground).ok();
+                    // A component of a subassembly takes the rest of it along.
+                    let moves = target
+                        .unit
+                        .and_then(|unit| session.subassembly_moved(unit, *pose * target.start.inverse()))
+                        .unwrap_or_else(|| vec![(target.any, *pose)]);
+                    session.grip_snap_commit(&moves, ground).ok();
                 }
                 self.grip = None;
             }
@@ -1431,9 +1440,10 @@ impl Viewport {
         let size = [f64::from(rect.width()), f64::from(rect.height())];
         let to_view = |p: egui::Pos2| [f64::from(p.x - rect.left()), f64::from(p.y - rect.top())];
         // The move and turn handles of the selected item come first: dragging them is not a selection.
-        // (Not during Grip Snap: its clicks are not drags of the handles.)
-        let on_handles =
-            self.grip.is_none() && gizmo::ui(ui, response, rect, &self.camera, session, &mut self.gizmo);
+        // (Not during Grip Snap or Free Move / Free Rotate: their drags are not drags of the handles.)
+        let on_handles = self.grip.is_none()
+            && self.free_tool.is_none()
+            && gizmo::ui(ui, response, rect, &self.camera, session, &mut self.gizmo);
         let hovered = if on_handles {
             None
         } else {
@@ -1451,11 +1461,12 @@ impl Viewport {
                 session.select_item(Some(item));
                 self.free_drag = freemove::begin(&self.camera, size, session, item, press);
             }
-            if let Some(drag) = self.free_drag {
+            if let Some(mut drag) = self.free_drag {
                 if response.dragged_by(PointerButton::Primary)
                     && let Some(at) = response.hover_pos().or_else(|| ui.input(|i| i.pointer.latest_pos()))
                 {
-                    freemove::update(&drag, tool, &self.camera, size, session, to_view(at));
+                    freemove::update(&mut drag, tool, &self.camera, size, session, to_view(at));
+                    self.free_drag = Some(drag);
                     ui.ctx().request_repaint();
                 }
                 if response.drag_stopped_by(PointerButton::Primary) {

@@ -21,6 +21,8 @@ pub(crate) struct Target {
     pub(crate) reference: GripReference,
     /// Where the component was when the edge was picked.
     pub(crate) start: DPose3,
+    /// The subassembly the component belongs to: the snap moves all of it (a unit in its parent).
+    pub(crate) unit: Option<gc_doc::SubassemblyId>,
 }
 
 /// A Grip Snap in progress.
