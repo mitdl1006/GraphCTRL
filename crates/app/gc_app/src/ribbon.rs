@@ -46,7 +46,7 @@ const CONSTRAINTS_3D: [(ConstraintKind, &str, Msg); 13] = [
     (ConstraintKind::OnZX, "ZX", Msg::ConOnZX),
 ];
 
-const CONSTRAINTS: [(ConstraintKind, &str, Msg); 12] = [
+const CONSTRAINTS: [(ConstraintKind, &str, Msg); 13] = [
     (ConstraintKind::Coincident, "::", Msg::ConCoincident),
     (ConstraintKind::Collinear, "--", Msg::ConCollinear),
     (ConstraintKind::Concentric, "(o)", Msg::ConConcentric),
@@ -56,6 +56,7 @@ const CONSTRAINTS: [(ConstraintKind, &str, Msg); 12] = [
     (ConstraintKind::Horizontal, "H", Msg::ConHorizontal),
     (ConstraintKind::Vertical, "V", Msg::ConVertical),
     (ConstraintKind::Tangent, "T", Msg::ConTangent),
+    (ConstraintKind::Smooth, "G2", Msg::ConSmooth),
     (ConstraintKind::Symmetric, "S", Msg::ConSymmetric),
     (ConstraintKind::Equal, "=", Msg::ConEqual),
     (ConstraintKind::Midpoint, "M", Msg::ConMidpoint),
