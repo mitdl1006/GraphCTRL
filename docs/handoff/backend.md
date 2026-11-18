@@ -20,7 +20,7 @@
 | 8 | ~~Automatic Dimensions and Constraints~~ **완료** | 126 (P2) | — | 아래 작업 기록 |
 | 9 | ~~치수 방향 뒤집기(Flip)~~ **완료** | 124 (P3) | 선-호·호-호 거리 치수 종류는 없음 | 아래 작업 기록 |
 | 10 | ~~타원~~(**완료**)·~~스플라인~~(**보간·열린 곡선 완료**, Smooth G2·제어점은 P3) | 60, 61, 108 (P3) | `CurveGeom`에 없음 | 새 곡선 종류 — 영향 큼 |
-| 11 | 어셈블리: ~~서브어셈블리 계층·활성화~~(**완료**, 단위 이동 포함), ~~조인트 Lock/Protect~~(**완료**), ~~3D 그립 스냅~~(**계산 완료**, 드래그 UI는 FE), ~~어셈블리 스케치 소유자~~(**완료**), 작업 축(선·모서리 위, 원 중심, 회전 면, 두 평면 교선) | 어셈블리 43, 90, 61, 98, 157 | 작업 축은 두 점·평면 법선만 | 행마다 원문 확인 후 범위 결정 |
+| 11 | 어셈블리: ~~서브어셈블리 계층·활성화~~(**완료**, 단위 이동·Flexible 포함), ~~조인트 Lock/Protect~~(**완료**), ~~3D 그립 스냅~~(**계산 완료**, 드래그 UI는 FE), ~~어셈블리 스케치 소유자~~(**완료**), 작업 축(선·모서리 위, 원 중심, 회전 면, 두 평면 교선) | 어셈블리 43, 90, 61, 98, 157 | 작업 축은 두 점·평면 법선만 | 행마다 원문 확인 후 범위 결정 |
 
 ## 현황 — 완료
 
@@ -53,6 +53,44 @@
 | 모션(오래된 남은 일) | 맨 아래 "남은 일(백엔드)" 절 그대로 |
 
 # 작업 기록(최신 순)
+
+## 2026-11-18 — 타원·스플라인 Offset, Split Spline(리드 다음 ③ 1차)
+
+근거: To Create 2D Shape Geometry, GUID-D489CE6D-7299-4211-A43A-F3580A4BA357 — "When you Offset an ellipse, the result is either a
+mathematical ellipse or an associative spline. If you select an ellipse near a quadrant and an axis is visible, the offset geometry is an
+ellipse. If you select an ellipse between quadrants … the offset geometry is a spline. An offset ellipse is a nonassociative mathematical
+ellipse." / To Create, Lock Spline Length, and Edit Splines, GUID-DB15C479-66F2-456A-9E54-40A60F83DC92 — "To split a spline, right-click a
+point and choose Split Spline."
+
+- `SketchOp::Offset`이 타원·타원 호·스플라인을 받는다(루프에는 끼지 않고 각각 따로).
+  - 타원: 같은 중심·축 방향, 두 반지름에 거리를 더한 새 타원(구속 없음 = 원문의 nonassociative). 호는 끝 각(이심 각)을 유지. 반지름이 0 이하가 되면 거부.
+  - 스플라인: 맞춤점마다 진행 방향 왼쪽(양수)으로 거리만큼 옮긴 새 스플라인(구속 없음).
+  - 간격띄우기 도구(`ToolKind::Offset`)는 그대로 동작(커서로 거리·방향).
+- `SketchOp::SplitSpline { curve, point }`: 안쪽 맞춤점에서 둘로. 원래 스플라인은 그 점까지, 새 스플라인(결과 `Created::Curve`)은 그 점부터. 두 조각이 점을 공유. 끝점·다른 점·스플라인 아님은 거부. 한 번의 실행 취소.
+- FE: 스플라인 맞춤점 우클릭 메뉴 "Split Spline" → `SketchOp::SplitSpline`.
+- 차이: 원문은 사분점 근처를 고르면 타원, 사분점 사이면 연관 스플라인 — 여기는 언제나 타원(`SketchOp::Offset`에 고른 위치가 없음). 스플라인 오프셋은 연관 아님.
+  나눈 두 조각은 각자 자연 3차로 다시 맞춰져 나눈 점 근처 모양이 조금 달라질 수 있다(원문은 모양 유지).
+- QA `qa_ellipse`의 Offset 거부 단언을 "거부 또는 정상, 한 단계"로 바꿈(Split·Fillet은 여전히 거부).
+- 테스트: `gc_session/tests/ellipse_spline_edit.rs`(5개).
+
+## 2026-11-18 — Flexible 서브어셈블리(리드 다음 ②)
+
+근거: Create and edit flexible components, GUID-30817F08-A5C2-44B7-B237-4791ACA3F854 —
+"right-click the placed subassembly … and then select Flexible. The freedom of movement allowed in the subassembly is available in the
+parent assembly. An icon denoting the flexible state marks the subassembly in the browser." / "Click Save to preserve flexible states in the
+assembly file." / "To remove flexibility, right-click a flexible subassembly, and then clear the check mark."
+
+- **강체(기본)**: 서브어셈블리는 상위에서 한 단위. 관계 풀이에서 단위 전체가 솔버 소유자 하나(첫 컴포넌트)로 합쳐지고, 단위 안끼리의 관계는
+  건너뛴다. 구성원 하나에 관계를 걸면 단위 전체가 같은 이동으로 움직인다. 자유도도 단위가 하나를 공유(구성원 하나라도 접지면 0).
+  중첩: 바깥에서부터 처음 만나는 강체 서브어셈블리가 단위(`rigid_unit`). 바깥이 Flexible이면 안쪽 강체가 각각 단위.
+- **Flexible**: 구성원이 상위에서 각자 움직인다(이전 동작). 클릭도 서브어셈블리가 아니라 구성원을 고른다(`pick_unit`이 통과).
+- API: `SubassemblyOp::SetFlexible { id, flexible }`(한 번의 실행 취소, 레이블 "Flexible"/"Rigid", 바꾼 뒤 관계 다시 풀이),
+  `Session::set_flexible(id, bool)`, `Subassembly.flexible`(저장됨, 기본 false라 옛 파일 그대로), `Document::rigid_unit(item)`,
+  `rigid_unit_members(item)`, `Session::unit_moves(item, pose)`(끌기 미리보기용 — 단위 구성원 전부의 새 자세, `preview_components`에 그대로).
+- FE: 브라우저 우클릭 메뉴 "Flexible" 체크 토글 + 서브어셈블리 행 아이콘(원문: 상태 아이콘). 컴포넌트 끌기는 `unit_moves` 결과로 미리보기.
+- 차이/남음: 제자리 편집(edit in place) 중에도 강체 단위의 내부 관계는 단위로 합쳐 푼다(인벤터는 하위 어셈블리 파일 안에서 풀지만 여기는 한 문서).
+  Flexible은 서브어셈블리 인스턴스별 상태 — 여기는 서브어셈블리가 문서 안 그룹이라 그룹별.
+- 테스트: `gc_session/tests/subassembly.rs::rigid_subassemblies_move_as_one_and_flexible_ones_let_members_move`.
 
 ## 2026-11-18 — 컴포넌트 복사·붙여넣기(Ctrl+C/V, 리드 다음 ①)
 

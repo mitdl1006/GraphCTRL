@@ -192,6 +192,37 @@ impl Session {
         self.grip_snap_commit(&moves, false)
     }
 
+    /// Flexible on or off for a subassembly: flexible, its components keep the freedom they have among
+    /// themselves in the parent (picked and dragged one by one); rigid (the default), it moves as one
+    /// unit. One undo step.
+    pub fn set_flexible(&mut self, id: gc_doc::SubassemblyId, flexible: bool) -> Result<(), EditError> {
+        self.edit_subassemblies(SubassemblyOp::SetFlexible { id, flexible }).map(|_| ())
+    }
+
+    /// Where everything that moves rigidly with a dragged component goes when it is put at `pose`: the
+    /// components of its rigid subassembly by the same move (itself alone when it is in none, or every
+    /// subassembly around it is flexible). For drag previews (`preview_components`) and commits.
+    pub fn unit_moves(
+        &self,
+        item: gc_core::AnyId,
+        pose: gc_math::DPose3,
+    ) -> Vec<(gc_core::AnyId, gc_math::DPose3)> {
+        let doc = self.doc();
+        let Some(now) = doc.component_origin(Occurrence::Item(item)).map(|o| o.pose) else {
+            return Vec::new();
+        };
+        let shift = pose * now.inverse();
+        doc.rigid_unit_members(item)
+            .into_iter()
+            .filter_map(|m| {
+                if m == item {
+                    return Some((m, pose));
+                }
+                doc.component_origin(Occurrence::Item(m)).map(|o| (m, shift * o.pose))
+            })
+            .collect()
+    }
+
     /// What a click on a component picks: the row directly inside the edit target (or at the top level)
     /// that holds it, so that a subassembly is picked as one unit. A component of an imported assembly or
     /// a robot link is picked itself. `None` for a component outside the edit target.
@@ -213,7 +244,11 @@ impl Session {
                 return Some(unit);
             }
             let parent = parent?;
-            if matches!(parent, TreeKey::Subassembly(_)) {
+            // A flexible subassembly does not take the pick: its components move on their own in the
+            // parent (Create and edit flexible components, GUID-30817F08-A5C2-44B7-B237-4791ACA3F854).
+            if let TreeKey::Subassembly(id) = parent
+                && !doc.subassemblies().iter().any(|s| s.id == id && s.flexible)
+            {
                 unit = parent;
             }
             at = parent;
