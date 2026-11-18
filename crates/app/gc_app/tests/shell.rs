@@ -6400,3 +6400,64 @@ fn isolate_hides_the_others_and_undo_isolate_shows_them_again() {
     assert!(visible(&harness, a) && visible(&harness, b));
     assert!(!harness.state().session.is_isolated());
 }
+
+/// User-defined folders of the browser (Inventor 2026 help, Assembly Browser Reference,
+/// GUID-CB6B1637-71AD-4753-8CC9-19559BFEE3A5): a row's menu makes a folder with it, moves other rows in, and the
+/// folder lists them below its name.
+#[test]
+fn the_browser_makes_folders_and_moves_rows_into_them() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let app = harness.state_mut();
+    let place = |xyz: [f64; 3]| gc_doc::Placement { xyz, rpy: [0.0; 3] };
+    let a = app.session.add_body(gc_doc::Solid::Box { size: [0.1; 3] }, place([0.0; 3])).unwrap();
+    let b = app.session.add_body(gc_doc::Solid::Box { size: [0.1; 3] }, place([0.5, 0.0, 0.0])).unwrap();
+    harness.run();
+    let right_click_row = |h: &mut egui_kittest::Harness<'_, GraphCtrlApp>, id: gc_core::Id<gc_doc::Body>| {
+        let name = h.state().session.doc().get(id).unwrap().name.clone();
+        let at = h
+            .get_all_by_label_contains(&name)
+            .find(|n| n.rect().min.x < 100.0)
+            .expect("the browser row")
+            .rect()
+            .center();
+        h.event(egui::Event::PointerMoved(at));
+        h.run_steps(2);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Secondary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+        h.run_steps(3);
+    };
+    // A new folder with the first body, named in the row that comes up.
+    right_click_row(&mut harness, a);
+    harness.get_by_label("새 폴더(이 항목으로)").click();
+    harness.run_steps(3);
+    let field = harness.get_all_by_label("새 폴더(이 항목으로)").last().unwrap();
+    field.click();
+    harness.run_steps(2);
+    harness.get_all_by_label("새 폴더(이 항목으로)").last().unwrap().type_text("Group");
+    harness.run_steps(2);
+    harness.get_by_label("확인").click();
+    harness.run_steps(3);
+    let folders = harness.state().session.folders();
+    assert_eq!(folders.len(), 1);
+    assert_eq!(folders[0].name, "Group");
+    assert_eq!(folders[0].members.len(), 1);
+    harness.get_by_label("Group (1)");
+    // The second body moves in through its menu.
+    right_click_row(&mut harness, b);
+    harness.get_by_label("폴더로 이동").click();
+    harness.run_steps(3);
+    harness.get_by_label("Group").click();
+    harness.run_steps(3);
+    assert_eq!(harness.state().session.folders()[0].members.len(), 2);
+    harness.get_by_label("Group (2)");
+}

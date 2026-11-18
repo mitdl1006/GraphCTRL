@@ -63,6 +63,8 @@ pub enum BrowserAction {
     SuppressRelationship(gc_core::Id<gc_doc::Relationship>, bool),
     /// Select a sketch role (a waypoint or a path of a sketch), or none; the view marks it.
     SelectRole(Option<Id<gc_doc::SketchRole>>),
+    /// Change the browser's user-defined folders.
+    Folder(gc_doc::FolderOp),
     /// Isolate these components (Inventor: Isolate; a subassembly is given as its members).
     Isolate(Vec<gc_doc::Occurrence>),
     /// Undo Isolate: show again what Isolate hid.
@@ -126,6 +128,10 @@ pub enum GroupName {
     Demote(Vec<gc_doc::TreeKey>, String),
     /// Rename a subassembly.
     Rename(gc_doc::SubassemblyId, String),
+    /// Add to New Folder: a user-defined folder of the browser holding these rows.
+    NewFolder(Vec<gc_doc::TreeKey>, String),
+    /// Rename a user-defined folder.
+    RenameFolder(u32, String),
 }
 
 /// The named parameters: a list, and one editor that adds a parameter or, when the name exists, changes
@@ -798,10 +804,112 @@ fn component_rows(
     rows: &[gc_doc::TreeRow],
     parent: Option<gc_doc::TreeKey>,
 ) {
+    // User-defined folders of this level (Inventor 2026 help, Assembly Browser Reference,
+    // GUID-CB6B1637-71AD-4753-8CC9-19559BFEE3A5: "User-defined Folder groups assembly nodes for better browser
+    // organization"): each lists its rows below its name; the rows in no folder follow.
+    let folders: Vec<gc_doc::BrowserFolder> = session
+        .folders()
+        .into_iter()
+        .filter(|f| f.members.first().is_some_and(|m| session.doc().tree_parent(*m) == parent))
+        .collect();
+    let mut inside: Vec<gc_doc::TreeKey> = Vec::new();
+    for folder in &folders {
+        inside.extend(folder.members.iter().copied());
+        let title = format!("{} ({})", folder.name, folder.members.len());
+        let opened = egui::CollapsingHeader::new(title)
+            .id_salt(("gc_folder", folder.id))
+            .default_open(true)
+            .show(ui, |ui| {
+                component_rows_in(
+                    ui,
+                    session,
+                    lang,
+                    state,
+                    selected,
+                    action,
+                    rows,
+                    parent,
+                    Scope::Only(&folder.members),
+                );
+            });
+        opened.header_response.context_menu(|ui| {
+            if ui.button(tr!(lang, CmdRename)).clicked() {
+                state.group_name = Some(GroupName::RenameFolder(folder.id, folder.name.clone()));
+                ui.close();
+            }
+            if ui.button(tr!(lang, CmdDeleteFolder)).clicked() {
+                *action = Some(BrowserAction::Folder(gc_doc::FolderOp::Delete(folder.id)));
+                ui.close();
+            }
+        });
+    }
+    component_rows_in(ui, session, lang, state, selected, action, rows, parent, Scope::Except(&inside));
+}
+
+/// Which rows of a level a call lists.
+#[derive(Clone, Copy)]
+enum Scope<'a> {
+    /// Only these (a user-defined folder's rows).
+    Only(&'a [gc_doc::TreeKey]),
+    /// All but these (the rows no folder holds).
+    Except(&'a [gc_doc::TreeKey]),
+}
+
+/// The New Folder and Move to Folder entries of a row's menu: "새 폴더(이 항목으로)", a list of the folders to
+/// move it to, and "폴더에서 빼기" when it is in one.
+fn folder_menu(
+    ui: &mut Ui,
+    session: &Session,
+    lang: Lang,
+    state: &mut ParamsUi,
+    action: &mut Option<BrowserAction>,
+    key: gc_doc::TreeKey,
+) {
+    if ui.button(tr!(lang, CmdNewFolder)).clicked() {
+        state.group_name = Some(GroupName::NewFolder(vec![key], String::new()));
+        ui.close();
+    }
+    let folders = session.folders();
+    if !folders.is_empty() {
+        ui.menu_button(tr!(lang, CmdMoveToFolder), |ui| {
+            for folder in &folders {
+                if ui.button(&folder.name).clicked() {
+                    *action = Some(BrowserAction::Folder(gc_doc::FolderOp::Move {
+                        members: vec![key],
+                        into: Some(folder.id),
+                    }));
+                    ui.close();
+                }
+            }
+        });
+    }
+    if session.folder_of(key).is_some() && ui.button(tr!(lang, CmdOutOfFolder)).clicked() {
+        *action = Some(BrowserAction::Folder(gc_doc::FolderOp::Move { members: vec![key], into: None }));
+        ui.close();
+    }
+}
+
+#[allow(clippy::too_many_arguments, reason = "the browser's shared state")]
+fn component_rows_in(
+    ui: &mut Ui,
+    session: &Session,
+    lang: Lang,
+    state: &mut ParamsUi,
+    selected: Option<gc_session::CellItem>,
+    action: &mut Option<BrowserAction>,
+    rows: &[gc_doc::TreeRow],
+    parent: Option<gc_doc::TreeKey>,
+    scope: Scope<'_>,
+) {
     use gc_doc::{Occurrence, SubassemblyOp, TreeKey};
     use gc_session::CellItem;
     let editing = session.edit_target();
     for row in rows.iter().filter(|row| row.parent == parent) {
+        match scope {
+            Scope::Only(keys) if !keys.contains(&row.key) => continue,
+            Scope::Except(keys) if keys.contains(&row.key) => continue,
+            _ => {}
+        }
         if !row_found(rows, row, &state.find) {
             continue;
         }
@@ -900,6 +1008,7 @@ fn component_rows(
                         *action = Some(BrowserAction::Subassembly(SubassemblyOp::Dissolve(id)));
                         ui.close();
                     }
+                    folder_menu(ui, session, lang, state, action, row.key);
                 });
             }
             TreeKey::Component(Occurrence::Item(any)) => {
@@ -941,6 +1050,8 @@ fn group_name_row(ui: &mut Ui, lang: Lang, state: &mut ParamsUi, action: &mut Op
     let (label, text) = match entry {
         GroupName::Demote(_, text) => (tr!(lang, CmdDemote), text),
         GroupName::Rename(_, text) => (tr!(lang, CmdRename), text),
+        GroupName::NewFolder(_, text) => (tr!(lang, CmdNewFolder), text),
+        GroupName::RenameFolder(_, text) => (tr!(lang, CmdRename), text),
     };
     let (mut confirmed, mut cancelled) = (false, false);
     ui.horizontal(|ui| {
@@ -958,13 +1069,22 @@ fn group_name_row(ui: &mut Ui, lang: Lang, state: &mut ParamsUi, action: &mut Op
         }
     });
     if confirmed {
-        let op = match entry {
-            GroupName::Demote(members, name) => {
-                SubassemblyOp::Demote { members: members.clone(), name: name.trim().to_owned() }
+        *action = Some(match entry {
+            GroupName::Demote(members, name) => BrowserAction::Subassembly(SubassemblyOp::Demote {
+                members: members.clone(),
+                name: name.trim().to_owned(),
+            }),
+            GroupName::Rename(id, name) => {
+                BrowserAction::Subassembly(SubassemblyOp::Rename { id: *id, name: name.trim().to_owned() })
             }
-            GroupName::Rename(id, name) => SubassemblyOp::Rename { id: *id, name: name.trim().to_owned() },
-        };
-        *action = Some(BrowserAction::Subassembly(op));
+            GroupName::NewFolder(members, name) => BrowserAction::Folder(gc_doc::FolderOp::Add {
+                name: name.trim().to_owned(),
+                members: members.clone(),
+            }),
+            GroupName::RenameFolder(id, name) => {
+                BrowserAction::Folder(gc_doc::FolderOp::Rename { id: *id, name: name.trim().to_owned() })
+            }
+        });
     }
     if confirmed || cancelled {
         state.group_name = None;
@@ -1425,6 +1545,9 @@ fn node_row(
         if groundable && ui.button(tr!(lang, CmdIsolate)).clicked() {
             *action = Some(BrowserAction::Isolate(vec![occurrence]));
             ui.close();
+        }
+        if groundable {
+            folder_menu(ui, session, lang, state, action, gc_doc::TreeKey::Component(occurrence));
         }
         if groundable && ui.button(tr!(lang, CmdIProperties)).clicked() {
             *action = Some(BrowserAction::Properties(occurrence));

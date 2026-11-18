@@ -392,6 +392,14 @@
 - 브라우저 컴포넌트 행·서브어셈블리 폴더 우클릭 "격리"(`Session::isolate`; 서브어셈블리는 안의 컴포넌트 전체로 펼쳐 넘김), 뷰 마킹 메뉴 오버플로의 선택된 컴포넌트 "격리". 격리 중에는 브라우저 "…" 메뉴와 뷰 메뉴에 "격리 취소"(`undo_isolate`).
 - 테스트: `isolate_hides_the_others_and_undo_isolate_shows_them_again`.
 
+### 브라우저 사용자 정의 폴더
+
+- 근거: Inventor 2026 도움말 Assembly Browser Reference, GUID-CB6B1637-71AD-4753-8CC9-19559BFEE3A5 ("User-defined Folder groups assembly nodes for better browser organization").
+- 같은 수준(부모가 같은) 행들 중 폴더에 든 것은 폴더 노드("이름 (개수)") 아래에, 나머지는 그 뒤에 그린다(`component_rows`가 `folders()`를 읽음). 폴더는 브라우저 배치일 뿐 트리 수준·부모는 그대로.
+- 컴포넌트 행·서브어셈블리 폴더 우클릭: "새 폴더(이 항목으로)"(이름 입력 줄이 나와 `FolderOp::Add`), "폴더로 이동"(폴더 목록 → `FolderOp::Move`), 폴더에 든 행은 "폴더에서 빼기". 폴더 노드 우클릭: 이름 바꾸기(`Rename`)·폴더 삭제(`Delete`). 모두 되돌리기 한 단계, 거절(수준이 다른 행, 이름 중복)은 상태 줄.
+- 알려진 차이: 끌어 넣기 없음(행이 클릭만 감지), 한 번에 한 행(다중 선택 없음), 폴더 안 폴더·관계·스케치는 백엔드 범위 밖.
+- 테스트: `the_browser_makes_folders_and_moves_rows_into_them`.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

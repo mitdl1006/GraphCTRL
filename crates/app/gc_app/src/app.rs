@@ -1536,6 +1536,8 @@ impl eframe::App for GraphCtrlApp {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     self.params.origin_selected = self.viewport.origin_selected;
                     match gc_panels::browser(ui, &self.session, lang, &mut self.params) {
+                        // A refusal (rows of two levels, a name taken) is explained in the status bar.
+                        Some(BrowserAction::Folder(op)) => drop(self.session.edit_folders(op)),
                         Some(BrowserAction::Isolate(keep)) => drop(self.session.isolate(&keep)),
                         Some(BrowserAction::UndoIsolate) => drop(self.session.undo_isolate()),
                         Some(BrowserAction::SelectRole(role)) => self.viewport.role_selected = role,
