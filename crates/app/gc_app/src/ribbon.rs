@@ -236,7 +236,15 @@ pub(crate) fn show(
                     };
                     if spatial {
                         // A 3D sketch has lines and arcs (Center Point Arc and Three Point Arc).
-                        split(ui, "line", Msg::ToolLine, &[(ToolKind::Line, Icon::Line, Msg::ToolLine)]);
+                        split(
+                            ui,
+                            "line",
+                            Msg::ToolLine,
+                            &[
+                                (ToolKind::Line, Icon::Line, Msg::ToolLine),
+                                (ToolKind::Spline, Icon::Spline, Msg::ToolSpline),
+                            ],
+                        );
                         split(
                             ui,
                             "arc",

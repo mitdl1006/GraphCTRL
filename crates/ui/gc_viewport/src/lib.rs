@@ -1208,7 +1208,10 @@ impl Viewport {
             }
         } else if matches!(
             session.tool(),
-            gc_tools::ToolKind::Line | gc_tools::ToolKind::Arc | gc_tools::ToolKind::Arc3
+            gc_tools::ToolKind::Line
+                | gc_tools::ToolKind::Arc
+                | gc_tools::ToolKind::Arc3
+                | gc_tools::ToolKind::Spline
         ) {
             let anchor = session.spatial_anchor().map(DVec3::from_array);
             let plane_axis = session.spatial_plane();
@@ -2108,6 +2111,13 @@ impl Viewport {
         if escape {
             self.hud.cancel();
             session.tool_event(ToolEvent::Key(ToolKey::Escape));
+        }
+        // Enter finishes a 3D spline through the fit points clicked.
+        if session.sketch_is_spatial()
+            && session.tool() == gc_tools::ToolKind::Spline
+            && ctx.input(|i| i.key_pressed(Key::Enter))
+        {
+            session.spatial_finish();
         }
         if delete {
             session.tool_event(ToolEvent::Key(ToolKey::Delete));

@@ -238,6 +238,12 @@
 - Bend: 3D 스케치 그리기 패널의 작은 버튼. 선 두 개를 클릭 → 반지름 입력(기본 10 mm) → Enter로 `SketchOp::Bend`. 실패하면 상태 표시줄에 사유, 명령 유지. Esc로 종료. 호 미리보기는 없음(알려진 차이).
 - 테스트: `look_at_turns_the_view_square_to_the_sketch_plane`, `the_3d_draw_panel_has_a_bend_button_that_esc_ends`.
 
+### 3D 스플라인 버튼
+
+- 근거: Inventor 2026 도움말 GUID-DB15C479-66F2-456A-9E54-40A60F83DC92 (보간 스플라인은 3D 스케치에서도 만들 수 있음).
+- 3D 스케치 그리기 패널의 선 분할 버튼에 "스플라인(보간)" 추가. 뷰포트 클릭마다 `spatial_click`로 맞춤점, Enter로 `spatial_finish`, 진행 중 곡선은 `spatial_spline_preview`로 미리보기. Esc는 기존 도구 취소.
+- 테스트: `a_3d_spline_is_placed_with_fit_points_and_finished_with_enter`.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹
