@@ -38,6 +38,8 @@ pub(crate) fn rename(txn: &mut Txn<'_>, item: AnyId, name: &str) -> Outcome {
         Kind::Feature => rename_in!(features, Feature),
         Kind::Assembly => rename_in!(assemblies, Assembly),
         Kind::SketchRole => rename_in!(roles, crate::role::SketchRole),
+        Kind::Task => rename_in!(tasks, crate::work::Task),
+        Kind::ObjectType | Kind::WorkObject | Kind::StateVar => return crate::work::rename(txn, item, &name),
         // Parameters are referred to by name in expressions; origin frames are fixed.
         _ => return Err(EditError::BadValue),
     }

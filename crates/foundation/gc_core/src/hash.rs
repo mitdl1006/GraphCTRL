@@ -193,6 +193,10 @@ impl StableHash for Kind {
             Self::Timeline => 17,
             Self::Relationship => 18,
             Self::SketchRole => 19,
+            Self::ObjectType => 20,
+            Self::WorkObject => 21,
+            Self::StateVar => 22,
+            Self::Task => 23,
         };
         tag.stable_hash(hasher);
     }

@@ -358,9 +358,9 @@ impl Document {
         self.aim_rotation(role.sketch, &role.aim)
     }
 
-    /// True when a robot's path follows the role.
+    /// True when a robot's path follows the role or a task's step goes to or along it.
     pub fn role_followed(&self, role: Id<SketchRole>) -> bool {
-        self.paths().iter().any(|(_, p)| p.follow.contains(&role))
+        self.paths().iter().any(|(_, p)| p.follow.contains(&role)) || self.role_in_task(role)
     }
 }
 
@@ -458,6 +458,8 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
             }
             let role = checked(txn.doc(), role, Some(*id))?;
             txn.modify(*id, |r: &mut SketchRole, _| *r = role)?;
+            // A task's step that goes to it as a waypoint (or along it as a path) keeps its kind.
+            crate::work::still_sound(txn.doc())?;
             Ok((Vec::new(), "Edit sketch role"))
         }
         CellOp::DeleteRole(id) => {

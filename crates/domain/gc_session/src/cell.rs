@@ -2675,14 +2675,7 @@ fn path_steps(
         if doc.is_inactive(waypoint_id.erase()) {
             continue;
         }
-        let goal = match &waypoint.target {
-            WaypointTarget::Joints(q) => Goal::Joints(q.clone()),
-            target => {
-                Goal::Pose(target_pose(doc, target, Some(base_frame(loaded, &robot.placement))).ok_or_else(
-                    || format!("{}: its sketch point or frame no longer exists", waypoint.name),
-                )?)
-            }
-        };
+        let goal = waypoint_goal(doc, loaded, robot, waypoint)?;
         steps.push(Step {
             name: waypoint.name.clone(),
             goal,
@@ -2696,65 +2689,89 @@ fn path_steps(
         });
     }
     for (index, role_id) in path.follow.iter().enumerate() {
-        let role = doc.get(*role_id).ok_or("a path role no longer exists")?;
         if doc.is_inactive(role_id.erase()) {
             continue;
         }
-        let gc_doc::RoleKind::Path { motion, tcp_speed, .. } = &role.kind else {
-            return Err(format!("{} is not a path", role.name));
-        };
-        let gone =
-            || format!("{}: its sketch curves no longer exist or no longer join end to end", role.name);
-        let runs = doc.role_poses(*role_id).ok_or_else(gone)?;
-        let first = runs.first().and_then(|run| run.first()).ok_or_else(gone)?;
-        let step = |name: String, goal: DPose3, travel: Travel| Step {
-            name,
-            goal: Goal::Pose(goal),
-            travel,
-            tcp_speed: tcp_speed.or(path.tcp_speed),
-            contacts: contacts_of(doc, path, index),
-        };
-        // Poses that differ: the tool has to move or turn to get from one to the other.
-        let apart = |a: &DPose3, b: &DPose3| {
-            (a.translation - b.translation).length() > 1e-9 || a.rotation.angle_between(b.rotation) > 1e-9
-        };
-        steps.push(step(format!("{} (start)", role.name), *first, Travel::Free));
-        match motion {
-            gc_doc::PathMotion::Follow => {
-                // One motion along every curve. Where one curve hands over to the next the pose is there
-                // once, unless the tool turns on the spot (a corner travelled tangentially).
-                let mut along: Vec<DPose3> = Vec::new();
-                let mut at = *first;
-                for pose in runs.iter().flatten() {
-                    if apart(&at, pose) {
-                        along.push(*pose);
-                        at = *pose;
-                    }
+        steps.extend(role_steps(doc, *role_id, path.tcp_speed, &contacts_of(doc, path, index))?);
+    }
+    Ok(steps)
+}
+
+/// The motions along a path role of sketch curves: a free move to its start, then along it as the role
+/// says (one motion along the curves, or one per curve in straight lines or joint moves).
+fn role_steps(
+    doc: &Document,
+    role_id: Id<gc_doc::SketchRole>,
+    fallback_speed: Option<f64>,
+    contacts: &[gc_motion::ContactAllowance],
+) -> Result<Vec<Step>, String> {
+    let mut steps = Vec::new();
+    let role = doc.get(role_id).ok_or("a path role no longer exists")?;
+    let gc_doc::RoleKind::Path { motion, tcp_speed, .. } = &role.kind else {
+        return Err(format!("{} is not a path", role.name));
+    };
+    let gone = || format!("{}: its sketch curves no longer exist or no longer join end to end", role.name);
+    let runs = doc.role_poses(role_id).ok_or_else(gone)?;
+    let first = runs.first().and_then(|run| run.first()).ok_or_else(gone)?;
+    let step = |name: String, goal: DPose3, travel: Travel| Step {
+        name,
+        goal: Goal::Pose(goal),
+        travel,
+        tcp_speed: tcp_speed.or(fallback_speed),
+        contacts: contacts.to_vec(),
+    };
+    // Poses that differ: the tool has to move or turn to get from one to the other.
+    let apart = |a: &DPose3, b: &DPose3| {
+        (a.translation - b.translation).length() > 1e-9 || a.rotation.angle_between(b.rotation) > 1e-9
+    };
+    steps.push(step(format!("{} (start)", role.name), *first, Travel::Free));
+    match motion {
+        gc_doc::PathMotion::Follow => {
+            // One motion along every curve. Where one curve hands over to the next the pose is there
+            // once, unless the tool turns on the spot (a corner travelled tangentially).
+            let mut along: Vec<DPose3> = Vec::new();
+            let mut at = *first;
+            for pose in runs.iter().flatten() {
+                if apart(&at, pose) {
+                    along.push(*pose);
+                    at = *pose;
                 }
-                let last = along.pop().ok_or_else(gone)?;
-                steps.push(step(role.name.clone(), last, Travel::Along(along)));
             }
-            gc_doc::PathMotion::Linear | gc_doc::PathMotion::Joint => {
-                let mut at = *first;
-                for (number, run) in runs.iter().enumerate() {
-                    let (start, end) = (run.first().ok_or_else(gone)?, run.last().ok_or_else(gone)?);
-                    let linear = *motion == gc_doc::PathMotion::Linear;
-                    // Travelling tangentially, the tool turns on the spot at a corner first.
-                    if linear && apart(&at, start) {
-                        steps.push(step(
-                            format!("{} ({} turn)", role.name, number + 1),
-                            *start,
-                            Travel::Linear,
-                        ));
-                    }
-                    let travel = if linear { Travel::Linear } else { Travel::Free };
-                    steps.push(step(format!("{} ({})", role.name, number + 1), *end, travel));
-                    at = *end;
+            let last = along.pop().ok_or_else(gone)?;
+            steps.push(step(role.name.clone(), last, Travel::Along(along)));
+        }
+        gc_doc::PathMotion::Linear | gc_doc::PathMotion::Joint => {
+            let mut at = *first;
+            for (number, run) in runs.iter().enumerate() {
+                let (start, end) = (run.first().ok_or_else(gone)?, run.last().ok_or_else(gone)?);
+                let linear = *motion == gc_doc::PathMotion::Linear;
+                // Travelling tangentially, the tool turns on the spot at a corner first.
+                if linear && apart(&at, start) {
+                    steps.push(step(format!("{} ({} turn)", role.name, number + 1), *start, Travel::Linear));
                 }
+                let travel = if linear { Travel::Linear } else { Travel::Free };
+                steps.push(step(format!("{} ({})", role.name, number + 1), *end, travel));
+                at = *end;
             }
         }
     }
     Ok(steps)
+}
+
+/// Where a robot's waypoint is, as a goal: joint values, or the world pose of the tool centre point.
+fn waypoint_goal(
+    doc: &Document,
+    loaded: &LoadedRobot,
+    robot: &Robot,
+    waypoint: &Waypoint,
+) -> Result<Goal, String> {
+    Ok(match &waypoint.target {
+        WaypointTarget::Joints(q) => Goal::Joints(q.clone()),
+        target => Goal::Pose(
+            target_pose(doc, target, Some(base_frame(loaded, &robot.placement)))
+                .ok_or_else(|| format!("{}: its sketch point or frame no longer exists", waypoint.name))?,
+        ),
+    })
 }
 
 fn plan_path(
@@ -2788,6 +2805,21 @@ fn plan_path(
             (algorithm, path.seed, 4)
         }
     };
+    let scene = robot_scene(doc, loaded, meshes, robot, assembly_obstacles)?;
+    let steps = path_steps(doc, loaded, path, robot)?;
+    let how = (algorithm, seed, runs, plugin);
+    let segments = run_steps(loaded, robot, &scene, steps, robot.joints.clone(), how, previous, control)?;
+    Ok(PlannedPath { segments, strategy: (path.planner.clone(), seed) })
+}
+
+/// The planning scene of a robot: itself with its tool, and every obstacle of the cell.
+pub(crate) fn robot_scene(
+    doc: &Document,
+    loaded: &LoadedRobot,
+    meshes: &BTreeMap<String, MeshRef>,
+    robot: &Robot,
+    assembly_obstacles: &Result<Vec<Obstacle>, String>,
+) -> Result<RobotScene, String> {
     let mut obstacles = Vec::new();
     for (_, body) in doc.bodies().iter().filter(|(id, _)| !doc.is_component_suppressed(id.erase())) {
         // An obstacle that cannot be checked must not be planned through as if it were not there.
@@ -2810,10 +2842,37 @@ fn plan_path(
     )
     .map_err(|e| e.to_string())?;
     let scene = scene.with_tool(pose_of(&robot.tcp)).with_pair_choices(&pair_choices(robot));
-    let steps = path_steps(doc, loaded, path, robot)?;
-    let mut start = robot.joints.clone();
+    Ok(scene)
+}
+
+/// How motions are planned: the algorithm, its seed, how many seeds to run, and a registered planner used
+/// in the algorithm's place.
+type Strategy<'a> = (Algorithm, u64, usize, Option<&'a dyn gc_robotics_api::MotionPlanner>);
+
+/// Plans steps one after the other, each starting where the one before ended.
+#[allow(clippy::too_many_arguments, reason = "the pieces of one planning run")]
+fn run_steps(
+    loaded: &LoadedRobot,
+    robot: &Robot,
+    scene: &RobotScene,
+    steps: Vec<Step>,
+    mut start: Vec<f64>,
+    (algorithm, seed, runs, plugin): Strategy<'_>,
+    previous: Option<&PlannedPath>,
+    control: &dyn Control,
+) -> Result<Vec<MotionPlan>, String> {
     let mut segments = Vec::with_capacity(steps.len());
-    for step in steps {
+    for mut step in steps {
+        // Already there: the tool stays where it is instead of the arm changing to another configuration
+        // that reaches the same pose.
+        if let (Goal::Pose(world), Travel::Free) = (&step.goal, &step.travel) {
+            let at = scene.tip_in_world(&start);
+            if (at.translation - world.translation).length() <= 1e-6
+                && at.rotation.angle_between(world.rotation) <= 1e-6
+            {
+                step.goal = Goal::Joints(start.clone());
+            }
+        }
         let goal_pose = match &step.goal {
             Goal::Pose(world) => Some(*world),
             Goal::Joints(_) => None,
@@ -2836,9 +2895,9 @@ fn plan_path(
         };
         let planned = match (&step.travel, previous.and_then(|p| p.segments.get(segments.len()))) {
             // A curve is followed anew each time: the same curve gives the same motion.
-            (Travel::Along(via), _) => gc_motion::plan_follow(&scene, &request, via, control),
-            (_, Some(old)) => gc_motion::replan_using(&scene, &request, old, plugin, control),
-            (_, None) => gc_motion::plan_motion_using(&scene, &request, plugin, control),
+            (Travel::Along(via), _) => gc_motion::plan_follow(scene, &request, via, control),
+            (_, Some(old)) => gc_motion::replan_using(scene, &request, old, plugin, control),
+            (_, None) => gc_motion::plan_motion_using(scene, &request, plugin, control),
         };
         let plan = planned.map_err(|e| format!("{}: {e}", step.name))?;
         if let Some(end) = plan.path.last() {
@@ -2846,7 +2905,7 @@ fn plan_path(
         }
         segments.push(plan);
     }
-    Ok(PlannedPath { segments, strategy: (path.planner.clone(), seed) })
+    Ok(segments)
 }
 
 /// A robot's link tree as plain data for the document: links from the root outwards, each with its joint
@@ -2912,4 +2971,164 @@ pub(crate) fn link_tree(model: &gc_robot::RobotModel, chain: &gc_robot::Chain) -
             }
         })
         .collect()
+}
+
+/// A task planned for one robot (plan 9.5: what the robot would bid for the task).
+#[derive(Clone, Debug)]
+pub struct TaskPlan {
+    /// The robot.
+    pub robot: Id<Robot>,
+    /// Its motions, in the order of the task's steps (a path step is a move to its start and the motion
+    /// along it; steps without motion have none).
+    pub segments: Vec<MotionPlan>,
+    /// Seconds spent in `Wait` steps. Signals, signal waits and tool actions count as no time (they have
+    /// no model yet).
+    pub waiting: f64,
+    /// The joint values the robot ends in.
+    pub end: Vec<f64>,
+}
+
+impl TaskPlan {
+    /// Expected time in seconds: the motions and the waits.
+    pub fn duration(&self) -> f64 {
+        self.segments.iter().map(|s| s.trajectory.duration()).sum::<f64>() + self.waiting
+    }
+}
+
+/// A robot that may do a task, with the time it would take or why it cannot.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TaskCandidate {
+    /// The robot.
+    pub robot: Id<Robot>,
+    /// Expected seconds from its current state, or the reason it cannot do the task.
+    pub time: Result<f64, String>,
+}
+
+impl Session {
+    /// Plans a task for a robot from its current joint values; see [`Session::task_plan_from`].
+    pub fn task_plan(&self, task: Id<gc_doc::Task>, robot: Id<Robot>) -> Result<TaskPlan, String> {
+        let start = self.doc.get(robot).ok_or("the robot no longer exists")?.joints.clone();
+        self.task_plan_from(task, robot, &start)
+    }
+
+    /// Plans a task's steps for a robot that starts at `start`: joint moves and straight moves to the
+    /// waypoint roles (the tool centre point on the sketch point, held as the role says), the path roles
+    /// as they say, the robot's own waypoints in a task located at it. The poses are where the sketches
+    /// are now (a sketch on a component or a work plane follows it), so the plan is for the cell as it
+    /// stands, with the robot's tool and every obstacle. Planned with the default planner, here and now
+    /// (it can take a moment). Fails with the step and the reason: out of reach, in collision, a role
+    /// whose sketch elements are gone, a robot the task is not for.
+    pub fn task_plan_from(
+        &self,
+        task_id: Id<gc_doc::Task>,
+        robot_id: Id<Robot>,
+        start: &[f64],
+    ) -> Result<TaskPlan, String> {
+        use gc_doc::{Location, MoveTarget, RobotChoice};
+        let doc = &self.doc;
+        let task = doc.get(task_id).ok_or("the task no longer exists")?;
+        let robot = doc.get(robot_id).ok_or("the robot no longer exists")?;
+        if doc.is_inactive(task_id.erase()) {
+            return Err(format!("{} is suppressed", task.name));
+        }
+        if doc.is_component_suppressed(robot_id.erase()) {
+            return Err(format!("{} is suppressed", robot.name));
+        }
+        let allowed = match (&task.location, &task.robots) {
+            (Location::Robot(own), _) => *own == robot_id,
+            (_, RobotChoice::Only(robots)) => robots.contains(&robot_id),
+            (_, RobotChoice::Any | RobotChoice::When(_)) => true,
+        };
+        if !allowed {
+            return Err(format!("{} is not for {}", task.name, robot.name));
+        }
+        let loaded = self.robot_model(robot_id).ok_or("the robot description could not be read")?;
+        let mut steps = Vec::new();
+        let mut waiting = 0.0;
+        let free = |name: &str, goal: Goal, travel: Travel| Step {
+            name: name.to_owned(),
+            goal,
+            travel,
+            tcp_speed: None,
+            contacts: Vec::new(),
+        };
+        for step in &task.steps {
+            let (target, travel) = match step {
+                gc_doc::Step::MoveJ(target) => (target, Travel::Free),
+                gc_doc::Step::MoveL(target) => (target, Travel::Linear),
+                gc_doc::Step::FollowPath(role) => {
+                    steps.extend(role_steps(doc, *role, None, &[])?);
+                    continue;
+                }
+                gc_doc::Step::Wait { seconds } => {
+                    waiting += seconds;
+                    continue;
+                }
+                gc_doc::Step::SetIo { .. }
+                | gc_doc::Step::WaitIo { .. }
+                | gc_doc::Step::ToolAction { .. } => continue,
+            };
+            steps.push(match target {
+                MoveTarget::Role(role) => {
+                    let name = doc.get(*role).map(|r| r.name.clone()).unwrap_or_default();
+                    let pose = doc
+                        .role_pose(*role)
+                        .ok_or_else(|| format!("{name}: its sketch point no longer exists"))?;
+                    free(&name, Goal::Pose(pose), travel)
+                }
+                MoveTarget::Waypoint(waypoint) => {
+                    let waypoint = doc.get(*waypoint).ok_or("a waypoint no longer exists")?;
+                    free(&waypoint.name, waypoint_goal(doc, loaded, robot, waypoint)?, travel)
+                }
+            });
+        }
+        let equipment = crate::assembly::obstacles(doc, &self.cell.assemblies, &pose_of);
+        let scene = robot_scene(doc, loaded, &self.cell.meshes, robot, &equipment)?;
+        let how = (PLANNERS[0].1, 1, 4, None);
+        let segments =
+            run_steps(loaded, robot, &scene, steps, start.to_vec(), how, None, &gc_plan::NeverCancel)?;
+        let end = segments.last().and_then(|s| s.path.last()).map_or_else(|| start.to_vec(), Vec::clone);
+        Ok(TaskPlan { robot: robot_id, segments, waiting, end })
+    }
+
+    /// The robots a task may be given to as the states stand: the robot it is located at, the ones it
+    /// names, or every robot (none while its robots' condition does not hold). Suppressed robots are
+    /// left out. In the order the robots were added.
+    pub fn task_robots(&self, task: Id<gc_doc::Task>) -> Vec<Id<Robot>> {
+        use gc_doc::{Location, RobotChoice};
+        let doc = &self.doc;
+        let Some(task) = doc.get(task) else { return Vec::new() };
+        let all = || doc.robots().iter().map(|(id, _)| id);
+        let robots: Vec<Id<Robot>> = match (&task.location, &task.robots) {
+            (Location::Robot(own), _) => vec![*own],
+            (_, RobotChoice::Only(robots)) => all().filter(|r| robots.contains(r)).collect(),
+            (_, RobotChoice::Any) => all().collect(),
+            (_, RobotChoice::When(condition)) => {
+                if doc.condition_holds(condition).unwrap_or(false) {
+                    all().collect()
+                } else {
+                    Vec::new()
+                }
+            }
+        };
+        robots.into_iter().filter(|r| !doc.is_component_suppressed(r.erase())).collect()
+    }
+
+    /// The robots that may do a task ([`Session::task_robots`]), each with the time the task would take
+    /// it from its current state or why it cannot (out of reach, in collision): the fastest first, those
+    /// that cannot last.
+    pub fn task_candidates(&self, task: Id<gc_doc::Task>) -> Vec<TaskCandidate> {
+        let mut candidates: Vec<TaskCandidate> = self
+            .task_robots(task)
+            .into_iter()
+            .map(|robot| TaskCandidate { robot, time: self.task_plan(task, robot).map(|p| p.duration()) })
+            .collect();
+        candidates.sort_by(|a, b| match (&a.time, &b.time) {
+            (Ok(x), Ok(y)) => x.total_cmp(y),
+            (Ok(_), Err(_)) => std::cmp::Ordering::Less,
+            (Err(_), Ok(_)) => std::cmp::Ordering::Greater,
+            (Err(_), Err(_)) => std::cmp::Ordering::Equal,
+        });
+        candidates
+    }
 }

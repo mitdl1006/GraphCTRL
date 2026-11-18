@@ -1835,6 +1835,7 @@ dependencies = [
  "gc_collide",
  "gc_core",
  "gc_doc",
+ "gc_expr",
  "gc_jobs",
  "gc_math",
  "gc_mesh",
