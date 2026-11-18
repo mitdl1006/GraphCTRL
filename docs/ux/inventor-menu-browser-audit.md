@@ -51,12 +51,12 @@ Suppress, Visibility, Grounded, iProperties)을 기준으로 했고, 완전한 �
 | 원문 항목 | 우리 앱 | 상태 |
 |---|---|---|
 | 빠른 검색(Find)으로 파일·피처·관계·iProperties 검색, 공백으로 키워드 구분 | 찾기 상자(이름 부분 일치) | △ iProperties·인스턴스 속성 일치 아이콘 없음 |
-| 필터: 미해결 파일만 / 오래된 파일 제외 / 필터 지우기 | 없음 | ✗ (조건 검색: 문제 있는 관계·억제된 것 등은 백엔드 상태가 있어 가능) |
+| 필터: 미해결 파일만 / 오래된 파일 제외 / 필터 지우기 | "완전 구속 숨기기"(문제 있는 것만), "억제된 항목만"; 미해결·오래된 파일은 해당 없음 | △ |
 | 브라우저 메뉴 > Find | 있음 | ✓ |
 | Edit Values in Browser 켜기/끄기 | "…" 메뉴 | ✓ |
 | Display Preferences: Hide UCS | — | ⛔ UCS 없음 |
 | Hide Work Features(원점 폴더 포함) | "…" 메뉴 | ✓ |
-| Show Children Only | 없음 | ✗ (서브어셈블리 편집 중 부모 숨김) |
+| Show Children Only | "…" 메뉴 "자식만 표시" (제자리 편집 중 편집 대상·그 안·그 위 행만) | ✓ |
 | Hide Fully Constrained | "…" 메뉴 | ✓ |
 | Hide Notes / Hide Documents | — | ⛔ |
 | Hide Warnings | "…" 메뉴 "경고 숨기기" (관계의 sick 표시를 숨김, 실패는 유지) | ✓ |
@@ -117,8 +117,8 @@ Suppress, Visibility, Grounded, iProperties)을 기준으로 했고, 완전한 �
 
 다음(원문 근거가 있는 것부터):
 1. Isolate / Undo Isolate (브라우저·뷰 우클릭; 원문: "Select All Visible … to restore an Isolate Components operation")
-2. 브라우저 Display Preferences: Show Children Only, Show Extended Names (Hide Warnings는 채움)
-3. 브라우저 필터(문제 있는 관계·억제된 것) · 사용자 정의 폴더
+2. 브라우저 Display Preferences: Show Extended Names(부품 피처 전용이라 해당 없음)
+3. 사용자 정의 폴더(백엔드 저장 필요)
 5. 서브어셈블리의 Enabled·Grounded·Suppress, 컴포넌트 끌어 놓기로 폴더 이동
 
 리드에게 요청(백엔드 데이터 필요): 사용자 정의 폴더 저장, Isolate 상태(실행 취소 가능한 가시성 묶음), 브라우저 필터용 상태 질의,

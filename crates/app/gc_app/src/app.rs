@@ -1517,6 +1517,7 @@ impl eframe::App for GraphCtrlApp {
             self.params.hovered = None;
         }
         self.viewport.browser_hover = self.params.hovered;
+        self.params.role = self.viewport.role_selected;
         let opaque = !self.translucent;
         side_panel(
             &ctx,

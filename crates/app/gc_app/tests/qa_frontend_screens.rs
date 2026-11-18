@@ -295,9 +295,15 @@ fn the_browser_menu_options_are_view_only_and_every_combination_is_safe() {
     let origins = |h: &H| h.query_all_by_label("원점").count();
     assert!(origins(&h) >= 1);
     // Each option on, then off again, one by one and together; the document never changes.
-    for item in
-        ["작업 피처 숨기기", "완전 구속 숨기기", "경고 숨기기", "구속 상태 표시", "브라우저에서 값 편집"]
-    {
+    for item in [
+        "작업 피처 숨기기",
+        "완전 구속 숨기기",
+        "자식만 표시",
+        "억제된 항목만",
+        "경고 숨기기",
+        "구속 상태 표시",
+        "브라우저에서 값 편집",
+    ] {
         toggle(&mut h, item);
         assert_eq!(depth(&h), steps, "{item} added an undo step");
         assert!(h.state().session.doc().same_content(&before), "{item} changed the document");
@@ -306,9 +312,15 @@ fn the_browser_menu_options_are_view_only_and_every_combination_is_safe() {
     // Hide Fully Constrained with a relationship that is not fully constrained keeps listing it (or hides
     // it if it is full): either way the relationship still exists.
     assert!(h.state().session.doc().get(id).is_some());
-    for item in
-        ["작업 피처 숨기기", "완전 구속 숨기기", "경고 숨기기", "구속 상태 표시", "브라우저에서 값 편집"]
-    {
+    for item in [
+        "작업 피처 숨기기",
+        "완전 구속 숨기기",
+        "자식만 표시",
+        "억제된 항목만",
+        "경고 숨기기",
+        "구속 상태 표시",
+        "브라우저에서 값 편집",
+    ] {
         toggle(&mut h, item);
     }
     assert!(origins(&h) >= 1, "all options off again: the Origin folders are back");

@@ -982,3 +982,51 @@ fn the_properties_panel_edits_a_path_role() {
         other => panic!("{other:?}"),
     }
 }
+
+/// A click on a waypoint's mark in the view selects its role (the browser follows); a click elsewhere lets go.
+#[test]
+fn clicking_a_roles_mark_in_the_view_selects_it() {
+    let mut harness = sketching();
+    let sketch = harness.state().session.active_sketch().unwrap().0;
+    harness.state_mut().session.set_tool(ToolKind::Point);
+    click(harness.state_mut(), mm(10.0, 10.0), false);
+    harness.state_mut().session.set_tool(ToolKind::Select);
+    let point = *harness
+        .state()
+        .session
+        .active_sketch()
+        .unwrap()
+        .1
+        .points
+        .keys()
+        .find(|p| {
+            harness
+                .state()
+                .session
+                .point_pos(**p)
+                .is_some_and(|pos| (pos[0] - 0.01).abs() < 1e-9 && (pos[1] - 0.01).abs() < 1e-9)
+        })
+        .unwrap();
+    let role = harness.state_mut().session.add_waypoint_role(sketch, point).unwrap();
+    harness.state_mut().session.finish_sketch();
+    harness.run_steps(3);
+    let click_at = |h: &mut Harness<'_>, at: egui::Pos2| {
+        h.event(egui::Event::PointerMoved(at));
+        h.run_steps(2);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            h.run_steps(2);
+        }
+    };
+    let at = harness.state().viewport().screen_of(gc_math::DVec3::new(0.01, 0.01, 0.0)).unwrap();
+    click_at(&mut harness, at);
+    assert_eq!(harness.state().viewport().role_selected, Some(role));
+    // Somewhere else in the view: let go.
+    click_at(&mut harness, egui::pos2(at.x + 120.0, at.y + 90.0));
+    assert_eq!(harness.state().viewport().role_selected, None);
+}
