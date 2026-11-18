@@ -203,8 +203,11 @@ fn view_scene() -> (Session, Id<Body>, Id<Body>) {
 #[test]
 fn locking_a_view_keeps_its_display_and_hides_what_is_added_later() {
     let (mut s, a, _b) = view_scene();
-    s.set_visible(a.erase(), false).unwrap();
+    // A new view is active as soon as it is made (backend 50fba77, lead-approved), and display edits go into
+    // the active view: hide A in "Only B", then show it again in a second view, and come back to the first.
     s.add_view_representation("Only B", None).unwrap();
+    s.set_visible(a.erase(), false).unwrap();
+    s.add_view_representation("All", None).unwrap();
     s.set_visible(a.erase(), true).unwrap();
     s.activate_view_representation(0).unwrap();
     assert!(!s.is_visible(a.erase()));
