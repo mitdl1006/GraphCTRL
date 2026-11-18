@@ -343,6 +343,57 @@ impl Document {
     }
 }
 
+/// Isolate: hides every visible component that is not kept, not inside a kept one and not around one.
+pub(crate) fn isolate(txn: &mut Txn<'_>, keep: &[Occurrence]) -> Outcome {
+    let doc = txn.doc();
+    if keep.is_empty() || keep.iter().any(|o| !doc.has_occurrence(*o)) {
+        return Err(EditError::BadValue);
+    }
+    let mut nodes = doc.components();
+    let robots: Vec<Id<Robot>> = doc.robots().iter().map(|(id, _)| id).collect();
+    nodes.extend(robots.into_iter().flat_map(|robot| doc.robot_links(robot)));
+    let parent = |o: Occurrence| nodes.iter().find(|n| n.occurrence == o).and_then(|n| n.parent);
+    // A component and those it is inside, nearest first.
+    let lineage = |o: Occurrence| {
+        let mut line = vec![o];
+        while let Some(up) = line.last().copied().and_then(parent).filter(|up| !line.contains(up)) {
+            line.push(up);
+        }
+        line
+    };
+    let around: Vec<Occurrence> = keep.iter().flat_map(|k| lineage(*k)).collect();
+    let related = |o: Occurrence| around.contains(&o) || lineage(o).iter().any(|up| keep.contains(up));
+    // Hiding a component hides what is inside it: only the outermost unrelated ones are switched.
+    let hide: Vec<Occurrence> = nodes
+        .iter()
+        .filter(|n| n.visible && !related(n.occurrence) && n.parent.is_none_or(related))
+        .map(|n| n.occurrence)
+        .collect();
+    for occurrence in &hide {
+        set_component(txn, *occurrence, ComponentFlag::Visible, false)?;
+    }
+    crate::cell::set_timeline(txn, |t| {
+        let isolated = &mut t.components.isolated;
+        isolated.extend(hide.iter().filter(|o| !isolated.contains(o)).copied().collect::<Vec<_>>());
+    })?;
+    Ok((Vec::new(), "Isolate"))
+}
+
+/// Undo Isolate: shows again what Isolate hid (what was done meanwhile stays).
+pub(crate) fn undo_isolate(txn: &mut Txn<'_>) -> Outcome {
+    let isolated = txn.doc().timeline().map(|(_, t)| t.components.isolated.clone()).unwrap_or_default();
+    if isolated.is_empty() {
+        return Err(EditError::BadValue);
+    }
+    for occurrence in isolated {
+        if txn.doc().has_occurrence(occurrence) {
+            set_component(txn, occurrence, ComponentFlag::Visible, true)?;
+        }
+    }
+    crate::cell::set_timeline(txn, |t| t.components.isolated.clear())?;
+    Ok((Vec::new(), "Undo Isolate"))
+}
+
 /// Switches a state of a component.
 pub(crate) fn set_component(
     txn: &mut Txn<'_>,

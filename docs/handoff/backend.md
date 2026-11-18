@@ -124,6 +124,19 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — Isolate / Undo Isolate
+
+원문: Frame Generator browser GUID-36AE9264-912D-4D3C-BB24-7EC16FA8777E("Isolate turns off visibility of components … Undo Isolate, instead of Undo,
+restores visibility of components to the pre-isolation state. It also keeps intact those operations performed in the isolated state"),
+Working with the Assembly Browser GUID-5F975252-BDB4-488C-A2C5-8B15C7D3C641("Select All Visible … to restore an Isolate Components operation").
+
+- `session.isolate(&[Occurrence])`: 보이는 컴포넌트 중 선택한 것, 그것을 담은 것(부모), 그 안의 것(자식)을 뺀 나머지를 숨긴다(바깥쪽 것만 끄면 안쪽도 안 보임). Undo 1단계.
+- `session.undo_isolate()`: Isolate가 숨긴 것만 다시 보인다. 그 사이에 한 일(손으로 보이게/숨긴 것, 이동 등)은 그대로. Isolate 전에 숨겨져 있던 것은 계속 숨김. 격리 중이 아니면 `BadValue`.
+- `session.is_isolated()`: Undo Isolate 메뉴를 낼지.
+- 저장: `Components.isolated`(문서에 저장 — 원문은 저장 여부를 말하지 않는다. 가시성이 문서에 저장되므로 같이 저장했다). `CellOp::{Isolate, UndoIsolate}`.
+- 대상은 `Occurrence`(본체·로봇·어셈블리·부품·링크·툴). 셀에서 묶은 서브어셈블리는 프론트가 구성원으로 펼쳐서 넘긴다. 스케치·작업 피처는 숨기지 않는다.
+- 테스트: `gc_session/tests/isolate.rs`.
+
 ## 2026-11-18 — 리드 덧붙임·QA 관찰 2건
 
 - **작업 좌표계 삭제**: 역할의 `aim`이 그 좌표계를 기준으로 하면 `CellOp::DeleteFrame`이 `InUse`로 거부(전에는 `Dangling`).
