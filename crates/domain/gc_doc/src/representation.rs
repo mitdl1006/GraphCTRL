@@ -256,6 +256,9 @@ pub(crate) fn add_view(
         locked: false,
         known: Vec::new(),
     });
+    // "It becomes the active View representation, as designated by a check mark" (To Create, Edit, and
+    // Restore View Representations, GUID-397F9263-12C3-47A1-B6A6-16FC05EDEF47).
+    reps.active_view = Some(reps.views.len() - 1);
     write(txn, reps)?;
     Ok((Vec::new(), "New view representation"))
 }

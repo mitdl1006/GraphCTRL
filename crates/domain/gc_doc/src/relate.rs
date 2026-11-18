@@ -272,6 +272,14 @@ pub enum RelationKind {
     },
     /// A ball joint: the origins coincide; all turning stays free.
     Ball,
+    /// A planar joint, by the general definition (NOT verified against the Inventor 2026 help, whose
+    /// joint page, GUID-21DC3336-5C51-42C1-90FB-4299CD66E0C6, does not describe it): the Z axes line up
+    /// (opposed unless `flip`) and the first origin stays in the plane through the second origin square
+    /// to its Z. Sliding in that plane both ways and turning about Z stay free.
+    Planar {
+        /// Flip component.
+        flip: bool,
+    },
     /// An angle between two planes' normals or two edges' directions, radians.
     Angle {
         /// The angle.
@@ -430,6 +438,7 @@ pub fn takes_limits(kind: &RelationKind, angular: bool) -> bool {
         | RelationKind::Rigid { .. }
         | RelationKind::Rotation { .. }
         | RelationKind::RotationTranslation { .. }
+        | RelationKind::Planar { .. }
         | RelationKind::Ball => false,
     }
 }
@@ -525,6 +534,7 @@ impl Relationship {
             | RelationKind::Rotational { .. }
             | RelationKind::Slider { .. }
             | RelationKind::Cylindrical { .. }
+            | RelationKind::Planar { .. }
             | RelationKind::Ball => true,
             RelationKind::Angle { angle, .. } => {
                 angle.is_finite() && direction_of(&g1).is_some() && direction_of(&g2).is_some()
@@ -661,6 +671,7 @@ fn is_joint(kind: &RelationKind) -> bool {
             | RelationKind::Rotational { .. }
             | RelationKind::Slider { .. }
             | RelationKind::Cylindrical { .. }
+            | RelationKind::Planar { .. }
             | RelationKind::Ball
     )
 }
@@ -692,6 +703,7 @@ fn sense_sign(kind: &RelationKind, now: f64) -> f64 {
         RelationKind::Rigid { flip }
         | RelationKind::Rotational { flip }
         | RelationKind::Slider { flip }
+        | RelationKind::Planar { flip }
         | RelationKind::Cylindrical { flip } => {
             if flip {
                 1.0
@@ -1576,6 +1588,8 @@ fn plain_residuals(term: &Term, poses: &[DPose3]) -> Vec<f64> {
             RelationKind::Slider { .. } | RelationKind::Cylindrical { .. } => {
                 push3(&mut out, across(p1 - p2, z2))
             }
+            // Planar: only the distance from the plane counts.
+            RelationKind::Planar { .. } => out.push((p1 - p2).dot(z2)),
             _ => push3(&mut out, p1 - p2),
         }
         if !matches!(term.kind, RelationKind::Ball) {
@@ -2503,6 +2517,7 @@ impl Document {
             RelationKind::Rigid { .. }
             | RelationKind::Slider { .. }
             | RelationKind::Cylindrical { .. }
+            | RelationKind::Planar { .. }
             | RelationKind::Ball
             | RelationKind::Symmetry { .. }
             // "The Drive Constraint command is not available for motion constraints."

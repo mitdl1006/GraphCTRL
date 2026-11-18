@@ -48,6 +48,11 @@ fn a_view_representation_restores_visibility() {
     assert_eq!(s.representations().views.len(), 1);
     assert!(s.representations().views[0].hidden.contains(&Occurrence::Item(b.erase())));
     assert_eq!(s.representations().views[0].camera.as_deref(), Some("cam"));
+    // A new view is the active one and would take the display edits that follow (Inventor 2026 help, To
+    // Create, Edit, and Restore View Representations, GUID-397F9263-12C3-47A1-B6A6-16FC05EDEF47); locked,
+    // it keeps what it saved. (Backend, lead-approved test change.)
+    assert_eq!(s.representations().active_view, Some(0));
+    op(&mut s, CellOp::LockViewRepresentation { index: 0, locked: true }).unwrap();
     // Show everything, hide a, then activate the view.
     s.set_component(Occurrence::Item(b.erase()), ComponentFlag::Visible, true).unwrap();
     s.set_component(Occurrence::Item(a.erase()), ComponentFlag::Visible, false).unwrap();
@@ -64,6 +69,7 @@ fn a_view_representation_restores_visibility() {
         assert!(s.doc().same_content(&before));
     }
     // A view that names a component that is gone (or never was) does not break activation.
+    op(&mut s, CellOp::LockViewRepresentation { index: 0, locked: false }).unwrap();
     let mut view = s.representations().views[0].clone();
     view.hidden.push(Occurrence::Item(ghost()));
     view.disabled.push(Occurrence::Item(ghost()));

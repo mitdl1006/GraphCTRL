@@ -124,6 +124,41 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — Planar 조인트 (**원문 미확인, 일반 정의**)
+
+- 리드 지시: 도움말에서 한 번 더 찾고(조인트·관계·자유도 관련 35쪽을 다시 받아 "Planar joint"/"joint types"/"Gap" 검색 — 없음), 없으면 일반 정의로 구현하고 "원문 미확인"으로 표시.
+- `RelationKind::Planar { flip }`: 두 조인트 원점의 Z축이 한 방향(기본 반대, `flip`이면 같은 방향)이고 첫 원점이 둘째 원점을 지나 그 Z에 수직인 평면 위에 있다. 평면 위 병진 2 + Z 둘레 회전 1이 남는다(`component_dof` 합계 3, 회전 1).
+- 한계(Limits)·Drive는 없다(`takes_limits` false, `driven` `BadValue`). Lock·Protect는 다른 조인트와 같다. Automatic은 Planar를 고르지 않는다(원문 규칙에 없음) — 유형을 직접 고른다.
+- Gap, Ball 한계: 원문 확인 전까지 보류(리드 결정). parity 문서(`docs/ux/inventor-assembly-parity.md` "Planar 조인트" 줄)에 같은 표시를 남겼다.
+- 테스트: `gc_doc/tests/relate.rs::a_planar_joint_leaves_sliding_on_the_plane_and_turning_about_its_normal`.
+
+## 2026-11-18 — 리드 결정 반영: 새 뷰 표현은 만들자마자 활성, "Primary가 활성일 때만" 규칙
+
+근거: To Create, Edit, and Restore View Representations(`GUID-397F9263-12C3-47A1-B6A6-16FC05EDEF47`) — "A new ViewRep node is added … It becomes the active View representation, as designated by a check mark." Positional representations in assemblies(`GUID-C728DFAC-1B45-4879-A004-45A8DC991954`) — "You can perform the following operations only when the Primary representation is active: Add, delete, or reorder components. Restructure the assembly. Change the count of a pattern. Create or delete work features. …"
+
+- **동작 변화 1**: `AddViewRepresentation`이 새 뷰를 활성으로 만든다. 활성·잠기지 않은 뷰는 표시 편집을 받으므로, "뷰를 만든 뒤 표시를 바꾸고 다시 활성화하면 복원"하려면 그 뷰를 잠그거나(Lock) 다른 뷰가 활성이어야 한다.
+  - 고친 테스트(리드 승인): `gc_doc/tests/relate.rs::view_representations_restore_what_is_shown`(만든 뒤 Lock), `gc_session/tests/qa_representations.rs::a_view_representation_restores_visibility`(만든 뒤 Lock, 유령 항목 검사 전에 해제), `gc_session/tests/occurrence_selection.rs::the_representations_folder_lists…`(숨기기를 "Hidden" 뷰를 만든 뒤로), `gc_app/tests/shell.rs::a_view_representation_restores_the_camera_and_the_section`(둘째 뷰를 만든 뒤 첫째를 다시 활성화 — 브라우저는 이미 활성인 행의 클릭을 무시한다).
+- **동작 변화 2**: 위치 표현이 활성인 동안 다음은 `EditError::PrimaryOnly`(새 변형)로 거부한다 — `AddBody`, `AddRobot`, `AddAssembly`, `MirrorComponents`, `CopyComponents`, `ReplaceComponents`, `AddPattern`, `RestorePatternElement`, `DeleteBody`, `DeleteRobot`, `DeleteAssembly`, `DeletePattern`, `MoveInTree`, `AddWorkFeature`, `DeleteWorkFeature`, `Subassembly(Demote | Move | Dissolve | Paste)`, 개수가 바뀌는 `SetPattern`. 배치·관계 값·억제·가시성·매개변수는 그대로 된다(위치 표현의 용도).
+  - 메시지: `Msg::ErrPrimaryOnly`("Primary 위치 표현이 활성일 때만 할 수 있습니다"), gc_panels의 오류 표시 match에 한 줄 추가.
+  - 작업 좌표계(`AddFrame`/`DeleteFrame`)와 스케치는 막지 않았다(원문 목록의 "work features"는 작업 평면·축·점으로 읽었다).
+- 테스트: `gc_doc/tests/relate.rs::components_are_added_and_deleted_only_in_the_primary_position`.
+
+## 2026-11-18 — 패턴 요소 억제·독립 요소 복원, BOM에서 억제 컴포넌트 제외 (대조 목록 10); 재구성(12)은 이미 있음
+
+근거: Suppress elements in assembly patterns(`GUID-FDD20E41-93A5-479D-B547-BA9956E9966B`) — "Suppressed pattern elements are not shown in the graphics window and are not calculated when the assembly is updated … also excluded from a bill of materials", "The suppression of elements is persistent". About Assembly Components in Patterns(`GUID-ABC5607F-6128-40C8-BF28-44D918E5803C`) — "You can restore an independent element to the pattern, but the copied components created when the element was made independent are not automatically deleted".
+
+| 무엇 | 호출 |
+|---|---|
+| 요소 억제/해제 | `CellOp::SuppressPatternElement { index, element, suppressed }` — 소스(0)·독립 요소·없는 자리는 `BadValue`. 요소의 컴포넌트에 Suppressed 플래그가 같이 걸린다(안 그려지고 장애물·계획에서 빠짐) |
+| 억제된 자리 | `doc.patterns()[i].suppressed: Vec<u32>` — 개수를 줄였다 늘려도 유지 |
+| 독립 요소 복원 | `CellOp::RestorePatternElement { index, element }` — 패턴이 그 자리를 다시 채운다. 독립시킬 때 떨어져 나온 컴포넌트는 남는다(원문: 겹치지 않게 사용자가 옮기거나 지움) |
+
+- `ComponentPattern`에 `suppressed` 필드 추가(serde default; 다른 브랜치에 구조체 리터럴 없음).
+- **동작 변화**: BOM(`bill_of_materials`, `bom_csv`)이 억제된 컴포넌트와 그 아래 행을 뺀다. 전에는 억제돼도 세었다. 기존 BOM 테스트(리드·QA)에는 억제를 쓰는 것이 없다.
+- 하지 않은 것: 부품 피처 패턴에 연관된 패턴(우리 부품에는 피처가 없다), 패턴의 패턴, Replace all instances.
+- **재구성(12)**: 원문(Create Subassemblies in Place, `GUID-FCEE3F0E-AAE2-4619-8645-2588FEECD353`)은 "Component Demote … You can then move components between assembly levels by dragging components in the browser"뿐이고 둘 다 이미 있다(`SubassemblyOp::{Demote, Move}`; 위 레벨로 `Move`가 곧 Promote). 2026 페이지에서 Promote 전용 서술은 찾지 못했다. 추가 작업 없음.
+- 테스트: `gc_doc/tests/pattern.rs::pattern_elements_can_be_suppressed_and_independent_ones_restored`, `gc_session/tests/bom.rs::suppressed_components_are_left_out`.
+
 ## 2026-11-18 — Motion 구속(Rotation, Rotation-Translation) (대조 목록 1); Transitional은 보류 (2)
 
 근거: Place Motion constraints between assembly components(`GUID-493DEAF8-D124-47BE-AFF2-B0535E9005C5`), Place Constraint Reference - Motion Tab(`GUID-0293C151-565F-4980-AA95-DD76C54AB538`) — "Because they operate only on open degrees of freedom, they do not conflict with positional constraints, resize adaptive parts, or move grounded components", "The Drive Constraint command is not available for motion constraints", "a value of 4.0 (4:1) rotates the second selection four units for every unit the first selection rotates", "the distance specifies how much the second selection moves relative to one rotation of the first selection", "the constraint is bidirectional", 기본값(원통 둘 → 반지름 비, 첫째가 원통 → 둘레).

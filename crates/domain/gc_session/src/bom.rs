@@ -80,7 +80,22 @@ impl Session {
 
     /// The lines of a BOM view, in tree order.
     pub fn bill_of_materials(&self, view: BomView) -> Vec<BomRow> {
-        let rows = self.component_tree();
+        // Suppressed components take no part (Inventor 2026 help, Suppress elements in assembly patterns,
+        // GUID-FDD20E41-93A5-479D-B547-BA9956E9966B: "Suppressed pattern elements are also excluded from
+        // a bill of materials"), nor does what hangs under them. Rows come parents first.
+        let mut left_out: Vec<TreeKey> = Vec::new();
+        let rows: Vec<TreeRow> = self
+            .component_tree()
+            .into_iter()
+            .filter(|row| {
+                let out = row.component.as_ref().is_some_and(|c| c.suppressed)
+                    || row.parent.is_some_and(|parent| left_out.contains(&parent));
+                if out {
+                    left_out.push(row.key);
+                }
+                !out
+            })
+            .collect();
         let mut children: HashMap<Option<TreeKey>, Vec<usize>> = HashMap::new();
         for (i, row) in rows.iter().enumerate() {
             children.entry(row.parent).or_default().push(i);

@@ -73,6 +73,12 @@ pub struct ComponentPattern {
     /// Occurrences made independent: their copies left the pattern and the place is not filled again.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub independent: Vec<u32>,
+    /// Occurrences suppressed (Inventor 2026 help, Suppress elements in assembly patterns,
+    /// GUID-FDD20E41-93A5-479D-B547-BA9956E9966B): "not shown in the graphics window and … not
+    /// calculated when the assembly is updated … also excluded from a bill of materials". Kept when
+    /// the pattern's count changes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub suppressed: Vec<u32>,
 }
 
 /// An occurrence of a pattern.
@@ -243,6 +249,13 @@ fn fill(
             });
             items.push(copy);
         }
+        // An occurrence that was suppressed stays so when it comes back.
+        if pattern.suppressed.contains(&index) {
+            for item in &items {
+                let occurrence = crate::design::Occurrence::Item(*item);
+                crate::tree::set_component(txn, occurrence, crate::design::ComponentFlag::Suppressed, true)?;
+            }
+        }
         pattern.elements.push(PatternElement { index, items });
     }
     pattern.elements.sort_by_key(|e| e.index);
@@ -270,6 +283,7 @@ pub(crate) fn add(
         layout: *layout,
         elements: Vec::new(),
         independent: Vec::new(),
+        suppressed: Vec::new(),
     };
     let mut created = Vec::new();
     fill(txn, &mut pattern, &mut created)?;
@@ -337,6 +351,63 @@ pub(crate) fn make_independent(
     pattern.independent.push(element);
     write_patterns(txn, patterns)?;
     Ok((Vec::new(), "Make independent"))
+}
+
+/// Suppresses or brings back an occurrence of a pattern (not the source, not an independent one): its
+/// components are suppressed with it.
+pub(crate) fn suppress_element(
+    txn: &mut Txn<'_>,
+    index: usize,
+    element: u32,
+    suppressed: bool,
+) -> Result<(Vec<Created>, &'static str), EditError> {
+    let mut patterns = txn.doc().patterns();
+    let pattern = patterns.get_mut(index).ok_or(EditError::BadValue)?;
+    let items = pattern
+        .elements
+        .iter()
+        .find(|e| e.index == element)
+        .map(|e| e.items.clone())
+        .ok_or(EditError::BadValue)?;
+    pattern.suppressed.retain(|e| *e != element);
+    if suppressed {
+        pattern.suppressed.push(element);
+    }
+    write_patterns(txn, patterns)?;
+    for item in items {
+        let occurrence = crate::design::Occurrence::Item(item);
+        if txn.doc().component_flag(occurrence, crate::design::ComponentFlag::Suppressed) != suppressed {
+            crate::tree::set_component(
+                txn,
+                occurrence,
+                crate::design::ComponentFlag::Suppressed,
+                suppressed,
+            )?;
+        }
+    }
+    Ok((Vec::new(), if suppressed { "Suppress" } else { "Unsuppress" }))
+}
+
+/// Restores an independent occurrence to its pattern (Inventor 2026 help, About Assembly Components in
+/// Patterns, GUID-ABC5607F-6128-40C8-BF28-44D918E5803C: "You can restore an independent element to the
+/// pattern, but the copied components created when the element was made independent are not
+/// automatically deleted"): the pattern fills the place again; the components that left stay.
+pub(crate) fn restore_element(
+    txn: &mut Txn<'_>,
+    index: usize,
+    element: u32,
+) -> Result<(Vec<Created>, &'static str), EditError> {
+    let mut patterns = txn.doc().patterns();
+    let mut pattern = patterns.get(index).cloned().ok_or(EditError::BadValue)?;
+    if !pattern.independent.contains(&element) {
+        return Err(EditError::BadValue);
+    }
+    pattern.independent.retain(|e| *e != element);
+    let mut created = Vec::new();
+    fill(txn, &mut pattern, &mut created)?;
+    patterns[index] = pattern;
+    write_patterns(txn, patterns)?;
+    Ok((created, "Restore pattern element"))
 }
 
 /// Moves every pattern copy to where its parent and the layout put it; patterns whose parents are gone

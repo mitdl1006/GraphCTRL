@@ -192,3 +192,27 @@ fn csv_guards_tab_and_carriage_return_and_trailing_spaces_merge_part_numbers() {
         s.bill_of_materials(BomView::PartsOnly).into_iter().map(|r| (r.part_number, r.quantity)).collect();
     assert_eq!(parts, vec![("BOLT".to_owned(), 2), ("bolt".to_owned(), 1)]);
 }
+
+/// Suppressed components take no part in the bill of materials (Inventor 2026 help, Suppress elements
+/// in assembly patterns, GUID-FDD20E41-93A5-479D-B547-BA9956E9966B: "Suppressed pattern elements are also
+/// excluded from a bill of materials").
+#[test]
+fn suppressed_components_are_left_out() {
+    let (mut s, _, _, [a, _, _, d, _]) = cell();
+    let bolts = |s: &Session| {
+        s.bill_of_materials(BomView::PartsOnly)
+            .into_iter()
+            .find(|r| r.part_number == "BOLT")
+            .unwrap()
+            .quantity
+    };
+    assert_eq!(bolts(&s), 2);
+    s.set_component(Occurrence::Item(a.erase()), gc_doc::ComponentFlag::Suppressed, true).unwrap();
+    s.set_component(Occurrence::Item(d.erase()), gc_doc::ComponentFlag::Suppressed, true).unwrap();
+    assert_eq!(bolts(&s), 1);
+    for view in [BomView::PartsOnly, BomView::Structured] {
+        assert!(s.bill_of_materials(view).iter().all(|r| r.part_number != "MOTOR"), "{view:?}");
+    }
+    s.set_component(Occurrence::Item(a.erase()), gc_doc::ComponentFlag::Suppressed, false).unwrap();
+    assert_eq!(bolts(&s), 2);
+}

@@ -611,6 +611,26 @@ pub enum CellOp {
     },
     /// Subassemblies made in the cell: Demote, move between levels, dissolve, rename.
     Subassembly(crate::subassembly::SubassemblyOp),
+    /// Suppresses or brings back an occurrence of a component pattern (Inventor 2026 help, Suppress
+    /// elements in assembly patterns, GUID-FDD20E41-93A5-479D-B547-BA9956E9966B): its components are
+    /// not shown, not obstacles and not in the bill of materials. Not for the source or an independent
+    /// occurrence.
+    SuppressPatternElement {
+        /// Which pattern.
+        index: usize,
+        /// Which occurrence (1, 2, …).
+        element: u32,
+        /// True to suppress.
+        suppressed: bool,
+    },
+    /// Restores an independent occurrence to its pattern (About Assembly Components in Patterns,
+    /// GUID-ABC5607F-6128-40C8-BF28-44D918E5803C); the components that left the pattern stay.
+    RestorePatternElement {
+        /// Which pattern.
+        index: usize,
+        /// Which occurrence.
+        element: u32,
+    },
     /// Accept the relationship (Inventor 2026 help, Place/Edit Connection Error Reference,
     /// GUID-23D0D333-AD6A-4CB6-9786-6966DFE8FDFF: "Creates the relationship or accepts the change to the
     /// existing relationship. The relationship is created and added to the browser with an icon"): adds
@@ -1176,7 +1196,46 @@ fn target_ok(txn: &Txn<'_>, robot: Id<Robot>, target: &WaypointTarget) -> Result
     Ok(())
 }
 
+/// True for the edits that are only possible while the Primary positional representation is active
+/// (Inventor 2026 help, Positional representations in assemblies,
+/// GUID-C728DFAC-1B45-4879-A004-45A8DC991954): adding, deleting or reordering components, restructuring
+/// the assembly, changing the count of a pattern, creating or deleting work features.
+fn needs_primary(doc: &crate::Document, op: &CellOp) -> bool {
+    use crate::subassembly::SubassemblyOp;
+    match op {
+        CellOp::AddBody(_)
+        | CellOp::AddRobot { .. }
+        | CellOp::AddAssembly { .. }
+        | CellOp::MirrorComponents { .. }
+        | CellOp::CopyComponents { .. }
+        | CellOp::ReplaceComponents { .. }
+        | CellOp::AddPattern { .. }
+        | CellOp::RestorePatternElement { .. }
+        | CellOp::DeleteBody(_)
+        | CellOp::DeleteRobot(_)
+        | CellOp::DeleteAssembly(_)
+        | CellOp::DeletePattern { .. }
+        | CellOp::MoveInTree { .. }
+        | CellOp::AddWorkFeature { .. }
+        | CellOp::DeleteWorkFeature(_) => true,
+        CellOp::Subassembly(op) => matches!(
+            op,
+            SubassemblyOp::Demote { .. }
+                | SubassemblyOp::Move { .. }
+                | SubassemblyOp::Dissolve(_)
+                | SubassemblyOp::Paste { .. }
+        ),
+        CellOp::SetPattern { index, layout } => {
+            doc.patterns().get(*index).is_some_and(|p| p.layout.count() != layout.count())
+        }
+        _ => false,
+    }
+}
+
 pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'static str), EditError> {
+    if txn.doc().active_position().is_some() && needs_primary(txn.doc(), op) {
+        return Err(EditError::PrimaryOnly);
+    }
     match op {
         CellOp::AddRole(_)
         | CellOp::SetRole { .. }
@@ -1210,6 +1269,12 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
             }
             settle(txn)?;
             Ok((Vec::new(), "Edit constraint"))
+        }
+        CellOp::SuppressPatternElement { index, element, suppressed } => {
+            crate::pattern::suppress_element(txn, *index, *element, *suppressed)
+        }
+        CellOp::RestorePatternElement { index, element } => {
+            crate::pattern::restore_element(txn, *index, *element)
         }
         CellOp::LockViewRepresentation { index, locked } => {
             crate::representation::lock_view(txn, *index, *locked)
