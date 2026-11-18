@@ -558,7 +558,8 @@ fn the_ur5e_follows_a_sketched_polyline() {
     harness.run();
     let session = &harness.state().session;
     let path = session.doc().paths().iter().next().unwrap().0;
-    assert_eq!(session.doc().get(path).unwrap().linear, vec![false, true, true]);
+    // Sketch -> path makes a path that follows the sketch's path role (no copied waypoints).
+    assert!(!session.doc().get(path).unwrap().follow.is_empty(), "the path follows the sketch's role");
     assert_eq!(session.plan_status(path), gc_session::PlanStatus::Ready, "{:?}", session.plan_error(path));
     // The tool passes through the three sketch points, and between them stays on the lines' height.
     let tips: Vec<[f64; 3]> = session.planned(path).unwrap().tip_path().collect();
