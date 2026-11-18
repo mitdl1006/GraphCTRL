@@ -1209,3 +1209,42 @@ fn components_are_added_and_deleted_only_in_the_primary_position() {
     bench.cell(CellOp::ActivatePositionalRepresentation(None)).unwrap();
     bench.cell(CellOp::AddBody(extra)).unwrap();
 }
+
+/// A planar joint by the general definition (not described in the Inventor 2026 help pages found): the
+/// component slides on the plane both ways and turns about its normal; nothing else.
+#[test]
+fn a_planar_joint_leaves_sliding_on_the_plane_and_turning_about_its_normal() {
+    let mut bench = Bench::new();
+    let (table, block) = table_and_box(&mut bench);
+    let frame = |origin: [f64; 3], z: [f64; 3]| Geometry::Frame { origin, z, x: [1.0, 0.0, 0.0] };
+    let joint = Relationship::new(
+        "Planar:1",
+        RelationKind::Planar { flip: false },
+        on(block, frame([0.0, 0.0, -0.1], [0.0, 0.0, -1.0])),
+        on(table, frame([0.0, 0.0, 0.5], [0.0, 0.0, 1.0])),
+    );
+    let id = bench.relate(joint).unwrap();
+    // The tilted block stands upright on the table top, about where it was across the table.
+    let pose = bench.pose(block);
+    assert!(close(pose.rotation * DVec3::Z, DVec3::Z));
+    assert!((pose.translation.z - 1.1).abs() < 1e-7);
+    assert!((pose.translation.x - 0.3).abs() < 0.1 && (pose.translation.y - 0.2).abs() < 0.1);
+    assert_eq!(bench.doc.component_dof(block.erase()).unwrap().total, 3);
+    assert_eq!(bench.doc.component_dof(block.erase()).unwrap().rotation(), 1);
+    // Slid across and turned about the vertical: it stays. Lifted and tipped: it comes back down.
+    let mut moved = bench.doc.get(block).unwrap().clone();
+    moved.placement = Placement { xyz: [-0.6, 0.3, 1.1], rpy: [0.0, 0.0, 0.7] };
+    bench.cell(CellOp::SetBody { id: block, body: moved.clone() }).unwrap();
+    assert_eq!(bench.doc.get(block).unwrap().placement, moved.placement);
+    moved.placement = Placement { xyz: [-0.6, 0.3, 1.6], rpy: [0.3, 0.0, 0.7] };
+    bench.cell(CellOp::SetBody { id: block, body: moved }).unwrap();
+    let pose = bench.pose(block);
+    assert!((pose.translation.z - 1.1).abs() < 1e-7 && close(pose.rotation * DVec3::Z, DVec3::Z));
+    // Flip turns it over; a planar joint takes no limits and cannot be driven.
+    let flipped =
+        Relationship { kind: RelationKind::Planar { flip: true }, ..bench.doc.get(id).unwrap().clone() };
+    bench.cell(CellOp::SetRelationship { id, relationship: flipped }).unwrap();
+    assert!(close(bench.pose(block).rotation * DVec3::Z, -DVec3::Z));
+    assert!(!gc_doc::takes_limits(&RelationKind::Planar { flip: false }, true));
+    assert!(bench.doc.driven(id, 0.1).is_err());
+}

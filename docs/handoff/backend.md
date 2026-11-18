@@ -124,6 +124,14 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — Planar 조인트 (**원문 미확인, 일반 정의**)
+
+- 리드 지시: 도움말에서 한 번 더 찾고(조인트·관계·자유도 관련 35쪽을 다시 받아 "Planar joint"/"joint types"/"Gap" 검색 — 없음), 없으면 일반 정의로 구현하고 "원문 미확인"으로 표시.
+- `RelationKind::Planar { flip }`: 두 조인트 원점의 Z축이 한 방향(기본 반대, `flip`이면 같은 방향)이고 첫 원점이 둘째 원점을 지나 그 Z에 수직인 평면 위에 있다. 평면 위 병진 2 + Z 둘레 회전 1이 남는다(`component_dof` 합계 3, 회전 1).
+- 한계(Limits)·Drive는 없다(`takes_limits` false, `driven` `BadValue`). Lock·Protect는 다른 조인트와 같다. Automatic은 Planar를 고르지 않는다(원문 규칙에 없음) — 유형을 직접 고른다.
+- Gap, Ball 한계: 원문 확인 전까지 보류(리드 결정). parity 문서(`docs/ux/inventor-assembly-parity.md` "Planar 조인트" 줄)에 같은 표시를 남겼다.
+- 테스트: `gc_doc/tests/relate.rs::a_planar_joint_leaves_sliding_on_the_plane_and_turning_about_its_normal`.
+
 ## 2026-11-18 — 리드 결정 반영: 새 뷰 표현은 만들자마자 활성, "Primary가 활성일 때만" 규칙
 
 근거: To Create, Edit, and Restore View Representations(`GUID-397F9263-12C3-47A1-B6A6-16FC05EDEF47`) — "A new ViewRep node is added … It becomes the active View representation, as designated by a check mark." Positional representations in assemblies(`GUID-C728DFAC-1B45-4879-A004-45A8DC991954`) — "You can perform the following operations only when the Primary representation is active: Add, delete, or reorder components. Restructure the assembly. Change the count of a pattern. Create or delete work features. …"
