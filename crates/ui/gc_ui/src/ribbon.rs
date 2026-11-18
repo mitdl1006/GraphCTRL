@@ -277,6 +277,14 @@ pub fn ribbon_split_button(
     run
 }
 
+/// A large ribbon button that opens a drop-list (Inventor's Object Visibility): `add_items` fills the list,
+/// which stays open while check boxes in it are clicked and closes with a click outside.
+pub fn ribbon_drop_button(ui: &mut Ui, icon: Icon, label: &str, add_items: impl FnOnce(&mut Ui)) -> Response {
+    let button = ribbon_button(ui, icon, label, false, true);
+    egui::Popup::menu(&button).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(add_items);
+    button
+}
+
 /// A group of ribbon buttons with its title underneath and a separator after it.
 pub fn ribbon_group(ui: &mut Ui, title: &str, add_buttons: impl FnOnce(&mut Ui)) {
     ui.vertical(|ui| {

@@ -5108,10 +5108,10 @@ fn alt_drag_places_a_mate_between_two_faces() {
 /// (shortcut table GUID-428B9A8E-E513-44C8-888A-F6048AE89F8E).
 #[test]
 fn ctrl_c_and_ctrl_v_paste_a_copy_of_the_selected_body() {
-    let mut harness = egui_kittest::Harness::builder()
-        .with_size(SIZE)
-        .with_pixels_per_point(1.0)
-        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
     harness.run();
     let app = harness.state_mut();
     let body =
@@ -5134,9 +5134,20 @@ fn ctrl_c_and_ctrl_v_paste_a_copy_of_the_selected_body() {
     harness.run_steps(3);
     assert_eq!(bodies(&harness), 1, "nothing is made before the click");
     assert!(harness.state().viewport().is_placing(), "the paste waits for its place");
+    // A ghost of the copy follows the cursor (the document is untouched).
+    harness.event(egui::Event::PointerMoved(egui::pos2(560.0, 430.0)));
+    harness.run_steps(3);
+    assert_eq!(harness.state().session.paste_ghosts().len(), 1, "the ghost");
+    if gpu {
+        let image = harness.render().unwrap();
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        image.save(out.join("review-64-paste-ghost.png")).unwrap();
+    }
     harness.key_press(egui::Key::Escape);
     harness.run_steps(3);
     assert_eq!(bodies(&harness), 1, "Esc pasted nothing");
+    assert!(harness.state().session.paste_ghosts().is_empty(), "and the ghost is gone");
     assert!(!harness.state().viewport().is_placing());
     // Pasted again, a click pastes where the cursor is: one undo step.
     let depth = harness.state().session.history().undo_depth();
@@ -5561,4 +5572,339 @@ fn the_browser_menu_hides_work_features_and_edits_a_constraint_value_in_place() 
     let kind = harness.state().session.doc().get(id).unwrap().kind;
     let gc_doc::RelationKind::Mate { offset, .. } = kind else { panic!("{kind:?}") };
     assert!((offset - 0.025).abs() < 1e-9, "the offset was typed in the browser: {offset}");
+}
+
+/// The Work Plane and Work Point dialogs list the newer ways to define a feature (Inventor 2026 help, To
+/// Create Work Features, GUID-38A9748E-FA2D-44D3-928C-DFE1326A9385); a midplane is made through the dialog.
+#[test]
+fn the_work_plane_dialog_offers_the_newer_definitions_and_makes_a_midplane() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let op = gc_doc::CellOp::AddWorkFeature(gc_doc::WorkFeature {
+        name: "Above".to_owned(),
+        geometry: gc_doc::WorkGeometry::PlaneOffset {
+            base: gc_doc::PlaneRef::Origin(gc_doc::OriginPlane::Xy),
+            distance: 0.04,
+        },
+        visible: true,
+    });
+    harness.state_mut().session.execute(&gc_doc::Command::Cell(op)).unwrap();
+    harness.run();
+    harness.get_by_label("작업 평면").click();
+    harness.run_steps(3);
+    for name in [
+        "평면에 평행, 점 통과",
+        "두 평면의 중간면",
+        "평면에 대한 각도 (선 기준)",
+        "선과 점",
+        "선에 수직, 점 통과",
+        "곡선에 수직, 점 통과",
+    ] {
+        harness.get_by_label(name);
+    }
+    harness.get_by_label("두 평면의 중간면").click();
+    harness.run_steps(3);
+    if gpu {
+        let image = harness.render().unwrap();
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        image.save(out.join("review-65-work-plane-kinds.png")).unwrap();
+    }
+}
+
+/// Page Up and the navigation bar's Look At turn the view square to the sketch plane being edited
+/// (Inventor 2026 help, Navigation Bar Reference, GUID-3B926737-92BA-46CF-B722-97F68651772B).
+#[test]
+fn look_at_turns_the_view_square_to_the_sketch_plane() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.state_mut().session.create_sketch("XZ").unwrap();
+    // A new sketch is looked at once by itself; then the view is turned away.
+    harness.run_steps(3);
+    harness.state_mut().viewport_mut().look(gc_draw::StandardView::Iso);
+    harness.run_steps(3);
+    let forward = harness.state().viewport().camera.forward();
+    assert!(forward.y.abs() < 0.9, "an isometric view is not square to XZ: {forward:?}");
+    harness.key_press(egui::Key::PageUp);
+    harness.run_steps(3);
+    let forward = harness.state().viewport().camera.forward();
+    assert!(forward.y.abs() > 0.99, "square to the XZ plane (its normal is Y): {forward:?}");
+    // The button of the navigation bar does the same from another view.
+    harness.state_mut().viewport_mut().look(gc_draw::StandardView::Iso);
+    harness.run_steps(3);
+    harness.get_by_label("면 보기").click();
+    harness.run_steps(3);
+    assert!(harness.state().viewport().camera.forward().y.abs() > 0.99);
+}
+
+#[test]
+fn the_3d_draw_panel_has_a_bend_button_that_esc_ends() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    pick_variant(&mut harness, "스케치", "3D 스케치");
+    harness.run();
+    assert!(harness.state().session.sketch_is_spatial());
+    harness.get_by_label("굽힘").click();
+    harness.run();
+    assert!(harness.state().viewport().is_bending());
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert!(!harness.state().viewport().is_bending());
+}
+
+#[test]
+fn a_3d_spline_is_placed_with_fit_points_and_finished_with_enter() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    pick_variant(&mut harness, "스케치", "3D 스케치");
+    harness.run();
+    pick_variant(&mut harness, "선", "스플라인(보간)");
+    harness.run();
+    assert_eq!(harness.state().session.tool(), ToolKind::Spline);
+    let count = |h: &egui_kittest::Harness<'_, GraphCtrlApp>| {
+        h.state()
+            .session
+            .active_sketch()
+            .unwrap()
+            .1
+            .curves
+            .values()
+            .filter(|c| matches!(c.geom, gc_sketch::CurveGeom::Spline { .. }))
+            .count()
+    };
+    for at in [egui::pos2(480.0, 520.0), egui::pos2(560.0, 470.0), egui::pos2(640.0, 540.0)] {
+        harness.event(egui::Event::PointerMoved(at));
+        harness.run();
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.run();
+        }
+    }
+    harness.event(egui::Event::PointerMoved(egui::pos2(700.0, 500.0)));
+    harness.run();
+    assert!(harness.state().session.spatial_spline_preview().is_some());
+    assert_eq!(count(&harness), 0);
+    harness.key_press(egui::Key::Enter);
+    harness.run();
+    assert_eq!(count(&harness), 1);
+}
+
+/// Auto-bend with 3D line creation (Application Options, Sketch tab, GUID-1898C432-CFD2-46F1-8BAE-631392DFBF1D):
+/// off by default, saved, read back at the next start.
+#[test]
+fn the_auto_bend_option_is_off_by_default_saved_and_read_back() {
+    let directory = tempfile::tempdir().unwrap();
+    let options =
+        || RunOptions { settings_dir: Some(directory.path().to_path_buf()), ..RunOptions::default() };
+    let mut harness =
+        egui_kittest::Harness::builder().with_size(SIZE).build_eframe(|cc| GraphCtrlApp::new(cc, options()));
+    harness.run();
+    assert!(!harness.state().session.auto_bend());
+    harness.get_by_label("파일").click();
+    harness.run();
+    harness.get_by_label("응용 프로그램 옵션").click();
+    harness.run_steps(3);
+    harness.get_by_label("3D 선 그릴 때 자동 굽힘").click();
+    harness.run();
+    assert!(harness.state().session.auto_bend());
+    let saved = gc_persist::places::load_settings(directory.path());
+    assert!(saved.auto_bend);
+
+    let again =
+        egui_kittest::Harness::builder().with_size(SIZE).build_eframe(|cc| GraphCtrlApp::new(cc, options()));
+    assert!(again.state().session.auto_bend());
+}
+
+/// Helical Curve in a 3D sketch (GUID-37BA1DCE-6BC4-41CD-A36D-577F31B304FC): the dialog's values, then the start
+/// and end clicked in the viewport.
+#[test]
+fn the_helical_curve_dialog_then_two_clicks_make_a_helix() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    pick_variant(&mut harness, "스케치", "3D 스케치");
+    harness.run();
+    harness.get_by_label("나선 곡선").click();
+    harness.run();
+    assert!(harness.state().viewport().is_helixing());
+    harness.get_by_label("확인").click();
+    harness.run();
+    let splines = |h: &egui_kittest::Harness<'_, GraphCtrlApp>| {
+        h.state()
+            .session
+            .active_sketch()
+            .unwrap()
+            .1
+            .curves
+            .values()
+            .filter(|c| matches!(c.geom, gc_sketch::CurveGeom::Spline { .. }))
+            .count()
+    };
+    for at in [egui::pos2(480.0, 520.0), egui::pos2(640.0, 440.0)] {
+        harness.event(egui::Event::PointerMoved(at));
+        harness.run();
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.run();
+        }
+    }
+    assert_eq!(splines(&harness), 1);
+    assert!(!harness.state().viewport().is_helixing());
+}
+
+/// Visual Style (View tab, Appearance panel; Inventor 2026 help, About Visual Styles in Models,
+/// GUID-8D59A8BF-49A8-4214-A3A7-F184DB73E68F): the drop-down chooses what the 3D view draws.
+#[test]
+fn the_visual_style_drop_down_switches_shaded_edges_and_wireframe() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("뷰").click();
+    harness.run();
+    assert_eq!(harness.state().viewport().style, gc_viewport::VisualStyle::ShadedWithEdges);
+    pick_variant(&mut harness, "시각 스타일", "와이어프레임");
+    assert_eq!(harness.state().viewport().style, gc_viewport::VisualStyle::Wireframe);
+    pick_variant(&mut harness, "시각 스타일", "숨은 모서리가 있는 와이어프레임");
+    assert_eq!(harness.state().viewport().style, gc_viewport::VisualStyle::WireframeWithHiddenEdges);
+    pick_variant(&mut harness, "시각 스타일", "보이는 모서리만 있는 와이어프레임");
+    assert_eq!(harness.state().viewport().style, gc_viewport::VisualStyle::WireframeVisibleEdges);
+    pick_variant(&mut harness, "시각 스타일", "숨은 모서리가 있는 음영 처리");
+    assert_eq!(harness.state().viewport().style, gc_viewport::VisualStyle::ShadedWithHiddenEdges);
+    pick_variant(&mut harness, "시각 스타일", "음영 처리");
+    assert_eq!(harness.state().viewport().style, gc_viewport::VisualStyle::Shaded);
+}
+
+/// Object Visibility (View tab, Visibility panel; Inventor 2026 help, To set visibility of work features,
+/// annotations, and other display elements, GUID-BA193171-FAFC-4150-9222-CC43D8D4AA54): a drop-list with a check
+/// box for each kind.
+#[test]
+fn the_object_visibility_drop_list_switches_kinds_on_and_off() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("뷰").click();
+    harness.run();
+    assert!(harness.state().viewport().visibility.work_planes, "work features start visible");
+    assert!(!harness.state().viewport().visibility.origin_planes, "origin folders start hidden");
+    harness.get_by_label("개체 가시성").click();
+    harness.run_steps(3);
+    harness.get_by_label("작업 평면").click();
+    harness.run_steps(2);
+    harness.get_by_label("원점 평면").click();
+    harness.run_steps(2);
+    harness.get_by_label("구속조건 기호").click();
+    harness.run_steps(2);
+    let v = harness.state().viewport();
+    assert!(!v.visibility.work_planes && v.visibility.origin_planes && !v.show_constraints);
+    // The list stays open for the next check box.
+    harness.get_by_label("3D 스케치").click();
+    harness.run_steps(2);
+    assert!(!harness.state().viewport().visibility.sketches_3d);
+}
+
+/// Ground Plane (View tab, Appearance panel; Inventor 2026 help, About Ground Planes in Model Views,
+/// GUID-AC7970C5-72DB-409E-AED4-96B9C5E6C4A0): on and off for the session.
+#[test]
+fn the_ground_plane_button_switches_the_floor_grid() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("뷰").click();
+    harness.run();
+    assert!(harness.state().viewport().show_ground);
+    harness.get_by_label("바닥 평면").click();
+    harness.run();
+    assert!(!harness.state().viewport().show_ground);
+    harness.get_by_label("바닥 평면").click();
+    harness.run();
+    assert!(harness.state().viewport().show_ground);
+}
+
+/// The View tab's panels follow Inventor's order: Visibility, Appearance, Windows, Navigate (the tab's
+/// panels of Inventor 2026, left to right).
+#[test]
+fn the_view_tab_panels_run_visibility_appearance_windows_navigate() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("뷰").click();
+    harness.run();
+    let x = |h: &egui_kittest::Harness<'_, GraphCtrlApp>, label: &str| h.get_by_label(label).rect().min.x;
+    let visibility = x(&harness, "개체 가시성");
+    let appearance = x(&harness, "바닥 평면");
+    let windows = x(&harness, "패널 반투명");
+    let navigate = x(&harness, "홈");
+    assert!(visibility < appearance && appearance < windows && windows < navigate);
+}
+
+/// User Interface and Clean Screen (View tab, Windows panel; Inventor 2026 help, ViewCube Menu Reference,
+/// GUID-285B9036-0E97-4F18-A6D2-EF78B8B8FAA9, and To Work with Graphics Windows,
+/// GUID-84B053B0-E83B-4D9C-8436-1BE9AD5E9EBE): check boxes show or hide the window's elements and are saved;
+/// Clean Screen hides the ribbon and browser, Ctrl+0 brings them back.
+#[test]
+fn the_user_interface_list_hides_elements_and_clean_screen_toggles_with_ctrl_0() {
+    let directory = tempfile::tempdir().unwrap();
+    let options =
+        || RunOptions { settings_dir: Some(directory.path().to_path_buf()), ..RunOptions::default() };
+    let mut harness =
+        egui_kittest::Harness::builder().with_size(SIZE).build_eframe(|cc| GraphCtrlApp::new(cc, options()));
+    harness.run();
+    harness.get_by_label("뷰").click();
+    harness.run();
+    assert!(harness.state().viewport().show_view_cube && harness.state().viewport().show_nav_bar);
+    harness.get_by_label("사용자 인터페이스").click();
+    harness.run_steps(3);
+    harness.get_by_label("뷰큐브").click();
+    harness.run_steps(2);
+    harness.get_by_label("탐색 막대").click();
+    harness.run_steps(2);
+    assert!(!harness.state().viewport().show_view_cube && !harness.state().viewport().show_nav_bar);
+    let saved = gc_persist::places::load_settings(directory.path());
+    assert!(saved.hide_view_cube && saved.hide_nav_bar && !saved.hide_status_bar);
+    // The next start reads it.
+    let again =
+        egui_kittest::Harness::builder().with_size(SIZE).build_eframe(|cc| GraphCtrlApp::new(cc, options()));
+    assert!(!again.state().viewport().show_view_cube);
+
+    // Clean Screen: the ribbon (and with it the tabs) go; Ctrl+0 brings them back.
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(2);
+    harness.get_by_label("전체 화면(Ctrl+0)").click();
+    harness.run_steps(3);
+    assert!(harness.query_by_label("뷰").is_none(), "the ribbon is away");
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Num0);
+    harness.run_steps(3);
+    assert!(harness.query_by_label("뷰").is_some(), "Ctrl+0 brings the ribbon back");
 }

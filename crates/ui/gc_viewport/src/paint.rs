@@ -74,7 +74,7 @@ fn view_of<'a>(ui: &egui::Ui, rect: Rect, camera: &'a Camera) -> View<'a> {
 }
 
 /// Paints what lies under the solids: the background and the grid.
-pub(crate) fn under(ui: &egui::Ui, rect: Rect, camera: &Camera, session: &Session) {
+pub(crate) fn under(ui: &egui::Ui, rect: Rect, camera: &Camera, session: &Session, ground: bool) {
     let view = view_of(ui, rect, camera);
     // A gradient from light at the top to a little darker at the bottom, as in CAD programs.
     let mut gradient = egui::Mesh::default();
@@ -107,7 +107,10 @@ pub(crate) fn under(ui: &egui::Ui, rect: Rect, camera: &Camera, session: &Sessio
         Some((_, sketch)) => plane_of(session, sketch),
         None => world_xy,
     };
-    grid(&view, &grid_plane);
+    // The floor grid is the ground plane; a sketch brings its own grid, which stays.
+    if ground || session.active_sketch().is_some() {
+        grid(&view, &grid_plane);
+    }
 }
 
 /// Paints what lies over the solids: axes, sketches, traces, waypoints and tool previews.
@@ -119,6 +122,7 @@ pub(crate) fn over(
     scene: &Scene,
     gpu: bool,
     show_constraints: bool,
+    vis: &crate::ObjectVisibility,
 ) {
     let mut view = view_of(ui, rect, camera);
     view.show_constraints = show_constraints;
@@ -128,7 +132,10 @@ pub(crate) fn over(
         let plane = plane_of(session, sketch);
         if active.is_some_and(|(active_id, _)| active_id == id) {
             active_sketch(&view, &plane, sketch, session);
-        } else if session.doc().is_visible(id.erase()) && !session.doc().is_inactive(id.erase()) {
+        } else if session.doc().is_visible(id.erase())
+            && !session.doc().is_inactive(id.erase())
+            && (if sketch.is_spatial() { vis.sketches_3d } else { vis.sketches })
+        {
             let stroke = Stroke::new(1.2, colors::inactive());
             for (id, curve) in &sketch.curves {
                 let ends = sketch.spline_ends(*id);
@@ -500,6 +507,9 @@ fn spatial_marks(view: &View<'_>, plane: &SketchPlane, sketch: &Sketch, session:
     if let Some(points) = session.spatial_arc_preview() {
         view.polyline(points.into_iter().map(|p| plane.world(p)), Stroke::new(1.6, colors::PREVIEW));
     }
+    if let Some(points) = session.spatial_spline_preview() {
+        view.polyline(points.into_iter().map(|p| plane.world(p)), Stroke::new(1.6, colors::PREVIEW));
+    }
     if let Some((from, to, axis)) = session.spatial_preview() {
         // Locked to an axis, the rubber band takes the axis' colour and name.
         let (color, name) = match axis {
@@ -790,6 +800,16 @@ fn preview(view: &View<'_>, plane: &SketchPlane, session: &Session) {
         }
     }
     for item in &preview.picks {
+        // A curve a tool has picked (Offset's pick, the first curve of a Fillet ...) is drawn over the
+        // sketch in the preview colour.
+        if let Item::Curve(id) = item
+            && let Some((_, sketch)) = session.active_sketch()
+            && let Some(curve) = sketch.curves.get(id)
+        {
+            let picked = Stroke::new(3.0, colors::PREVIEW);
+            let ends = sketch.spline_ends(*id);
+            curve_path(view, plane, curve, |p| session.point_pos(p), None, picked, false, ends);
+        }
         if let Item::Point(p) = item
             && let Some(at) = session.point_pos(*p).and_then(|p| view.screen(plane.world(p)))
         {
