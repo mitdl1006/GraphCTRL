@@ -310,6 +310,15 @@
 - 2D 스케치 구속 패널에 "부드럽게(G2)" 소형 버튼(기호 G2) 추가: `ToolKind::Constraint(ConstraintKind::Smooth)`. 스플라인 끝과 이어진 선·호·스플라인을 클릭하는 흐름은 gc_tools가 처리하고, 뷰포트의 G2 기호는 기존 그리기를 따른다. 3D 스케치 패널에는 두지 않았다(원문 목록 미확인).
 - 테스트: `the_constrain_panel_has_a_smooth_g2_button`; 폭 검사(`every_ribbon_tab_fits_1280_px`) 통과.
 
+### 문서 설정 대화상자, 옵션 창 Auto-Bend 정리
+
+- 근거: Inventor 2026 도움말 GUID-FB49837F-7832-4713-928E-1CEDBDB0C3BD (To Change Document Settings: 탭 목록), GUID-58DD9A89-84C7-48F3-8E4E-0303E755B10F (Sketch 탭: 3D Sketch Auto-Bend Radius), 옵션 창은 GUID-1898C432-CFD2-46F1-8BAE-631392DFBF1D(체크 상자만).
+- 도구 > 문서 설정: 단위 탭(길이·각도 단위, 선형·각도 자릿수, 치수 표시 값/이름/식/정밀 값, 입력 상자에 식 표시)과 스케치 탭(스냅 간격 X·Y, 보조선당 스냅 수, 주선당 보조선 수, 3D 스케치 자동 굽힘 반지름, 구속조건 추론·유지). 확인/적용/취소. 길이 칸은 문서 단위로 보여 주고 식·단위를 해석(`evaluate_value`); 0 이하나 해석 안 되는 값은 대화상자에 사유를 보이고 닫지 않는다. 적용은 `Session::set_doc_settings`(한 번의 실행 취소).
+- 응용 프로그램 옵션 스케치 탭: 자동 굽힘 반지름 칸을 뺐다(원문대로 체크만). `Settings.auto_bend_radius` 필드도 제거.
+- 백엔드가 아직 연결하지 않았다고 한 것(단위 없는 값의 문서 단위 해석, 스냅·격자 값, 구속 추론)은 대화상자에서 값만 저장한다.
+- 원문에 있고 여기 없는 것: Modeling·Drawing·BOM·Default Tolerance 탭, Lineweight, 허용차 표시.
+- 테스트: `the_document_settings_dialog_changes_the_units_and_the_auto_bend_radius`(잘못된 값 거부, 좋은 값 저장, 확인으로 닫힘); `the_auto_bend_option_is_off_by_default_saved_and_read_back` 유지.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹
