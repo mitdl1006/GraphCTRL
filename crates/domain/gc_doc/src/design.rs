@@ -145,6 +145,17 @@ impl WorkGeometry {
         }
     }
 
+    /// The sketch points it is built on.
+    pub fn sketch_points(&self) -> Vec<(Id<Sketch>, Id<gc_sketch::SkPoint>)> {
+        self.points()
+            .into_iter()
+            .filter_map(|p| match p {
+                PointRef::SketchPoint { sketch, point } => Some((sketch, point)),
+                PointRef::Origin | PointRef::Fixed(_) | PointRef::Work(_) | PointRef::Component(_) => None,
+            })
+            .collect()
+    }
+
     fn points(&self) -> Vec<PointRef> {
         match self {
             Self::PlaneThroughPoints { points } => points.to_vec(),

@@ -1289,13 +1289,15 @@ fn work_features_are_placed_in_the_world() {
     );
     let Some(WorkShape::Plane(pose)) = session.work_shape(tilted) else { panic!() };
     assert!((pose.rotation * gc_math::DVec3::Z - gc_math::DVec3::Z).length() < 1e-12);
-    let line = add(
-        &mut session,
-        WorkGeometry::PlaneThroughPoints {
+    // Points on a line give no plane: refused.
+    let feature = WorkFeature {
+        name: "W".into(),
+        geometry: WorkGeometry::PlaneThroughPoints {
             points: [PointRef::Origin, PointRef::Fixed([1.0, 0.0, 0.0]), PointRef::Fixed([2.0, 0.0, 0.0])],
         },
-    );
-    assert_eq!(session.work_shape(line), None);
+        visible: true,
+    };
+    assert!(session.execute(&Command::Cell(CellOp::AddWorkFeature(feature))).is_err());
 }
 
 #[test]

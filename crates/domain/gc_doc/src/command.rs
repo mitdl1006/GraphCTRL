@@ -2924,7 +2924,26 @@ pub(crate) fn run(txn: &mut Txn<'_>, command: &Command) -> Result<(Vec<Created>,
         }
         Command::Sketch { sketch, op } => {
             let scope = scope_of(txn.doc());
+            let present = |doc: &Document| -> Vec<bool> {
+                let Some(s) = doc.get(*sketch) else { return Vec::new() };
+                doc.work_features()
+                    .iter()
+                    .flat_map(|(_, w)| {
+                        let curves = w.geometry.curves().into_iter().filter(|r| r.sketch == *sketch);
+                        let points = w.geometry.sketch_points().into_iter().filter(|(k, _)| k == sketch);
+                        curves
+                            .map(|r| s.curves.contains_key(&r.curve))
+                            .chain(points.map(|(_, p)| s.points.contains_key(&p)))
+                            .collect::<Vec<bool>>()
+                    })
+                    .collect()
+            };
+            let before = present(txn.doc());
             let result = txn.modify(*sketch, |s: &mut Sketch, ids| sketch_op(s, ids, op, &scope))??;
+            // A curve or point a work feature is built on cannot go (like a sketch a feature uses).
+            if before.iter().zip(present(txn.doc())).any(|(was, is)| *was && !is) {
+                return Err(EditError::InUse);
+            }
             // Dimensions and parameters that use this sketch's dimensions follow (and loops are refused).
             if matches!(
                 op,

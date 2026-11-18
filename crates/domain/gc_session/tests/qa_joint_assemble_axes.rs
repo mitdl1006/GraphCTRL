@@ -416,7 +416,6 @@ fn an_axis_between_the_same_or_missing_planes_is_refused_and_a_real_pair_works()
 /// Two planes that never meet (parallel and apart, or the same plane by two different work planes) have no
 /// line of intersection: the axis must be refused at creation, not accepted as a feature with no shape.
 #[test]
-#[ignore = "BUG: an axis between two parallel planes is accepted although it has no line (work_shape is None); only identical references are refused (owner: backend, gc_doc work_feature_ok)"]
 fn an_axis_between_parallel_planes_is_refused() {
     let mut s = Session::new();
     let xy = PlaneRef::Origin(OriginPlane::Xy);
@@ -435,7 +434,6 @@ fn an_axis_between_parallel_planes_is_refused() {
 /// A work axis on (or parallel to) a line of zero length has no direction, so it must be refused.
 /// (A zero-length line cannot be drawn, but a projected reference line from a point to itself is accepted.)
 #[test]
-#[ignore = "BUG: a work axis on a zero-length line is accepted although it has no direction (work_shape is None) (owner: backend, gc_doc work_feature_ok should check the shape exists)"]
 fn an_axis_on_a_zero_length_line_is_refused() {
     let mut s = Session::new();
     let k = s.create_sketch("XY").unwrap();
@@ -542,7 +540,6 @@ fn the_sketch_a_work_axis_refers_to_cannot_be_deleted() {
 /// Deleting the curve an axis is built on (inside the sketch) is refused, or takes the axis along; it must not
 /// leave an axis pointing at nothing.
 #[test]
-#[ignore = "BUG: deleting the sketch line a work axis follows is accepted and leaves the axis with no shape (the sketch itself is protected, its curves are not) (owner: backend, gc_doc sketch Delete should refuse or take the axis along)"]
 fn deleting_the_curve_of_a_work_axis_leaves_no_dangling_axis() {
     let mut s = Session::new();
     let k = s.create_sketch("XY").unwrap();

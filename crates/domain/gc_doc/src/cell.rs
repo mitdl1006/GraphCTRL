@@ -1143,12 +1143,19 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
         CellOp::AddWorkFeature(feature) => {
             work_feature_ok(txn, feature, None)?;
             let id = txn.insert(feature.clone());
+            // A definition that does not work out (parallel planes, a line of no length) is refused.
+            if txn.doc().work_shape(id).is_none() {
+                return Err(EditError::BadValue);
+            }
             place_new(txn, id.erase())?;
             Ok((vec![Created::WorkFeature(id)], "Add work feature"))
         }
         CellOp::SetWorkFeature { id, feature } => {
             work_feature_ok(txn, feature, Some(*id))?;
             txn.modify(*id, |f: &mut crate::design::WorkFeature, _| f.clone_from(feature))?;
+            if txn.doc().work_shape(*id).is_none() {
+                return Err(EditError::BadValue);
+            }
             Ok((Vec::new(), "Edit work feature"))
         }
         CellOp::DeleteWorkFeature(id) => {

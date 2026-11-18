@@ -54,6 +54,16 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — QA 버그 3건(작업 축, qa_joint_assemble_axes.rs)
+
+- `CellOp::AddWorkFeature`·`SetWorkFeature`는 넣은 뒤 `work_shape`가 `None`이면 `BadValue`로 거부한다.
+  평행한 두 평면의 교선 축, 길이 0인 선 위 축이 이렇게 거부된다. 같은 직선 위 세 점을 지나는 평면도 이제 거부된다
+  (`gc_session/tests/cell.rs`의 기존 단언을 바꿈).
+- 스케치 작업(`Command::Sketch`)이 작업 피처가 쓰는 곡선이나 스케치 점을 없애면 `EditError::InUse`로 거부한다.
+  작업 전에 있던 참조만 본다. 그래서 이미 끊긴 참조가 있는 옛 파일의 스케치도 계속 편집할 수 있다.
+  피처가 쓰는 스케치 자체의 삭제 거부와 같은 방식이다.
+- `WorkGeometry::sketch_points()`를 추가했다. 테스트 3개의 `#[ignore]`를 풀었다.
+
 ## 2026-11-18 — QA 버그 3건(transform.rs): 고정 곡선 이동, 투영 선 이동, 중복 복사
 
 - relax 없이 Move·Rotate·Stretch하면(`MoveRules::break_ties == false`) 움직일 점(일치 구속으로 함께 가는 점 포함) 중에
