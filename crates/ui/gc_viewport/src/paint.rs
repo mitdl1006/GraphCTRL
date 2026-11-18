@@ -109,7 +109,8 @@ pub(crate) fn under(ui: &egui::Ui, rect: Rect, camera: &Camera, session: &Sessio
     };
     // The floor grid is the ground plane; a sketch brings its own grid, which stays.
     if ground || session.active_sketch().is_some() {
-        grid(&view, &grid_plane);
+        let document = session.doc_settings();
+        grid(&view, &grid_plane, session.active_sketch().is_some().then_some(&document));
     }
 }
 
@@ -239,7 +240,24 @@ fn grid_step(px: f64) -> f64 {
     [1.0, 2.0, 5.0, 10.0].into_iter().map(|m| m * decade).find(|s| *s >= wanted).unwrap_or(10.0 * decade)
 }
 
-fn grid(view: &View<'_>, plane: &SketchPlane) {
+/// The grid lines of one axis for a sketch: the minor spacing is the document's snap spacing times the snaps
+/// per minor line (Document Settings, Sketch tab, Grid Display), a major line every `minor_per_major` minor
+/// lines. Zoomed so far out that minor lines would be closer than a few pixels, the minor spacing grows by a
+/// major step at a time.
+fn document_grid_step(settings: &gc_doc::DocSettings, axis: usize, px: f64) -> (f64, i64) {
+    let major = i64::from(settings.minor_per_major.max(1));
+    let mut step = settings.snap_spacing[axis] * f64::from(settings.snaps_per_minor.max(1));
+    let mut every = major;
+    let mut guard = 0;
+    while step / px < 6.0 && guard < 12 {
+        step *= major as f64;
+        every = major.max(1);
+        guard += 1;
+    }
+    (step, every)
+}
+
+fn grid(view: &View<'_>, plane: &SketchPlane, document: Option<&gc_doc::DocSettings>) {
     let Some(geometric) = plane.plane() else { return };
     let corners = [[0.0, 0.0], [view.size[0], 0.0], [view.size[0], view.size[1]], [0.0, view.size[1]]];
     let mut low = [f64::INFINITY; 2];
@@ -253,8 +271,12 @@ fn grid(view: &View<'_>, plane: &SketchPlane) {
             high[axis] = high[axis].max(local[axis]);
         }
     }
-    let step = grid_step(view.camera.px_scale(view.size));
+    let px = view.camera.px_scale(view.size);
     for axis in 0..2 {
+        let (step, every) = match document {
+            Some(settings) => document_grid_step(settings, axis, px),
+            None => (grid_step(px), 5),
+        };
         let (first, last) = ((low[axis] / step).floor(), (high[axis] / step).ceil());
         if last - first > 400.0 {
             return;
@@ -262,7 +284,7 @@ fn grid(view: &View<'_>, plane: &SketchPlane) {
         #[allow(clippy::cast_possible_truncation, reason = "bounded by the check above")]
         for index in first as i64..=last as i64 {
             let at = index as f64 * step;
-            let major = index % 5 == 0;
+            let major = index % every == 0;
             let stroke = Stroke::new(
                 if major { 1.0 } else { 0.5 },
                 if major { colors::grid_major() } else { colors::grid() },
@@ -828,6 +850,20 @@ mod tests {
         assert_eq!(format_length(0.012_345_6), "12.346 mm");
         assert_eq!(format_length(-0.000_000_01), "0 mm");
         assert_eq!(format_angle(std::f64::consts::FRAC_PI_2), "90 deg");
+    }
+
+    #[test]
+    fn the_sketch_grid_follows_the_document_settings() {
+        let settings = gc_doc::DocSettings::default();
+        // 1 mm snaps, 10 per minor line, a major line every 10: a minor line every 10 mm.
+        let (step, every) = document_grid_step(&settings, 0, 1e-3);
+        assert!((step - 0.01).abs() < 1e-12 && every == 10, "{step} {every}");
+        // Zoomed far out the minor lines would crowd: the spacing grows by a major step.
+        let (far, _) = document_grid_step(&settings, 0, 1e-2);
+        assert!((far - 0.1).abs() < 1e-12, "{far}");
+        // The two axes have their own spacing.
+        let wide = gc_doc::DocSettings { snap_spacing: [0.001, 0.002], ..settings };
+        assert!((document_grid_step(&wide, 1, 1e-3).0 - 0.02).abs() < 1e-12);
     }
 
     #[test]

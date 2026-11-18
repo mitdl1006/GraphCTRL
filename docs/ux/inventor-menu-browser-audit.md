@@ -67,7 +67,7 @@ Suppress, Visibility, Grounded, iProperties)을 기준으로 했고, 완전한 �
 | 노드 이름 바꾸기: 선택 후 한 번 더 클릭(더블클릭 아님) | 있음 | ✓ |
 | 더블클릭 = 편집 상태 진입 | 스케치·작업 피처·컴포넌트 | ✓ |
 | 패널 도킹·끌어 옮기기·+ 로 패널 추가 | 좌/우 패널 접기만 | △ |
-| 브라우저 노드에 커서를 올리면 뷰에 경계 상자 (기록) | 없음 | ✗ |
+| 브라우저 노드에 커서를 올리면 뷰에 경계 상자 (기록) | 바디·로봇 행 위에 커서 → 뷰에 경계 상자(12개 모서리) | ✓ |
 | 브라우저 선택 → 뷰 강조 | 있음 | ✓ |
 | 뷰에서 선택 → 브라우저 강조 (원문 View 문서는 "highlight 안 함"이라 했으나 Inventor 본체는 함) | 있음 | ✓ |
 | 아이콘: 고정(압정)·비활성(배경 스타일)·비가시·다중 바디·표면·가상·표준 부품 | 압정·비활성·비가시 | △ 부품 종류 아이콘은 우리 개념과 다름 |
@@ -119,7 +119,6 @@ Suppress, Visibility, Grounded, iProperties)을 기준으로 했고, 완전한 �
 1. Isolate / Undo Isolate (브라우저·뷰 우클릭; 원문: "Select All Visible … to restore an Isolate Components operation")
 2. 브라우저 Display Preferences: Show Children Only, Show Extended Names (Hide Warnings는 채움)
 3. 브라우저 필터(문제 있는 관계·억제된 것) · 사용자 정의 폴더
-4. 노드에 커서를 올리면 뷰에 경계 상자
 5. 서브어셈블리의 Enabled·Grounded·Suppress, 컴포넌트 끌어 놓기로 폴더 이동
 
 리드에게 요청(백엔드 데이터 필요): 사용자 정의 폴더 저장, Isolate 상태(실행 취소 가능한 가시성 묶음), 브라우저 필터용 상태 질의,

@@ -1490,6 +1490,9 @@ impl gc_app::FileDialogs for Scripted {
     fn open_mesh(&mut self) -> Option<std::path::PathBuf> {
         Some(self.0.clone())
     }
+    fn save_csv(&mut self, _: &str) -> Option<std::path::PathBuf> {
+        Some(self.0.clone())
+    }
 }
 
 /// "Import Mesh" asks for a file and adds it as a body; a file that cannot be read is reported.
@@ -6051,4 +6054,148 @@ fn the_quick_access_toolbar_undoes_redoes_and_returns() {
     // Return does nothing at the top level (disabled), and the other buttons are there.
     harness.get_by_label("복귀 (빠른 실행)");
     harness.get_by_label("저장 (빠른 실행)");
+}
+
+/// The Bill of Materials dialog (Tools > BOM; Inventor 2026 help, About the BOM Structure,
+/// GUID-A0A95805-CBF6-4524-8314-4AC8B53C19CF): the table lists the components, the Parts Only view and the CSV export work,
+/// a click on a row selects the component.
+#[test]
+fn the_bom_dialog_lists_components_selects_and_exports_csv() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("bom.csv");
+    let mut harness =
+        egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0).build_eframe(|cc| {
+            GraphCtrlApp::new(cc, RunOptions::default()).with_dialogs(Box::new(Scripted(path.clone())))
+        });
+    harness.run();
+    let body = harness
+        .state_mut()
+        .session
+        .add_body(gc_doc::Solid::Box { size: [0.1; 3] }, gc_doc::Placement { xyz: [0.0; 3], rpy: [0.0; 3] })
+        .unwrap();
+    harness.run();
+    harness.get_by_label("도구").click();
+    harness.run();
+    harness.get_by_label("자재 명세서(BOM)").click();
+    harness.run_steps(3);
+    // The table has the body's line; clicking it selects the component.
+    let rows = harness.state().session.bill_of_materials(gc_session::BomView::Structured);
+    assert_eq!(rows.len(), 1);
+    // (The same name also appears in the panels at the sides; the dialog's cell is the one in the middle.)
+    let cell = harness
+        .get_all_by_label(&rows[0].part_number)
+        .find(|n| (300.0..700.0).contains(&n.rect().min.x))
+        .expect("the table's cell");
+    cell.click();
+    harness.run_steps(2);
+    assert_eq!(harness.state().session.selected_item(), Some(gc_session::CellItem::Body(body)));
+    // Parts Only, then the export writes the CSV the session gives.
+    harness.get_by_label("부품 전용").click();
+    harness.run_steps(2);
+    harness.get_by_label("CSV로 내보내기…").click();
+    harness.run_steps(3);
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.starts_with("Item,Part Number,Quantity,Description,BOM Structure"), "{text}");
+    assert!(text.contains(&rows[0].part_number));
+}
+
+/// Hovering a component row of the browser draws its bounding box in the view (the view is told which row).
+#[test]
+fn hovering_a_browser_row_boxes_the_component_in_the_view() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let body = harness
+        .state_mut()
+        .session
+        .add_body(gc_doc::Solid::Box { size: [0.1; 3] }, gc_doc::Placement { xyz: [0.0; 3], rpy: [0.0; 3] })
+        .unwrap();
+    harness.run();
+    assert!(harness.state().viewport().browser_hover.is_none());
+    let name = harness.state().session.components().first().map(|n| n.name.clone()).unwrap();
+    // The row's name is painted text; its show/hide box carries the name and spans the row.
+    let toggle = harness
+        .get_all_by_label_contains(&name)
+        .find(|n| n.rect().min.x < 100.0)
+        .expect("the row's show/hide box");
+    let row = toggle;
+    let at = row.rect().center();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run_steps(3);
+    assert_eq!(harness.state().viewport().browser_hover, Some(gc_core::Id::<gc_doc::Body>::erase(body)));
+    // Away from the browser the box goes.
+    harness.event(egui::Event::PointerMoved(egui::pos2(900.0, 600.0)));
+    harness.run_steps(3);
+    assert!(harness.state().viewport().browser_hover.is_none());
+}
+
+/// Snap to grid (Application Options, Sketch tab): off by default, saved, read back.
+#[test]
+fn the_snap_to_grid_option_is_off_by_default_saved_and_read_back() {
+    let directory = tempfile::tempdir().unwrap();
+    let options =
+        || RunOptions { settings_dir: Some(directory.path().to_path_buf()), ..RunOptions::default() };
+    let mut harness =
+        egui_kittest::Harness::builder().with_size(SIZE).build_eframe(|cc| GraphCtrlApp::new(cc, options()));
+    harness.run();
+    assert!(!harness.state().session.snap_to_grid());
+    harness.get_by_label("파일").click();
+    harness.run();
+    harness.get_by_label("응용 프로그램 옵션").click();
+    harness.run_steps(3);
+    harness.get_by_label("격자에 스냅").click();
+    harness.run();
+    assert!(harness.state().session.snap_to_grid());
+    assert!(gc_persist::places::load_settings(directory.path()).snap_to_grid);
+    let again =
+        egui_kittest::Harness::builder().with_size(SIZE).build_eframe(|cc| GraphCtrlApp::new(cc, options()));
+    assert!(again.state().session.snap_to_grid());
+}
+
+/// Default Parameter Input Display (Document Settings, Units tab): with it off, editing a dimension in the view
+/// starts from its value, not the expression typed.
+#[test]
+fn editing_a_dimension_starts_from_the_expression_or_the_value_as_the_document_says() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let app = harness.state_mut();
+    let sketch = app.session.create_sketch("XY").unwrap();
+    let line = app
+        .session
+        .execute(&gc_doc::Command::Sketch {
+            sketch,
+            op: gc_doc::SketchOp::AddLine {
+                a: [0.0; 3],
+                b: [0.05, 0.0, 0.0],
+                snap_a: gc_doc::EndSnap::default(),
+                snap_b: gc_doc::EndSnap::default(),
+                horizontal: Some(true),
+            },
+        })
+        .unwrap()
+        .iter()
+        .find_map(|c| if let gc_doc::Created::Curve(id) = c { Some(*id) } else { None })
+        .unwrap();
+    let (p, q) = app.session.active_sketch().unwrap().1.line(line).unwrap();
+    let kind = gc_sketch::DimKind::Distance { p, q };
+    app.session
+        .execute(&gc_doc::Command::Sketch {
+            sketch,
+            op: gc_doc::SketchOp::AddDimension { kind, source: "25 + 25".into(), text_pos: [0.0; 2] },
+        })
+        .unwrap();
+    let id = *app.session.active_sketch().unwrap().1.dimensions.keys().next().unwrap();
+    let mut viewport = gc_viewport::Viewport::new(None);
+    viewport.edit_dimension(&app.session, id);
+    assert_eq!(viewport.dimension_edit_text(), Some("25 + 25"));
+    let mut settings = app.session.doc_settings();
+    settings.input_as_expression = false;
+    app.session.set_doc_settings(settings).unwrap();
+    viewport.edit_dimension(&app.session, id);
+    assert_eq!(viewport.dimension_edit_text(), Some("50 mm"));
 }

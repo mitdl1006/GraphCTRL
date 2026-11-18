@@ -337,6 +337,27 @@
 - 브라우저 "…" 메뉴에 "경고 숨기기"(Hide Warnings, GUID-5F975252): 관계의 sick 표시만 숨기고 실패 상태는 유지. `qa_frontend_screens`의 메뉴 옵션 테스트에 항목 추가.
 - 테스트: `find_in_window_centres_the_view_on_a_component`, `the_quick_access_toolbar_undoes_redoes_and_returns`; shell 112개, qa_*·sketch_shape_tools 통과.
 
+### BOM 대화상자
+
+- 근거: Inventor 2026 도움말 About the BOM Structure, GUID-A0A95805-CBF6-4524-8314-4AC8B53C19CF ("To change the BOM Structure, double-click the BOM Structure row in the Bill of Materials"; Normal·Phantom·Reference·Purchased·Inseparable).
+- 진입: 도구 > 자재 명세서(BOM), 관리 탭 "자재 명세서(BOM)" 버튼. 구조화/부품 전용 탭, 열: 항목(들여쓰기)·부품 번호·수량·설명·BOM 구조. 행 클릭 → 그 줄의 첫 트리 행이 컴포넌트면 브라우저·뷰에서 선택(`select_occurrence`). BOM 구조 열은 더블클릭 대신 줄 안의 드롭다운으로 바꾼다(`set_bom_structure`, 한 번의 실행 취소). "CSV로 내보내기…"는 `bom_csv`를 파일 대화상자(`FileDialogs::save_csv`)로 고른 곳에 쓰고 상태 줄에 알린다.
+- 원문과 차이: 더블클릭이 아니라 드롭다운. 문서 설정의 Bill of Materials 탭(기본 BOM 구조)·열 편집·정렬·Excel 내보내기·BOM 편집 중 부품 번호 수정은 없음(설명·부품 번호 편집은 iProperties 대화상자에서).
+- 테스트: `the_bom_dialog_lists_components_selects_and_exports_csv`; shell 113개 통과.
+
+### 브라우저 노드 호버 경계 상자
+
+- 근거: docs/ux/inventor-assembly-parity.md(기록): "브라우저 노드에 커서를 올리면 경계 상자가 그래픽에 표시"(2026 도움말의 해당 쪽은 읽지 못함).
+- 브라우저의 바디·로봇 행 위에 커서를 올리면 `ParamsUi.hovered` → `Viewport.browser_hover`로 전달되어 뷰에 그 컴포넌트의 경계 상자(월드 축 정렬, 12개 모서리)를 강조색으로 그린다. 브라우저를 벗어나거나 접으면 사라진다. 경계 계산은 `find_in_window`와 같은 함수(`item_bounds`)를 쓴다.
+- 테스트: `hovering_a_browser_row_boxes_the_component_in_the_view`.
+
+### 문서 설정 남은 것: 격자에 스냅, 스케치 격자 간격, 입력 식 표시
+
+- 근거: Inventor 2026 도움말 Sketch Tab Reference(Application Options, GUID-1898C432-CFD2-46F1-8BAE-631392DFBF1D: Snap to grid), Sketch Tab Reference(Document Settings, GUID-58DD9A89-84C7-48F3-8E4E-0303E755B10F: Snap Spacing, Grid Display), To Change Document Settings(GUID-FB49837F-7832-4713-928E-1CEDBDB0C3BD: Units 탭 Default Parameter Input Display).
+- 응용 프로그램 옵션 스케치 탭 "격자에 스냅"(`Session::set_snap_to_grid`, 기본 꺼짐, `settings.json`의 `snap_to_grid`에 저장·복원).
+- 스케치를 편집하는 동안 격자는 문서 설정을 따른다: 가는 선 = 스냅 간격 × 보조선당 스냅 수(축별), 굵은 선 = 주선당 보조선 수마다. 너무 멀리 축소해 가는 선이 6 px보다 가까워지면 주선 간격씩 키운다. 스케치가 없을 때의 바닥 격자는 이전의 1-2-5 자동 간격 그대로.
+- 치수 입력 상자: 문서 설정 "입력 식 표시"가 켜져 있으면(기본) 쓴 식, 꺼져 있으면 값(문서 단위·자릿수)으로 시작한다(`Viewport::edit_dimension`, 뷰에서 더블클릭). 새 치수를 만들 때의 값 입력 상자(도구가 요청하는 것)는 이번에 바꾸지 않았다.
+- 테스트: `the_snap_to_grid_option_is_off_by_default_saved_and_read_back`, `editing_a_dimension_starts_from_the_expression_or_the_value_as_the_document_says`, gc_viewport `the_sketch_grid_follows_the_document_settings`.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹
