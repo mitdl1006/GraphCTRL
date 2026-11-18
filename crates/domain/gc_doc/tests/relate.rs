@@ -688,6 +688,10 @@ fn view_representations_restore_what_is_shown() {
             section: None,
         })
         .unwrap();
+    // A new view is the active one and takes display edits (To Create, Edit, and Restore View
+    // Representations, GUID-397F9263-12C3-47A1-B6A6-16FC05EDEF47); locked, it keeps what it has.
+    assert_eq!(bench.doc.representations().active_view, Some(0));
+    bench.cell(CellOp::LockViewRepresentation { index: 0, locked: true }).unwrap();
     let show = Command::SetComponent {
         occurrence: Occurrence::Item(block.erase()),
         flag: ComponentFlag::Visible,
@@ -939,12 +943,8 @@ fn the_active_view_follows_the_display_until_it_is_locked() {
     };
     let hidden = |bench: &Bench, view: usize| bench.doc.representations().views[view].hidden.clone();
     bench.cell(CellOp::AddViewRepresentation { name: "View1".into(), camera: None, section: None }).unwrap();
-    // Not active yet: display edits leave it alone.
-    shown(&mut bench, block, false);
-    assert!(hidden(&bench, 0).is_empty());
-    shown(&mut bench, block, true);
-    // Active: hiding the block is saved in it, in the same undo step.
-    bench.cell(CellOp::ActivateViewRepresentation(0)).unwrap();
+    // A new view is the active one: hiding the block is saved in it, in the same undo step.
+    assert_eq!(bench.doc.representations().active_view, Some(0));
     let depth = bench.history.undo_depth();
     shown(&mut bench, block, false);
     assert_eq!(bench.history.undo_depth(), depth + 1);
@@ -1172,4 +1172,40 @@ fn motion_constraints_tie_turning_and_travel_together() {
         Some(std::f64::consts::TAU * 0.02)
     );
     assert_eq!(Document::motion_default(&on(driver, axis([0.0, 0.0, 1.0])), &large, false), Some(1.0));
+}
+
+/// Inventor 2026 help, Positional representations in assemblies
+/// (GUID-C728DFAC-1B45-4879-A004-45A8DC991954): "You can perform the following operations only when the
+/// Primary representation is active: Add, delete, or reorder components. Restructure the assembly.
+/// Change the count of a pattern. Create or delete work features."
+#[test]
+fn components_are_added_and_deleted_only_in_the_primary_position() {
+    let mut bench = Bench::new();
+    let (table, block) = table_and_box(&mut bench);
+    bench.cell(CellOp::AddPositionalRepresentation("Open".into())).unwrap();
+    bench.cell(CellOp::ActivatePositionalRepresentation(Some(0))).unwrap();
+    let extra = Body {
+        name: "Extra".into(),
+        placement: Placement { xyz: [0.0, 0.0, 3.0], rpy: [0.0; 3] },
+        solid: Solid::Box { size: [0.1; 3] },
+        look: Default::default(),
+    };
+    let before = bench.doc.clone();
+    assert_eq!(bench.cell(CellOp::AddBody(extra.clone())), Err(EditError::PrimaryOnly));
+    assert_eq!(bench.cell(CellOp::DeleteBody(block)), Err(EditError::PrimaryOnly));
+    assert!(bench.doc.same_content(&before));
+    // Moving a component and changing a relationship are what a position is for.
+    let mut moved = bench.doc.get(block).unwrap().clone();
+    moved.placement.xyz = [0.5, 0.0, 2.0];
+    bench.cell(CellOp::SetBody { id: block, body: moved }).unwrap();
+    let mate = Relationship::new(
+        "Mate:1",
+        RelationKind::Mate { offset: 0.0, sense: AxisSense::Opposed },
+        on(block, bottom(0.2)),
+        on(table, top(1.0)),
+    );
+    bench.relate(mate).unwrap();
+    // Back in Primary everything is possible again.
+    bench.cell(CellOp::ActivatePositionalRepresentation(None)).unwrap();
+    bench.cell(CellOp::AddBody(extra)).unwrap();
 }

@@ -1196,7 +1196,46 @@ fn target_ok(txn: &Txn<'_>, robot: Id<Robot>, target: &WaypointTarget) -> Result
     Ok(())
 }
 
+/// True for the edits that are only possible while the Primary positional representation is active
+/// (Inventor 2026 help, Positional representations in assemblies,
+/// GUID-C728DFAC-1B45-4879-A004-45A8DC991954): adding, deleting or reordering components, restructuring
+/// the assembly, changing the count of a pattern, creating or deleting work features.
+fn needs_primary(doc: &crate::Document, op: &CellOp) -> bool {
+    use crate::subassembly::SubassemblyOp;
+    match op {
+        CellOp::AddBody(_)
+        | CellOp::AddRobot { .. }
+        | CellOp::AddAssembly { .. }
+        | CellOp::MirrorComponents { .. }
+        | CellOp::CopyComponents { .. }
+        | CellOp::ReplaceComponents { .. }
+        | CellOp::AddPattern { .. }
+        | CellOp::RestorePatternElement { .. }
+        | CellOp::DeleteBody(_)
+        | CellOp::DeleteRobot(_)
+        | CellOp::DeleteAssembly(_)
+        | CellOp::DeletePattern { .. }
+        | CellOp::MoveInTree { .. }
+        | CellOp::AddWorkFeature { .. }
+        | CellOp::DeleteWorkFeature(_) => true,
+        CellOp::Subassembly(op) => matches!(
+            op,
+            SubassemblyOp::Demote { .. }
+                | SubassemblyOp::Move { .. }
+                | SubassemblyOp::Dissolve(_)
+                | SubassemblyOp::Paste { .. }
+        ),
+        CellOp::SetPattern { index, layout } => {
+            doc.patterns().get(*index).is_some_and(|p| p.layout.count() != layout.count())
+        }
+        _ => false,
+    }
+}
+
 pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'static str), EditError> {
+    if txn.doc().active_position().is_some() && needs_primary(txn.doc(), op) {
+        return Err(EditError::PrimaryOnly);
+    }
     match op {
         CellOp::AddRole(_)
         | CellOp::SetRole { .. }

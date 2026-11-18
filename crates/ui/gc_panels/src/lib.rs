@@ -1890,6 +1890,7 @@ pub fn status_bar(
                 gc_doc::EditError::Underconstrained => Msg::ErrUnderconstrained,
                 gc_doc::EditError::DegenerateFrame => Msg::ErrDegenerateFrame,
                 gc_doc::EditError::Protected(_) => Msg::ErrProtected,
+                gc_doc::EditError::PrimaryOnly => Msg::ErrPrimaryOnly,
                 _ => Msg::ErrOther,
             };
             ui.separator();

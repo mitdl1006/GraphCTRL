@@ -124,6 +124,17 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — 리드 결정 반영: 새 뷰 표현은 만들자마자 활성, "Primary가 활성일 때만" 규칙
+
+근거: To Create, Edit, and Restore View Representations(`GUID-397F9263-12C3-47A1-B6A6-16FC05EDEF47`) — "A new ViewRep node is added … It becomes the active View representation, as designated by a check mark." Positional representations in assemblies(`GUID-C728DFAC-1B45-4879-A004-45A8DC991954`) — "You can perform the following operations only when the Primary representation is active: Add, delete, or reorder components. Restructure the assembly. Change the count of a pattern. Create or delete work features. …"
+
+- **동작 변화 1**: `AddViewRepresentation`이 새 뷰를 활성으로 만든다. 활성·잠기지 않은 뷰는 표시 편집을 받으므로, "뷰를 만든 뒤 표시를 바꾸고 다시 활성화하면 복원"하려면 그 뷰를 잠그거나(Lock) 다른 뷰가 활성이어야 한다.
+  - 고친 테스트(리드 승인): `gc_doc/tests/relate.rs::view_representations_restore_what_is_shown`(만든 뒤 Lock), `gc_session/tests/qa_representations.rs::a_view_representation_restores_visibility`(만든 뒤 Lock, 유령 항목 검사 전에 해제), `gc_session/tests/occurrence_selection.rs::the_representations_folder_lists…`(숨기기를 "Hidden" 뷰를 만든 뒤로), `gc_app/tests/shell.rs::a_view_representation_restores_the_camera_and_the_section`(둘째 뷰를 만든 뒤 첫째를 다시 활성화 — 브라우저는 이미 활성인 행의 클릭을 무시한다).
+- **동작 변화 2**: 위치 표현이 활성인 동안 다음은 `EditError::PrimaryOnly`(새 변형)로 거부한다 — `AddBody`, `AddRobot`, `AddAssembly`, `MirrorComponents`, `CopyComponents`, `ReplaceComponents`, `AddPattern`, `RestorePatternElement`, `DeleteBody`, `DeleteRobot`, `DeleteAssembly`, `DeletePattern`, `MoveInTree`, `AddWorkFeature`, `DeleteWorkFeature`, `Subassembly(Demote | Move | Dissolve | Paste)`, 개수가 바뀌는 `SetPattern`. 배치·관계 값·억제·가시성·매개변수는 그대로 된다(위치 표현의 용도).
+  - 메시지: `Msg::ErrPrimaryOnly`("Primary 위치 표현이 활성일 때만 할 수 있습니다"), gc_panels의 오류 표시 match에 한 줄 추가.
+  - 작업 좌표계(`AddFrame`/`DeleteFrame`)와 스케치는 막지 않았다(원문 목록의 "work features"는 작업 평면·축·점으로 읽었다).
+- 테스트: `gc_doc/tests/relate.rs::components_are_added_and_deleted_only_in_the_primary_position`.
+
 ## 2026-11-18 — 패턴 요소 억제·독립 요소 복원, BOM에서 억제 컴포넌트 제외 (대조 목록 10); 재구성(12)은 이미 있음
 
 근거: Suppress elements in assembly patterns(`GUID-FDD20E41-93A5-479D-B547-BA9956E9966B`) — "Suppressed pattern elements are not shown in the graphics window and are not calculated when the assembly is updated … also excluded from a bill of materials", "The suppression of elements is persistent". About Assembly Components in Patterns(`GUID-ABC5607F-6128-40C8-BF28-44D918E5803C`) — "You can restore an independent element to the pattern, but the copied components created when the element was made independent are not automatically deleted".
