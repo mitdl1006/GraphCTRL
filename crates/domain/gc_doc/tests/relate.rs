@@ -919,3 +919,85 @@ fn free_move_drops_a_component_until_the_assembly_is_updated() {
     );
     assert_eq!(bench.cell(CellOp::FreeMove { item: id.erase(), placement: lower }), Err(EditError::BadValue));
 }
+
+/// View representations (Inventor 2026 help, To Create, Edit, and Restore View Representations,
+/// GUID-397F9263-12C3-47A1-B6A6-16FC05EDEF47): the active one takes display edits, Lock stops that and
+/// hides components added later, Copy makes an active duplicate. Positional representations copy too
+/// (GUID-34C28C35-45CA-4476-9336-30146F7C9471).
+#[test]
+fn the_active_view_follows_the_display_until_it_is_locked() {
+    let mut bench = Bench::new();
+    let (table, block) = table_and_box(&mut bench);
+    let shown = |bench: &mut Bench, body: Id<Body>, on: bool| {
+        let occurrence = Occurrence::Item(body.erase());
+        let command = Command::SetComponent { occurrence, flag: ComponentFlag::Visible, on };
+        let applied = apply(&mut bench.doc, &command).unwrap();
+        bench.history.record(applied.label, applied.delta);
+    };
+    let visible = |bench: &Bench, body: Id<Body>| {
+        bench.doc.component_flag(Occurrence::Item(body.erase()), ComponentFlag::Visible)
+    };
+    let hidden = |bench: &Bench, view: usize| bench.doc.representations().views[view].hidden.clone();
+    bench.cell(CellOp::AddViewRepresentation { name: "View1".into(), camera: None, section: None }).unwrap();
+    // Not active yet: display edits leave it alone.
+    shown(&mut bench, block, false);
+    assert!(hidden(&bench, 0).is_empty());
+    shown(&mut bench, block, true);
+    // Active: hiding the block is saved in it, in the same undo step.
+    bench.cell(CellOp::ActivateViewRepresentation(0)).unwrap();
+    let depth = bench.history.undo_depth();
+    shown(&mut bench, block, false);
+    assert_eq!(bench.history.undo_depth(), depth + 1);
+    assert_eq!(hidden(&bench, 0), [Occurrence::Item(block.erase())]);
+    bench.history.undo(&mut bench.doc).unwrap();
+    assert!(hidden(&bench, 0).is_empty() && visible(&bench, block));
+    shown(&mut bench, block, false);
+
+    // Copy: "View2", active, the same display; the original keeps what it had.
+    bench.cell(CellOp::CopyViewRepresentation(0)).unwrap();
+    let reps = bench.doc.representations();
+    assert_eq!((reps.views[1].name.as_str(), reps.active_view), ("View2", Some(1)));
+    assert_eq!(reps.views[1].hidden, reps.views[0].hidden);
+    shown(&mut bench, block, true);
+    assert!(hidden(&bench, 1).is_empty());
+    assert_eq!(hidden(&bench, 0), [Occurrence::Item(block.erase())]);
+
+    // Locked: display edits are not saved, a replacement keeps the display (the name may change), and a
+    // component added while it is active is hidden.
+    bench.cell(CellOp::LockViewRepresentation { index: 1, locked: true }).unwrap();
+    shown(&mut bench, table, false);
+    assert!(hidden(&bench, 1).is_empty());
+    shown(&mut bench, table, true);
+    let mut renamed = bench.doc.representations().views[1].clone();
+    renamed.name = "Assembly step".into();
+    renamed.hidden.push(Occurrence::Item(table.erase()));
+    bench.cell(CellOp::SetViewRepresentation { index: 1, view: renamed }).unwrap();
+    let view = bench.doc.representations().views[1].clone();
+    assert!(view.name == "Assembly step" && view.hidden.is_empty() && view.locked);
+    let late = bench.body("Late", [0.1, 0.1, 0.1], Placement { xyz: [1.5, 0.0, 0.05], rpy: [0.0; 3] });
+    assert!(!visible(&bench, late) && visible(&bench, block));
+    assert_eq!(hidden(&bench, 1), [Occurrence::Item(late.erase())]);
+    // It can be shown by hand; the locked view still does not take that.
+    shown(&mut bench, late, true);
+    assert!(visible(&bench, late));
+    assert_eq!(hidden(&bench, 1), [Occurrence::Item(late.erase())]);
+    // Unlocked, it follows again.
+    bench.cell(CellOp::LockViewRepresentation { index: 1, locked: false }).unwrap();
+    shown(&mut bench, late, false);
+    shown(&mut bench, late, true);
+    assert!(hidden(&bench, 1).is_empty());
+    assert!(bench.cell(CellOp::LockViewRepresentation { index: 9, locked: true }).is_err());
+    assert!(bench.cell(CellOp::CopyViewRepresentation(9)).is_err());
+
+    // A positional representation copies with its overrides under a numbered name; Primary stays active.
+    bench.cell(CellOp::AddPositionalRepresentation("Open".into())).unwrap();
+    let mut open = bench.doc.representations().positions[0].clone();
+    open.placements.push((block.erase(), Placement { xyz: [0.0, 0.0, 2.0], rpy: [0.0; 3] }));
+    bench.cell(CellOp::SetPositionalRepresentation { index: 0, position: open.clone() }).unwrap();
+    bench.cell(CellOp::CopyPositionalRepresentation(0)).unwrap();
+    let reps = bench.doc.representations();
+    assert_eq!(reps.positions[1].name, "Open1");
+    assert_eq!(reps.positions[1].placements, open.placements);
+    assert_eq!(reps.active_position, None);
+    assert!(bench.cell(CellOp::CopyPositionalRepresentation(5)).is_err());
+}

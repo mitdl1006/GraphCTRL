@@ -37,6 +37,15 @@ pub struct ViewRepresentation {
     /// The section view definition as the viewport writes it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub section: Option<String>,
+    /// Lock (Inventor 2026 help, To Create, Edit, and Restore View Representations,
+    /// GUID-397F9263-12C3-47A1-B6A6-16FC05EDEF47: "Prevents changes to the View representation display
+    /// characteristics. Components added after a view is locked are not visible while the view is
+    /// active").
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub locked: bool,
+    /// The components there were when the view was locked (what came later is hidden in it).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub known: Vec<Occurrence>,
 }
 
 /// A saved position: overrides on top of the Primary state.
@@ -108,6 +117,122 @@ fn write(txn: &mut Txn<'_>, reps: Representations) -> Result<(), EditError> {
     crate::cell::set_timeline(txn, |t| t.representations = reps)
 }
 
+/// What a view representation saves of the display as it is now: hidden, not enabled, transparency.
+fn display_now(doc: &crate::document::Document) -> (Vec<Occurrence>, Vec<Occurrence>, Vec<(AnyId, f64)>) {
+    let all = doc.all_occurrences();
+    let hidden = all.iter().copied().filter(|o| !doc.component_flag(*o, ComponentFlag::Visible)).collect();
+    let disabled = all.iter().copied().filter(|o| !doc.component_flag(*o, ComponentFlag::Enabled)).collect();
+    let transparency = doc
+        .bodies()
+        .iter()
+        .map(|(id, b)| (id.erase(), b.look.transparency))
+        .chain(doc.robots().iter().map(|(id, r)| (id.erase(), r.look.transparency)))
+        .chain(doc.assemblies().iter().map(|(id, a)| (id.erase(), a.look.transparency)))
+        .filter(|(_, t)| *t > 0.0)
+        .collect();
+    (hidden, disabled, transparency)
+}
+
+/// True when the active view representation is locked (components added then are hidden in it).
+pub(crate) fn active_view_locked(doc: &crate::document::Document) -> bool {
+    doc.timeline().is_some_and(|(_, t)| {
+        let reps = &t.representations;
+        reps.active_view.and_then(|i| reps.views.get(i)).is_some_and(|v| v.locked)
+    })
+}
+
+/// Keeps the active view representation in step after a command (Inventor 2026 help, To Create, Edit,
+/// and Restore View Representations, GUID-397F9263-12C3-47A1-B6A6-16FC05EDEF47: "Edit a View
+/// representation … Activate. Edit the display of components"; "select Lock so the representation does
+/// not update changes to the display"; "Components added after a view is locked are not visible while
+/// the view is active"). An unlocked active view takes the display as it is now; a locked one stays as
+/// it is and hides the components that came after it was locked.
+pub(crate) fn follow(txn: &mut Txn<'_>) -> Result<(), EditError> {
+    let mut reps = txn.doc().representations();
+    let Some(index) = reps.active_view else { return Ok(()) };
+    let Some(view) = reps.views.get(index).cloned() else { return Ok(()) };
+    if !view.locked {
+        let (hidden, disabled, transparency) = display_now(txn.doc());
+        if hidden == view.hidden && disabled == view.disabled && transparency == view.transparency {
+            return Ok(());
+        }
+        reps.views[index] = ViewRepresentation { hidden, disabled, transparency, ..view };
+        return write(txn, reps);
+    }
+    let new: Vec<Occurrence> =
+        txn.doc().all_occurrences().into_iter().filter(|o| !view.known.contains(o)).collect();
+    if new.is_empty() {
+        return Ok(());
+    }
+    for occurrence in &new {
+        if txn.doc().component_flag(*occurrence, ComponentFlag::Visible) {
+            crate::tree::set_component(txn, *occurrence, ComponentFlag::Visible, false)?;
+        }
+    }
+    let mut reps = txn.doc().representations();
+    if let Some(view) = reps.views.get_mut(index) {
+        view.known.extend(new.iter().copied());
+        for occurrence in &new {
+            if !view.hidden.contains(occurrence) {
+                view.hidden.push(*occurrence);
+            }
+        }
+    }
+    write(txn, reps)
+}
+
+/// Lock or unlock a view representation.
+pub(crate) fn lock_view(
+    txn: &mut Txn<'_>,
+    index: usize,
+    locked: bool,
+) -> Result<(Vec<Created>, &'static str), EditError> {
+    let mut reps = txn.doc().representations();
+    let known = if locked { txn.doc().all_occurrences() } else { Vec::new() };
+    let view = reps.views.get_mut(index).ok_or(EditError::BadValue)?;
+    view.locked = locked;
+    view.known = known;
+    write(txn, reps)?;
+    Ok((Vec::new(), if locked { "Lock view representation" } else { "Unlock view representation" }))
+}
+
+/// A free name made from `name` with a number appended ("View1" gives "View2"; "Open" gives "Open1").
+fn numbered(name: &str, taken: &dyn Fn(&str) -> bool) -> String {
+    let stem = name.trim_end_matches(|c: char| c.is_ascii_digit());
+    let stem = if stem.is_empty() { name } else { stem };
+    (1u32..).map(|n| format!("{stem}{n}")).find(|n| !taken(n)).unwrap_or_else(|| name.to_owned())
+}
+
+/// Copy (same help page: "Duplicates the current View representation to make it active. The
+/// incremental number appends the name"): a copy of a view representation, unlocked, at the end of the
+/// list; it becomes the active one and the display is set as it says.
+pub(crate) fn copy_view(txn: &mut Txn<'_>, index: usize) -> Result<(Vec<Created>, &'static str), EditError> {
+    let mut reps = txn.doc().representations();
+    let source = reps.views.get(index).cloned().ok_or(EditError::BadValue)?;
+    let name = numbered(&source.name, &|n| reps.views.iter().any(|v| v.name == n));
+    reps.views.push(ViewRepresentation { name, locked: false, known: Vec::new(), ..source });
+    let copy = reps.views.len() - 1;
+    write(txn, reps)?;
+    activate_view(txn, copy)?;
+    Ok((Vec::new(), "Copy view representation"))
+}
+
+/// Copy of a positional representation (Inventor 2026 help, To Create, Edit, or Copy Positional
+/// Representations, GUID-34C28C35-45CA-4476-9336-30146F7C9471: "The copied representation is placed in
+/// the browser at the same level as the [Primary] representation"): the same overrides under a
+/// numbered name, at the end of the list; which one is active does not change.
+pub(crate) fn copy_position(
+    txn: &mut Txn<'_>,
+    index: usize,
+) -> Result<(Vec<Created>, &'static str), EditError> {
+    let mut reps = txn.doc().representations();
+    let source = reps.positions.get(index).cloned().ok_or(EditError::BadValue)?;
+    let name = numbered(&source.name, &|n| n == "Primary" || reps.positions.iter().any(|p| p.name == n));
+    reps.positions.push(PositionalRepresentation { name, ..source });
+    write(txn, reps)?;
+    Ok((Vec::new(), "Copy positional representation"))
+}
+
 /// Saves the current visibility as a new view representation.
 pub(crate) fn add_view(
     txn: &mut Txn<'_>,
@@ -116,24 +241,7 @@ pub(crate) fn add_view(
     section: Option<&str>,
 ) -> Result<(Vec<Created>, &'static str), EditError> {
     let doc = txn.doc();
-    let hidden: Vec<Occurrence> = doc
-        .all_occurrences()
-        .into_iter()
-        .filter(|o| !doc.component_flag(*o, ComponentFlag::Visible))
-        .collect();
-    let disabled: Vec<Occurrence> = doc
-        .all_occurrences()
-        .into_iter()
-        .filter(|o| !doc.component_flag(*o, ComponentFlag::Enabled))
-        .collect();
-    let transparency: Vec<(AnyId, f64)> = doc
-        .bodies()
-        .iter()
-        .map(|(id, b)| (id.erase(), b.look.transparency))
-        .chain(doc.robots().iter().map(|(id, r)| (id.erase(), r.look.transparency)))
-        .chain(doc.assemblies().iter().map(|(id, a)| (id.erase(), a.look.transparency)))
-        .filter(|(_, t)| *t > 0.0)
-        .collect();
+    let (hidden, disabled, transparency) = display_now(doc);
     let mut reps = doc.representations();
     if name.trim().is_empty() || reps.views.iter().any(|v| v.name == name) {
         return Err(EditError::NameTaken);
@@ -145,6 +253,8 @@ pub(crate) fn add_view(
         transparency,
         camera: camera.map(str::to_owned),
         section: section.map(str::to_owned),
+        locked: false,
+        known: Vec::new(),
     });
     write(txn, reps)?;
     Ok((Vec::new(), "New view representation"))
@@ -157,7 +267,14 @@ pub(crate) fn set_view(
     view: &ViewRepresentation,
 ) -> Result<(Vec<Created>, &'static str), EditError> {
     let mut reps = txn.doc().representations();
-    *reps.views.get_mut(index).ok_or(EditError::BadValue)? = view.clone();
+    let slot = reps.views.get_mut(index).ok_or(EditError::BadValue)?;
+    // Lock keeps the display characteristics; the name may still change.
+    if slot.locked {
+        let name = view.name.clone();
+        *slot = ViewRepresentation { name, ..slot.clone() };
+    } else {
+        *slot = ViewRepresentation { locked: false, known: Vec::new(), ..view.clone() };
+    }
     write(txn, reps)?;
     Ok((Vec::new(), "Edit view representation"))
 }

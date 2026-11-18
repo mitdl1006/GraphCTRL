@@ -3466,6 +3466,25 @@ pub(crate) fn run(txn: &mut Txn<'_>, command: &Command) -> Result<(Vec<Created>,
     }
 }
 
+/// True for a command that changes what a view representation saves: visibility, enabled state,
+/// transparency.
+fn touches_display(command: &Command) -> bool {
+    use crate::cell::CellOp;
+    match command {
+        Command::Sequence(commands) => commands.iter().any(touches_display),
+        Command::SetVisible { .. } | Command::SetComponent { .. } => true,
+        Command::Cell(op) => matches!(
+            op,
+            CellOp::SetBodyLook { .. }
+                | CellOp::SetRobotLook { .. }
+                | CellOp::SetAssemblyLook { .. }
+                | CellOp::Isolate { .. }
+                | CellOp::UndoIsolate
+        ),
+        _ => false,
+    }
+}
+
 /// Applies a command. On success the document is changed and the result says how to undo it. On failure
 /// the document is exactly as before.
 pub fn apply(doc: &mut Document, command: &Command) -> Result<Applied, EditError> {
@@ -3475,6 +3494,9 @@ pub fn apply(doc: &mut Document, command: &Command) -> Result<Applied, EditError
     crate::project::refresh(&mut txn)?;
     crate::role::prune(&mut txn)?;
     crate::tree::prune_states(&mut txn)?;
+    if touches_display(command) || crate::representation::active_view_locked(txn.doc()) {
+        crate::representation::follow(&mut txn)?;
+    }
     name_dimensions(&mut txn)?;
     crate::relparam::sync(&mut txn)?;
     let (delta, changed) = txn.commit()?;

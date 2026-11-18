@@ -611,6 +611,20 @@ pub enum CellOp {
     },
     /// Subassemblies made in the cell: Demote, move between levels, dissolve, rename.
     Subassembly(crate::subassembly::SubassemblyOp),
+    /// Lock or unlock a view representation (Inventor 2026 help, To Create, Edit, and Restore View
+    /// Representations, GUID-397F9263-12C3-47A1-B6A6-16FC05EDEF47): a locked one keeps its display
+    /// characteristics, and components added later are hidden while it is active.
+    LockViewRepresentation {
+        /// Which view.
+        index: usize,
+        /// True to lock.
+        locked: bool,
+    },
+    /// Copy of a view representation; the copy becomes the active one.
+    CopyViewRepresentation(usize),
+    /// Copy of a positional representation (To Create, Edit, or Copy Positional Representations,
+    /// GUID-34C28C35-45CA-4476-9336-30146F7C9471).
+    CopyPositionalRepresentation(usize),
     /// Free Move and Free Rotate (Inventor 2026 help, Move assembly components,
     /// GUID-9796C22B-23C1-4D69-BC2E-54056E46F255, Rotate assembly components,
     /// GUID-7EAE9DFD-899A-4FD1-B63F-92DD41D0A916): drops a component (body, robot or imported assembly)
@@ -1144,6 +1158,11 @@ pub(crate) fn run(txn: &mut Txn<'_>, op: &CellOp) -> Result<(Vec<Created>, &'sta
         | CellOp::AddFollowPath { .. }
         | CellOp::AddPathThrough { .. } => crate::role::run(txn, op),
         CellOp::Work(op) => crate::work::run(txn, op),
+        CellOp::LockViewRepresentation { index, locked } => {
+            crate::representation::lock_view(txn, *index, *locked)
+        }
+        CellOp::CopyViewRepresentation(index) => crate::representation::copy_view(txn, *index),
+        CellOp::CopyPositionalRepresentation(index) => crate::representation::copy_position(txn, *index),
         CellOp::FreeMove { item, placement } => {
             placed(placement)?;
             let placement = *placement;
