@@ -4664,3 +4664,91 @@ fn a_work_feature_clicked_in_the_view_fills_the_assemble_selection() {
     harness.get_by_label_contains("첫 번째 선택");
     harness.get_by_label("첫 번째 선택: Point1 · 점");
 }
+
+/// The Limits tab of a joint (Inventor 2026 help, To Define and Manage Joint Relationships,
+/// GUID-21DC3336-5C51-42C1-90FB-4299CD66E0C6): Start and End in degrees for a rotational joint; the
+/// browser then marks the joint +/-.
+#[test]
+fn a_rotational_joint_gets_angular_limits_from_its_dialog() {
+    let gpu = gc_test_support::gpu().is_some();
+    let builder = egui_kittest::Harness::builder().with_size(SIZE).with_pixels_per_point(1.0);
+    let builder = if gpu { builder.wgpu() } else { builder };
+    let mut harness = builder.build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let app = harness.state_mut();
+    let frame = |z: f64, nz: f64| gc_doc::Geometry::Frame {
+        origin: [0.0, 0.0, z],
+        z: [0.0, 0.0, nz],
+        x: [1.0, 0.0, 0.0],
+    };
+    let sel = |id: gc_core::AnyId, geometry| gc_doc::Selection {
+        occurrence: gc_doc::Occurrence::Item(id),
+        geometry,
+    };
+    let table = app
+        .session
+        .add_body(
+            gc_doc::Solid::Box { size: [2.0, 1.0, 1.0] },
+            gc_doc::Placement { xyz: [0.0, 0.0, 0.5], rpy: [0.0; 3] },
+        )
+        .unwrap();
+    let block = app
+        .session
+        .add_body(
+            gc_doc::Solid::Box { size: [0.2; 3] },
+            gc_doc::Placement { xyz: [0.3, 0.2, 1.6], rpy: [0.0; 3] },
+        )
+        .unwrap();
+    let id = app
+        .session
+        .add_relationship(gc_doc::Relationship::new(
+            "Hinge",
+            gc_doc::RelationKind::Rotational { flip: false },
+            sel(block.erase(), frame(-0.1, -1.0)),
+            sel(table.erase(), frame(0.5, 1.0)),
+        ))
+        .unwrap();
+    harness.run();
+    let at = harness.get_by_label("Hinge").rect().center();
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run();
+    }
+    harness.get_by_label("한계…").click();
+    harness.run_steps(3);
+    harness.get_by_label("조인트 한계");
+    harness.get_by_label("각도 한계").click();
+    harness.run_steps(3);
+    let input = egui::accesskit::Role::TextInput;
+    for (label, text) in [("시작", "-30"), ("끝", "45")] {
+        let field = harness.get_by_role_and_label(input, label);
+        field.click();
+        harness.run_steps(2);
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        harness.run_steps(2);
+        harness.get_by_role_and_label(input, label).type_text(text);
+        harness.run_steps(2);
+    }
+    if gc_test_support::gpu().is_some() {
+        harness.run_steps(2);
+        let image = harness.render().unwrap();
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/evidence");
+        std::fs::create_dir_all(&out).unwrap();
+        image.save(out.join("review-56-joint-limits.png")).unwrap();
+    }
+    harness.get_by_label("확인").click();
+    harness.run_steps(3);
+    let (angular, linear) = harness.state().session.joint_limits(id);
+    let range = angular.expect("angular limits set");
+    assert!(linear.is_none());
+    assert!((range.start + 30f64.to_radians()).abs() < 1e-9, "{range:?}");
+    assert!((range.end - 45f64.to_radians()).abs() < 1e-9, "{range:?}");
+    harness.get_by_label("Hinge +/-");
+}

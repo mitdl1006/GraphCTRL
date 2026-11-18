@@ -11,6 +11,7 @@ mod diagnostics;
 mod drive;
 mod example;
 mod interference;
+mod joint_limits;
 mod measure;
 mod parameters;
 mod pattern;
