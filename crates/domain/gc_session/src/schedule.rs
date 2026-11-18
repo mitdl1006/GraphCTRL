@@ -26,17 +26,58 @@ pub struct Assignment {
     pub end: f64,
 }
 
-/// What [`Session::schedule`] worked out.
-#[derive(Clone, Debug, Default, PartialEq)]
+/// What [`Session::schedule`] worked out. Two schedules are equal when they give the same tasks to the
+/// same robots at the same times and block the same tasks for the same reasons.
+#[derive(Clone, Debug, Default)]
 pub struct Schedule {
     /// The tasks that are done, in the order they start (ties: priority, then the order made).
     pub assignments: Vec<Assignment>,
     /// The tasks that are never done, each with why: its precondition never holds, or no robot can do it
     /// (with the robot's reason).
     pub blocked: Vec<(Id<Task>, String)>,
+    /// The planned motions of each assignment, in the same order.
+    pub plans: Vec<crate::TaskPlan>,
+}
+
+impl PartialEq for Schedule {
+    fn eq(&self, other: &Self) -> bool {
+        self.assignments == other.assignments && self.blocked == other.blocked
+    }
 }
 
 impl Schedule {
+    /// The joint values of a robot at `time` seconds into the schedule: along the motion of the task it
+    /// is doing, or standing where its last task left it. `None` before its first task (it is where the
+    /// document has it) and for a robot without tasks.
+    pub fn joints_at(&self, robot: Id<Robot>, time: f64) -> Option<Vec<f64>> {
+        let (assignment, plan) = self
+            .assignments
+            .iter()
+            .zip(&self.plans)
+            .filter(|(a, _)| a.robot == robot && a.start <= time)
+            .max_by(|(a, _), (b, _)| a.start.total_cmp(&b.start))?;
+        Some(plan.sample(time - assignment.start))
+    }
+
+    /// Every robot that has tasks, with its joint values at `time` ([`Schedule::joints_at`]; before its
+    /// first task, where that task starts from).
+    pub fn robots_at(&self, time: f64) -> Vec<(Id<Robot>, Vec<f64>)> {
+        let mut robots: Vec<Id<Robot>> = self.assignments.iter().map(|a| a.robot).collect();
+        robots.sort();
+        robots.dedup();
+        robots
+            .into_iter()
+            .filter_map(|robot| {
+                let first = || {
+                    let (_, plan) =
+                        self.assignments.iter().zip(&self.plans).find(|(a, _)| a.robot == robot)?;
+                    Some(plan.start.clone())
+                };
+                Some((robot, self.joints_at(robot, time).or_else(first)?))
+            })
+            .collect()
+    }
+
     /// When the last task ends.
     pub fn makespan(&self) -> f64 {
         self.assignments.iter().map(|a| a.end).fold(0.0, f64::max)
@@ -121,7 +162,7 @@ impl Planning<'_> {
         let mut robots: BTreeMap<Id<Robot>, (Vec<f64>, f64)> =
             doc.robots().iter().map(|(id, r)| (id, (r.joints.clone(), 0.0))).collect();
         // Bids already worked out: a task for a robot from given joint values.
-        type Bid = Result<(f64, Vec<f64>), String>;
+        type Bid = Result<crate::TaskPlan, String>;
         type BidKey = (Id<Task>, Id<Robot>, Vec<u64>);
         let mut bids: BTreeMap<BidKey, Bid> = BTreeMap::new();
         // The state of each robot's tool, and what the tool actions of a running task do to their objects
@@ -157,7 +198,7 @@ impl Planning<'_> {
                     reasons.insert(id, "no robot may do it".to_owned());
                 }
                 // The idle robot that would finish soonest; the first of equals.
-                let mut best: Option<(f64, Id<Robot>, Vec<f64>, ToolOutcome)> = None;
+                let mut best: Option<(crate::TaskPlan, ToolOutcome)> = None;
                 for robot in allowed {
                     let Some((joints, free_at)) = robots.get(&robot) else { continue };
                     if *free_at > now {
@@ -165,9 +206,7 @@ impl Planning<'_> {
                         continue;
                     }
                     let key = (id, robot, joints.iter().map(|q| q.to_bits()).collect());
-                    let bid = bids.entry(key).or_insert_with(|| {
-                        self.task_plan_from(id, robot, joints).map(|plan| (plan.duration(), plan.end))
-                    });
+                    let bid = bids.entry(key).or_insert_with(|| self.task_plan_from(id, robot, joints));
                     // Its tool must be in a state to do the task's tool actions.
                     let tool = tools.get(&robot).cloned().flatten();
                     let outcome = match self.tool_outcome(task, robot, &world, tool) {
@@ -178,8 +217,8 @@ impl Planning<'_> {
                         }
                     };
                     match bid {
-                        Ok((time, end)) if best.as_ref().is_none_or(|(t, ..)| *time < *t) => {
-                            best = Some((*time, robot, end.clone(), outcome));
+                        Ok(plan) if best.as_ref().is_none_or(|(b, _)| plan.duration() < b.duration()) => {
+                            best = Some((plan.clone(), outcome));
                         }
                         Ok(_) => {}
                         Err(why) => {
@@ -188,9 +227,12 @@ impl Planning<'_> {
                     }
                 }
                 match best {
-                    Some((time, robot, end, (tool, objects))) => {
-                        let assignment = Assignment { task: id, robot, start: now, end: now + time };
-                        robots.insert(robot, (end, assignment.end));
+                    Some((plan, (tool, objects))) => {
+                        let robot = plan.robot;
+                        let assignment =
+                            Assignment { task: id, robot, start: now, end: now + plan.duration() };
+                        robots.insert(robot, (plan.end.clone(), assignment.end));
+                        out.plans.push(plan);
                         tools.insert(robot, tool);
                         changes.insert(id, objects);
                         running.push(assignment.clone());
