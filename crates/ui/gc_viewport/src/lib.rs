@@ -20,7 +20,7 @@ mod workfeat;
 
 use egui::{Key, PointerButton, Sense, vec2};
 use gc_core::Id;
-use gc_doc::{GripLine, GripMotion, Sketch};
+use gc_doc::{GripReference, Sketch};
 use gc_draw::{Camera, NavAction, NavInput, NavPreset, StandardView, nav_action, viewcube};
 use gc_i18n::{Lang, tr};
 use gc_math::{Aabb, DPose3, DVec3, Plane};
@@ -1282,29 +1282,19 @@ impl Viewport {
                     let scene = Scene::of(session);
                     let hit = self.picker.pick_surface(&scene, &self.camera.ray(at, size)).map(|h| h.point);
                     grip.from = hit.or_else(|| {
-                        grip::on_view_plane(&self.camera, size, DVec3::from(target.line.point), at)
+                        grip::on_view_plane(&self.camera, size, grip::anchor(&target.reference), at)
                     });
                 }
             } else if let (Some(from), false) = (grip.from, grip.fixed) {
-                // Moving along the line: the point of a parallel line through the start nearest the cursor's
-                // ray, so the component follows the cursor; turning: the point of the view plane.
-                let direction = DVec3::from(target.line.direction).normalize_or_zero();
-                let to = pointer.and_then(|at| match grip.motion {
-                    GripMotion::MoveAlong => gizmo::along_axis(&self.camera, at, size, from, direction)
-                        .map(|t| from + direction * t),
-                    GripMotion::RotateAbout => grip::on_view_plane(&self.camera, size, from, at),
-                    // Point and plane references are not offered by this command yet (it picks an edge); the
-                    // view plane keeps the drag defined if one ever arrives here.
-                    GripMotion::Displace
-                    | GripMotion::RotateAboutPoint
-                    | GripMotion::MoveWithinPlane
-                    | GripMotion::MoveAlongNormal => grip::on_view_plane(&self.camera, size, from, at),
+                let to = pointer.and_then(|at| {
+                    grip::end_point(&self.camera, size, &target.reference, grip.motion, from, at)
                 });
                 if let Some(to) = to {
-                    grip.pose = session.grip_snap_pose(
+                    grip.to = Some(to);
+                    grip.pose = session.grip_snap_pose_on(
                         target.any,
                         grip.motion,
-                        target.line,
+                        target.reference,
                         from.to_array(),
                         to.to_array(),
                     );
@@ -1317,13 +1307,14 @@ impl Viewport {
             }
         } else if clicked
             && let Some(at) = pointer
-            && let Some((item, gc_session::Feature::Edge(a, b))) = self.pick_feature(session, at, size)
+            && let Some((item, feature)) = self.pick_feature(session, at, size)
             && let Some(any) = grip::component_of(item)
-            && let Some(line) = GripLine::through(a, b)
+            && let Some(reference) = grip::reference_of(&feature)
             && let Some((start, _)) = gizmo::pose_of(session, item)
         {
             session.select_item(Some(item));
-            grip.target = Some(grip::Target { item, any, line, start });
+            grip.motion = grip::motions(&reference)[0];
+            grip.target = Some(grip::Target { item, any, reference, start });
         }
         // The panel: what to pick next, move or rotate, the freedom report, and the ways to end.
         let mut end: Option<Option<bool>> = None;
@@ -1336,10 +1327,13 @@ impl Viewport {
             .show(ui.ctx(), |ui| {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
                     ui.strong(tr!(lang, GripTitle));
-                    ui.horizontal(|ui| {
-                        ui.selectable_value(&mut motion, GripMotion::MoveAlong, tr!(lang, GripMove));
-                        ui.selectable_value(&mut motion, GripMotion::RotateAbout, tr!(lang, GripRotate));
-                    });
+                    if let Some(target) = &grip.target {
+                        ui.horizontal_wrapped(|ui| {
+                            for option in grip::motions(&target.reference) {
+                                ui.selectable_value(&mut motion, option, grip::motion_name(option, lang));
+                            }
+                        });
+                    }
                     let hint = match (&grip.target, grip.from, grip.fixed) {
                         (None, _, _) => tr!(lang, GripPickEdge),
                         (Some(_), None, _) => tr!(lang, GripPickFrom),
@@ -1348,7 +1342,20 @@ impl Viewport {
                     };
                     ui.label(hint);
                     if let Some(target) = &grip.target {
-                        let allowed = session.grip_allows(target.any, motion, target.line);
+                        // With both points: the snap itself; before: a line is judged by its direction alone.
+                        let allowed = match (grip.from, grip.to) {
+                            (Some(from), Some(to)) => session.grip_snap_allowed(
+                                target.any,
+                                motion,
+                                target.reference,
+                                from.to_array(),
+                                to.to_array(),
+                            ),
+                            _ => match target.reference {
+                                GripReference::Line(line) => session.grip_allows(target.any, motion, line),
+                                _ => true,
+                            },
+                        };
                         let text = if allowed { tr!(lang, GripAllowed) } else { tr!(lang, GripBlocked) };
                         let colour = if allowed {
                             egui::Color32::from_rgb(0x2e, 0x9e, 0x4f)
@@ -1376,7 +1383,7 @@ impl Viewport {
             if let Some(target) = &grip.target {
                 grip::show(session, target, None);
             }
-            grip = grip::Grip { motion, from: None, pose: None, fixed: false, ..grip };
+            grip = grip::Grip { motion, from: None, to: None, pose: None, fixed: false, ..grip };
         }
         match end {
             Some(Some(ground)) => {

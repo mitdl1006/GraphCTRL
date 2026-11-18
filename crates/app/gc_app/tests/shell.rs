@@ -4485,7 +4485,7 @@ fn grip_snap_moves_a_component_along_a_picked_edge() {
     harness.run_steps(3);
     harness.get_by_label("그립 스냅").click();
     harness.run_steps(3);
-    harness.get_by_label("기준이 될 구성요소의 모서리를 선택하세요");
+    harness.get_by_label("기준이 될 구성요소의 모서리·꼭짓점·평면을 선택하세요");
     let screen = |h: &egui_kittest::Harness<'_, GraphCtrlApp>, p: [f64; 3]| {
         h.state().viewport().screen_of(gc_math::DVec3::from(p)).unwrap()
     };
@@ -4751,4 +4751,64 @@ fn a_rotational_joint_gets_angular_limits_from_its_dialog() {
     assert!((range.start + 30f64.to_radians()).abs() < 1e-9, "{range:?}");
     assert!((range.end - 45f64.to_radians()).abs() < 1e-9, "{range:?}");
     harness.get_by_label("Hinge +/-");
+}
+
+/// Grip Snap with a flat face as the reference (Inventor 2026 help, Grip Snap Move Options Bar Reference,
+/// GUID-C030C32C-7E1E-4F37-BBDF-120412898D00: Plane, Move along normal using reference geometry): the
+/// component moves along the face's normal by the part of the way that lies along it.
+#[test]
+fn grip_snap_moves_a_component_along_the_normal_of_a_picked_face() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let app = harness.state_mut();
+    app.session
+        .add_body(
+            gc_doc::Solid::Box { size: [0.1; 3] },
+            gc_doc::Placement { xyz: [-0.5, 0.0, 0.0], rpy: [0.0; 3] },
+        )
+        .unwrap();
+    let id =
+        app.session.add_body(gc_doc::Solid::Box { size: [0.2; 3] }, gc_doc::Placement::default()).unwrap();
+    app.fit_view();
+    app.viewport_mut().camera.pan([0.0, 0.0], [-250.0, 0.0], [1280.0, 700.0]);
+    harness.run();
+    harness.get_by_label("조립").click();
+    harness.run_steps(3);
+    harness.get_by_label("그립 스냅").click();
+    harness.run_steps(3);
+    let screen = |h: &egui_kittest::Harness<'_, GraphCtrlApp>, p: [f64; 3]| {
+        h.state().viewport().screen_of(gc_math::DVec3::from(p)).unwrap()
+    };
+    let click = |h: &mut egui_kittest::Harness<'_, GraphCtrlApp>, at: egui::Pos2| {
+        h.event(egui::Event::PointerMoved(at));
+        h.run_steps(3);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            h.run_steps(3);
+        }
+    };
+    // The middle of the top face.
+    let face = screen(&harness, [0.0, 0.0, 0.1]);
+    click(&mut harness, face);
+    harness.get_by_label("면 안에서 이동");
+    harness.get_by_label("법선 방향 이동").click();
+    harness.run_steps(3);
+    click(&mut harness, face);
+    let to = screen(&harness, [0.0, 0.0, 0.16]);
+    harness.event(egui::Event::PointerMoved(to));
+    harness.run_steps(3);
+    click(&mut harness, to);
+    harness.get_by_label("완료").click();
+    harness.run_steps(3);
+    let xyz = harness.state().session.doc().get(id).unwrap().placement.xyz;
+    assert!((xyz[2] - 0.06).abs() < 0.01, "followed the cursor along the normal: {xyz:?}");
+    assert!(xyz[0].abs() < 1e-9 && xyz[1].abs() < 1e-9, "only along it: {xyz:?}");
 }
