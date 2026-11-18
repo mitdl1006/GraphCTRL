@@ -195,6 +195,12 @@
 - 로봇 탭: 로봇 추가·경로 만들기·계획·재생은 큰 버튼, 가져오기 2개 / 모양 3개 / 웨이포인트 추가 3종 / 좌표계·스케치 경로는 작은 버튼 묶음. 검사 탭: 측정·간섭 분석 큰 버튼, 접촉 솔버 작은 버튼(`ribbon_stack_responses`로 메뉴 유지). 뷰 탭: 홈·전체 보기·자유도·단면 삭제 큰 버튼, 정면·평면·우측 / 직교·원근 / 단면 3종 / 패널 토글은 작은 버튼. 1280 px 단언 유지. 증거 `docs/evidence/img/review-61-ribbon-tabs.png`.
 - 접근성 이름은 그대로(버튼 이름 = 라벨).
 
+### Flexible 서브어셈블리 / 스플라인 분할 / 타원·스플라인 간격띄우기
+
+- **Flexible**: 원문 Create and edit flexible components, GUID-30817F08-A5C2-44B7-B237-4791ACA3F854("Right-click the placed subassembly in the graphics window or the browser, and then select Flexible ... An icon denoting the flexible state marks the subassembly in the browser ... clear the check mark"). 브라우저 서브어셈블리 행 우클릭 메뉴에 "유연" 체크(`SubassemblyOp::SetFlexible`, Undo 1단계), 유연한 행에는 용수철 아이콘(`Icon::Flexible`)이 오른쪽에 붙는다. 그래픽 창 우클릭 마킹 메뉴 목록에도 "유연"(현재 상태면 ✓)이 서브어셈블리 소속 구성요소에서 나온다. 자유 이동/회전과 그립 스냅은 `Session::unit_moves`로 강체 서브어셈블리만 통째로 움직이고(미리보기도 `preview_components`), 유연한 서브어셈블리는 구성요소별로 끌린다. 테스트 `flexible_subassemblies_are_dragged_component_by_component`(+ 기존 통째 이동 테스트).
+- **스플라인 분할**: 원문 GUID-DB15C479-66F2-456A-9E54-40A60F83DC92("To split a spline, right-click a point and choose Split Spline"). 스케치에서 스플라인의 안쪽 맞춤점을 우클릭(멈춤 메뉴 모드)하면 목록에 "스플라인 분할"이 나오고 `SketchOp::SplitSpline`을 실행한다. 테스트 `the_right_click_menu_of_a_spline_fit_point_splits_the_spline`. 차이: 끝점에서는 항목이 나오지 않는다(백엔드가 거부), 핸들 재설정 메뉴는 없다.
+- **간격띄우기**(GUID-D489CE6D…): 타원·스플라인도 받는다. 화면 점검 — 안쪽 타원과 스플라인 사본이 그려진다(`docs/evidence/img/review-62-offset.png`, 테스트 `offset_works_on_an_ellipse_and_a_spline_on_screen`). 이상 없음.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹
