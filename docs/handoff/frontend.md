@@ -670,6 +670,15 @@
 - 병합: 백엔드가 같은 자리에 넣은 `Feature::Circle/Sphere` arm과 내 `Feature::Cone` arm을 모두 남겼다. Measure는 계속 원뿔·구·원을 고르지 않는다(백엔드가 측정을 지원하니 필요하면 켠다).
 - 테스트: `gc_scene` `a_surface_hit_reports_a_sphere_and_a_circular_edge`(공의 구, 원통 테두리의 원). 뷰에서 Insert를 만드는 끝단 테스트는 없다.
 
+## iProperties: Physical 확장·Status·Custom (백엔드 1e56e8b·6d8deb1·45a5886)
+
+근거: iProperties Reference GUID-8ABF17C5-B9EB-47B5-92CF-9FBD335334E3, Physical Tab GUID-877564AC-78CE-4216-9913-003A2DE8D698.
+
+- Physical 탭: "수량 재정의 포함 (Include QTY Overrides)" 체크 → `physical_properties_with(target, 체크)`(업데이트 때 반영), "관성 특성"(`inertial_properties`): Global·COG의 Ixx/Iyy/Izz/Ixy/Ixz/Iyz와 Principal 모멘트(kg·m², 지수 표기), "관성곱을 음의 적분으로 표시"(Negative integral) 체크가 곱을 부호 반전해 보인다. 주축으로의 회전은 표시하지 않았다.
+- 상태 탭: Status 문자열. 사용자 정의 탭: 이름/값 행 목록(추가·× 지우기), 이름이 비거나 겹치면 `set_properties`가 거부하고 오류를 대화상자에 보인다.
+- 테스트: `the_iproperties_dialog_has_custom_properties_a_status_and_inertia`(이름 없는 속성 거부, 이름·값 저장).
+- BOM에 사용자 정의 열 표시는 하지 않았다(백엔드 안내의 행 `keys` + `custom_value` 규칙).
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

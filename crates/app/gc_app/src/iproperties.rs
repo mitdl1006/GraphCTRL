@@ -12,6 +12,8 @@ enum Tab {
     Summary,
     Project,
     Physical,
+    Status,
+    Custom,
 }
 
 /// The dialog's state.
@@ -27,6 +29,12 @@ pub(crate) struct IPropertiesDialog {
     typed: [String; 2],
     /// The calculated values as of the last Update; `None` when the shape is not known.
     physical: Option<PhysicalProperties>,
+    /// Physical: Include QTY Overrides (BOM Static Quantities count in the mass, volume and area of the document).
+    include_quantities: bool,
+    /// The inertial properties as of the last Update.
+    inertia: Option<gc_session::InertialProperties>,
+    /// Physical: show the products of inertia negated (Inventor's "Negative integral" option).
+    negative_integral: bool,
     error: Option<String>,
 }
 
@@ -40,6 +48,9 @@ impl Default for IPropertiesDialog {
             draft: IProperties::default(),
             typed: [String::new(), String::new()],
             physical: None,
+            include_quantities: false,
+            inertia: None,
+            negative_integral: false,
             error: None,
         }
     }
@@ -74,7 +85,13 @@ impl IPropertiesDialog {
         self.error = None;
         self.draft = session.properties(target);
         self.typed = [number_text(self.draft.density), number_text(self.draft.mass_override)];
-        self.physical = session.physical_properties(target);
+        self.refresh(session);
+    }
+
+    /// Works the Physical tab's numbers out again.
+    fn refresh(&mut self, session: &Session) {
+        self.physical = session.physical_properties_with(self.target, self.include_quantities);
+        self.inertia = session.inertial_properties(self.target);
     }
 
     fn apply(&mut self, session: &mut Session, lang: Lang) -> bool {
@@ -88,7 +105,7 @@ impl IPropertiesDialog {
             Ok(()) => {
                 self.error = None;
                 // The values depend on what was just set.
-                self.physical = session.physical_properties(self.target);
+                self.refresh(session);
                 true
             }
             Err(error) => {
@@ -114,6 +131,8 @@ impl IPropertiesDialog {
                     ui.selectable_value(&mut self.tab, Tab::Summary, tr!(lang, IpTabSummary));
                     ui.selectable_value(&mut self.tab, Tab::Project, tr!(lang, IpTabProject));
                     ui.selectable_value(&mut self.tab, Tab::Physical, tr!(lang, IpTabPhysical));
+                    ui.selectable_value(&mut self.tab, Tab::Status, tr!(lang, IpTabStatus));
+                    ui.selectable_value(&mut self.tab, Tab::Custom, tr!(lang, IpTabCustom));
                 });
                 ui.separator();
                 match self.tab {
@@ -147,6 +166,10 @@ impl IPropertiesDialog {
                         );
                     }
                     Tab::Physical => self.physical_tab(ui, session, lang),
+                    Tab::Status => {
+                        text_grid(ui, "gc_ip_status", [(tr!(lang, IpStatus), &mut self.draft.status, false)]);
+                    }
+                    Tab::Custom => self.custom_tab(ui, lang),
                 }
                 ui.separator();
                 if let Some(error) = &self.error {
@@ -216,8 +239,81 @@ impl IPropertiesDialog {
                 ui.weak(tr!(lang, IpNotKnown));
             }
         }
+        ui.checkbox(&mut self.include_quantities, tr!(lang, IpIncludeQty));
         if ui.button(tr!(lang, IpUpdate)).clicked() {
-            self.physical = session.physical_properties(self.target);
+            self.refresh(session);
+        }
+        self.inertia_ui(ui, lang);
+    }
+
+    /// The Inertial Properties: Global, COG and the Principal moments (Inventor 2026 help, iProperties - Physical Tab -
+    /// Reference, GUID-877564AC-78CE-4216-9913-003A2DE8D698).
+    fn inertia_ui(&mut self, ui: &mut egui::Ui, lang: Lang) {
+        let Some(inertia) = self.inertia else { return };
+        ui.separator();
+        ui.label(egui::RichText::new(tr!(lang, IpInertia)).strong());
+        ui.checkbox(&mut self.negative_integral, tr!(lang, IpNegativeIntegral));
+        let sign = if self.negative_integral { -1.0 } else { 1.0 };
+        let number = |v: f64| format!("{v:.6e}");
+        egui::Grid::new("gc_ip_inertia").num_columns(7).spacing([10.0, 4.0]).show(ui, |ui| {
+            for head in ["", "Ixx", "Iyy", "Izz", "Ixy", "Ixz", "Iyz"] {
+                ui.label(egui::RichText::new(head).strong());
+            }
+            ui.end_row();
+            for (label, m) in
+                [(tr!(lang, IpInertiaGlobal), inertia.global), (tr!(lang, IpInertiaCog), inertia.cog)]
+            {
+                ui.label(label);
+                for v in [m.ixx, m.iyy, m.izz, sign * m.ixy, sign * m.ixz, sign * m.iyz] {
+                    ui.label(number(v));
+                }
+                ui.end_row();
+            }
+        });
+        ui.label(format!(
+            "{}: {}, {}, {} kg·m²",
+            tr!(lang, IpInertiaPrincipal),
+            number(inertia.principal[0]),
+            number(inertia.principal[1]),
+            number(inertia.principal[2])
+        ));
+    }
+
+    /// The Custom tab: iProperties the user adds, by name and value (a name is not empty and not repeated).
+    fn custom_tab(&mut self, ui: &mut egui::Ui, lang: Lang) {
+        let mut remove = None;
+        egui::Grid::new("gc_ip_custom").num_columns(3).spacing([12.0, 6.0]).show(ui, |ui| {
+            ui.label(egui::RichText::new(tr!(lang, IpCustomName)).strong());
+            ui.label(egui::RichText::new(tr!(lang, IpCustomValue)).strong());
+            ui.end_row();
+            for (index, property) in self.draft.custom.iter_mut().enumerate() {
+                let name = ui.add(egui::TextEdit::singleline(&mut property.name).desired_width(120.0));
+                name.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::Role::TextInput,
+                        true,
+                        format!("{} {}", tr!(lang, IpCustomName), index + 1),
+                    )
+                });
+                let value = ui.add(egui::TextEdit::singleline(&mut property.value).desired_width(160.0));
+                value.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::Role::TextInput,
+                        true,
+                        format!("{} {}", tr!(lang, IpCustomValue), index + 1),
+                    )
+                });
+                if ui.small_button("×").on_hover_text(tr!(lang, IpCustomRemove)).clicked() {
+                    remove = Some(index);
+                }
+                ui.end_row();
+            }
+        });
+        if let Some(index) = remove {
+            self.draft.custom.remove(index);
+        }
+        if ui.button(tr!(lang, IpCustomAdd)).clicked() {
+            self.draft.custom.push(gc_doc::CustomProperty::default());
         }
     }
 }
