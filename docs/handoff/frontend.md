@@ -679,6 +679,14 @@
 - 테스트: `the_iproperties_dialog_has_custom_properties_a_status_and_inertia`(이름 없는 속성 거부, 이름·값 저장).
 - BOM에 사용자 정의 열 표시는 하지 않았다(백엔드 안내의 행 `keys` + `custom_value` 규칙).
 
+## 스케치: Line 도구 우클릭 Close
+
+근거: To Work with Sketch Profiles GUID-4110FA02-0A8A-41F7-85B5-384819DAC528(우클릭 Close).
+
+- 스케치 우클릭(마킹) 메뉴의 오버플로 맨 위에 Line 도구일 때 "닫기 (Close)"(`ToolCommand::Close`: 시작점으로 닫는 선분, 도구 유지)가 나온다. Done은 기존대로(Esc와 같음).
+- 테스트: `the_line_tools_right_click_menu_offers_close`.
+- 남은 스케치 항목(리드 목록): Point Snaps 우클릭(백엔드 스냅 종류 대기), 상자 선택 Window/Crossing(스케치), HUD 세부(극좌표 등), F8/F9·구속 글리프 상호작용, 치수 표시 5모드, Slice Graphics(F7).
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

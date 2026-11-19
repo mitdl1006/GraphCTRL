@@ -878,7 +878,7 @@ impl Viewport {
                         }
                     }
                 }
-                radial::Set::sketch(session.sketch_is_spatial(), menu)
+                radial::Set::sketch(session.sketch_is_spatial(), menu, session.tool() == ToolKind::Line)
             } else {
                 // What is under the cursor is selected, and decides the short menu.
                 let view = at.map(to_view);
