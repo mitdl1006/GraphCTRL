@@ -182,3 +182,41 @@ fn static_quantities_count_in_the_mass_when_asked() {
     let one = s.physical_properties_with(Some(Occurrence::Item(bolt.erase())), true).unwrap();
     assert!((one.mass - 1.0).abs() < 1e-12);
 }
+
+/// Inertial Properties (Inventor 2026 help, iProperties - Physical Tab - Reference,
+/// GUID-877564AC-78CE-4216-9913-003A2DE8D698): Global, COG and Principal moments.
+#[test]
+fn inertial_properties_of_a_box_follow_the_textbook() {
+    let mut s = Session::new();
+    let a = body(&mut s, Solid::Box { size: [0.1, 0.2, 0.3] }, [1.0, 0.0, 0.0]);
+    let oa = Occurrence::Item(a.erase());
+    s.set_properties(Some(oa), IProperties { density: Some(1000.0), ..IProperties::default() }).unwrap();
+    let inertia = s.inertial_properties(Some(oa)).unwrap();
+    let near = |x: f64, y: f64| (x - y).abs() < 1e-12;
+    // m = 6 kg: I = m (b² + c²) / 12 about the centre of gravity.
+    assert!(near(inertia.cog.ixx, 0.065) && near(inertia.cog.iyy, 0.05) && near(inertia.cog.izz, 0.025));
+    assert!(near(inertia.cog.ixy, 0.0) && near(inertia.cog.ixz, 0.0) && near(inertia.cog.iyz, 0.0));
+    // About the assembly origin, 1 m away along X: m d² more about Y and Z.
+    assert!(
+        near(inertia.global.ixx, 0.065) && near(inertia.global.iyy, 6.05) && near(inertia.global.izz, 6.025)
+    );
+    assert!(inertia.principal.iter().zip([0.065, 0.05, 0.025]).all(|(p, e)| near(*p, e)));
+    assert!(inertia.rotation_to_principal.iter().all(|r| r.abs() < 1e-12));
+    // Turned a quarter about Z: X and Y change places about the centre of gravity; the principal
+    // moments are the same three.
+    let mut turned = s.doc().get(a).unwrap().clone();
+    turned.placement.rpy = [0.0, 0.0, std::f64::consts::FRAC_PI_2];
+    s.execute(&gc_doc::Command::Cell(gc_doc::CellOp::SetBody { id: a, body: turned })).unwrap();
+    let inertia = s.inertial_properties(Some(oa)).unwrap();
+    assert!((inertia.cog.ixx - 0.05).abs() < 1e-9 && (inertia.cog.iyy - 0.065).abs() < 1e-9);
+    let mut principal = inertia.principal;
+    principal.sort_by(f64::total_cmp);
+    assert!(principal.iter().zip([0.025, 0.05, 0.065]).all(|(p, e)| (p - e).abs() < 1e-9));
+    // The whole document with a second, equal box opposite: twice the moments about the axis between.
+    let b = body(&mut s, Solid::Box { size: [0.2, 0.1, 0.3] }, [-1.0, 0.0, 0.0]);
+    let ob = Occurrence::Item(b.erase());
+    s.set_properties(Some(ob), IProperties { density: Some(1000.0), ..IProperties::default() }).unwrap();
+    let all = s.inertial_properties(None).unwrap();
+    assert!((all.cog.izz - 2.0 * 6.025).abs() < 1e-9, "{}", all.cog.izz);
+    assert!((all.global.izz - all.cog.izz).abs() < 1e-9, "the centre of gravity is the origin");
+}

@@ -124,6 +124,17 @@
 
 # 작업 기록(최신 순)
 
+## 2026-11-18 — Physical 탭: 관성 특성(Global·COG·Principal); Summary·Project 나머지 필드는 원문 없음
+
+근거: iProperties - Physical Tab - Reference(`GUID-877564AC-78CE-4216-9913-003A2DE8D698`) — "Inertial Properties: Click Principal, Global, or COG …", "Principal Moments: … about the principal axes of inertia", "Rotation to principal …", "Mass Moments: Moments of inertia (Ixx, Iyy, and Izz) and products of inertia (Ixy, Ixz, and Iyz)", "Inertial Properties and Center of Gravity do not include … BOM Quantity overrides", "reported according to your selection of Negative integral or Positive integral".
+
+- `session.inertial_properties(target) -> Option<InertialProperties { global, cog, principal: [f64; 3], rotation_to_principal: [f64; 3] /*rpy*/ }>`; `MassMoments { ixx, iyy, izz, ixy, ixz, iyz }`(kg·m²). 기준 좌표계는 어셈블리 원점·축. `target`은 `physical_properties`와 같다(바디·로봇 하나, 또는 `None` = 문서 전체, Reference 제외).
+- 관성곱은 **양의 적분**(∫xy dm)으로 준다. 인벤터의 Negative integral 옵션처럼 보이려면 프런트에서 부호만 바꾸면 된다.
+- 계산: 박스·원통·구는 해석식, 메시는 원점 기준 사면체 적분(닫힌 메시 가정), 자세 이동은 평행축 정리. 컴포넌트마다 질량(밀도×부피 또는 질량 오버라이드)이 부피에 고르게 퍼져 있다고 본다. 주축은 Jacobi 회전으로 구한다(오른손 좌표계).
+- 고친 것: `Measure`의 기본값이 행렬 단위행렬을 물려받지 않게 했다(새 필드 관련, 기존 값에는 영향 없음).
+- **Summary·Project 탭의 나머지 필드(제안 3)는 하지 않았다**: 2026 도움말의 iProperties 페이지들(Reference `GUID-8ABF17C5…`, About `GUID-DB4F5723…`, To Work with iProperties `GUID-9ED64200…`)에 필드 목록이 없다. 필요한 값은 Custom iProperties로 넣을 수 있다. 필드 목록의 원문(또는 리드 지시)이 있으면 추가한다.
+- 테스트: `gc_session` `physical::tests::mesh_second_moments_match_the_solids`, `gc_session/tests/iproperties.rs::inertial_properties_of_a_box_follow_the_textbook`.
+
 ## 2026-11-18 — Physical 탭: Include QTY Overrides
 
 근거: iProperties - Physical Tab - Reference(`GUID-877564AC-78CE-4216-9913-003A2DE8D698`) — "Mass, Volume, and Area includes contributions from … BOM Quantity overrides when the … Include QTY Overrides check [box is] selected", "If static quantities are created, the center of gravity and moments of inertia values may not be accurate".
