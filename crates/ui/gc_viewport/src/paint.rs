@@ -678,7 +678,6 @@ fn glyphs(view: &View<'_>, plane: &SketchPlane, sketch: &Sketch, session: &Sessi
                     }
                 }
             }
-            view.painter.ctx().request_repaint();
         }
     }
 }
