@@ -74,8 +74,12 @@ pub fn gate(root: &Path, skip_gpu: bool) -> Result<()> {
 /// The test binaries that draw with a GPU (they call `gc_test_support::gpu()` or build a wgpu harness).
 /// Only these run a second time with a required adapter; every other test already ran in the `test` step.
 /// A new GPU test file must be added here (`gpu_test_files_are_listed` checks it).
-const GPU_TESTS: &[(&str, &str)] =
-    &[("gc_render", "gpu"), ("gc_app", "shell"), ("gc_app", "sketch_shape_tools")];
+const GPU_TESTS: &[(&str, &str)] = &[
+    ("gc_render", "gpu"),
+    ("gc_app", "shell"),
+    ("gc_app", "sketch_shape_tools"),
+    ("gc_app", "evidence_flow"),
+];
 
 /// Runs the GPU test binaries with `GC_REQUIRE_GPU=1`, so a GPU test that finds no adapter fails instead
 /// of skipping.

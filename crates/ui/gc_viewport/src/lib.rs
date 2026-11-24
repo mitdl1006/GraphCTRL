@@ -2309,11 +2309,20 @@ impl Viewport {
                     ui.checkbox(&mut route.linear, tr!(lang, RouteLinear));
                 });
             });
-        if response.clicked_by(PointerButton::Primary)
-            && let Some(at) = response.interact_pointer_pos()
-        {
+        // The nearest point of the sketches that are shown to the cursor, ringed as the one a click takes;
+        // the first point stays ringed and a line follows the cursor from it (nothing is made yet).
+        let painter = ui
+            .ctx()
+            .layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("gc_route_overlay")))
+            .with_clip_rect(rect);
+        let hover_color = egui::Color32::from_rgb(255, 160, 40);
+        let screen_of = |sketch: Id<gc_doc::Sketch>, point: Id<gc_sketch::SkPoint>| {
+            let s = session.doc().get(sketch)?;
+            let pos = s.pos(point)?;
+            self.camera.project(plane_of(session, s).world(pos), size)
+        };
+        let near = |at: egui::Pos2| {
             let screen = to_view(at);
-            // The nearest point of the sketches that are shown.
             let mut best: Option<(f64, Id<gc_doc::Sketch>, Id<gc_sketch::SkPoint>)> = None;
             for (sketch_id, sketch) in session.doc().sketches().iter() {
                 if !session.doc().is_visible(sketch_id.erase()) {
@@ -2329,6 +2338,31 @@ impl Viewport {
                     }
                 }
             }
+            best
+        };
+        let hovered = response.hover_pos().and_then(near);
+        let first_screen = route.first.and_then(|(sk, pt)| screen_of(sk, pt));
+        if let Some(from) = first_screen {
+            let from_pt = rect.min + egui::vec2(from[0] as f32, from[1] as f32);
+            let to_pt = hovered
+                .and_then(|(_, sk, pt)| screen_of(sk, pt))
+                .map(|p| rect.min + egui::vec2(p[0] as f32, p[1] as f32))
+                .or(response.hover_pos());
+            if let Some(to_pt) = to_pt {
+                painter.line_segment([from_pt, to_pt], egui::Stroke::new(2.0, hover_color));
+            }
+            painter.circle_stroke(from_pt, 8.0, egui::Stroke::new(2.5, hover_color));
+        }
+        if let Some((_, sketch, point)) = hovered
+            && let Some(p) = screen_of(sketch, point)
+        {
+            let at = rect.min + egui::vec2(p[0] as f32, p[1] as f32);
+            painter.circle_stroke(at, 7.0, egui::Stroke::new(2.0, hover_color));
+        }
+        if response.clicked_by(PointerButton::Primary)
+            && let Some(at) = response.interact_pointer_pos()
+        {
+            let best = near(at);
             if let Some((_, sketch, point)) = best {
                 match route.first {
                     None => route.first = Some((sketch, point)),

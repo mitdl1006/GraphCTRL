@@ -1712,19 +1712,22 @@ impl eframe::App for GraphCtrlApp {
         let mut work_request: Option<gc_panels::WorkRequest> = None;
         // The schedule: a bottom panel with the Gantt chart, above the status bar (declared after it).
         if self.schedule_open {
-            egui::Panel::bottom("schedule").resizable(true).default_size(150.0).show(ui, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.strong(tr!(lang, ScheduleTitle));
-                        if ui.small_button("✕").clicked() {
-                            self.schedule_open = false;
-                            self.schedule.stop(&mut self.session);
-                        }
+            egui::Panel::bottom("schedule").resizable(true).default_size(180.0).min_size(120.0).show(
+                ui,
+                |ui| {
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.strong(tr!(lang, ScheduleTitle));
+                            if ui.small_button("✕").clicked() {
+                                self.schedule_open = false;
+                                self.schedule.stop(&mut self.session);
+                            }
+                        });
+                        schedule_request =
+                            gc_panels::schedule_panel(ui, &mut self.session, lang, &mut self.schedule);
                     });
-                    schedule_request =
-                        gc_panels::schedule_panel(ui, &mut self.session, lang, &mut self.schedule);
-                });
-            });
+                },
+            );
         }
         // The 3D view fills the window; the browser and the properties float over it, see-through, and
         // the view's own overlays keep to what they leave free.

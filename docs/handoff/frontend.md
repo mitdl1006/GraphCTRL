@@ -710,6 +710,12 @@
 - 설정은 문서가 아닌 앱 설정(`Settings.hud_cartesian`, `hud_no_dimension_input`)에 저장, 응용 프로그램 옵션 > 스케치 탭에 UI.
 - 테스트: `gc_session` `the_hud_takes_delta_x_and_delta_y_and_can_leave_dimensions_out`, `gc_app` `the_hud_options_switch_the_line_to_delta_x_and_y`.
 
+## 끝단 점검: 역할 지정 → 경로 생성 → 작업·스케줄 재생 (증거 PNG)
+
+점검 결과: ① 우클릭 메뉴(점→웨이포인트, 체인→경로, 닫힌 곡선도 경로)·브라우저 역할 노드·역할 패널은 이미 인벤터식으로 동작. ② "경로 생성"은 점1→점2 클릭으로 경로를 만들고 Esc·우클릭 취소, Undo 1단계였으나 **미리보기가 없었음** → 마우스 아래 점에 고리, 첫 점에 고리, 첫 점에서 커서(또는 가리킨 점)까지 선을 그림(맨 위 레이어). ③ 스케줄 패널이 너무 낮아(약 75px) 간트가 안 보여 기본 높이를 키움(180, 최소 120).
+- 새 테스트 `crates/app/gc_app/tests/evidence_flow.rs`(GPU 단계 목록 `xtask/src/gate.rs`에 추가): 흐름 전체를 단언하고 GPU가 있으면 `docs/evidence/img/`에 PNG를 남김.
+- PNG: flow-1-sketch, flow-2-point-menu, flow-3-line-menu, flow-4-roles-in-browser, flow-5-role-panel, flow-6-role-menu-make-task, flow-7-schedule-worked-out, flow-8-schedule-playing, route-1-sketch-points, route-2-mode-on, route-3-first-point-and-preview, route-4-path-made, route-5-after-undo.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹
