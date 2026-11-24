@@ -448,3 +448,48 @@ fn create_path_is_off_without_a_robot_and_the_path_panel_lists_followed_roles() 
     h.run_steps(3);
     assert_eq!(h.state().session.plan_status(path), gc_session::PlanStatus::Stale);
 }
+
+/// The Create Path preview (a ring under the cursor, a line from the first point) is only a drawing: moving the pointer
+/// about, off the view and back, never changes the document or the undo history, and Esc takes the first point away.
+#[test]
+fn the_create_path_preview_never_touches_the_document() {
+    let mut h = robot_scene();
+    let a = [0.45, -0.15, 0.25];
+    let before = h.state().session.doc().clone();
+    let steps = depth(&h);
+    h.get_by_label("경로 생성").click();
+    h.run_steps(2);
+    world_click(&mut h, a);
+    assert!(h.state().viewport().is_routing());
+    // The pointer wanders: over the view, over the ribbon, off the window, back.
+    for at in [
+        egui::pos2(300.0, 300.0),
+        egui::pos2(640.0, 400.0),
+        egui::pos2(640.0, 30.0),
+        egui::pos2(-50.0, -50.0),
+        egui::pos2(5000.0, 5000.0),
+        egui::pos2(900.0, 650.0),
+    ] {
+        h.event(egui::Event::PointerMoved(at));
+        h.run_steps(3);
+    }
+    h.event(egui::Event::PointerGone);
+    h.run_steps(3);
+    h.event(egui::Event::PointerMoved(egui::pos2(700.0, 420.0)));
+    h.run_steps(3);
+    assert!(h.state().viewport().is_routing(), "the preview ended the mode");
+    assert!(h.state().session.doc().same_content(&before), "the preview changed the document");
+    assert_eq!(depth(&h), steps);
+    // Esc ends it; a new run starts from nothing (the old first point is not remembered).
+    escape(&mut h);
+    assert!(!h.state().viewport().is_routing());
+    h.get_by_label("경로 생성").click();
+    h.run_steps(2);
+    world_click(&mut h, [0.45, 0.15, 0.25]);
+    assert!(
+        h.state().viewport().is_routing(),
+        "the first click of a new run counted as the second point of the old one"
+    );
+    assert!(h.state().session.doc().paths().is_empty());
+    escape(&mut h);
+}
