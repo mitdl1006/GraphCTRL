@@ -8,7 +8,7 @@
 #![allow(clippy::unwrap_used, clippy::panic, clippy::float_cmp, reason = "test code")]
 
 use eframe::egui;
-use egui_kittest::kittest::Queryable as _;
+use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use gc_app::{GraphCtrlApp, RunOptions};
 use gc_core::Id;
 use gc_doc::{Body, Geometry, Occurrence, Placement, RelationKind, Selection, Solid};
@@ -302,4 +302,146 @@ fn the_joint_dialog_takes_two_clicked_faces_and_a_rigid_joint_joins_their_frames
     assert!(h.state_mut().session.undo());
     assert!(h.state().session.doc().same_content(&before));
     let _ = Occurrence::Item(a.erase());
+}
+
+fn rows_text(h: &H) -> Vec<String> {
+    ["첫 번째 선택", "두 번째 선택"]
+        .iter()
+        .flat_map(|p| {
+            h.query_all_by_label_contains(p)
+                .map(|n| format!("{:?}", n.accesskit_node().label()))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+/// The first of these body-local spots whose click, in a fresh dialog, fills the first selection with something
+/// described by `want` (the dialog is cancelled again).
+fn spot_that_picks(h: &mut H, tab: &str, body: Id<Body>, spots: &[[f64; 3]], want: &str) -> Option<[f64; 3]> {
+    for spot in spots {
+        let w = world(h, body, *spot);
+        let Some(at) = h.state().viewport().screen_of(w) else { continue };
+        if at.x > 900.0 || at.x < 250.0 || at.y < 120.0 || at.y > 740.0 {
+            continue;
+        }
+        open(h, "구속", Some(tab));
+        click(h, at);
+        let rows = rows_text(h);
+        h.get_by_label("취소").click();
+        h.run_steps(3);
+        if rows.iter().any(|r| r.contains(want)) {
+            return Some(*spot);
+        }
+    }
+    None
+}
+
+#[test]
+fn the_rims_of_two_cylinders_clicked_in_the_view_are_inserted_axis_to_axis_and_face_to_face() {
+    let mut h = harness();
+    let solid = Solid::Cylinder { radius: 0.05, length: 0.1 };
+    let s = &mut h.state_mut().session;
+    let a = s.add_body(solid.clone(), Placement { xyz: [-0.15, 0.1, 0.0], rpy: [0.0; 3] }).unwrap();
+    let b = s.add_body(solid, Placement { xyz: [0.2, 0.0, 0.1], rpy: [0.3, -0.2, 0.8] }).unwrap();
+    h.run();
+    h.state_mut().fit_view();
+    h.run_steps(3);
+    let before = h.state().session.doc().clone();
+    open(&mut h, "구속", Some("삽입"));
+    // The rim of each cylinder's visible end: the circular edge is picked, not the cap behind it.
+    let rim = |z: f64| -> Vec<[f64; 3]> {
+        (0..12)
+            .map(|i| {
+                let t = f64::from(i) * std::f64::consts::TAU / 12.0;
+                [0.05 * gc_math::fm::cos(t), 0.05 * gc_math::fm::sin(t), z]
+            })
+            .collect()
+    };
+    h.get_by_label("취소").click();
+    h.run_steps(3);
+    let all = [rim(0.05), rim(-0.05)].concat();
+    let spot_b = spot_that_picks(&mut h, "삽입", b, &all, "· 원");
+    let spot_a = spot_that_picks(&mut h, "삽입", a, &all, "· 원");
+    let (Some(spot_b), Some(spot_a)) = (spot_b, spot_a) else {
+        panic!("a circular edge could not be picked on a cylinder's rim: {spot_b:?} {spot_a:?}");
+    };
+    open(&mut h, "구속", Some("삽입"));
+    click_on(&mut h, b, spot_b);
+    click_on(&mut h, a, spot_a);
+    let rows = rows_text(&h);
+    h.get_by_label("확인").click();
+    h.run_steps(3);
+    let rels = h.state().session.relationships();
+    assert_eq!(
+        rels.len(),
+        1,
+        "one Insert constraint; rows {rows:?}; error {:?}",
+        h.state().session.last_error()
+    );
+    let (first, second) = (rels[0].1.first, rels[0].1.second);
+    assert!(matches!(rels[0].1.kind, RelationKind::Insert { .. }));
+    for sel in [first, second] {
+        assert!(matches!(sel.geometry, Geometry::Circle { .. }), "{:?}", sel.geometry);
+    }
+    // Axes on one line and the circles' planes together (offset 0).
+    let doc = h.state().session.doc();
+    let (p1, d1) = doc.selection_axis(&first).unwrap();
+    let (p2, d2) = doc.selection_axis(&second).unwrap();
+    assert!(d1.cross(d2).length() < 1e-6, "the axes are parallel");
+    assert!((p2 - p1).cross(d1).length() < 1e-6, "the axes are one line");
+    let (c1, c2) = (doc.selection_point(&first).unwrap(), doc.selection_point(&second).unwrap());
+    assert!(((c1 - c2).dot(d1)).abs() < 1e-6, "the circles' planes are {} apart", (c1 - c2).dot(d1));
+    assert!(d1.dot(d2) < -0.999, "Insert's default turns the parts to face each other");
+    // Undo restores exactly.
+    assert!(h.state_mut().session.undo());
+    assert!(h.state().session.doc().same_content(&before));
+}
+
+#[test]
+fn a_sphere_clicked_in_the_view_is_made_tangent_to_a_clicked_face() {
+    let mut h = harness();
+    let s = &mut h.state_mut().session;
+    let table = s
+        .add_body(Solid::Box { size: [0.4, 0.4, 0.1] }, Placement { xyz: [-0.1, 0.0, 0.0], rpy: [0.0; 3] })
+        .unwrap();
+    let ball = s
+        .add_body(Solid::Sphere { radius: 0.05 }, Placement { xyz: [0.25, 0.1, 0.2], rpy: [0.0; 3] })
+        .unwrap();
+    h.run();
+    h.state_mut().fit_view();
+    h.run_steps(3);
+    let before = h.state().session.doc().clone();
+    let r = 0.05 * 0.7;
+    let spots = [[r, 0.0, r], [-r, 0.0, r], [0.0, r, r], [0.0, -r, r], [0.0, 0.0, 0.05], [r, 0.0, -r]];
+    let Some(spot) = spot_that_picks(&mut h, "접선", ball, &spots, "· 형상") else {
+        panic!("a sphere could not be picked by clicking on it");
+    };
+    open(&mut h, "구속", Some("접선"));
+    click_on(&mut h, table, [0.12, 0.05, 0.05]);
+    click_on(&mut h, ball, spot);
+    let rows = rows_text(&h);
+    h.get_by_label("확인").click();
+    h.run_steps(3);
+    let rels = h.state().session.relationships();
+    assert_eq!(rels.len(), 1, "rows {rows:?}; error {:?}", h.state().session.last_error());
+    let (first, second) = (rels[0].1.first, rels[0].1.second);
+    assert!(matches!(rels[0].1.kind, RelationKind::Tangent { .. }));
+    let sphere = [first, second]
+        .into_iter()
+        .find(|s| matches!(s.geometry, Geometry::Sphere { .. }))
+        .expect("a sphere selection");
+    let face = [first, second]
+        .into_iter()
+        .find(|s| matches!(s.geometry, Geometry::Plane { .. }))
+        .expect("a plane selection");
+    let doc = h.state().session.doc();
+    let centre = doc.selection_point(&sphere).unwrap();
+    let (p, n) = (doc.selection_point(&face).unwrap(), doc.selection_axis(&face).unwrap().1);
+    assert!(
+        ((centre - p).dot(n).abs() - 0.05).abs() < 1e-6,
+        "the ball's centre is {} from the face",
+        (centre - p).dot(n)
+    );
+    assert!(h.state_mut().session.undo());
+    assert!(h.state().session.doc().same_content(&before));
 }
