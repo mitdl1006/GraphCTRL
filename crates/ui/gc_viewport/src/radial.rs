@@ -36,6 +36,8 @@ pub(crate) struct SplineMenu {
     pub(crate) waypoint: Option<(gc_core::Id<gc_doc::Sketch>, gc_core::Id<gc_sketch::SkPoint>)>,
     /// The open curve under the cursor that is not in a path role yet; its chain becomes the path.
     pub(crate) path: Option<(gc_core::Id<gc_doc::Sketch>, gc_core::Id<gc_sketch::Curve>)>,
+    /// The constraint glyph under the cursor (Delete Constraint).
+    pub(crate) constraint: Option<gc_core::Id<gc_sketch::GeoConstraint>>,
 }
 
 /// A command of the marking menu.
@@ -45,6 +47,9 @@ pub(crate) enum Cmd {
     Tool(ToolKind),
     /// End the command in progress.
     Done,
+    /// Delete the constraint whose glyph is under the cursor (docs/ux/inventor-sketch-parity.md: glyph interaction; Inventor
+    /// 2026 help, To Work with Geometric Constraints, GUID-B06FA7B7-5CD5-4D58-B1C5-0C5ABAFFD84E).
+    DeleteConstraint(gc_core::Id<gc_sketch::GeoConstraint>),
     /// Line: draw the closing segment back to where the chain started; the tool stays on (Inventor 2026 help, To Work
     /// with Sketch Profiles, GUID-4110FA02-0A8A-41F7-85B5-384819DAC528: right-click Close).
     CloseLine,
@@ -113,6 +118,9 @@ impl Set {
         }
         radial[4] = Some(Cmd::FinishSketch);
         let mut overflow = Vec::new();
+        if let Some(constraint) = spline.constraint {
+            overflow.push(Cmd::DeleteConstraint(constraint));
+        }
         // While a command runs, the menu starts with Done (and Close for the Line tool).
         if line_tool {
             overflow.push(Cmd::CloseLine);
@@ -193,6 +201,7 @@ impl Cmd {
             Self::Tool(_) => String::new(),
             Self::Done => tr!(lang, CmdDone).to_owned(),
             Self::CloseLine => tr!(lang, CmdCloseLine).to_owned(),
+            Self::DeleteConstraint(_) => tr!(lang, CmdDeleteConstraint).to_owned(),
             Self::FinishSketch => tr!(lang, CmdFinishSketch).to_owned(),
             Self::Constrain => tr!(lang, ConstrainTitle).to_owned(),
             Self::Place => tr!(lang, MarkPlace).to_owned(),
@@ -254,6 +263,14 @@ pub(crate) fn run(cmd: Cmd, session: &mut Session) -> Effect {
     match cmd {
         Cmd::Tool(kind) => session.set_tool(kind),
         Cmd::Done => session.tool_event(ToolEvent::Key(ToolKey::Escape)),
+        Cmd::DeleteConstraint(id) => {
+            session.tool_event(ToolEvent::ClickItem {
+                item: Some(gc_sketch::Item::Constraint(id)),
+                pos: [0.0; 2],
+                modifier: false,
+            });
+            session.tool_event(ToolEvent::Key(ToolKey::Delete));
+        }
         Cmd::CloseLine => session.tool_event(ToolEvent::Command(gc_tools::ToolCommand::Close)),
         Cmd::FinishSketch => session.finish_sketch(),
         Cmd::Constrain => return Effect::Request(ViewportRequest::Constrain),

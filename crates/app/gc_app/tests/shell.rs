@@ -7796,3 +7796,63 @@ fn the_line_tools_right_click_menu_offers_close() {
     assert_eq!(lines(&harness), 3, "the closing segment");
     assert_eq!(harness.state().session.tool(), ToolKind::Line);
 }
+
+/// A constraint glyph is deleted from its right-click menu (docs/ux/inventor-sketch-parity.md; Inventor 2026 help,
+/// To Work with Geometric Constraints, GUID-B06FA7B7-5CD5-4D58-B1C5-0C5ABAFFD84E).
+#[test]
+fn a_constraint_glyph_is_deleted_from_its_right_click_menu() {
+    use gc_tools::{ToolEvent, ToolKind};
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("XY 스케치").click();
+    harness.run_steps(3);
+    let session = &mut harness.state_mut().session;
+    session.set_tool(ToolKind::Line);
+    // A nearly horizontal line becomes horizontal: one H constraint.
+    for at in [[0.0, 0.0], [0.05, 0.0004]] {
+        session.tool_event(ToolEvent::Move { pos: at, px: 1e-4, suppress_snap: false });
+        session.tool_event(ToolEvent::Click { pos: at, px: 1e-4, modifier: false });
+    }
+    session.tool_event(ToolEvent::Key(gc_tools::Key::Escape));
+    session.set_tool(ToolKind::Select);
+    let constraints = |h: &egui_kittest::Harness<'_, GraphCtrlApp>| {
+        h.state().session.active_sketch().unwrap().1.constraints.len()
+    };
+    let before = constraints(&harness);
+    assert!(before >= 1, "the line got a constraint");
+    harness.state_mut().fit_view();
+    harness.run_steps(3);
+    let mid = harness
+        .state()
+        .session
+        .active_sketch()
+        .unwrap()
+        .1
+        .points
+        .values()
+        .map(|p| p.pos)
+        .fold([0.0, 0.0], |acc, p| [acc[0] + p[0] / 2.0, acc[1] + p[1] / 2.0]);
+    let screen = harness
+        .state()
+        .viewport()
+        .screen_of(gc_math::DVec3::new(mid[0], mid[1], 0.0))
+        .expect("the middle of the line is on the screen");
+    let glyph = screen + egui::vec2(11.5, -14.0);
+    harness.event(egui::Event::PointerMoved(glyph));
+    harness.run_steps(2);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: glyph,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+    harness.run_steps(3);
+    harness.get_by_label("구속 삭제").click();
+    harness.run_steps(3);
+    assert_eq!(constraints(&harness), before - 1);
+}

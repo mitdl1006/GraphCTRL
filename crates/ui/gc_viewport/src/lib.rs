@@ -817,6 +817,32 @@ impl Viewport {
                                     <= gc_tools::tolerance::POINT_PX
                             })
                     };
+                    // The constraint glyph under the cursor can be deleted.
+                    if self.show_constraints
+                        && let Some((_, sketch)) = session.active_sketch()
+                    {
+                        let rect = self.rect;
+                        let camera = self.camera;
+                        menu.constraint = paint::glyph_spots(plane, sketch, session, |w| {
+                            let p = camera.project(w, size)?;
+                            #[allow(clippy::cast_possible_truncation, reason = "screen coordinates fit f32")]
+                            Some(egui::pos2(rect.left() + p[0] as f32, rect.top() + p[1] as f32))
+                        })
+                        .into_iter()
+                        .map(|spot| {
+                            let half = 3.5 * spot.label.len().max(1) as f32;
+                            let centre = if spot.label.is_empty() {
+                                spot.at
+                            } else {
+                                spot.at + egui::vec2(half, -5.0)
+                            };
+                            let screen = egui::pos2(rect.left() + at[0] as f32, rect.top() + at[1] as f32);
+                            (centre.distance(screen), spot.id)
+                        })
+                        .filter(|(d, _)| *d <= 10.0)
+                        .min_by(|a, b| a.0.total_cmp(&b.0))
+                        .map(|(_, id)| id);
+                    }
                     // Sketch roles (plan 9.1): the point or the open curve under the cursor can become a
                     // waypoint or a path of the robot work.
                     if let Some((sketch_id, sketch)) = session.active_sketch() {

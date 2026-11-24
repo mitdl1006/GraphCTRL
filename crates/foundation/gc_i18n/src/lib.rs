@@ -865,6 +865,7 @@ messages! {
     /// Status bar button: cut away what hides the sketch plane (F7).
     StatusSlice => ("그래픽 자르기 (F7)", "Slice Graphics (F7)"),
     /// Sketch context menu: end the command in progress.
+    CmdDeleteConstraint => ("구속 삭제", "Delete Constraint"),
     CmdCloseLine => ("닫기 (Close)", "Close"),
     CmdDone => ("완료", "Done"),
     /// Browser menu: rename in place.

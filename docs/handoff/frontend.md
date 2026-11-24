@@ -687,6 +687,16 @@
 - 테스트: `the_line_tools_right_click_menu_offers_close`.
 - 남은 스케치 항목(리드 목록): Point Snaps 우클릭(백엔드 스냅 종류 대기), 상자 선택 Window/Crossing(스케치), HUD 세부(극좌표 등), F8/F9·구속 글리프 상호작용, 치수 표시 5모드, Slice Graphics(F7).
 
+## 스케치 구속 글리프: 호버 강조·우클릭 삭제
+
+근거: To Work with Geometric Constraints GUID-B06FA7B7-5CD5-4D58-B1C5-0C5ABAFFD84E, docs/ux/inventor-sketch-parity.md 구속 글리프 행.
+
+- 글리프 위에 포인터를 올리면 글자가 주황색이 되고 고리가 둘러싸며, 그 구속이 묶는 점(일치·수평·수직·점-곡선 위·중점·대칭·고정·축/평면 정렬)에 고리가 생긴다. 곡선 사이 구속(평행·접선 등)은 글리프만 강조한다(곡선 윤곽 강조는 아직).
+- 글리프 위 우클릭(선택 상태에서): 마킹 메뉴 오버플로의 "구속 삭제" → 그 구속을 선택하고 삭제(한 실행 취소 단계).
+- HUD 점검: 길이·각도 입력(극좌표)과 Tab 자물쇠는 이미 있다. 직교(Cartesian) 입력 전환과 "Enable Dimension Input" 끄기 옵션은 없다.
+- 하지 않은 것: 우클릭 "Hide"(글리프별 숨김은 백엔드 없음), 글리프 끌어 옮기기, 치수 Tolerance 표시(백엔드에 허용차 없음), Point Snaps(백엔드 스냅 종류 대기).
+- 테스트: `a_constraint_glyph_is_deleted_from_its_right_click_menu`.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

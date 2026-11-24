@@ -613,18 +613,72 @@ pub(crate) fn glyph_spots(
     spots
 }
 
-/// Small letters next to the geometry that say which constraints apply.
+/// The sketch points a constraint ties together (the ones a hovered glyph marks).
+fn constraint_points(constraint: &GeoConstraint) -> Vec<gc_core::Id<gc_sketch::SkPoint>> {
+    match *constraint {
+        GeoConstraint::Coincident(p, q) | GeoConstraint::Horizontal(p, q) | GeoConstraint::Vertical(p, q) => {
+            vec![p, q]
+        }
+        GeoConstraint::PointOnCurve(p, _) | GeoConstraint::Midpoint(p, _) | GeoConstraint::Fix(p) => vec![p],
+        GeoConstraint::Symmetric { p, q, .. } => vec![p, q],
+        GeoConstraint::AlongAxis { q, .. } => vec![q],
+        GeoConstraint::OnPlane { p, .. } => vec![p],
+        _ => Vec::new(),
+    }
+}
+
+/// Small letters next to the geometry that say which constraints apply. The glyph under the pointer is drawn
+/// orange with a ring round it, and rings mark the points it ties together (To Work with Geometric Constraints, GUID-B06FA7B7-5CD5-4D58-B1C5-0C5ABAFFD84E: hovering
+/// a constraint glyph highlights the related geometry).
 fn glyphs(view: &View<'_>, plane: &SketchPlane, sketch: &Sketch, session: &Session) {
     if !view.show_constraints {
         return;
     }
-    for spot in glyph_spots(plane, sketch, session, |w| view.screen(w)) {
+    let pointer = view.painter.ctx().input(|i| i.pointer.latest_pos());
+    let hover = Color32::from_rgb(0xE0, 0x80, 0x20);
+    let spots = glyph_spots(plane, sketch, session, |w| view.screen(w));
+    // The nearest glyph within a few pixels of the pointer.
+    let hovered = pointer.and_then(|at| {
+        spots
+            .iter()
+            .map(|spot| {
+                let half = 3.5 * spot.label.len().max(1) as f32;
+                let centre = if spot.label.is_empty() { spot.at } else { spot.at + vec2(half, -5.0) };
+                (centre.distance(at), spot.id)
+            })
+            .filter(|(d, _)| *d <= 10.0)
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, id)| id)
+    });
+    for spot in &spots {
         let selected = session.selection().contains(&Item::Constraint(spot.id));
-        let color = if selected { colors::SELECTED } else { colors::GLYPH };
+        let over = hovered == Some(spot.id);
+        let color = if over {
+            hover
+        } else if selected {
+            colors::SELECTED
+        } else {
+            colors::GLYPH
+        };
         if spot.label.is_empty() {
-            view.painter.circle_stroke(spot.at, 4.5, Stroke::new(1.2, color));
+            view.painter.circle_stroke(spot.at, 4.5, Stroke::new(if over { 2.0 } else { 1.2 }, color));
         } else {
             view.text(spot.at, Align2::LEFT_BOTTOM, spot.label, 11.0, color);
+        }
+        if over {
+            let half = 3.5 * spot.label.len().max(1) as f32;
+            let centre = if spot.label.is_empty() { spot.at } else { spot.at + vec2(half, -5.0) };
+            view.painter.circle_stroke(centre, 9.0 + half, Stroke::new(1.5, hover));
+            if let Some(constraint) = sketch.constraints.get(&spot.id) {
+                for point in constraint_points(constraint) {
+                    if let Some(at) =
+                        session.point_pos(point).map(|p| plane.world(p)).and_then(|w| view.screen(w))
+                    {
+                        view.painter.circle_stroke(at, 7.0, Stroke::new(2.0, hover));
+                    }
+                }
+            }
+            view.painter.ctx().request_repaint();
         }
     }
 }
