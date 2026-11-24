@@ -96,6 +96,9 @@ pub struct Viewport {
     pub perf_overlay: bool,
     /// The Constrain dialog is open: every origin element is drawn and a click picks one for it.
     pub constrain_mode: bool,
+    /// The Constrain dialog is on its Insert tab: a circular edge near the pointer is picked before any face,
+    /// cylinder side or cone around it, and within a wider reach.
+    pub circle_first: bool,
     /// What the last click picked for the Constrain dialog.
     constrain_pick: Option<(gc_doc::Occurrence, gc_doc::OriginElement)>,
     /// The work feature the last click picked for a relationship dialog.
@@ -482,6 +485,7 @@ impl Viewport {
             clear: None,
             spatial_drag: None,
             constrain_mode: false,
+            circle_first: false,
             constrain_pick: None,
             constrain_work: None,
             constrain_selection: None,
@@ -1913,17 +1917,27 @@ impl Viewport {
         let pixels = |p: DVec3| {
             screen(p).map_or(f64::INFINITY, |s| ((s[0] - at[0]).powi(2) + (s[1] - at[1]).powi(2)).sqrt())
         };
+        // A circular edge close to the pointer (Insert mates circles), before the faces around it; on the Insert
+        // tab also before the side of a cylinder and within a wider reach.
+        let reach = self.camera.distance * if self.circle_first { 0.03 } else { 0.012 };
+        let circle = hit.circle.filter(|&(.., distance)| cones && distance <= reach).map(
+            |(centre, normal, radius, _)| Feature::Circle {
+                centre: centre.to_array(),
+                normal: normal.to_array(),
+                radius,
+            },
+        );
+        if self.circle_first
+            && let Some(feature) = circle
+        {
+            return Some((hit.owner, feature));
+        }
         if let Some((centre, axis, radius, length)) = hit.cylinder {
             let feature =
                 Feature::Cylinder { centre: centre.to_array(), axis: axis.to_array(), radius, length };
             return Some((hit.owner, feature));
         }
-        // A circular edge close to the pointer (Insert mates circles), before the faces around it.
-        if cones
-            && let Some((centre, normal, radius, distance)) = hit.circle
-            && distance <= self.camera.distance * 0.012
-        {
-            let feature = Feature::Circle { centre: centre.to_array(), normal: normal.to_array(), radius };
+        if let Some(feature) = circle {
             return Some((hit.owner, feature));
         }
         if let Some((centre, radius)) = hit.sphere.filter(|_| cones) {

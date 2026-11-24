@@ -445,3 +445,34 @@ fn a_sphere_clicked_in_the_view_is_made_tangent_to_a_clicked_face() {
     assert!(h.state_mut().session.undo());
     assert!(h.state().session.doc().same_content(&before));
 }
+
+#[test]
+fn on_the_insert_tab_most_clicks_around_a_visible_rim_pick_the_circle() {
+    let mut h = harness();
+    let solid = Solid::Cylinder { radius: 0.05, length: 0.1 };
+    let a = h.state_mut().session.add_body(solid, Placement { xyz: [0.0, 0.0, 0.0], rpy: [0.0; 3] }).unwrap();
+    h.run();
+    h.state_mut().fit_view();
+    h.run_steps(3);
+    let rim = |z: f64| -> Vec<[f64; 3]> {
+        (0..12)
+            .map(|i| {
+                let t = f64::from(i) * std::f64::consts::TAU / 12.0;
+                [0.05 * gc_math::fm::cos(t), 0.05 * gc_math::fm::sin(t), z]
+            })
+            .collect()
+    };
+    // The rim of the end that faces the camera: nearly every spot on it picks the circular edge (a tenth of the
+    // spots at the silhouette may fall on the far side).
+    let best = [0.05, -0.05]
+        .into_iter()
+        .map(|z| {
+            rim(z)
+                .iter()
+                .filter(|spot| spot_that_picks(&mut h, "삽입", a, &[**spot], "· 원").is_some())
+                .count()
+        })
+        .max()
+        .unwrap();
+    assert!(best >= 10, "only {best} of 12 rim clicks picked the circular edge");
+}

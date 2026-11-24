@@ -130,7 +130,6 @@ fn close_is_not_offered_once_the_chain_is_finished() {
 }
 
 #[test]
-#[ignore = "BUG: after a square is closed by clicking its start point, right-click Close lays a zero-length line (0,0)->(0,0) (owner: backend, gc_tools ToolCommand::Close; the chain just restarted has no segment to close)"]
 fn a_chain_that_ends_back_on_its_start_has_nothing_left_to_close() {
     let mut h = sketching();
     // Square drawn back to the start by clicking the start point.

@@ -1411,6 +1411,9 @@ impl Tool {
                 if self.chain.len() < 3 {
                     return Vec::new(); // closing needs at least two segments
                 }
+                if gc_math::fm::hypot(end[0] - start[0], end[1] - start[1]) < 1e-9 {
+                    return Vec::new(); // the chain is back on its start: nothing left to close
+                }
                 let snap_a = curve_between(sketch, self.chain[self.chain.len() - 2], end)
                     .map(|(_, point)| EndSnap { point: Some(point), ..EndSnap::default() })
                     .unwrap_or_default();

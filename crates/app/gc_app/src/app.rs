@@ -2055,6 +2055,7 @@ impl eframe::App for GraphCtrlApp {
             || self.replicate.picking()
             || self.assemble.picking()
             || self.place_origin_picking;
+        self.viewport.circle_first = self.constrain.inserting();
         if let Some((first, second)) = self.viewport.take_quick_constrain() {
             crate::assemble::quick_mate(&mut self.session, first, second, &mut self.assemble.conflict);
         }

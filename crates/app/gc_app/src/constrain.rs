@@ -257,6 +257,11 @@ impl Constrain {
         self.open
     }
 
+    /// Whether the dialog is open on its Insert tab (circular edges are picked first).
+    pub(crate) fn inserting(&self) -> bool {
+        self.open && self.kind == Type::Insert
+    }
+
     /// The dialog window. Applies and closes as the buttons say.
     pub(crate) fn window(&mut self, ctx: &egui::Context, session: &mut Session, lang: Lang) {
         let mut open = self.open;

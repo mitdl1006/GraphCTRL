@@ -716,6 +716,11 @@
 - 새 테스트 `crates/app/gc_app/tests/evidence_flow.rs`(GPU 단계 목록 `xtask/src/gate.rs`에 추가): 흐름 전체를 단언하고 GPU가 있으면 `docs/evidence/img/`에 PNG를 남김.
 - PNG: flow-1-sketch, flow-2-point-menu, flow-3-line-menu, flow-4-roles-in-browser, flow-5-role-panel, flow-6-role-menu-make-task, flow-7-schedule-worked-out, flow-8-schedule-playing, route-1-sketch-points, route-2-mode-on, route-3-first-point-and-preview, route-4-path-made, route-5-after-undo.
 
+## QA 수정: Line 닫기 0길이 선, Insert 탭 원형 모서리 우선 (gc_tools 변경(리드 승인))
+
+- `gc_tools/src/tool.rs`: `ToolCommand::Close`가 사슬 끝이 시작점과 같으면(방금 시작점 클릭으로 닫은 직후) 무시 → (0,0)→(0,0) 선이 생기지 않음. QA `a_chain_that_ends_back_on_its_start_has_nothing_left_to_close`의 ignore 해제.
+- Constrain 대화상자가 Insert 탭이면 `Viewport::circle_first`: 원형 모서리를 원통 옆면보다 먼저, 더 넓은 범위(카메라 거리의 3%)에서 고름. 새 테스트 `on_the_insert_tab_most_clicks_around_a_visible_rim_pick_the_circle`(12곳 중 10곳 이상).
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹
