@@ -7754,3 +7754,45 @@ fn the_iproperties_dialog_has_custom_properties_a_status_and_inertia() {
     assert_eq!(custom.len(), 1);
     assert_eq!((custom[0].name.as_str(), custom[0].value.as_str()), ("Batch", "7"));
 }
+
+/// While the Line tool runs, the right-click menu offers Close (Inventor 2026 help, To Work with Sketch Profiles,
+/// GUID-4110FA02-0A8A-41F7-85B5-384819DAC528): the closing segment goes back to where the chain started and the tool
+/// stays on.
+#[test]
+fn the_line_tools_right_click_menu_offers_close() {
+    use gc_tools::{ToolEvent, ToolKind};
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("XY 스케치").click();
+    harness.run_steps(3);
+    let session = &mut harness.state_mut().session;
+    session.set_tool(ToolKind::Line);
+    for at in [[0.0, 0.0], [0.05, 0.0], [0.05, 0.05]] {
+        session.tool_event(ToolEvent::Move { pos: at, px: 1e-4, suppress_snap: false });
+        session.tool_event(ToolEvent::Click { pos: at, px: 1e-4, modifier: false });
+    }
+    let lines = |h: &egui_kittest::Harness<'_, GraphCtrlApp>| {
+        h.state().session.active_sketch().unwrap().1.curves.len()
+    };
+    assert_eq!(lines(&harness), 2);
+    harness.run_steps(2);
+    let centre = egui::pos2(500.0, 450.0);
+    harness.event(egui::Event::PointerMoved(centre));
+    harness.run_steps(2);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: centre,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+    harness.run_steps(3);
+    harness.get_by_label("닫기 (Close)").click();
+    harness.run_steps(3);
+    assert_eq!(lines(&harness), 3, "the closing segment");
+    assert_eq!(harness.state().session.tool(), ToolKind::Line);
+}

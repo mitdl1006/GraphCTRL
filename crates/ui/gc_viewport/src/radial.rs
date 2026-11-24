@@ -45,6 +45,9 @@ pub(crate) enum Cmd {
     Tool(ToolKind),
     /// End the command in progress.
     Done,
+    /// Line: draw the closing segment back to where the chain started; the tool stays on (Inventor 2026 help, To Work
+    /// with Sketch Profiles, GUID-4110FA02-0A8A-41F7-85B5-384819DAC528: right-click Close).
+    CloseLine,
     /// Finish the sketch.
     FinishSketch,
     /// Constrain components.
@@ -101,7 +104,7 @@ pub(crate) struct Set {
 
 impl Set {
     /// The menu of a sketch being edited.
-    pub(crate) fn sketch(spatial: bool, spline: SplineMenu) -> Self {
+    pub(crate) fn sketch(spatial: bool, spline: SplineMenu, line_tool: bool) -> Self {
         let mut radial = vec![None; 8];
         radial[0] = Some(Cmd::Tool(ToolKind::Line));
         if !spatial {
@@ -110,6 +113,10 @@ impl Set {
         }
         radial[4] = Some(Cmd::FinishSketch);
         let mut overflow = Vec::new();
+        // While a command runs, the menu starts with Done (and Close for the Line tool).
+        if line_tool {
+            overflow.push(Cmd::CloseLine);
+        }
         if let Some((curve, point)) = spline.split {
             overflow.push(Cmd::SplitSpline(curve, point));
         }
@@ -185,6 +192,7 @@ impl Cmd {
             Self::Tool(ToolKind::Rectangle) => tr!(lang, SplitRectangle).to_owned(),
             Self::Tool(_) => String::new(),
             Self::Done => tr!(lang, CmdDone).to_owned(),
+            Self::CloseLine => tr!(lang, CmdCloseLine).to_owned(),
             Self::FinishSketch => tr!(lang, CmdFinishSketch).to_owned(),
             Self::Constrain => tr!(lang, ConstrainTitle).to_owned(),
             Self::Place => tr!(lang, MarkPlace).to_owned(),
@@ -246,6 +254,7 @@ pub(crate) fn run(cmd: Cmd, session: &mut Session) -> Effect {
     match cmd {
         Cmd::Tool(kind) => session.set_tool(kind),
         Cmd::Done => session.tool_event(ToolEvent::Key(ToolKey::Escape)),
+        Cmd::CloseLine => session.tool_event(ToolEvent::Command(gc_tools::ToolCommand::Close)),
         Cmd::FinishSketch => session.finish_sketch(),
         Cmd::Constrain => return Effect::Request(ViewportRequest::Constrain),
         Cmd::Place => return Effect::Request(ViewportRequest::PlaceComponent),
