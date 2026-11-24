@@ -7888,3 +7888,26 @@ fn the_hud_options_switch_the_line_to_delta_x_and_y() {
     let fields: Vec<_> = harness.state().session.tool_hud().iter().map(|slot| slot.field).collect();
     assert!(fields.contains(&gc_tools::HudField::DeltaX) && fields.contains(&gc_tools::HudField::DeltaY));
 }
+
+/// The Quick Access Toolbar's drop-down arrow opens a Customize menu; unchecking a command hides it, checking brings
+/// it back (Inventor 2026 help, To Customize the Quick Access Toolbar, GUID-3BF60B85-4BE9-4619-9FD3-0A179FA680E0).
+#[test]
+fn the_quick_access_customize_menu_hides_and_shows_commands() {
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    let open = |harness: &mut egui_kittest::Harness<'_, GraphCtrlApp>| {
+        harness.get_by_label("빠른 실행 사용자 정의").click();
+        harness.run_steps(3);
+    };
+    harness.get_by_label("저장 (빠른 실행)");
+    open(&mut harness);
+    // The menu lists the commands; Save is unchecked.
+    harness.get_all_by_label("저장").last().unwrap().click();
+    harness.run_steps(3);
+    assert!(harness.query_by_label("저장 (빠른 실행)").is_none(), "Save is still on the toolbar");
+    assert_eq!(harness.state().qat_hidden_for_test(), vec!["save".to_owned()]);
+    harness.get_by_label("열기... (빠른 실행)");
+}

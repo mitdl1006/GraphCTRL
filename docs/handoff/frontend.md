@@ -725,6 +725,11 @@
 
 - 스케줄 패널 기본 220·최소 190px(간트 행이 보임, 위쪽 경계 끌기로 조절). 역할·작업을 선택하면(선택 항목 없을 때) 속성 패널은 그 편집기만 보여 "속성 / 셀 전체…" 중복 머리를 없앰. flow-*.png 갱신.
 
+## 빠른 실행 도구 모음 사용자 정의 (드롭다운 Customize)
+
+원문: To Customize the Quick Access Toolbar, GUID-3BF60B85-4BE9-4619-9FD3-0A179FA680E0. QAT 끝에 ▾ 단추(이름 "빠른 실행 사용자 정의") → 새로 만들기·열기·저장·실행 취소·다시 실행·Return·Update를 체크로 켜고 끔. 끈 목록은 앱 설정(`Settings.qat_hidden`)에 저장. 테스트 `the_quick_access_customize_menu_hides_and_shows_commands`.
+아직 없음: "리본 명령 우클릭 > Add to the QAT"(리본 명령 임의 추가), "Show Above/Below the Ribbon". audit 표의 해당 줄은 △로 갱신.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹

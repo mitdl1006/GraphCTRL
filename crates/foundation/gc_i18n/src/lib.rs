@@ -1195,6 +1195,7 @@ messages! {
     /// Assemble tab: edit the parent of the edit target.
     CmdReturnParent => ("상위로", "Return to Parent"),
     /// Assemble tab: back to the top-level assembly.
+    QatCustomize => ("빠른 실행 사용자 정의", "Customize Quick Access"),
     QatTitle => ("빠른 실행", "Quick Access"),
     CmdReturnTop => ("최상위로", "Return to Top"),
     /// Browser, right-click a joint: refuse relationships that take its freedom away.

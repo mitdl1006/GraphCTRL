@@ -100,6 +100,8 @@ pub struct Settings {
     pub hud_cartesian: bool,
     /// Heads-Up Display Settings: "Enable Dimension Input where possible" is off (default: on, so this is false).
     pub hud_no_dimension_input: bool,
+    /// Quick Access Toolbar commands the user unchecked in its Customize menu (all shown by default).
+    pub qat_hidden: Vec<String>,
     /// View tab, Windows panel, User Interface: what the user switched off (all shown by default).
     pub hide_view_cube: bool,
     /// The navigation bar is hidden.

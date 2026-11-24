@@ -271,6 +271,8 @@ pub struct GraphCtrlApp {
     /// The document and everything that edits it.
     pub session: Session,
     viewport: Viewport,
+    /// Quick Access Toolbar commands switched off in its Customize menu.
+    qat_hidden: Vec<String>,
     lang: Lang,
     tab: Tab,
     cell: gc_panels::CellUi,
@@ -421,6 +423,7 @@ impl GraphCtrlApp {
             frames: 0,
             session,
             viewport,
+            qat_hidden: saved.qat_hidden.clone(),
             lang,
             tab: Tab::Model,
             cell: gc_panels::CellUi::default(),
@@ -523,6 +526,11 @@ impl GraphCtrlApp {
             self.loading_shown = false;
             self.notice = None;
         }
+    }
+
+    /// The Quick Access Toolbar commands switched off, for tests.
+    pub fn qat_hidden_for_test(&self) -> Vec<String> {
+        self.qat_hidden.clone()
     }
 
     /// The viewport, for inspecting what it drew.
@@ -1222,7 +1230,11 @@ impl GraphCtrlApp {
             // editing state).
             ui.separator();
             let ctx = ui.ctx().clone();
-            let qat = |ui: &mut egui::Ui, symbol: &str, label: &str, enabled: bool| {
+            let hidden = self.qat_hidden.clone();
+            let qat = |ui: &mut egui::Ui, key: &str, symbol: &str, label: &str, enabled: bool| {
+                if hidden.iter().any(|h| h == key) {
+                    return false;
+                }
                 // Named apart from the menu's own entries ("저장 (빠른 실행)"), so a screen can tell them apart.
                 let name = format!("{label} ({})", tr!(lang, QatTitle));
                 let response = ui.add_enabled(enabled, egui::Button::new(symbol).frame(false));
@@ -1230,34 +1242,57 @@ impl GraphCtrlApp {
                     .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, name.as_str()));
                 response.on_hover_text(label).clicked()
             };
-            if qat(ui, "+", tr!(lang, CmdNew), true) {
+            if qat(ui, "new", "+", tr!(lang, CmdNew), true) {
                 self.request(Pending::New, &ctx);
             }
-            if qat(ui, "O", tr!(lang, CmdOpen), true) {
+            if qat(ui, "open", "O", tr!(lang, CmdOpen), true) {
                 self.request(Pending::Open, &ctx);
             }
-            if qat(ui, "S", tr!(lang, CmdSave), true) {
+            if qat(ui, "save", "S", tr!(lang, CmdSave), true) {
                 self.save(false);
             }
             let (can_undo, can_redo) =
                 (self.session.history().undo_depth() > 0, self.session.history().redo_depth() > 0);
-            if qat(ui, "←", tr!(lang, CmdUndo), can_undo) {
+            if qat(ui, "undo", "←", tr!(lang, CmdUndo), can_undo) {
                 self.session.undo();
             }
-            if qat(ui, "→", tr!(lang, CmdRedo), can_redo) {
+            if qat(ui, "redo", "→", tr!(lang, CmdRedo), can_redo) {
                 self.session.redo();
             }
             let editing = self.session.edit_target().is_some();
-            if qat(ui, "↑", tr!(lang, CmdReturn), editing) {
+            if qat(ui, "return", "↑", tr!(lang, CmdReturn), editing) {
                 self.session.return_edit();
             }
             // Update: the components dropped by Free Move or Free Rotate snap back to their relationships (Inventor
             // 2026 help, Move assembly components, GUID-9796C22B-23C1-4D69-BC2E-54056E46F255); available while
             // something is out of place.
             let stale = self.session.needs_update();
-            if qat(ui, "U", tr!(lang, CmdUpdate), stale) {
+            if qat(ui, "update", "U", tr!(lang, CmdUpdate), stale) {
                 drop(self.session.update_assembly());
             }
+            // The drop-down arrow: the Customize menu, a check mark on each command shown.
+            let arrow = ui.menu_button("▾", |ui| {
+                for (key, label) in [
+                    ("new", tr!(lang, CmdNew)),
+                    ("open", tr!(lang, CmdOpen)),
+                    ("save", tr!(lang, CmdSave)),
+                    ("undo", tr!(lang, CmdUndo)),
+                    ("redo", tr!(lang, CmdRedo)),
+                    ("return", tr!(lang, CmdReturn)),
+                    ("update", tr!(lang, CmdUpdate)),
+                ] {
+                    let mut shown = !self.qat_hidden.iter().any(|h| h == key);
+                    if ui.checkbox(&mut shown, label).changed() {
+                        self.qat_hidden.retain(|h| h != key);
+                        if !shown {
+                            self.qat_hidden.push(key.to_owned());
+                        }
+                    }
+                }
+            });
+            arrow
+                .response
+                .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tr!(lang, QatCustomize)));
         });
     }
 
@@ -1303,6 +1338,7 @@ impl GraphCtrlApp {
             snap_to_grid: self.session.snap_to_grid(),
             hud_cartesian: self.session.hud_input().cartesian,
             hud_no_dimension_input: !self.session.hud_input().dimensions,
+            qat_hidden: self.qat_hidden.clone(),
             hide_view_cube: !self.viewport.show_view_cube,
             hide_nav_bar: !self.viewport.show_nav_bar,
             hide_status_bar: !self.show_status,
