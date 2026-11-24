@@ -25,14 +25,14 @@
 
 | 명령 | 인벤터 2026 동작 | 단축키 | GraphCTRL 현재 | 차이 | 우선 | 담당 |
 |---|---|---|---|---|---|---|
-| Start 2D Sketch (스케치 시작) | 3D Model 탭 Sketch 패널 "Start 2D Sketch" → 평면(작업 평면·평면 면) 클릭 [S1]. 브라우저 우클릭 "New Sketch", 평면 클릭 후 미니 툴바 "Create Sketch"도 가능 [S1]. 새 2D 스케치가 시작되면 **Line 명령이 자동 활성화**(편집 진입 시에는 아님) [S27]. 평면 선택 후 UI 흐름의 세부(미리보기 하이라이트 등)는 (미확인) | S [S28,S29] | 모델 탭에 "XY/XZ/YZ에 스케치" 버튼 3개(`create_sketch(plane)`), 면 클릭으로 평면 고르기 없음. 시작 후 선택 도구 | 평면 선택 흐름 다름. Line 자동 활성 없음 | P1 | FE+BE |
-| Look At on start (스케치 평면에 시선 맞춤) | 응용 옵션 "Look at sketch plane on sketch creation and edit": 켜면 새 스케치·편집 때 그래픽 창이 스케치 평면과 평행으로 재정렬, 끄면 현재 시점 유지 [S6] | (옵션) | 시작 시 시점 처리 (미확인)(코드에서 자동 정렬 미발견) | 확인 필요 | P1 | FE |
-| Slice Graphics (그래픽 절단) | 상태바 버튼 또는 F7: 시점 쪽 모델을 잘라내 스케치 평면을 드러냄. 피처 명령 클릭·스케치 종료·F7 재입력으로 복원 [S8] | F7 [S28,S29] | 없음 | 로봇·설비가 평면을 가릴 때 필요 | P2 | FE(+render) |
-| Finish Sketch (스케치 마무리) | 스케치 탭 Exit 패널 "Finish Sketch" 또는 그래픽 영역 우클릭 "Finish 2D Sketch" [S1]. Exit 패널의 한글 라벨은 (미확인) | (없음, 도움말에 단축키 없음) | 종료 패널 "스케치 마무리" 있음. 우클릭 "Finish 2D Sketch" 없음 | 우클릭 항목 추가 | P1 | FE |
-| Cancel Sketch (스케치 취소) | 스케치 시작·편집 시 리본에 Finish와 함께 표시. 지금까지 한 모든 동작을 되돌림(생성 중이면 스케치 생성까지). Undo/Redo 목록에 동작이 쌓임 [S1,S33(2024.1)] | | 없음(Ctrl+Z 반복만) | 한 번에 되돌리는 명령 없음 | P2 | BE+FE |
-| 다른 스케치 편집으로 전환 | 브라우저에서 스케치 아이콘 더블클릭, 우클릭 "Edit Sketch", 평면 위 우클릭 "Edit Sketch", 치수 우클릭 "Edit Sketch" [S1]. 2025.2부터 Finish/Cancel 없이 다른 스케치를 더블클릭해 곧바로 전환 [S33] | | 브라우저 행 더블클릭으로 진입(`enter_sketch`). 활성 스케치에서 다른 스케치로 직접 전환은 (미확인) | 직접 전환·치수 우클릭 진입 없음 | P2 | FE |
-| 스케치 표시 | F10 "Sketch visibility" [S28]. 브라우저 스케치 우클릭 "Dimension Visibility", 뷰 탭 Object Visibility의 Sketch Dimensions [S14] | F10 | 브라우저 가시성 토글(스케치별) | 치수 표시 토글·F10 없음 | P3 | FE |
-| 평면 좌표계 재정렬 | Constrain 패널 "Edit Coordinate System": 축 화살표 클릭 후 모서리 클릭으로 회전, 원점 점 클릭 후 꼭짓점 클릭으로 이동, 우클릭 Flip Axis/Done [S31] | | 없음 | 스케치 평면 정렬은 면 선택 없음 | P3 | BE+FE |
+| Start 2D Sketch (스케치 시작) | 3D Model 탭 Sketch 패널 "Start 2D Sketch" → 평면(작업 평면·평면 면) 클릭 [S1]. 브라우저 우클릭 "New Sketch", 평면 클릭 후 미니 툴바 "Create Sketch"도 가능 [S1]. 새 2D 스케치가 시작되면 **Line 명령이 자동 활성화**(편집 진입 시에는 아님) [S27]. 평면 선택 후 UI 흐름의 세부(미리보기 하이라이트 등)는 (미확인) | S [S28,S29] | 구현: 원점 평면·구성요소 면·작업 평면 위 시작, S 키(선택 평면 우선, 없으면 XY) | 평면 선택 흐름 다름. Line 자동 활성 없음 | P1 | FE+BE |
+| Look At on start (스케치 평면에 시선 맞춤) | 응용 옵션 "Look at sketch plane on sketch creation and edit": 켜면 새 스케치·편집 때 그래픽 창이 스케치 평면과 평행으로 재정렬, 끄면 현재 시점 유지 [S6] | (옵션) | 구현: 면 보기(탐색 막대)로 평면 정렬 — 시작 시 자동 정렬은 확인 중 | 확인 필요 | P1 | FE |
+| Slice Graphics (그래픽 절단) | 상태바 버튼 또는 F7: 시점 쪽 모델을 잘라내 스케치 평면을 드러냄. 피처 명령 클릭·스케치 종료·F7 재입력으로 복원 [S8] | F7 [S28,S29] | 구현: F7 그래픽 슬라이스(스케치 종료 시 해제) | 로봇·설비가 평면을 가릴 때 필요 | P2 | FE(+render) |
+| Finish Sketch (스케치 마무리) | 스케치 탭 Exit 패널 "Finish Sketch" 또는 그래픽 영역 우클릭 "Finish 2D Sketch" [S1]. Exit 패널의 한글 라벨은 (미확인) | (없음, 도움말에 단축키 없음) | 구현: 스케치 마무리 버튼 | 우클릭 항목 추가 | P1 | FE |
+| Cancel Sketch (스케치 취소) | 스케치 시작·편집 시 리본에 Finish와 함께 표시. 지금까지 한 모든 동작을 되돌림(생성 중이면 스케치 생성까지). Undo/Redo 목록에 동작이 쌓임 [S1,S33(2024.1)] | | 구현: 스케치 취소(Cancel Sketch) | 한 번에 되돌리는 명령 없음 | P2 | BE+FE |
+| 다른 스케치 편집으로 전환 | 브라우저에서 스케치 아이콘 더블클릭, 우클릭 "Edit Sketch", 평면 위 우클릭 "Edit Sketch", 치수 우클릭 "Edit Sketch" [S1]. 2025.2부터 Finish/Cancel 없이 다른 스케치를 더블클릭해 곧바로 전환 [S33] | | 확인 중 | 직접 전환·치수 우클릭 진입 없음 | P2 | FE |
+| 스케치 표시 | F10 "Sketch visibility" [S28]. 브라우저 스케치 우클릭 "Dimension Visibility", 뷰 탭 Object Visibility의 Sketch Dimensions [S14] | F10 | 구현: F10 스케치 표시 전환 | 치수 표시 토글·F10 없음 | P3 | FE |
+| 평면 좌표계 재정렬 | Constrain 패널 "Edit Coordinate System": 축 화살표 클릭 후 모서리 클릭으로 회전, 원점 점 클릭 후 꼭짓점 클릭으로 이동, 우클릭 Flip Axis/Done [S31] | | 예정 | 스케치 평면 정렬은 면 선택 없음 | P3 | BE+FE |
 
 ### 2.2 Create 패널 — 선·원·호 (Line, Circle, Arc)
 
@@ -40,32 +40,32 @@
 
 | 명령 | 인벤터 2026 동작 | 단축키 | GraphCTRL 현재 | 차이 | 우선 | 담당 |
 |---|---|---|---|---|---|---|
-| Line (선) — Create 패널 [S2] | 1번 클릭 = 시작점. 이후 클릭마다 이어지는 선분(끝점끼리 **자동 일치 구속**) [S2,S25]. **더블클릭 = 선 종료** [S2]. **끝점에서 드래그**: 호 미리보기가 나오고 놓으면 시작점에 접하는(또는 직각) 호가 되며, 이어서 클릭하면 다음 선분·호 [S2]. 우클릭 "Close"는 마지막 선분 뒤에 시작점으로 닫는 선을 그리고 명령은 유지 [S13]. 거의 수직·수평이면 자동으로 수직·수평 구속 [S27]. HUD가 켜져 있으면 길이·각도 입력(§3.2) [S4] | L | 클릭 연속 선(끝점 스냅 시 일치), 수평/수직 스냅(4 px)이 H/V 구속, Esc로 이탈. 끝점 드래그 호·더블클릭 종료·Backspace·Close 없음 | 접선/직각 호 전환, 더블클릭, Backspace, Close | P1 | BE(도구)+FE(입력) |
-| Midpoint Line (중점 선) | 1번 클릭 = 선의 중점, 2번 클릭(또는 입력창 길이·각도) = 끝점. 중점과 선택한 기하 사이에 일치 구속 [S2,S33(2025.2)] | (미확인) | 없음 | 신규 | P2 | BE |
-| Center Point Circle (중심점 원) [S3] | 1번 클릭 = 중심, 2번 클릭 = 반지름점. 2번째 점이 선·호·원·타원 위이면 **접선 구속** 적용. 반복해서 계속 그림 | C | 중심→림 두 번 클릭. 접선 추론(림이 곡선 위일 때)은 PLAN 부록 C에는 있으나 도구 구현 범위는 (미확인) | 접선 추론 확인 | P1 | BE |
-| Tangent Circle (접선 원) [S3] | "세 선에 접하는 원": 선 3개를 선택(도움말 문장이 중심점 원과 중복되어 모호) — 세부 순서 (미확인) | (미확인) | 없음 | 신규 | P2 | BE |
-| Three Point Arc (3점 호) [S2] | 1번 = 첫 끝점, 2번 = 다른 끝점(현), 3번 = 방향·반지름(호 위의 점). HUD 지원 [S4] | A는 별칭 아님(표에 없음) | 없음 | 신규 | P1 | BE |
-| Center Point Arc (중심점 호) [S2] | 1번 = 중심, 2번 = 반지름·시작점, 3번 = 끝점. HUD 지원 [S4] | | 중심·시작·끝 3클릭 호(커서가 쓸어간 방향으로 CCW) = 같은 순서. 단축키 A | 순서 일치. 호 방향 규칙·키 확인 | P1 | BE |
-| Tangent Arc (접선 호) [S2] | 기존 곡선 위에 커서를 올리면 끝점이 강조되고, 끝점 근처 클릭 = 호 시작(접선 구속), 이동 후 클릭 = 호 끝 | | 없음 | 신규 (선 도구의 끝점 드래그와 같은 결과) | P1 | BE |
+| Line (선) — Create 패널 [S2] | 1번 클릭 = 시작점. 이후 클릭마다 이어지는 선분(끝점끼리 **자동 일치 구속**) [S2,S25]. **더블클릭 = 선 종료** [S2]. **끝점에서 드래그**: 호 미리보기가 나오고 놓으면 시작점에 접하는(또는 직각) 호가 되며, 이어서 클릭하면 다음 선분·호 [S2]. 우클릭 "Close"는 마지막 선분 뒤에 시작점으로 닫는 선을 그리고 명령은 유지 [S13]. 거의 수직·수평이면 자동으로 수직·수평 구속 [S27]. HUD가 켜져 있으면 길이·각도 입력(§3.2) [S4] | L | 구현: 선(Create 패널, L 키), 3D 선 Auto-Bend는 옵션(예정) | 접선/직각 호 전환, 더블클릭, Backspace, Close | P1 | BE(도구)+FE(입력) |
+| Midpoint Line (중점 선) | 1번 클릭 = 선의 중점, 2번 클릭(또는 입력창 길이·각도) = 끝점. 중점과 선택한 기하 사이에 일치 구속 [S2,S33(2025.2)] | (미확인) | 구현: 중점 선(중심을 찍고 끝점) | 신규 | P2 | BE |
+| Center Point Circle (중심점 원) [S3] | 1번 클릭 = 중심, 2번 클릭 = 반지름점. 2번째 점이 선·호·원·타원 위이면 **접선 구속** 적용. 반복해서 계속 그림 | C | 구현: 중심점 원(C 키) | 접선 추론 확인 | P1 | BE |
+| Tangent Circle (접선 원) [S3] | "세 선에 접하는 원": 선 3개를 선택(도움말 문장이 중심점 원과 중복되어 모호) — 세부 순서 (미확인) | (미확인) | 구현: 접선 원(세 선에 접하는 원) | 신규 | P2 | BE |
+| Three Point Arc (3점 호) [S2] | 1번 = 첫 끝점, 2번 = 다른 끝점(현), 3번 = 방향·반지름(호 위의 점). HUD 지원 [S4] | A는 별칭 아님(표에 없음) | 구현: 3점 호(호▾) | 신규 | P1 | BE |
+| Center Point Arc (중심점 호) [S2] | 1번 = 중심, 2번 = 반지름·시작점, 3번 = 끝점. HUD 지원 [S4] | | 구현: 중심점 호(호▾) | 순서 일치. 호 방향 규칙·키 확인 | P1 | BE |
+| Tangent Arc (접선 호) [S2] | 기존 곡선 위에 커서를 올리면 끝점이 강조되고, 끝점 근처 클릭 = 호 시작(접선 구속), 이동 후 클릭 = 호 끝 | | 구현: 접선 호(호▾) | 신규 (선 도구의 끝점 드래그와 같은 결과) | P1 | BE |
 
 ### 2.3 Create 패널 — 사각형·슬롯·다각형·타원·스플라인·점
 
 | 명령 | 인벤터 2026 동작 | 단축키 | GraphCTRL 현재 | 차이 | 우선 | 담당 |
 |---|---|---|---|---|---|---|
-| Two Point Rectangle (2점) [S3] | 대각 모서리 2클릭, 스케치 축에 정렬. HUD 지원 [S4] | (표에 없음) | 2클릭. 선4+일치4+H,V,H,V(PLAN 5.5). 단축키 R(인벤터 표에 없음) | 구속 구성은 같음으로 보이나 **(인벤터가 만드는 구속 목록은 도움말에 없음, 미확인)** | P1 | BE |
-| Three Point Rectangle (3점) [S3] | 1=모서리, 2=한 변의 방향·길이, 3=인접 변 길이. 임의 방향. HUD 지원 [S4] | | 없음 | 신규 | P1 | BE |
-| Two Point Center / Three Point Center Rectangle [S3] | 2점 중심: 1=중심, 2=모서리. 3점 중심: 1=중심, 2=한 변 방향·거리, 3=인접 변 거리 | | 없음 | 신규 | P2 | BE |
-| Slot (슬롯) 5종 [S3] | Center to Center: 호 중심 2점 클릭 후 3번째로 너비. Overall: 중심선 시작·끝 2점 후 너비. Center Point: 슬롯 중심, 호 중심 1점, 너비. Three Point Arc Slot(호 슬롯): 중심 호의 시작·끝 2점, 3번째 = 호 중심, 마지막 = 너비. Center Point Arc Slot: 중심점, 중심 호의 시작·끝, 너비(4클릭). 값은 입력창·우클릭으로 직접 입력 가능 [S3] | (미확인) | **BE 직선 3종 완료**: `SketchOp::AddSlot{a, b, width, kind: SlotKind::{CenterToCenter, Overall, CenterPoint}}` — 구성 중심선, 변 2개, 반원 끝 2개(변과 접함, 같은 반지름). 남는 자유도 5(호 중심 2개·너비) | **호 슬롯 2종 완료**: `SketchOp::AddArcSlot{centre, start, end, width}` — 구성 중심 호, 동심 바깥·안쪽 호, 반원 끝 2개. 끝의 접함은 2차 퇴화를 피해 1차 구성(각 끝에 중심에서 바깥 호 끝까지 구성 반지름 선, 그 위에 끝 중심·안쪽 호 끝)으로 → 자유도 6(중심·반지름·두 각도·너비). 도구 `ToolKind::ArcSlot(ArcSlotKind::{ThreePoint, CenterPoint})`: 3점 = 시작·끝·호 위의 점, 중심점 = 중심·시작·끝(짧은 쪽으로 돎) 뒤 너비. 리본 작은 버튼 2개. **UI 완료**: 리본 작성 패널 슬롯(중심 대 중심) + 작은 버튼(전체·중심점), 클릭 순서·너비 입력창(`HudField::Width`) | P2 | BE |
-| Polygon (다각형) [S3] | 대화상자: Inscribed(꼭짓점 기준)/Circumscribed(변 중점 기준), 변 수(최대 120). 중심 클릭 후 드래그. Esc·다른 명령·대화상자 Done으로 종료 | (미확인) | **BE 완료**: `SketchOp::AddPolygon{centre, at, sides(3–120), circumscribed}` — 선 n개 + 구성 원(내접: 꼭짓점이 원 위, 외접: 변이 원에 접함), 꼭짓점 일치, 변 같음(짝수 외접은 첫 변 중점으로 가는 구성 반지름이 그 변과 직각). 남는 자유도 4(중심·크기·회전). 원문에 구속 목록은 없어 구성은 자체 결정 | **UI 완료**: 리본 다각형, 도구가 도는 동안 '다각형 옵션' 창(내접/외접·변 수·완료), 중심 클릭 → 커서 따라 미리보기 → 클릭 | P2 | BE+FE |
-| Ellipse (타원) [S3] | 1=중심, 2=첫 축의 방향·길이(중심선 표시), 3=두 번째 축 길이 | (미확인) | **BE 완료**: `CurveGeom::Ellipse{c, major, minor}`, `SketchOp::AddEllipse`, `ToolKind::Ellipse`(중심 → 첫 축 끝 → 타원 위 점, 미리보기), 리본 원▾. 구속: 중심 일치, 점-타원 위, 주축 수평·수직(중심·축 끝 점), 장반경 = 중심-축 끝 거리 치수, 단반경 = 반지름 치수 | Offset 완료(사분점 근처 → 타원, 사이 → 스플라인; 스플라인은 비연관). Trim·Extend·교점·사분점 스냅 완료. Split·Fillet·접선은 미지원(거부) | P3 | BE |
-| Interpolation Spline (보간) [S11] | 클릭마다 맞춤점. 끝점은 사각형, 맞춤점은 마름모. 시작점 우클릭 "Close Curve". 핸들 편집(Activate Handle), Insert Point, Split Spline, Spline Tension 등 [S11] | (미확인) | **BE 완료(열린 곡선)**: `CurveGeom::Spline{points}`(맞춤점 = 스케치 점, 자연 3차·현 길이), `SketchOp::AddSpline{points, snaps}`, `ToolKind::Spline`(클릭으로 맞춤점, Enter 또는 마지막 점 다시 클릭으로 마침), 리본 선▾ | Split Spline(맞춤점에서, `SketchOp::SplitSpline`)·Offset·Trim·교점에서 Split·교점 스냅·Close Curve·Insert Point·Extend 완료. 핸들·Tension은 없음. 제어점 스플라인은 P3 | P3 | BE |
-| Control Vertex Spline (제어점) [S11] | 클릭마다 제어점(제어 프레임은 구성선, 제어점은 원). 완료는 OK, 계속은 Apply | | 없음 | 신규 | P3 | BE |
-| Point / Center Point (점) [S10] | 클릭으로 점 배치(기본은 Center Point = 십자, Format 패널 토글로 일반 점 = 점). 우클릭 Point Snaps(Midpoint·Center·Intersection 등 8종)로 정밀 배치. 구속 없이 생성 [S10]. HUD: Tab → X, Tab → Y, Enter [S4] | (미확인) | 선·원 끝점이 점. 독립 점 도구 없음 | **BE 완료**(`SketchOp::PlacePoint{pos, center}`: 구속 없음, 기본 센터 점은 도구가 `center: true`로; `SetCenterPoint{points, center}` 토글 — 독립 점만). **UI 완료**: 리본 점 도구, 작성 패널 '중심점' 토글(선택된 독립 점도 바꿈), HUD X/Y(`HudField::{X, Y}`: 커서 좌표 표시, 입력 → Tab → 입력 → Enter로 그 좌표에 배치, 치수는 붙이지 않음 — 원문도 점에는 치수를 말하지 않음) | P2 | BE |
-| Fillet (모깎기) [S3] | 대화상자 반지름 + Equal. 선 두 개(또는 끝점 공유 모서리 위에 커서를 올려 미리보기) 선택. 교차하는 선은 호 끝으로 **트림**됨. 반지름은 다음 사용까지 유지, Esc·대화상자 닫기로 종료 | (미확인; 표의 F는 파트 Fillet) | 없음 | 신규(트림 의존) | P1 | BE |
-| Chamfer (모따기) [S3] | 대화상자: Create Dimensions, Equal to Parameters(기본 켜짐). 방식 3: Equal Distance, Unequal Distance, Distance and Angle. 선 두 개 선택 | (미확인) | 없음 | **완료**(handoff "분할·2D 모따기") | P2 | BE |
-| Text / Geometry Text [S8] | Create 패널 Text: 클릭=삽입점, 드래그=텍스트 상자, Format Text 대화상자(글꼴·속성·매개변수 삽입). 생성 후 더블클릭 편집, 드래그 이동, Delete. 미리보기 갱신(2026.1) [S33]. Geometry Text는 선·호·원에 정렬 | T [S28,S29] | 없음 | 신규(렌더·입력 별도 작업, 필요성 낮음) | P3 | FE+BE |
-| Project Geometry (형상 투영) [S20,S21] | Create 패널. 모서리·꼭짓점·작업 요소·루프·곡선 클릭 → 참조 형상(연결된 연관 형상, 고정). 면 클릭 = 그 면의 모든 루프. Shift+클릭 = 구성/일반 반전. 우클릭 Break Link, Replace Reference(2026.1) [S20,S33]. 종료: 우클릭 Done·Esc·다른 명령 | (미확인) | 원점 투영 점 자동 생성(PLAN 5.5 외부 참조: 원점·작업점·다른 스케치 점). 투영 명령 없음 | 명령 없음. 연관·Break Link·Broken 상태 일부 있음(PLAN) | P2 | BE+FE |
-| Auto-project (자동 투영) [S6,S21] | 옵션 3가지: "Autoproject edges during curve creation"(기존 선을 커서로 훑으면 참조로 투영), "Autoproject edges for sketch creation and edit"(선택 면의 모서리를 스케치 시작·편집 때 자동 투영), "Autoproject part origin on sketch create"(기본 켜짐) [S6]. 면 위에 만든 스케치의 모서리는 자동 투영되며 이 자동 참조는 삭제 불가 [S21] | | 원점 자동 투영만(삭제 불가, 5.5) | 모서리·곡선 자동 투영 없음 | P2 | BE |
+| Two Point Rectangle (2점) [S3] | 대각 모서리 2클릭, 스케치 축에 정렬. HUD 지원 [S4] | (표에 없음) | 구현: 2점 직사각형(직사각형▾) | 구속 구성은 같음으로 보이나 **(인벤터가 만드는 구속 목록은 도움말에 없음, 미확인)** | P1 | BE |
+| Three Point Rectangle (3점) [S3] | 1=모서리, 2=한 변의 방향·길이, 3=인접 변 길이. 임의 방향. HUD 지원 [S4] | | 구현: 3점 직사각형(직사각형▾) | 신규 | P1 | BE |
+| Two Point Center / Three Point Center Rectangle [S3] | 2점 중심: 1=중심, 2=모서리. 3점 중심: 1=중심, 2=한 변 방향·거리, 3=인접 변 거리 | | 구현: 2점·3점 중심 직사각형(직사각형▾) | 신규 | P2 | BE |
+| Slot (슬롯) 5종 [S3] | Center to Center: 호 중심 2점 클릭 후 3번째로 너비. Overall: 중심선 시작·끝 2점 후 너비. Center Point: 슬롯 중심, 호 중심 1점, 너비. Three Point Arc Slot(호 슬롯): 중심 호의 시작·끝 2점, 3번째 = 호 중심, 마지막 = 너비. Center Point Arc Slot: 중심점, 중심 호의 시작·끝, 너비(4클릭). 값은 입력창·우클릭으로 직접 입력 가능 [S3] | (미확인) | 구현: 슬롯 5종(슬롯▾: 중심 대 중심·전체·중심점·3점 호·중심점 호) | **호 슬롯 2종 완료**: `SketchOp::AddArcSlot{centre, start, end, width}` — 구성 중심 호, 동심 바깥·안쪽 호, 반원 끝 2개. 끝의 접함은 2차 퇴화를 피해 1차 구성(각 끝에 중심에서 바깥 호 끝까지 구성 반지름 선, 그 위에 끝 중심·안쪽 호 끝)으로 → 자유도 6(중심·반지름·두 각도·너비). 도구 `ToolKind::ArcSlot(ArcSlotKind::{ThreePoint, CenterPoint})`: 3점 = 시작·끝·호 위의 점, 중심점 = 중심·시작·끝(짧은 쪽으로 돎) 뒤 너비. 리본 작은 버튼 2개. **UI 완료**: 리본 작성 패널 슬롯(중심 대 중심) + 작은 버튼(전체·중심점), 클릭 순서·너비 입력창(`HudField::Width`) | P2 | BE |
+| Polygon (다각형) [S3] | 대화상자: Inscribed(꼭짓점 기준)/Circumscribed(변 중점 기준), 변 수(최대 120). 중심 클릭 후 드래그. Esc·다른 명령·대화상자 Done으로 종료 | (미확인) | 구현: 다각형(내접·외접, 변 수) | **UI 완료**: 리본 다각형, 도구가 도는 동안 '다각형 옵션' 창(내접/외접·변 수·완료), 중심 클릭 → 커서 따라 미리보기 → 클릭 | P2 | BE+FE |
+| Ellipse (타원) [S3] | 1=중심, 2=첫 축의 방향·길이(중심선 표시), 3=두 번째 축 길이 | (미확인) | 구현: 타원(중심·축·점), 자르기·연장·간격띄우기 | Offset 완료(사분점 근처 → 타원, 사이 → 스플라인; 스플라인은 비연관). Trim·Extend·교점·사분점 스냅 완료. Split·Fillet·접선은 미지원(거부) | P3 | BE |
+| Interpolation Spline (보간) [S11] | 클릭마다 맞춤점. 끝점은 사각형, 맞춤점은 마름모. 시작점 우클릭 "Close Curve". 핸들 편집(Activate Handle), Insert Point, Split Spline, Spline Tension 등 [S11] | (미확인) | 구현: 보간 스플라인(맞춤점, 점 삽입, 곡선 닫기, Split Spline) | Split Spline(맞춤점에서, `SketchOp::SplitSpline`)·Offset·Trim·교점에서 Split·교점 스냅·Close Curve·Insert Point·Extend 완료. 핸들·Tension은 없음. 제어점 스플라인은 P3 | P3 | BE |
+| Control Vertex Spline (제어점) [S11] | 클릭마다 제어점(제어 프레임은 구성선, 제어점은 원). 완료는 OK, 계속은 Apply | | 예정 | 신규 | P3 | BE |
+| Point / Center Point (점) [S10] | 클릭으로 점 배치(기본은 Center Point = 십자, Format 패널 토글로 일반 점 = 점). 우클릭 Point Snaps(Midpoint·Center·Intersection 등 8종)로 정밀 배치. 구속 없이 생성 [S10]. HUD: Tab → X, Tab → Y, Enter [S4] | (미확인) | 구현: 점(X/Y HUD 입력), 중심점 | **BE 완료**(`SketchOp::PlacePoint{pos, center}`: 구속 없음, 기본 센터 점은 도구가 `center: true`로; `SetCenterPoint{points, center}` 토글 — 독립 점만). **UI 완료**: 리본 점 도구, 작성 패널 '중심점' 토글(선택된 독립 점도 바꿈), HUD X/Y(`HudField::{X, Y}`: 커서 좌표 표시, 입력 → Tab → 입력 → Enter로 그 좌표에 배치, 치수는 붙이지 않음 — 원문도 점에는 치수를 말하지 않음) | P2 | BE |
+| Fillet (모깎기) [S3] | 대화상자 반지름 + Equal. 선 두 개(또는 끝점 공유 모서리 위에 커서를 올려 미리보기) 선택. 교차하는 선은 호 끝으로 **트림**됨. 반지름은 다음 사용까지 유지, Esc·대화상자 닫기로 종료 | (미확인; 표의 F는 파트 Fillet) | 구현: 모깎기(버튼) | 신규(트림 의존) | P1 | BE |
+| Chamfer (모따기) [S3] | 대화상자: Create Dimensions, Equal to Parameters(기본 켜짐). 방식 3: Equal Distance, Unequal Distance, Distance and Angle. 선 두 개 선택 | (미확인) | 구현: 2D 모따기(같은 거리·다른 거리·거리와 각도) | **완료**(handoff "분할·2D 모따기") | P2 | BE |
+| Text / Geometry Text [S8] | Create 패널 Text: 클릭=삽입점, 드래그=텍스트 상자, Format Text 대화상자(글꼴·속성·매개변수 삽입). 생성 후 더블클릭 편집, 드래그 이동, Delete. 미리보기 갱신(2026.1) [S33]. Geometry Text는 선·호·원에 정렬 | T [S28,S29] | 예정 | 신규(렌더·입력 별도 작업, 필요성 낮음) | P3 | FE+BE |
+| Project Geometry (형상 투영) [S20,S21] | Create 패널. 모서리·꼭짓점·작업 요소·루프·곡선 클릭 → 참조 형상(연결된 연관 형상, 고정). 면 클릭 = 그 면의 모든 루프. Shift+클릭 = 구성/일반 반전. 우클릭 Break Link, Replace Reference(2026.1) [S20,S33]. 종료: 우클릭 Done·Esc·다른 명령 | (미확인) | 부분: 형상 투영(연결 투영, 원본 삭제 시 고정 선); 후속 항목은 확인 중 | 명령 없음. 연관·Break Link·Broken 상태 일부 있음(PLAN) | P2 | BE+FE |
+| Auto-project (자동 투영) [S6,S21] | 옵션 3가지: "Autoproject edges during curve creation"(기존 선을 커서로 훑으면 참조로 투영), "Autoproject edges for sketch creation and edit"(선택 면의 모서리를 스케치 시작·편집 때 자동 투영), "Autoproject part origin on sketch create"(기본 켜짐) [S6]. 면 위에 만든 스케치의 모서리는 자동 투영되며 이 자동 참조는 삭제 불가 [S21] | | 구현: 면 위 스케치 모서리 자동 투영(응용 프로그램 옵션 체크) | 모서리·곡선 자동 투영 없음 | P2 | BE |
 
 ### 2.4 Modify 패널
 
@@ -73,24 +73,24 @@
 
 | 명령 | 인벤터 2026 동작 | 단축키 | GraphCTRL 현재 | 차이 | 우선 | 담당 |
 |---|---|---|---|---|---|---|
-| Move (이동) [S17] | 위 일반 + 대화상자 Copy 체크(복사본 이동), Precise Input(X,Y) | (미확인; 표의 M은 어셈블리) | 선택 도구로 점·선 드래그(솔버 드래그)만 | **완료**(handoff "스케치 이동·복사·회전") — 선택은 명령 전에, More는 Always/Never 상자 하나 | P2 | BE+FE |
-| Copy (복사) [S17] | 위 일반 + Clipboard [Ctrl+C]로 다른 스케치에 붙여넣기. 복사 시 파선 원본·실선 복사본 | | 없음 | **완료**(handoff "스케치 이동·복사·회전") — 선택은 명령 전에, More는 Always/Never 상자 하나 | P2 | BE |
-| Rotate (회전) [S17] | 중심점 모드, 끝점으로 각도, 대화상자 Angle 직접 입력(고정됨) | | 없음 | **완료**(handoff "스케치 이동·복사·회전") — 선택은 명령 전에, More는 Always/Never 상자 하나 | P2 | BE |
-| Trim (트림) [S19] | 커서를 곡선 위에 올리고 잠시 멈추면 미리보기, 클릭 = 가장 가까운 교차 곡선까지 자름. **끝점이 경계 곡선에 일치 구속**. 교차가 없으면 곡선 삭제. **마우스 누른 채 이동 = 지나간 모든 곡선 트림(동적)**. Ctrl+선택 = 경계 지정. Shift 누르고 선택 = 임시 Extend. 우클릭 = Split/Extend로 전환 | TR [S28,S29] | 없음(STATUS "다음 후보 2번") | 신규 | P1 | BE+FE |
-| Extend (연장) [S19] | 트림의 반대. 가장 가까운 교차 곡선까지 연장하고 일치 구속. 동적 연장, Ctrl로 경계 지정, Shift = 임시 Trim | (미확인) | 없음 | 신규 | P1 | BE+FE |
-| Split (분할) [S19] | 선택 곡선을 가장 가까운 교차 곡선에서 분할(치수 유지). 두 조각이 H/V/평행/직각/동일선상 구속을 상속, 동일·대칭 구속은 필요 시 해제. 커서 근처 끝점 쪽 영향 | (미확인) | 없음 | **완료**(handoff "분할·2D 모따기") | P2 | BE |
-| Offset (오프셋) [S18] | 곡선 선택 후 커서 이동·클릭 또는 부동 입력창에 거리 입력. 기본 **루프 선택**(Loop Select, 우클릭 해제 가능), **동일 거리 구속**(Constrain Offset, 우클릭 해제 가능). 타원은 위치에 따라 타원/스플라인 [S3] | (미확인) | **BE 완료**: `SketchOp::Offset{curves, distance, loop_select, constrain}` — 기본 루프 선택(끝점이 만나는 곡선), 선은 평행·호와 원은 동심, 이웃은 교점에서 만나고 접하던 곳은 계속 접함. Constrain Offset: 곡선마다 구성 게이지(선은 직각, 호·원은 반지름 방향)를 같게 → 닫힌 루프는 거리 하나만 자유. 양수 = 닫힌 루프 바깥/열린 체인 왼쪽 | **UI 완료**: 리본 '수정' 패널 간격띄우기 — 곡선 클릭 → 커서 쪽·거리 미리보기(또는 거리 입력창) → 클릭. Loop Select/Constrain Offset은 우클릭 대신 '간격띄우기 옵션' 창. 타원·스플라인은 없음 | P2 | BE |
-| Scale (축척) [S18] | 기준점 선택 후 끝점 클릭, 또는 Scale Factor 직접 입력 | | 없음 | **완료**(handoff "스케치 축척·신축") | P3 | BE |
-| Stretch (신축) [S18] | 기준점 지정 후 끝점. 선택 범위에 따라 1차·2차 형상 구분(구속 처리 규칙이 이를 따름) | | 없음 | **완료**(handoff "스케치 축척·신축") | P3 | BE |
+| Move (이동) [S17] | 위 일반 + 대화상자 Copy 체크(복사본 이동), Precise Input(X,Y) | (미확인; 표의 M은 어셈블리) | 구현: 이동(기준점, More Always·Never) | **완료**(handoff "스케치 이동·복사·회전") — 선택은 명령 전에, More는 Always/Never 상자 하나 | P2 | BE+FE |
+| Copy (복사) [S17] | 위 일반 + Clipboard [Ctrl+C]로 다른 스케치에 붙여넣기. 복사 시 파선 원본·실선 복사본 | | 구현: 복사(이동과 같은 흐름) | **완료**(handoff "스케치 이동·복사·회전") — 선택은 명령 전에, More는 Always/Never 상자 하나 | P2 | BE |
+| Rotate (회전) [S17] | 중심점 모드, 끝점으로 각도, 대화상자 Angle 직접 입력(고정됨) | | 구현: 회전 | **완료**(handoff "스케치 이동·복사·회전") — 선택은 명령 전에, More는 Always/Never 상자 하나 | P2 | BE |
+| Trim (트림) [S19] | 커서를 곡선 위에 올리고 잠시 멈추면 미리보기, 클릭 = 가장 가까운 교차 곡선까지 자름. **끝점이 경계 곡선에 일치 구속**. 교차가 없으면 곡선 삭제. **마우스 누른 채 이동 = 지나간 모든 곡선 트림(동적)**. Ctrl+선택 = 경계 지정. Shift 누르고 선택 = 임시 Extend. 우클릭 = Split/Extend로 전환 | TR [S28,S29] | 구현: 자르기(Trim 미리보기, 타원 포함) | 신규 | P1 | BE+FE |
+| Extend (연장) [S19] | 트림의 반대. 가장 가까운 교차 곡선까지 연장하고 일치 구속. 동적 연장, Ctrl로 경계 지정, Shift = 임시 Trim | (미확인) | 구현: 연장(타원 포함) | 신규 | P1 | BE+FE |
+| Split (분할) [S19] | 선택 곡선을 가장 가까운 교차 곡선에서 분할(치수 유지). 두 조각이 H/V/평행/직각/동일선상 구속을 상속, 동일·대칭 구속은 필요 시 해제. 커서 근처 끝점 쪽 영향 | (미확인) | 구현: 분할(교차점에서, 원은 거부) | **완료**(handoff "분할·2D 모따기") | P2 | BE |
+| Offset (오프셋) [S18] | 곡선 선택 후 커서 이동·클릭 또는 부동 입력창에 거리 입력. 기본 **루프 선택**(Loop Select, 우클릭 해제 가능), **동일 거리 구속**(Constrain Offset, 우클릭 해제 가능). 타원은 위치에 따라 타원/스플라인 [S3] | (미확인) | 구현: 간격띄우기(루프 선택·간격띄우기 구속, 타원·스플라인 포함) | **UI 완료**: 리본 '수정' 패널 간격띄우기 — 곡선 클릭 → 커서 쪽·거리 미리보기(또는 거리 입력창) → 클릭. Loop Select/Constrain Offset은 우클릭 대신 '간격띄우기 옵션' 창. 타원·스플라인은 없음 | P2 | BE |
+| Scale (축척) [S18] | 기준점 선택 후 끝점 클릭, 또는 Scale Factor 직접 입력 | | 구현: 축척(비율 입력) | **완료**(handoff "스케치 축척·신축") | P3 | BE |
+| Stretch (신축) [S18] | 기준점 지정 후 끝점. 선택 범위에 따라 1차·2차 형상 구분(구속 처리 규칙이 이를 따름) | | 구현: 신축(구속이 막으면 미끄러짐) | **완료**(handoff "스케치 축척·신축") | P3 | BE |
 
 ### 2.5 Pattern 패널
 
 | 명령 | 인벤터 2026 동작 | 단축키 | GraphCTRL 현재 | 차이 | 우선 | 담당 |
 |---|---|---|---|---|---|---|
-| Rectangular Pattern (사각 패턴) [S12] | 대화상자: 기하 선택 → 방향 1 선택(화살표) + Count + Spacing(수식 가능), 방향 2 동일. 선택 Extents: Boundary(Include Geometry/Include Centroids/Base Points). 고급: Suppress, Associative, Fitted. OK로 생성. 패턴 형상은 완전 구속이며 구속은 그룹으로 유지. 경계 밖 형상은 다른 색·선종류(2026.2) | RP [S29] | **BE 완료**: `SketchOp::RectangularPattern{curves, first, second: Option<SketchPatternDirection{line, count, spacing(식), flip}>, fitted}` — 복사 점마다 앞 복사본에서 방향선과 평행·첫 간격선과 같은 길이의 구성 단계, 첫 단계에 간격 치수(방향마다 1개) → 완전 구속, 간격 치수 편집이 패턴 전체를 옮김 | 패턴 편집·Delete Pattern·Suppress는 아래 '패턴 편집' 행. Associative 해제·Boundary는 없음. **UI 완료**: 리본 '패턴' 패널 → '직사각형 패턴' 창(창이 열린 채 뷰포트에서 형상·방향 1/2 선택기로 클릭, 개수·간격 식·뒤집기·맞춤, 적용/완료) | P2 | BE+FE |
-| Circular Pattern (원형 패턴) [S12] | 축(점·꼭짓점·작업축) 선택, Count, Angle(첫~끝 요소 사이 각도, 수식 가능) | CP [S29] | **BE 완료**: `SketchOp::CircularPattern{curves, axis(점), count, angle(식), flip, fitted}` — 복사 점마다 원본과 같은 반지름의 구성 선 + 앞 복사본과의 각도 치수(같은 식) → 완전 구속. 식에 모델 매개변수를 쓰면 함께 편집됨 | 축으로 작업축 선택은 점만 지원. 편집은 아래 '패턴 편집' 행. **UI 완료**: '원형 패턴' 창(형상·축 선택기 — 원을 클릭하면 중심, 개수·각도 식·뒤집기·맞춤) | P2 | BE+FE |
-| Mirror (대칭 복사) [S12] | 대화상자: 기하 선택 → Mirror Line 선택(파란 화살표). 스플라인이 대칭선과 교차하면 Self Symmetric. Apply로 계속·Done으로 종료 | (미확인; 표의 MI는 피처 미러) | **BE 완료**: `SketchOp::Mirror{curves, axis}` — 복사 점마다 대칭 구속(대칭선 위 점은 공유), 원은 같은 반지름, 호는 방향 반대로. 자유도 추가 없음(원본을 바꾸면 따라감) | **UI 완료**: '미러 패턴' 창(형상·대칭선 선택기, 인벤터처럼 창이 열린 채 뷰포트에서 클릭, 적용으로 계속·완료로 닫기). Self Symmetric(스플라인)은 스플라인이 없어 해당 없음 | P2 | BE |
-| 패턴 편집 | 요소 우클릭 Edit Pattern, 패턴 치수 더블클릭, Delete / Delete Pattern / Suppress Element(s) [S12] | | **완료**: 스케치가 패턴 기록(`Sketch::patterns`: 정의·요소별 곡선·추가 항목·억제)을 가짐. `SketchOp::{EditSketchPattern, DeleteSketchPattern, SuppressPatternElements}`. Delete는 패턴이 만든 항목을 건드리지 않고(원문 "nonpattern geometry"), 원본을 지우면 패턴도 지움. 억제 = 그 요소 곡선을 구성선(파선·프로파일 제외), 구속 유지. UI: 패턴 곡선을 고른 채 리본 직사각형/원형 → 값이 채워진 창 + '억제' 선택기 + 확인/패턴 삭제 | 우클릭 메뉴 대신 리본 버튼. 편집은 복사본을 새로 만듦(복사본에 손으로 단 구속은 사라짐). 패턴 치수를 더블클릭해 바꾼 값은 창의 값에 반영 안 됨. Associative 해제·Boundary 없음 | P3 | BE |
+| Rectangular Pattern (사각 패턴) [S12] | 대화상자: 기하 선택 → 방향 1 선택(화살표) + Count + Spacing(수식 가능), 방향 2 동일. 선택 Extents: Boundary(Include Geometry/Include Centroids/Base Points). 고급: Suppress, Associative, Fitted. OK로 생성. 패턴 형상은 완전 구속이며 구속은 그룹으로 유지. 경계 밖 형상은 다른 색·선종류(2026.2) | RP [S29] | 구현: 직사각형 패턴(편집 창, 요소 억제) | 패턴 편집·Delete Pattern·Suppress는 아래 '패턴 편집' 행. Associative 해제·Boundary는 없음. **UI 완료**: 리본 '패턴' 패널 → '직사각형 패턴' 창(창이 열린 채 뷰포트에서 형상·방향 1/2 선택기로 클릭, 개수·간격 식·뒤집기·맞춤, 적용/완료) | P2 | BE+FE |
+| Circular Pattern (원형 패턴) [S12] | 축(점·꼭짓점·작업축) 선택, Count, Angle(첫~끝 요소 사이 각도, 수식 가능) | CP [S29] | 구현: 원형 패턴(편집 창) | 축으로 작업축 선택은 점만 지원. 편집은 아래 '패턴 편집' 행. **UI 완료**: '원형 패턴' 창(형상·축 선택기 — 원을 클릭하면 중심, 개수·각도 식·뒤집기·맞춤) | P2 | BE+FE |
+| Mirror (대칭 복사) [S12] | 대화상자: 기하 선택 → Mirror Line 선택(파란 화살표). 스플라인이 대칭선과 교차하면 Self Symmetric. Apply로 계속·Done으로 종료 | (미확인; 표의 MI는 피처 미러) | 구현: 미러 패턴(대칭선) | **UI 완료**: '미러 패턴' 창(형상·대칭선 선택기, 인벤터처럼 창이 열린 채 뷰포트에서 클릭, 적용으로 계속·완료로 닫기). Self Symmetric(스플라인)은 스플라인이 없어 해당 없음 | P2 | BE |
+| 패턴 편집 | 요소 우클릭 Edit Pattern, 패턴 치수 더블클릭, Delete / Delete Pattern / Suppress Element(s) [S12] | | 구현: 패턴 곡선을 고른 채 패턴 버튼 → 편집 창, 패턴 삭제 | 우클릭 메뉴 대신 리본 버튼. 편집은 복사본을 새로 만듦(복사본에 손으로 단 구속은 사라짐). 패턴 치수를 더블클릭해 바꾼 값은 창의 값에 반영 안 됨. Associative 해제·Boundary 없음 | P3 | BE |
 
 ### 2.6 Constrain 패널 — 구속조건
 
@@ -98,32 +98,32 @@
 
 | 구속 (한글 관행명) | 인벤터 2026 선택 순서·규칙 [S25] | GraphCTRL 현재 | 차이 | 우선 | 담당 |
 |---|---|---|---|---|---|
-| Coincident (일치) | 점 클릭 → (점 또는 곡선) 클릭. 한 점이 곡선 위에 놓이면 곡선 연장선 위에도 있을 수 있음(곡선 범위 밖 가능). 선을 연속 그리면 끝점 일치 자동 생성. 노란 점 = 구속 존재, 초록 점 = 릴렉스 때 제거 대상 [S25] | 있음(`Coincident`, `PointOnCurve`) | 노란/초록 점 표시 규칙(미확인) | P1 | FE |
-| Collinear (동일선상) | 선(또는 타원 축) 2개 | 있음 | | - | - |
-| Concentric (동심) | 호·원·타원 2개(결과는 중심점 일치와 같음) | 있음 | | - | - |
-| Fix (고정) | 곡선·중심점·중간점·점 클릭, 계속 클릭 가능. 선은 위치·각도 고정(끝점은 길이 변경 가능), 원·호는 중심·반지름 고정. 좌표계를 옮기면 따라옴 | 있음(점 고정). 선·원에 대한 의미가 같은지 (미확인) | 선 고정 의미 확인 | P2 | BE |
-| Parallel (평행) / Perpendicular (직각) | 선·곡선·타원 축 2개. 스플라인 직각은 끝점끼리만 | 있음 | | - | - |
-| Horizontal (수평) / Vertical (수직) | 선·타원 축 하나, 또는 **점 2개**. 계속 클릭 가능 | 있음(점쌍 형태 `Horizontal(p,q)`) | Shift 전환, `-` 키 | P2 | FE |
-| Tangent (접선) | 곡선 2개 | 있음(선-원, 원-원, 끝 접선) | | - | - |
-| Smooth G2 (스무스) | 스플라인과 그 끝점의 다른 곡선(선·호·스플라인) 선택. 곡률 연속 | 없음(스플라인 없음) | 스플라인 도입 후 | P3 | BE |
-| Symmetric (대칭) | 곡선(또는 점) 1, 2 선택 후 **대칭선** 선택. 대칭선을 삭제하면 구속도 삭제. 대칭선은 어떤 선종류도 가능 | 있음(`Symmetric`) | | - | - |
-| Equal (동일) | 같은 종류의 원·호·선 2개 | 있음 | | - | - |
-| Midpoint (중점) | 도움말 S25 구속 목록에 없음(별도 중점 구속은 (미확인)). 점 스냅 "Midpoint"와 일치 구속으로 다룸 [S10] | 있음(`Midpoint`, 리본 버튼 "중점") | 용어·동작 정렬 확인 | P3 | BE |
-| 구속 글리프 상호작용 | 호버 = 연관 형상·파트너 글리프 강조 [S24,S25]. 글리프 드래그로 이동(기하 이동 때 상대 위치 유지, 가시성 재토글 시 기본 위치로 복귀). 클릭 선택 후 **Delete = 구속 삭제**. 우클릭 글리프 "Hide". 기하 선택 후 우클릭 "Delete Constraints" [S24]. 참조(투영) 구속 삭제 = Break Link [S24] | 글리프 호버 강조·Delete는 있음(PLAN 5.5). 드래그 이동·우클릭 Hide·Delete Constraints는 (미확인) | 드래그·우클릭 항목 | P2 | FE |
-| Show / Hide Constraints (F8 / F9) | 상태바 "Show All Constraints/Hide All Constraints" 또는 F8/F9. 일반 탭 옵션: Display Constraints on Creation(만들 때만 표시, 명령 끝나면 자동 숨김), Show Constraints for Selected Objects(선택한 기하의 구속 표시, 삭제 가능), Display Coincident Constraints in Sketch [S24,S29] | 글리프는 항상 표시되는 것으로 보임(스크린샷). F8/F9 없음 | 표시 모델 다름 | P1 | FE |
-| Constraint Settings (구속 설정) | Constrain 패널 > Constraint Settings: General(위 3개 표시 옵션), Inference(Infer Constraints, Persist Constraints, 우선순위 "Parallel and Perpendicular"(기본) / "Horizontal and Vertical", 추론할 구속 종류 선택), Relax Mode 탭. Inference Scope(Geometry in Current Command(기본)/All Geometry/Select) [S23,S24] | 없음 | 옵션 UI 전체 | P2 | FE+BE |
+| Coincident (일치) | 점 클릭 → (점 또는 곡선) 클릭. 한 점이 곡선 위에 놓이면 곡선 연장선 위에도 있을 수 있음(곡선 범위 밖 가능). 선을 연속 그리면 끝점 일치 자동 생성. 노란 점 = 구속 존재, 초록 점 = 릴렉스 때 제거 대상 [S25] | 구현: 일치(점·곡선 위의 점) | 노란/초록 점 표시 규칙(미확인) | P1 | FE |
+| Collinear (동일선상) | 선(또는 타원 축) 2개 | 구현: 동일선상(선·타원 주축) | | - | - |
+| Concentric (동심) | 호·원·타원 2개(결과는 중심점 일치와 같음) | 구현: 동심 | | - | - |
+| Fix (고정) | 곡선·중심점·중간점·점 클릭, 계속 클릭 가능. 선은 위치·각도 고정(끝점은 길이 변경 가능), 원·호는 중심·반지름 고정. 좌표계를 옮기면 따라옴 | 구현: 고정(점·선·원·호·타원·스플라인 맞춤점) | 선 고정 의미 확인 | P2 | BE |
+| Parallel (평행) / Perpendicular (직각) | 선·곡선·타원 축 2개. 스플라인 직각은 끝점끼리만 | 구현: 평행·직각(선·곡선·타원 주축) | | - | - |
+| Horizontal (수평) / Vertical (수직) | 선·타원 축 하나, 또는 **점 2개**. 계속 클릭 가능 | 구현: 수평·수직(선, 타원 주축, 두 점) | Shift 전환, `-` 키 | P2 | FE |
+| Tangent (접선) | 곡선 2개 | 구현: 접선(선-원, 원-원, 선-타원, 원-타원, 타원-타원, 스플라인 끝) | | - | - |
+| Smooth G2 (스무스) | 스플라인과 그 끝점의 다른 곡선(선·호·스플라인) 선택. 곡률 연속 | 구현: 스플라인 Smooth(G2) | 스플라인 도입 후 | P3 | BE |
+| Symmetric (대칭) | 곡선(또는 점) 1, 2 선택 후 **대칭선** 선택. 대칭선을 삭제하면 구속도 삭제. 대칭선은 어떤 선종류도 가능 | 부분: 대칭(선·원·호 쌍). 타원·스플라인 쌍은 예정 | | - | - |
+| Equal (동일) | 같은 종류의 원·호·선 2개 | 구현: 동일 | | - | - |
+| Midpoint (중점) | 도움말 S25 구속 목록에 없음(별도 중점 구속은 (미확인)). 점 스냅 "Midpoint"와 일치 구속으로 다룸 [S10] | 구현: 중점 | 용어·동작 정렬 확인 | P3 | BE |
+| 구속 글리프 상호작용 | 호버 = 연관 형상·파트너 글리프 강조 [S24,S25]. 글리프 드래그로 이동(기하 이동 때 상대 위치 유지, 가시성 재토글 시 기본 위치로 복귀). 클릭 선택 후 **Delete = 구속 삭제**. 우클릭 글리프 "Hide". 기하 선택 후 우클릭 "Delete Constraints" [S24]. 참조(투영) 구속 삭제 = Break Link [S24] | 부분: 글리프 호버·Delete 있음, 드래그 이동·우클릭 숨기기는 확인 중 | 드래그·우클릭 항목 | P2 | FE |
+| Show / Hide Constraints (F8 / F9) | 상태바 "Show All Constraints/Hide All Constraints" 또는 F8/F9. 일반 탭 옵션: Display Constraints on Creation(만들 때만 표시, 명령 끝나면 자동 숨김), Show Constraints for Selected Objects(선택한 기하의 구속 표시, 삭제 가능), Display Coincident Constraints in Sketch [S24,S29] | 예정(F8·F9 없음) | 표시 모델 다름 | P1 | FE |
+| Constraint Settings (구속 설정) | Constrain 패널 > Constraint Settings: General(위 3개 표시 옵션), Inference(Infer Constraints, Persist Constraints, 우선순위 "Parallel and Perpendicular"(기본) / "Horizontal and Vertical", 추론할 구속 종류 선택), Relax Mode 탭. Inference Scope(Geometry in Current Command(기본)/All Geometry/Select) [S23,S24] | 예정 | 옵션 UI 전체 | P2 | FE+BE |
 
 ### 2.7 Constrain 패널 — 치수 (Dimension)
 
 | 명령 | 인벤터 2026 동작 | 단축키 | GraphCTRL 현재 | 차이 | 우선 | 담당 |
 |---|---|---|---|---|---|---|
-| General Dimension (일반 치수) [S14,S16] | Constrain 패널 Dimension. 기하를 클릭하고 클릭으로 배치. 다음 치수로 계속 선택, 끝은 우클릭 OK. 만들 수 있는 종류: 한 요소 선형, 두 요소 간 선형/정렬, 두 모서리 각도, 세 점 각도, 내부·외부 각도, 기준선 각도, 반지름, 지름 [S16]. 중점·끝점·중심 스냅 필터(2025.1) [S33]. 클릭한 대상과 커서 위치로 종류가 정해지는 구체 규칙은 도움말에 없음 (미확인) | D | 치수 도구: 선→길이, 두 점→수평/수직/정렬, 평행선→거리, 두 선→각도(사분면), 점+선→수직거리, 원→지름, 호→반지름(PLAN 5.5). 값 상자 즉시 표시, Enter 확정, 도구 유지(S2 시나리오) | 인벤터는 "클릭 후 배치 클릭"과 HUD 값 상자를 같이 씀. 중점 스냅 필터 없음 | P1 | BE+FE |
-| 치수 편집 [S14] | 더블클릭, 또는 Dimension 명령 중 클릭, 또는 우클릭 메뉴. **Edit Dimension 대화상자**: 값 직접 입력, 화살표 메뉴에서 Measure(기하를 클릭해 측정값 사용)·Show Dimensions(브라우저에서 피처 선택 → 그 치수 클릭해 참조)·목록 값 선택. 체크 표시(OK)로 확정. 식 입력 가능: `HGHT = 5mm`은 매개변수 HGHT를 만들고 5 mm를 할당. 치수 텍스트 위에서 이동 커서가 나오면 드래그로 위치 변경 | 더블클릭 | 값 상자에서 수식·매개변수 지원(`gc_expr`, PLAN 5.5 `source`). 치수 더블클릭 편집(스케치 캔버스)은 (미확인). Measure·Show Dimensions 메뉴 없음 | 편집 진입점, 대화상자 구성 | P1 | FE |
-| 구동/참조 치수 (Driven) [S14] | 완전 구속 스케치에 치수를 넣으면 **과구속 알림 후 Accept(= 괄호로 표시되는 참조 치수) / Cancel**. 구동 치수를 일반으로 바꾸려면 완전 구속이 아니어야 하며, 선택 후 Format 패널의 **Driven Dimension 토글**을 끈다. 구동 치수 값은 복사해 일반 치수 입력에 붙여넣기 가능(2024.1) [S33] | | 과구속 프롬프트(수락 = 괄호 참조 치수, 취소 = 문서 불변)(S3 시나리오). Format 토글 없음 | 토글 추가 | P1 | FE+BE |
-| 치수 표시 형식 [S14] | 상태바 아이콘: Value / Name / Expression / Tolerance / Precise Value. 수식 치수는 `fx:` 접두. 색: 호버 = 주황, 선택 = 파랑, 기본 = 검정 [S27] | | 값만 표시(`"60 mm"`). `fx` 표시 (미확인) | 표시 모드 5종 | P2 | FE |
-| 치수 방향 뒤집기 (Flip Direction) [S14,S33] | 우클릭 Flip Direction(평행선 거리·점-선 거리·점쌍 수평/수직·선-호 거리·호-호 거리·각도), 다중 선택 가능 | | **완료**(handoff "치수 방향 뒤집기") — 리본 버튼, 선택한 치수 | 선-호·호-호 거리 종류 없음 | P3 | BE+FE |
-| 삭제·표시 [S14] | 선택 후 Delete 또는 우클릭 Delete | Delete | Delete 있음 | - | - |
-| Automatic Dimensions and Constraints (자동 치수) [S15] | Constrain 패널. Auto Dimension 대화상자: Curves 선택, 체크박스 Dimensions/Constraints(기본 켜짐), "Dimensions Required"(필요 수, 제외 항목은 합계에서 뺌). 선택 없음 = 전체 스케치. Apply/Remove/Done | (미확인) | **완료**(handoff "자동 치수 및 구속") | 창 안 Curves 선택기 없음 | P2 | BE+FE |
+| General Dimension (일반 치수) [S14,S16] | Constrain 패널 Dimension. 기하를 클릭하고 클릭으로 배치. 다음 치수로 계속 선택, 끝은 우클릭 OK. 만들 수 있는 종류: 한 요소 선형, 두 요소 간 선형/정렬, 두 모서리 각도, 세 점 각도, 내부·외부 각도, 기준선 각도, 반지름, 지름 [S16]. 중점·끝점·중심 스냅 필터(2025.1) [S33]. 클릭한 대상과 커서 위치로 종류가 정해지는 구체 규칙은 도움말에 없음 (미확인) | D | 구현: 일반 치수(D 키), 선-호·호-호 거리 | 인벤터는 "클릭 후 배치 클릭"과 HUD 값 상자를 같이 씀. 중점 스냅 필터 없음 | P1 | BE+FE |
+| 치수 편집 [S14] | 더블클릭, 또는 Dimension 명령 중 클릭, 또는 우클릭 메뉴. **Edit Dimension 대화상자**: 값 직접 입력, 화살표 메뉴에서 Measure(기하를 클릭해 측정값 사용)·Show Dimensions(브라우저에서 피처 선택 → 그 치수 클릭해 참조)·목록 값 선택. 체크 표시(OK)로 확정. 식 입력 가능: `HGHT = 5mm`은 매개변수 HGHT를 만들고 5 mm를 할당. 치수 텍스트 위에서 이동 커서가 나오면 드래그로 위치 변경 | 더블클릭 | 구현: 더블클릭 편집, 이름 = 값 한 단계 | 편집 진입점, 대화상자 구성 | P1 | FE |
+| 구동/참조 치수 (Driven) [S14] | 완전 구속 스케치에 치수를 넣으면 **과구속 알림 후 Accept(= 괄호로 표시되는 참조 치수) / Cancel**. 구동 치수를 일반으로 바꾸려면 완전 구속이 아니어야 하며, 선택 후 Format 패널의 **Driven Dimension 토글**을 끈다. 구동 치수 값은 복사해 일반 치수 입력에 붙여넣기 가능(2024.1) [S33] | | 구현: 종속(참조) 치수(매개변수 표에 (참조)) | 토글 추가 | P1 | FE+BE |
+| 치수 표시 형식 [S14] | 상태바 아이콘: Value / Name / Expression / Tolerance / Precise Value. 수식 치수는 `fx:` 접두. 색: 호버 = 주황, 선택 = 파랑, 기본 = 검정 [S27] | | 부분: 표시 형식 옵션은 확인 중 | 표시 모드 5종 | P2 | FE |
+| 치수 방향 뒤집기 (Flip Direction) [S14,S33] | 우클릭 Flip Direction(평행선 거리·점-선 거리·점쌍 수평/수직·선-호 거리·호-호 거리·각도), 다중 선택 가능 | | 구현: 방향 뒤집기(우클릭) | 선-호·호-호 거리 종류 없음 | P3 | BE+FE |
+| 삭제·표시 [S14] | 선택 후 Delete 또는 우클릭 Delete | Delete | 구현: Delete, 표시 전환 | - | - |
+| Automatic Dimensions and Constraints (자동 치수) [S15] | Constrain 패널. Auto Dimension 대화상자: Curves 선택, 체크박스 Dimensions/Constraints(기본 켜짐), "Dimensions Required"(필요 수, 제외 항목은 합계에서 뺌). 선택 없음 = 전체 스케치. Apply/Remove/Done | (미확인) | 구현: 자동 치수 및 구속(곡선 선택, 치수·구속 켜기 끄기) | 창 안 Curves 선택기 없음 | P2 | BE+FE |
 
 ## 3. 공통 동작
 
@@ -188,19 +188,19 @@
 
 | 옵션 | 인벤터 2026 [S6,S7] | GraphCTRL |
 |---|---|---|
-| Constraint Settings | 표시·생성·추론·릴렉스·과구속 설정 대화상자 | 없음 |
-| Spline fit method | Standard / AutoCAD / Minimum Energy + 기본 장력 | 해당 없음(스플라인 없음) |
-| Display | Grid lines, Minor grid lines, Axes, Coordinate system indicator | 격자·축 표시(토글 UI는 (미확인)) |
-| Heads-Up Display (+Settings) | §3.2 | 없음 |
-| Snap to grid | 켜기/끄기(상태바 버튼 포함) [S32] | 격자 스냅 규칙은 PLAN에 "그리드 → 암시 구속 없음" |
-| Autoproject 3종 | §2.3 | 원점 자동 투영만 |
-| Project objects as construction geometry | 기본 꺼짐 | 없음 |
-| Look at sketch plane on sketch creation and edit | 기본값은 도움말에 없음(미확인) | (미확인) |
-| Point alignment | 점선 정렬 | 없음(수평/수직 스냅만) |
-| Auto-scale sketch geometry on initial dimension | 첫 치수에서 스케치 전체를 비례 확대 | 없음(미확인) |
-| 3D: Auto-bend with 3D line creation | 기본 꺼짐 | 해당 없음 |
-| Opacity of sketch displayed through shaded model | 기본 0 % (가려짐) | (미확인) |
-| 문서 설정 Sketch 탭 | Snap Spacing X/Y, Snaps Per Minor, Major Every, 선 두께 표시 | 단위 설정 일부(`설정` 후보) |
+| Constraint Settings | 표시·생성·추론·릴렉스·과구속 설정 대화상자 | 예정 |
+| Spline fit method | Standard / AutoCAD / Minimum Energy + 기본 장력 | 구현: 맞춤점 보간 스플라인(방법 선택은 예정) |
+| Display | Grid lines, Minor grid lines, Axes, Coordinate system indicator | 확인 중 |
+| Heads-Up Display (+Settings) | §3.2 | 구현: HUD 입력(선·원·호·사각형·점, Tab 잠금, Enter 완성, Esc) |
+| Snap to grid | 켜기/끄기(상태바 버튼 포함) [S32] | 구현: 격자 스냅(문서 설정, 스냅 간격·보조선당) |
+| Autoproject 3종 | §2.3 | 부분: 자동 투영 옵션(모서리) |
+| Project objects as construction geometry | 기본 꺼짐 | 예정 |
+| Look at sketch plane on sketch creation and edit | 기본값은 도움말에 없음(미확인) | 구현: 면 보기(수동) |
+| Point alignment | 점선 정렬 | 예정 |
+| Auto-scale sketch geometry on initial dimension | 첫 치수에서 스케치 전체를 비례 확대 | 예정 |
+| 3D: Auto-bend with 3D line creation | 기본 꺼짐 | 구현: 3D 선 Auto-Bend 옵션(예정 표시 아님, 확인 중) |
+| Opacity of sketch displayed through shaded model | 기본 0 % (가려짐) | 확인 중 |
+| 문서 설정 Sketch 탭 | Snap Spacing X/Y, Snaps Per Minor, Major Every, 선 두께 표시 | 구현: 문서 설정 — 스냅·단위 |
 
 ## 4. 구현 우선순위
 
