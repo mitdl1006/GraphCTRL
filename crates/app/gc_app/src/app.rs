@@ -1712,7 +1712,7 @@ impl eframe::App for GraphCtrlApp {
         let mut work_request: Option<gc_panels::WorkRequest> = None;
         // The schedule: a bottom panel with the Gantt chart, above the status bar (declared after it).
         if self.schedule_open {
-            egui::Panel::bottom("schedule").resizable(true).default_size(180.0).min_size(120.0).show(
+            egui::Panel::bottom("schedule").resizable(true).default_size(220.0).min_size(190.0).show(
                 ui,
                 |ui| {
                     egui::ScrollArea::vertical().show(ui, |ui| {
@@ -2002,16 +2002,25 @@ impl eframe::App for GraphCtrlApp {
                 ui.set_max_width(ui.available_width());
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     // A sketch role selected in the browser has its own properties.
+                    let mut other_focus = false;
                     if let Some(role) =
                         self.viewport.role_selected.filter(|id| self.session.doc().get(*id).is_some())
                     {
                         gc_panels::role_properties(ui, &mut self.session, lang, role);
-                        ui.separator();
+                        other_focus = true;
                     }
                     // What is selected in the work node has its editor.
                     if self.params.work.selected.is_some() {
                         work_request =
                             gc_panels::work_properties(ui, &mut self.session, lang, &self.params.work);
+                        other_focus = true;
+                    }
+                    // With a role or a task selected the panel shows only that, not the whole cell's note and
+                    // properties below it.
+                    if other_focus && self.session.selected_item().is_none() {
+                        return;
+                    }
+                    if other_focus {
                         ui.separator();
                     }
                     gc_panels::properties(ui, &mut self.session, lang, &mut self.expression);

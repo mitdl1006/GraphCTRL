@@ -721,6 +721,10 @@
 - `gc_tools/src/tool.rs`: `ToolCommand::Close`가 사슬 끝이 시작점과 같으면(방금 시작점 클릭으로 닫은 직후) 무시 → (0,0)→(0,0) 선이 생기지 않음. QA `a_chain_that_ends_back_on_its_start_has_nothing_left_to_close`의 ignore 해제.
 - Constrain 대화상자가 Insert 탭이면 `Viewport::circle_first`: 원형 모서리를 원통 옆면보다 먼저, 더 넓은 범위(카메라 거리의 3%)에서 고름. 새 테스트 `on_the_insert_tab_most_clicks_around_a_visible_rim_pick_the_circle`(12곳 중 10곳 이상).
 
+## 리뷰 반영: 스케줄 패널 높이, 역할 선택 시 속성 패널
+
+- 스케줄 패널 기본 220·최소 190px(간트 행이 보임, 위쪽 경계 끌기로 조절). 역할·작업을 선택하면(선택 항목 없을 때) 속성 패널은 그 편집기만 보여 "속성 / 셀 전체…" 중복 머리를 없앰. flow-*.png 갱신.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹
