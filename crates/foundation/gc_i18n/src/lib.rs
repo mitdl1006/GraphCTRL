@@ -1045,6 +1045,10 @@ messages! {
     MenuOptions => ("응용 프로그램 옵션", "Application Options"),
     /// Application Options, Sketch tab: project the edges of the selected face when a sketch is created.
     OptSnapToGrid => ("격자에 스냅", "Snap to grid"),
+    OptHudTitle => ("히즈업 디스플레이(HUD) 치수 입력", "Heads-Up Display: Dimension Input"),
+    OptHudDimensions => ("가능하면 치수 입력 사용 (Enable Dimension Input where possible)", "Enable Dimension Input where possible"),
+    OptHudPolar => ("극좌표 (Polar)", "Polar Coordinates"),
+    OptHudCartesian => ("직교좌표 (Cartesian)", "Cartesian Coordinates"),
     OptAutoBend => ("3D 선 그릴 때 자동 굽힘", "Auto-bend with 3D line creation"),
     OptAutoproject => ("스케치 작성·편집 시 모서리 자동 투영", "Autoproject edges for sketch creation and edit"),
     /// 3D Model tab: group of the work features.
@@ -1620,6 +1624,8 @@ messages! {
     ToolScale => ("축척", "Scale"),
     ToolStretch => ("신축", "Stretch"),
     HudScale => ("축척 비율", "Scale factor"),
+    HudDeltaX => ("ΔX", "ΔX"),
+    HudDeltaY => ("ΔY", "ΔY"),
     ErrProtected => ("보호된 조인트의 움직임을 막아 거부했습니다", "Refused: it would stop a protected joint's motion"),
     ErrPrimaryOnly => ("Primary 위치 표현이 활성일 때만 할 수 있습니다", "Only possible while the Primary positional representation is active"),
     AutoDimTitle => ("자동 치수", "Auto Dimension"),

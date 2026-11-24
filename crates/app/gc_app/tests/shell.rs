@@ -7856,3 +7856,35 @@ fn a_constraint_glyph_is_deleted_from_its_right_click_menu() {
     harness.run_steps(3);
     assert_eq!(constraints(&harness), before - 1);
 }
+
+/// Application Options > Sketch: the Heads-Up Display's Dimension Input is Polar or Cartesian, and can be left out
+/// (Inventor 2026 help, HUD Settings Reference, GUID-C75B225D-6257-4C64-A6D8-841FE1FB1F8C); the HUD then shows ΔX and ΔY.
+#[test]
+fn the_hud_options_switch_the_line_to_delta_x_and_y() {
+    use gc_tools::{ToolEvent, ToolKind};
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .build_eframe(|cc| GraphCtrlApp::new(cc, RunOptions::default()));
+    harness.run();
+    harness.get_by_label("파일").click();
+    harness.run();
+    harness.get_by_label("응용 프로그램 옵션").click();
+    harness.run_steps(3);
+    assert!(!harness.state().session.hud_input().cartesian);
+    harness.get_by_label("직교좌표 (Cartesian)").click();
+    harness.run_steps(2);
+    assert!(harness.state().session.hud_input().cartesian);
+    // A line's HUD now has ΔX and ΔY.
+    harness.get_by_label("XY 스케치").click();
+    harness.run_steps(3);
+    let session = &mut harness.state_mut().session;
+    session.set_tool(ToolKind::Line);
+    let at = [0.0, 0.0];
+    session.tool_event(ToolEvent::Move { pos: at, px: 1e-4, suppress_snap: false });
+    session.tool_event(ToolEvent::Click { pos: at, px: 1e-4, modifier: false });
+    session.tool_event(ToolEvent::Move { pos: [0.02, 0.01], px: 1e-4, suppress_snap: false });
+    harness.run_steps(3);
+    let fields: Vec<_> = harness.state().session.tool_hud().iter().map(|slot| slot.field).collect();
+    assert!(fields.contains(&gc_tools::HudField::DeltaX) && fields.contains(&gc_tools::HudField::DeltaY));
+}

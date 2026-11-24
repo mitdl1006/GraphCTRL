@@ -1395,6 +1395,18 @@ impl Session {
         self.refresh();
     }
 
+    /// How the heads-up display takes the first side of a line: Cartesian or Polar, with or without dimensions
+    /// (Inventor 2026 help, Heads-Up Display (HUD) Settings Reference, GUID-C75B225D-6257-4C64-A6D8-841FE1FB1F8C). An
+    /// application setting: it stays when the tool changes.
+    pub fn set_hud_input(&mut self, input: gc_tools::HudInput) {
+        self.tool.set_hud_input(input);
+    }
+
+    /// The HUD input options.
+    pub fn hud_input(&self) -> gc_tools::HudInput {
+        self.tool.hud_input()
+    }
+
     /// Switches the tool.
     pub fn set_tool(&mut self, kind: ToolKind) {
         // The tools' settings (Center Point, the Polygon dialog, the Offset toggles) outlive the tool.
@@ -1649,7 +1661,9 @@ impl Session {
                 | gc_tools::HudField::Height
                 | gc_tools::HudField::Distance
                 | gc_tools::HudField::X
-                | gc_tools::HudField::Y => gc_doc::Unit::Mm,
+                | gc_tools::HudField::Y
+                | gc_tools::HudField::DeltaX
+                | gc_tools::HudField::DeltaY => gc_doc::Unit::Mm,
             };
             self.tool.set_hud_value(field, gc_doc::evaluate_value(&self.doc, &text, unit));
         }

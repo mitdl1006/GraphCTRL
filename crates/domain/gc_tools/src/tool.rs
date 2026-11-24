@@ -58,6 +58,28 @@ pub enum HudField {
     Y,
     /// A scale factor (the Scale tool; a plain number).
     Scale,
+    /// The horizontal distance from the last point, signed (the HUD's Cartesian input).
+    DeltaX,
+    /// The vertical distance from the last point, signed.
+    DeltaY,
+}
+
+/// How the heads-up display takes the first side of a line (Inventor 2026 help, Heads-Up Display (HUD) Settings
+/// Reference, GUID-C75B225D-6257-4C64-A6D8-841FE1FB1F8C).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HudInput {
+    /// Dimension Input options: Cartesian (ΔX and ΔY from the last point) instead of Polar (length and angle, the
+    /// default).
+    pub cartesian: bool,
+    /// Enable Dimension Input where possible: typed values become dimensions. When off, values are ΔX and ΔY only
+    /// and no dimensions are placed.
+    pub dimensions: bool,
+}
+
+impl Default for HudInput {
+    fn default() -> Self {
+        Self { cartesian: false, dimensions: true }
+    }
 }
 
 /// One input box as the display should show it now.
@@ -437,6 +459,8 @@ pub struct Tool {
     /// Chamfer: the dialog's type and sizes, and Create Dimensions.
     chamfer: gc_doc::ChamferKind,
     chamfer_dimensions: bool,
+    /// The HUD's input options (kept from one tool to the next).
+    input: HudInput,
 }
 
 fn angle_about(centre: [f64; 2], point: [f64; 2]) -> f64 {
@@ -755,7 +779,27 @@ impl Tool {
             selection_points: Vec::new(),
             chamfer: gc_doc::ChamferKind::Equal("5 mm".to_owned()),
             chamfer_dimensions: true,
+            input: HudInput::default(),
         }
+    }
+
+    /// The HUD input options.
+    pub fn hud_input(&self) -> HudInput {
+        self.input
+    }
+
+    /// Sets the HUD input options. The values already typed are dropped when the way of typing changes.
+    pub fn set_hud_input(&mut self, input: HudInput) {
+        if input != self.input {
+            self.hud.clear();
+            self.hud_values.clear();
+        }
+        self.input = input;
+    }
+
+    /// Whether the first side of a line is typed as ΔX and ΔY (Cartesian chosen, or Dimension Input off).
+    fn cartesian_side(&self) -> bool {
+        self.input.cartesian || !self.input.dimensions
     }
 
     /// Which tool this is.
@@ -845,10 +889,17 @@ impl Tool {
             |field, measured| HudSlot { field, measured, locked: self.locked(field).map(str::to_owned) };
         match self.kind {
             ToolKind::Line if !self.arc_drag => {
-                vec![
-                    slot(HudField::Length, distance(anchor, cursor)),
-                    slot(HudField::Angle, angle_about(anchor, cursor)),
-                ]
+                if self.cartesian_side() {
+                    vec![
+                        slot(HudField::DeltaX, cursor[0] - anchor[0]),
+                        slot(HudField::DeltaY, cursor[1] - anchor[1]),
+                    ]
+                } else {
+                    vec![
+                        slot(HudField::Length, distance(anchor, cursor)),
+                        slot(HudField::Angle, angle_about(anchor, cursor)),
+                    ]
+                }
             }
             ToolKind::Circle => vec![slot(HudField::Diameter, 2.0 * distance(anchor, cursor))],
             ToolKind::Arc if self.arc_start.is_none() => {
@@ -859,6 +910,10 @@ impl Tool {
                 slot(HudField::Height, (cursor[1] - anchor[1]).abs()),
             ],
             ToolKind::Rectangle3 => match self.second {
+                None if self.cartesian_side() => vec![
+                    slot(HudField::DeltaX, cursor[0] - anchor[0]),
+                    slot(HudField::DeltaY, cursor[1] - anchor[1]),
+                ],
                 None => vec![
                     slot(HudField::Length, distance(anchor, cursor)),
                     slot(HudField::Angle, angle_about(anchor, cursor)),
@@ -911,6 +966,14 @@ impl Tool {
         let Some(anchor) = self.anchor else { return at };
         let mut pos = at.pos;
         match self.kind {
+            ToolKind::Line | ToolKind::Rectangle3 if self.second.is_none() && self.cartesian_side() => {
+                // ΔX and ΔY from the last point, each as typed or as the cursor has it.
+                let dx = self.locked_value(HudField::DeltaX).unwrap_or(pos[0] - anchor[0]);
+                let dy = self.locked_value(HudField::DeltaY).unwrap_or(pos[1] - anchor[1]);
+                if self.locked(HudField::DeltaX).is_some() || self.locked(HudField::DeltaY).is_some() {
+                    pos = [anchor[0] + dx, anchor[1] + dy];
+                }
+            }
             ToolKind::Line | ToolKind::Rectangle3 if self.second.is_none() => {
                 let length = self.locked_value(HudField::Length).unwrap_or_else(|| distance(anchor, pos));
                 let angle = self.locked_value(HudField::Angle).unwrap_or_else(|| angle_about(anchor, pos));
@@ -1150,10 +1213,15 @@ impl Tool {
     /// An edit as drawn: wrapped as construction geometry when the toggle is on, and with the locked
     /// input values attached as dimensions.
     fn emit(&mut self, op: SketchOp, slots: &[(HudField, DimSlot)]) -> ToolOutput {
-        let dims: Vec<(DimSlot, String)> = slots
-            .iter()
-            .filter_map(|(field, slot)| self.locked(*field).map(|text| (*slot, text.to_owned())))
-            .collect();
+        // With Dimension Input off, typed values place geometry but no dimensions.
+        let dims: Vec<(DimSlot, String)> = if self.input.dimensions {
+            slots
+                .iter()
+                .filter_map(|(field, slot)| self.locked(*field).map(|text| (*slot, text.to_owned())))
+                .collect()
+        } else {
+            Vec::new()
+        };
         self.hud.clear();
         self.hud_values.clear();
         let op = if dims.is_empty() { op } else { SketchOp::WithDimensions { op: Box::new(op), dims } };
@@ -1505,7 +1573,11 @@ impl Tool {
                         snap_b: end_snap(&here),
                         horizontal: here.horizontal,
                     },
-                    &[(HudField::Length, DimSlot::Length)],
+                    &[
+                        (HudField::Length, DimSlot::Length),
+                        (HudField::DeltaX, DimSlot::DeltaX),
+                        (HudField::DeltaY, DimSlot::DeltaY),
+                    ],
                 )]
             }
             ToolKind::Circle => {
@@ -1678,7 +1750,12 @@ impl Tool {
                         c: [here.pos[0], here.pos[1], 0.0],
                         snap_a,
                     },
-                    &[(HudField::Length, DimSlot::Width), (HudField::Width, DimSlot::Height)],
+                    &[
+                        (HudField::Length, DimSlot::Width),
+                        (HudField::Width, DimSlot::Height),
+                        (HudField::DeltaX, DimSlot::DeltaX),
+                        (HudField::DeltaY, DimSlot::DeltaY),
+                    ],
                 );
                 self.reset();
                 vec![out]

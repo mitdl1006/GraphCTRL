@@ -381,3 +381,42 @@ fn p1_8_fillet_takes_the_typed_radius_keeps_it_and_trims_the_corner() {
     assert_eq!(radii.len(), 2);
     assert!(radii.iter().all(|r| (r - 5e-3).abs() < 1e-9), "{radii:?}");
 }
+
+/// The HUD's Cartesian Dimension Input and "Enable Dimension Input" (Inventor 2026 help, Heads-Up Display (HUD)
+/// Settings Reference, GUID-C75B225D-6257-4C64-A6D8-841FE1FB1F8C): with Cartesian chosen the line's first side is
+/// typed as ΔX and ΔY from the last point, which become horizontal and vertical dimensions; with Dimension Input
+/// off the same values place the line and no dimension is made.
+#[test]
+fn the_hud_takes_delta_x_and_delta_y_and_can_leave_dimensions_out() {
+    use gc_tools::HudInput;
+    let draw = |input: HudInput| {
+        let mut session = new_session();
+        session.set_hud_input(input);
+        session.set_tool(ToolKind::Line);
+        click(&mut session, mm(10.0, 10.0));
+        move_to(&mut session, mm(30.0, 25.0));
+        let hud = session.tool_hud();
+        assert_eq!(hud.iter().map(|s| s.field).collect::<Vec<_>>(), vec![HudField::DeltaX, HudField::DeltaY]);
+        assert!((hud[0].measured - 0.020).abs() < 1e-12 && (hud[1].measured - 0.015).abs() < 1e-12);
+        session.tool_event(ToolEvent::Hud { field: HudField::DeltaX, value: Some("-40".into()) });
+        session.tool_event(ToolEvent::Hud { field: HudField::DeltaY, value: Some("30".into()) });
+        session.tool_event(ToolEvent::Key(Key::Enter));
+        session
+    };
+    let session = draw(HudInput { cartesian: true, dimensions: true });
+    let (a, b) = line_ends(&session, curves(&session)[0]);
+    assert!((b[0] - a[0] + 0.040).abs() < 1e-9 && (b[1] - a[1] - 0.030).abs() < 1e-9, "{a:?} {b:?}");
+    let sketch = session.active_sketch().unwrap().1;
+    let kinds: Vec<_> = sketch.dimensions.values().map(|d| d.kind).collect();
+    assert!(
+        kinds.iter().any(|k| matches!(k, DimKind::HDistance { sign, .. } if *sign < 0.0))
+            && kinds.iter().any(|k| matches!(k, DimKind::VDistance { .. })),
+        "{kinds:?}"
+    );
+    assert!(sketch.dimensions.values().all(|d| d.driving && d.value > 0.0));
+    // Dimension Input off: ΔX and ΔY only, and no dimension.
+    let session = draw(HudInput { cartesian: false, dimensions: false });
+    let (a, b) = line_ends(&session, curves(&session)[0]);
+    assert!((b[0] - a[0] + 0.040).abs() < 1e-9 && (b[1] - a[1] - 0.030).abs() < 1e-9);
+    assert!(session.active_sketch().unwrap().1.dimensions.is_empty());
+}

@@ -405,6 +405,10 @@ impl GraphCtrlApp {
             session.set_autoproject_face_edges(!settings.autoproject_edges_off);
             session.set_auto_bend(settings.auto_bend);
             session.set_snap_to_grid(settings.snap_to_grid);
+            session.set_hud_input(gc_tools::HudInput {
+                cartesian: settings.hud_cartesian,
+                dimensions: !settings.hud_no_dimension_input,
+            });
         }
         let saved =
             options.settings_dir.as_deref().map(gc_persist::places::load_settings).unwrap_or_default();
@@ -1297,6 +1301,8 @@ impl GraphCtrlApp {
             autoproject_edges_off: !self.session.autoproject_face_edges(),
             auto_bend: self.session.auto_bend(),
             snap_to_grid: self.session.snap_to_grid(),
+            hud_cartesian: self.session.hud_input().cartesian,
+            hud_no_dimension_input: !self.session.hud_input().dimensions,
             hide_view_cube: !self.viewport.show_view_cube,
             hide_nav_bar: !self.viewport.show_nav_bar,
             hide_status_bar: !self.show_status,
@@ -1360,6 +1366,21 @@ impl GraphCtrlApp {
             }
             // Auto-bend with 3D line creation (Sketch tab, 3D Sketch; GUID-1898C432-CFD2-46F1-8BAE-631392DFBF1D):
             // off by default; the radius is a document setting (Tools > Document Settings, Sketch tab).
+            // Heads-Up Display Settings (GUID-C75B225D-6257-4C64-A6D8-841FE1FB1F8C): Dimension Input options.
+            let mut input = self.session.hud_input();
+            let before = input;
+            ui.label(egui::RichText::new(tr!(lang, OptHudTitle)).strong());
+            ui.checkbox(&mut input.dimensions, tr!(lang, OptHudDimensions));
+            ui.horizontal(|ui| {
+                ui.add_enabled_ui(input.dimensions, |ui| {
+                    ui.selectable_value(&mut input.cartesian, false, tr!(lang, OptHudPolar));
+                    ui.selectable_value(&mut input.cartesian, true, tr!(lang, OptHudCartesian));
+                });
+            });
+            if input != before {
+                self.session.set_hud_input(input);
+                changed = true;
+            }
             let mut bend = self.session.auto_bend();
             if ui.checkbox(&mut bend, tr!(lang, OptAutoBend)).changed() {
                 self.session.set_auto_bend(bend);

@@ -95,6 +95,11 @@ pub struct Settings {
     pub auto_bend: bool,
     /// Snap to grid (Sketch tab, "Snap to grid"; default: off).
     pub snap_to_grid: bool,
+    /// Heads-Up Display Settings: the Dimension Input options are Cartesian (ΔX, ΔY) instead of Polar (default:
+    /// Polar, so this is false).
+    pub hud_cartesian: bool,
+    /// Heads-Up Display Settings: "Enable Dimension Input where possible" is off (default: on, so this is false).
+    pub hud_no_dimension_input: bool,
     /// View tab, Windows panel, User Interface: what the user switched off (all shown by default).
     pub hide_view_cube: bool,
     /// The navigation bar is hidden.

@@ -160,6 +160,7 @@ impl Tool {
         tool.chamfer = self.chamfer.clone();
         tool.selection_points.clone_from(&self.selection_points);
         tool.chamfer_dimensions = self.chamfer_dimensions;
+        tool.input = self.input;
         tool
     }
 

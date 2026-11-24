@@ -48,6 +48,10 @@ pub enum DimSlot {
     Width,
     /// The length of the second side of a rectangle.
     Height,
+    /// The horizontal distance between the ends of the first line (the HUD's Cartesian input, ΔX).
+    DeltaX,
+    /// The vertical distance between the ends of the first line (ΔY).
+    DeltaY,
 }
 
 /// How the first two clicks of a straight slot are read (Inventor 2026 help, To Create 2D Shape Geometry,
@@ -2891,11 +2895,28 @@ fn sketch_op(
                     }
                     DimSlot::Diameter => circle.map(DimKind::Diameter),
                     DimSlot::Radius => arc.map(DimKind::Radius),
+                    // The signs follow the line as drawn: the typed value is a size.
+                    DimSlot::DeltaX => lines.first().and_then(|l| sketch.line(*l)).map(|(p, q)| {
+                        let sign = match (sketch.pos(p), sketch.pos(q)) {
+                            (Some(a), Some(b)) if b[0] < a[0] => -1.0,
+                            _ => 1.0,
+                        };
+                        DimKind::HDistance { p, q, sign }
+                    }),
+                    DimSlot::DeltaY => lines.first().and_then(|l| sketch.line(*l)).map(|(p, q)| {
+                        let sign = match (sketch.pos(p), sketch.pos(q)) {
+                            (Some(a), Some(b)) if b[1] < a[1] => -1.0,
+                            _ => 1.0,
+                        };
+                        DimKind::VDistance { p, q, sign }
+                    }),
                 };
                 let kind = kind.ok_or(SketchError::InvalidValue)?;
                 // The text beside what it measures.
                 let text_pos = match kind {
-                    DimKind::Distance { p, q } => {
+                    DimKind::Distance { p, q }
+                    | DimKind::HDistance { p, q, .. }
+                    | DimKind::VDistance { p, q, .. } => {
                         let (a, b) = (sketch.pos(p).unwrap_or_default(), sketch.pos(q).unwrap_or_default());
                         [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0]
                     }
@@ -2904,6 +2925,12 @@ fn sketch_op(
                         .and_then(|(centre, r)| sketch.pos(centre).map(|at| [at[0] + r, at[1]]))
                         .unwrap_or_default(),
                     _ => [0.0; 2],
+                };
+                // A typed ΔX or ΔY may be negative (to the left, down); the dimension holds its size.
+                let source = &if matches!(slot, DimSlot::DeltaX | DimSlot::DeltaY) {
+                    source.trim().trim_start_matches('-').trim().to_owned()
+                } else {
+                    source.clone()
                 };
                 let value = evaluate(source, scope, field_unit(&kind))?;
                 let result = sketch.try_add_dimension(ids, kind, source, value, text_pos)?;

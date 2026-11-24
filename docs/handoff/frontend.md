@@ -697,6 +697,19 @@
 - 하지 않은 것: 우클릭 "Hide"(글리프별 숨김은 백엔드 없음), 글리프 끌어 옮기기, 치수 Tolerance 표시(백엔드에 허용차 없음), Point Snaps(백엔드 스냅 종류 대기).
 - 테스트: `a_constraint_glyph_is_deleted_from_its_right_click_menu`.
 
+## HUD Cartesian·치수 입력 끄기 (gc_tools 변경(리드 승인))
+
+원문: HUD Settings Reference, GUID-C75B225D-6257-4C64-A6D8-841FE1FB1F8C.
+
+**gc_tools 변경(리드 승인)** — 백엔드는 병합 시 아래 파일을 알아 둘 것(기존 Polar 기본 동작은 그대로, 기존 테스트 전부 통과).
+- `gc_tools/src/tool.rs`: `HudField::{DeltaX, DeltaY}`, `HudInput { cartesian, dimensions }`(기본 Polar·치수 켬), `Tool::{hud_input, set_hud_input}`.
+  Cartesian이면 Line·Rectangle3 첫 변이 ΔX/ΔY 슬롯을 갖고 `apply_locks`가 잠긴 ΔX/ΔY로 끝점을 정한다. 치수 입력을 끄면 `emit`이 치수를 붙이지 않는다.
+- `gc_tools/src/{lib,shapes}.rs`: `HudInput` 내보내기, `renewed()`가 설정을 이어받음.
+- `gc_session/src/lib.rs`: `set_hud_input`/`hud_input`, ΔX/ΔY 단위 mm.
+- `gc_doc/src/command.rs`: `DimSlot::{DeltaX, DeltaY}` → 수평/수직 거리 치수(방향 부호 유지, 입력의 `-`는 크기에서 제외).
+- 설정은 문서가 아닌 앱 설정(`Settings.hud_cartesian`, `hud_no_dimension_input`)에 저장, 응용 프로그램 옵션 > 스케치 탭에 UI.
+- 테스트: `gc_session` `the_hud_takes_delta_x_and_delta_y_and_can_leave_dimensions_out`, `gc_app` `the_hud_options_switch_the_line_to_delta_x_and_y`.
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹
