@@ -529,3 +529,16 @@ GraphCTRL 고유 기능이라 Autodesk 도움말 근거는 없다. 리드·백�
 
 관찰(버그 아님): ① **kittest로는 BOM의 수량 칸(`DragValue`)을 클릭해 입력하거나 끌 수 없다**(클릭해도 편집 상자가 안 열리고 끌어도 값이 안 바뀜; 접근성 set_value는 한 프레임 값이라 저장되지 않음). 그래서 수량을 손으로 입력·끌기·잘못된 글자는 자동 검사를 못 했다(체크리스트 56번). ② 원통 끝 테두리를 클릭하면 12곳 중 7곳만 "원"이 잡히고 나머지는 원점 축·평면·원통 면이 잡힌다(원점 축 가까이를 누르면 축이 우선인 규칙대로). ③ 화면 테스트에서 일반 `Label`의 글은 접근성 `label`이 아니라 `value`에 있다(질량 같은 표시값을 찾을 때 둘 다 본다).
 체크리스트 55~58번 추가(실제 PC 확인 0건).
+
+## 2026-11-24 HUD 직교 입력·치수 입력 끄기·구속 글리프·경로 생성 미리보기 — 리드 `d735d85`
+
+근거(Inventor 2026 도움말): HUD Settings Reference GUID-C75B225D-6257-4C64-A6D8-841FE1FB1F8C, Geometric Constraints GUID-B06FA7B7-5CD5-4D58-B1C5-0C5ABAFFD84E. 경로 생성 미리보기는 GraphCTRL 고유 기능. 리드 브랜치를 merge했다(충돌 없음). 이전 라운드의 Line Close 버그는 고쳐져(4264b8e) `#[ignore]`를 떼고 통과한다.
+
+**버그 1건**(재현 테스트 `#[ignore]` 2개, 같은 원인): HUD를 Cartesian으로 두고 치수 입력을 켠 채 ΔX 또는 ΔY에 **0**을 넣으면 선이 아예 만들어지지 않고(Enter 뒤 곡선 0개), 3점 직사각형은 첫 변을 ΔY=0으로 정하면 세 번째 클릭 뒤에도 곡선이 0개다. 치수 입력을 끄거나 0이 아닌 값이면 만들어진다. 길이 0인 거리 치수가 거부되면서 세그먼트 전체가 사라지는 것으로 보인다(담당: 백엔드, `gc_tools`/`gc_doc`의 `DimSlot::DeltaX`/`DeltaY`). 수평선·수직선은 가장 흔한 입력이라 영향이 크다. 테스트: `gc_session/tests/qa_hud_input.rs::a_horizontal_or_vertical_delta_of_zero_makes_a_line_with_one_dimension_only`, `::a_rectangle_whose_first_side_is_horizontal_by_a_typed_zero_delta_y_is_still_made`.
+
+새 테스트(그 외 모두 통과):
+- `gc_session/tests/qa_hud_input.rs`(11 중 9 통과·2 ignore): 기본값은 Polar+치수, 길이·각도 입력의 선은 수평/수직 치수 없이 길이·각도 치수; Cartesian은 ΔX/ΔY 상자와 네 부호 조합에서 끝점과 크기가 양수인 수평/수직 거리 치수; ΔX만 입력하면 다른 쪽은 커서를 따르고 치수 하나; 숫자가 아닌 글(`abc`·`1e999`·`NaN`·`inf`·`--5`·`5 +`·`(`·`1/0`)은 길이 0이거나 비유한 선을 만들지 않음, 빈 글은 잠금을 풀고; `1 in`·`2*5` 같은 단위·식; 둘 다 0이면 선 없음; 치수 입력을 끄면 직교·극좌표 모두 치수 0개; 입력 방식이 도구를 바꿔도 남고 원은 ΔX를 받지 않으며 그리는 중에 설정을 바꿔도 안 죽음; 3점 직사각형 첫 변 ΔX/ΔY.
+- `gc_app/tests/qa_glyph_screens.rs`(4): 글리프에 20번 올렸다 떼도 문서·Undo 불변, 우클릭 > 구속 삭제는 한 단계이고 자유도가 늘며 Undo가 정확히 복원, 글리프 밖 우클릭에는 삭제 항목이 없고 메뉴를 Esc·바깥 클릭으로 닫으면 아무것도 안 지워짐, 같은 자리에서 두 번 지워도 하나씩만.
+- `gc_app/tests/qa_role_screens.rs`(+1): 경로 생성 미리보기 중 포인터를 뷰·리본·창 밖으로 옮겨도 문서·Undo 불변, Esc 뒤 새로 시작하면 이전 첫 점이 남지 않음.
+- `evidence_flow`(리드 테스트)는 병합 뒤에도 통과한다. 흐름 전체(스케치→역할→작업→스케줄)의 경계 케이스는 앞선 `qa_sketch_roles`·`qa_work_model`·`qa_schedule_*`·`qa_role_screens`·`qa_work_screens`·`qa_schedule_screens`가 이미 다루며(역할 삭제 뒤 `task_problems`, 오래된 스케줄, 저장·열기), 이번에 새로 더한 것은 위 미리보기·글리프다.
+체크리스트 59~61번 추가(실제 PC 확인 0건).
