@@ -2886,6 +2886,21 @@ fn sketch_op(
             let circle = first_of(|g| matches!(g, gc_sketch::CurveGeom::Circle { .. }));
             let arc = first_of(|g| matches!(g, gc_sketch::CurveGeom::Arc { .. }));
             for (slot, source) in dims {
+                // A typed ΔX or ΔY of zero is no distance: the line is made vertical or horizontal instead, and the
+                // other axis alone is dimensioned (HUD Settings Reference, GUID-C75B225D-6257-4C64-A6D8-841FE1FB1F8C).
+                if matches!(slot, DimSlot::DeltaX | DimSlot::DeltaY)
+                    && let Some((p, q)) = lines.first().and_then(|l| sketch.line(*l))
+                    && evaluate(source.trim().trim_start_matches('-').trim(), scope, Unit::Mm)
+                        .is_ok_and(|v| v.abs() < 1e-12)
+                {
+                    let constraint = if matches!(slot, DimSlot::DeltaX) {
+                        GeoConstraint::Vertical(p, q)
+                    } else {
+                        GeoConstraint::Horizontal(p, q)
+                    };
+                    infer(sketch, ids, constraint, &mut created);
+                    continue;
+                }
                 let kind = match slot {
                     DimSlot::Length | DimSlot::Width => {
                         lines.first().and_then(|l| sketch.line(*l)).map(|(p, q)| DimKind::Distance { p, q })

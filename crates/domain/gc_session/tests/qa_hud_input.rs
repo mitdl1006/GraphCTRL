@@ -178,7 +178,6 @@ fn units_and_expressions_in_delta_boxes_and_zero_in_both_makes_no_line() {
 }
 
 #[test]
-#[ignore = "BUG: a Cartesian line typed with ΔY = 0 (horizontal) or ΔX = 0 (vertical) and Dimension Input on is not made at all: Enter leaves no curve; the zero distance dimension seems to drop the whole segment (owner: backend, gc_tools/gc_doc DimSlot::DeltaX/DeltaY). With Dimension Input off it is made."]
 fn a_horizontal_or_vertical_delta_of_zero_makes_a_line_with_one_dimension_only() {
     for (dx, dy) in [("30", "0"), ("0", "30"), ("-30", "0"), ("0", "-30")] {
         let mut s = started(CARTESIAN);
@@ -282,7 +281,6 @@ fn the_first_side_of_a_three_point_rectangle_takes_delta_x_and_delta_y_too() {
 }
 
 #[test]
-#[ignore = "BUG: a three-point rectangle whose first side is typed in Cartesian boxes with ΔY = 0 and Dimension Input on is never made: the third click leaves no curve (with Dimension Input off or ΔY not zero it is made); the zero vertical distance dimension seems to drop the whole rectangle (owner: backend, gc_tools/gc_doc DimSlot::DeltaY)"]
 fn a_rectangle_whose_first_side_is_horizontal_by_a_typed_zero_delta_y_is_still_made() {
     let s = rectangle_with_typed_first_side("40", "0", CARTESIAN);
     assert_eq!(curves(&s).len(), 4, "the rectangle was not made");

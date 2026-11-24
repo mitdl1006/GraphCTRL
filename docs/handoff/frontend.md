@@ -730,6 +730,10 @@
 원문: To Customize the Quick Access Toolbar, GUID-3BF60B85-4BE9-4619-9FD3-0A179FA680E0. QAT 끝에 ▾ 단추(이름 "빠른 실행 사용자 정의") → 새로 만들기·열기·저장·실행 취소·다시 실행·Return·Update를 체크로 켜고 끔. 끈 목록은 앱 설정(`Settings.qat_hidden`)에 저장. 테스트 `the_quick_access_customize_menu_hides_and_shows_commands`.
 아직 없음: "리본 명령 우클릭 > Add to the QAT"(리본 명령 임의 추가), "Show Above/Below the Ribbon". audit 표의 해당 줄은 △로 갱신.
 
+## QA 수정: HUD ΔX/ΔY에 0 입력
+
+원문: GUID-C75B225D-6257-4C64-A6D8-841FE1FB1F8C. `gc_doc` `SketchOp::WithDimensions`: ΔX 또는 ΔY가 0이면 길이 0 치수를 만들지 않고 수직/수평 구속을 붙이고, 0이 아닌 축만 치수. QA 두 테스트의 ignore 해제(gc_session/tests/qa_hud_input.rs). gc_doc 변경(리드 승인 범위의 DimSlot).
+
 ## 남은 일
 - 어셈블리 P1 FE 남은 것: #2 컴포넌트 원점 폴더·가시성(백엔드 원점 데이터 필요), #3 뷰포트에서 원점 평면·축·점 선택, #4 컴포넌트 평면 위 스케치, #8 단면도(Half/Quarter/Three-Quarter + 캡: 클립 평면은 F7 인프라 재사용, 캡 렌더 필요), #10 구속 표시·DOF 글리프, #13 Free Move/Rotate
 - 브라우저: 삭제 시 `dependents_of` 목록을 보여 주는 확인 안내(지금은 거부 메시지만), 끌어서 순서 바꾸기(`MoveInTree`), 롤백 마커 표시(`rollback_index`), 설비(`assemblies`)·작업 피처·피처 그룹
